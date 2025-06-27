@@ -5,7 +5,7 @@
  * Phase 2: Web Browsers and Preview configuration dialog - Complete implementation
  */
 
-package com.dev.idea.plugins.tomcat.ui.dialogs;
+package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;

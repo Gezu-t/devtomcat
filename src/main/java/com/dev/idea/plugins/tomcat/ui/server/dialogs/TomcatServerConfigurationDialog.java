@@ -1,4 +1,4 @@
-package com.dev.idea.plugins.tomcat.ui.dialogs;
+package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;

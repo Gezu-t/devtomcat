@@ -5,7 +5,7 @@
  * Phase 2: Application Servers configuration dialog - Complete implementation
  */
 
-package com.dev.idea.plugins.tomcat.ui.dialogs;
+package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;

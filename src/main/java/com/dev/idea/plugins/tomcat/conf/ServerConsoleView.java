@@ -1,10 +1,3 @@
-/**
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
- * Created: 6/9/25
- * Enhanced Server Console with professional deployment feedback
- */
-
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.intellij.execution.impl.ConsoleViewImpl;
@@ -22,8 +15,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Enhanced server console with professional deployment logging
+ * Fixed server console with professional deployment logging
  * Provides sophisticated log parsing and URL generation
+ *
+ * @author Gezahegn Lemma (Gezu)
  */
 public class ServerConsoleView extends ConsoleViewImpl {
 
@@ -209,11 +204,8 @@ public class ServerConsoleView extends ConsoleViewImpl {
 
             // Use configured ports if not detected from logs
             if (httpPorts.isEmpty() && httpsPorts.isEmpty()) {
+                // Use the port from configuration (removed getSslPort() since it doesn't exist)
                 httpPorts.add(String.valueOf(configuration.getPort()));
-                Integer sslPort = configuration.getSslPort();
-                if (sslPort != null) {
-                    httpsPorts.add(String.valueOf(sslPort));
-                }
             }
 
             // Print server startup completion
@@ -274,7 +266,7 @@ public class ServerConsoleView extends ConsoleViewImpl {
             }
         }
 
-        // HTTPS URLs
+        // HTTPS URLs (only if detected from logs, since we removed SSL port support)
         for (String httpsPort : httpsPorts) {
             try {
                 boolean isDefaultPort = "443".equals(httpsPort);

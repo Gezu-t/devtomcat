@@ -1,20 +1,12 @@
-/**
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
- * Created: 6/9/25
- * DevTomcat utility methods - our own implementation
- */
-
 package com.dev.idea.plugins.tomcat.utils;
 
-import com.intellij.openapi.module.Module;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -29,334 +21,249 @@ import java.nio.file.Paths;
 import java.util.stream.Stream;
 
 /**
- * DevTomcat utility methods matching IntelliJ Ultimate Tomcat functionality
- * Professional implementation based on Ultimate Tomcat capabilities
+ * DevTomcat Core Utility Methods
+ *
+ * Provides low-level filesystem operations, Tomcat installation management,
+ * and XML utilities for the DevTomcat plugin.
+ *
+ * This class focuses on pure filesystem and Tomcat-specific operations.
+ * For UI and IntelliJ-specific operations, see {@link PluginUtils}.
+ *
+ * @author Gezahegn Lemma (Gezu)
  */
 public class DevTomcatUtils {
 
-    private static final String CATALINA_BASE_DIR = ".idea";
+    private static final Logger LOG = Logger.getInstance(DevTomcatUtils.class);
+
+    // Directory structure constants
+    private static final String CATALINA_BASE_DIR   = ".idea";
     private static final String TOMCAT_INSTANCE_DIR = "tomcat";
-    private static final String TEMP_DIR = "temp";
-    private static final String WORK_DIR = "work";
-    private static final String CONF_DIR = "conf";
-    private static final String LOGS_DIR = "logs";
-    private static final String WEBAPPS_DIR = "webapps";
+    private static final String TEMP_DIR            = "temp";
+    private static final String WORK_DIR            = "work";
+    private static final String CONF_DIR            = "conf";
+    private static final String LOGS_DIR            = "logs";
+    private static final String WEBAPPS_DIR         = "webapps";
+
+    // Prevent instantiation
+    private DevTomcatUtils() {}
+
+    // =====================================================================
+    // CATALINA BASE MANAGEMENT
+    // =====================================================================
 
     /**
-     * Get Catalina base directory for the given configuration
-     * Following Ultimate's pattern: .idea/tomcat/Unnamed_projectname_hash
+     * Computes and creates the per-configuration Catalina base directory.
+     * Layout: {@code <project>/.idea/tomcat/<configName>_<projectName>_<hash>}
+     *
+     * @param configuration The Tomcat run configuration
+     * @return Path to the Catalina base directory, or null if creation failed
      */
     @Nullable
     public static Path getCatalinaBase(@NotNull TomcatRunConfiguration configuration) {
         try {
             Project project = configuration.getProject();
-            Module module = configuration.getModule();
+            if (project == null) return null;
 
-            if (project == null || module == null) {
-                return null;
-            }
+            String projectBase = project.getBasePath();
+            if (projectBase == null) return null;
 
-            String projectBasePath = project.getBasePath();
-            if (projectBasePath == null) {
-                return null;
-            }
+            String cfgName = sanitizeName(configuration.getName(), "Unnamed");
+            String projectName = sanitizeName(project.getName(), "Project");
+            String instanceDir = String.format("%s_%s_%d", cfgName, projectName, Math.abs(configuration.hashCode()));
 
-            // Ultimate pattern: .idea/tomcat/Unnamed_projectname_hash
-            String configName = configuration.getName();
-            if (configName == null || configName.trim().isEmpty()) {
-                configName = "Unnamed";
-            }
+            Path base = Paths.get(projectBase, CATALINA_BASE_DIR, TOMCAT_INSTANCE_DIR, instanceDir);
+            createCatalinaStructure(base);
 
-            String projectName = project.getName();
-            String instanceName = configName + "_" + projectName + "_" + Math.abs(configuration.hashCode());
+            LOG.info("DevTomcat: Catalina base ready at " + base);
+            return base;
 
-            Path catalinaBase = Paths.get(projectBasePath, CATALINA_BASE_DIR, TOMCAT_INSTANCE_DIR, instanceName);
-
-            // Create Ultimate-style directory structure
-            createUltimateStyleStructure(catalinaBase);
-
-            System.out.println("DevTomcat: Using Ultimate-style Catalina base: " + catalinaBase);
-            return catalinaBase;
-
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error getting Ultimate-style Catalina base - " + e.getMessage());
+        } catch (Exception ex) {
+            LOG.error("DevTomcat: Failed to create Catalina base", ex);
             return null;
         }
     }
 
     /**
-     * Create Ultimate-style Catalina base directory structure
+     * Creates the complete Tomcat directory structure
      */
-    private static void createUltimateStyleStructure(Path catalinaBase) throws IOException {
-        // Create main directories like Ultimate
-        Files.createDirectories(catalinaBase);
-        Files.createDirectories(catalinaBase.resolve(TEMP_DIR));
-        Files.createDirectories(catalinaBase.resolve(WORK_DIR));
-        Files.createDirectories(catalinaBase.resolve(CONF_DIR));
-        Files.createDirectories(catalinaBase.resolve(LOGS_DIR));
-        Files.createDirectories(catalinaBase.resolve(WEBAPPS_DIR));
+    private static void createCatalinaStructure(@NotNull Path base) throws IOException {
+        // Create main directories
+        Files.createDirectories(base.resolve(TEMP_DIR));
+        Files.createDirectories(base.resolve(WORK_DIR));
+        Files.createDirectories(base.resolve(CONF_DIR));
+        Files.createDirectories(base.resolve(LOGS_DIR));
+        Files.createDirectories(base.resolve(WEBAPPS_DIR));
 
-        // Create Ultimate-style work structure
-        Files.createDirectories(catalinaBase.resolve(WORK_DIR + "/Catalina/localhost"));
+        // Create Catalina-specific subdirectories
+        Files.createDirectories(base.resolve(WORK_DIR).resolve("Catalina").resolve("localhost"));
+        Files.createDirectories(base.resolve(CONF_DIR).resolve("Catalina").resolve("localhost"));
 
-        // Create Ultimate-style conf structure
-        Files.createDirectories(catalinaBase.resolve(CONF_DIR + "/Catalina/localhost"));
-
-        System.out.println("DevTomcat: Created Ultimate-style directory structure");
+        LOG.debug("DevTomcat: Directory structure created under " + base);
     }
 
     /**
-     * Check if a folder is empty
-     */
-    public static boolean isEmptyFolder(@NotNull Path path) {
-        try {
-            if (!Files.exists(path) || !Files.isDirectory(path)) {
-                return true;
-            }
-
-            try (Stream<Path> entries = Files.list(path)) {
-                return !entries.findFirst().isPresent();
-            }
-        } catch (IOException e) {
-            System.err.println("DevTomcat: Error checking if folder is empty - " + e.getMessage());
-            return true;
-        }
-    }
-
-    /**
-     * Create a document builder for XML processing
-     */
-    @NotNull
-    public static DocumentBuilder createDocumentBuilder() throws ParserConfigurationException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setValidating(false);
-        factory.setFeature("http://xml.org/sax/features/namespaces", false);
-        factory.setFeature("http://xml.org/sax/features/validation", false);
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-dtd-grammar", false);
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        System.out.println("DevTomcat: Created XML document builder");
-        return builder;
-    }
-
-    /**
-     * Create a transformer for XML processing
-     */
-    @NotNull
-    public static Transformer createTransformer() throws TransformerConfigurationException {
-        TransformerFactory factory = TransformerFactory.newInstance();
-        Transformer transformer = factory.newTransformer();
-
-        // Set output properties for pretty printing
-        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-        transformer.setOutputProperty(OutputKeys.METHOD, "xml");
-        transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
-        transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
-
-        System.out.println("DevTomcat: Created XML transformer");
-        return transformer;
-    }
-
-    /**
-     * Get module content root path
+     * Get the logs directory for a configuration
      */
     @Nullable
-    public static String getModuleContentRoot(@NotNull Module module) {
-        try {
-            ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
-            VirtualFile[] contentRoots = rootManager.getContentRoots();
-
-            if (contentRoots.length > 0) {
-                String path = contentRoots[0].getPath();
-                System.out.println("DevTomcat: Module content root: " + path);
-                return path;
-            }
-
-            return null;
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error getting module content root - " + e.getMessage());
-            return null;
-        }
+    public static Path getLogsDirectory(@NotNull TomcatRunConfiguration configuration) {
+        Path base = getCatalinaBase(configuration);
+        return base != null ? base.resolve(LOGS_DIR) : null;
     }
 
-    /**
-     * Get web application root directory using Ultimate's detection logic
-     */
-    @Nullable
-    public static String getWebAppRoot(@NotNull Module module) {
-        try {
-            String contentRoot = getModuleContentRoot(module);
-            if (contentRoot == null) {
-                return null;
-            }
-
-            // Ultimate's web app detection order
-            String[] ultimateWebAppPaths = {
-                    "src/main/webapp",     // Maven standard
-                    "web",                 // IntelliJ default
-                    "WebContent",          // Eclipse standard
-                    "src/webapp",          // Alternative Maven
-                    "webapp",              // Simple structure
-                    "src/main/web",        // Spring Boot alternative
-                    "public",              // Modern web frameworks
-                    "www"                  // Alternative structure
-            };
-
-            for (String webAppPath : ultimateWebAppPaths) {
-                Path webAppDir = Paths.get(contentRoot, webAppPath);
-                if (Files.exists(webAppDir) && Files.isDirectory(webAppDir)) {
-                    // Ultimate also checks for WEB-INF to confirm it's a webapp
-                    Path webInf = webAppDir.resolve("WEB-INF");
-                    if (Files.exists(webInf) && Files.isDirectory(webInf)) {
-                        String path = webAppDir.toString();
-                        System.out.println("DevTomcat:  web app root found: " + path);
-                        return path;
-                    }
-                }
-            }
-
-            // Ultimate fallback: create minimal structure if needed
-            Path defaultWebApp = Paths.get(contentRoot, "web");
-            if (!Files.exists(defaultWebApp)) {
-                Files.createDirectories(defaultWebApp);
-                Files.createDirectories(defaultWebApp.resolve("WEB-INF"));
-                System.out.println("DevTomcat: Created  default web structure at: " + defaultWebApp);
-                return defaultWebApp.toString();
-            }
-
-            System.out.println("DevTomcat: Using Ultimate fallback web app root: " + defaultWebApp);
-            return defaultWebApp.toString();
-
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error getting web app root - " + e.getMessage());
-            return null;
-        }
-    }
+    // =====================================================================
+    // TOMCAT INSTALLATION VALIDATION
+    // =====================================================================
 
     /**
-     * Validate Tomcat installation directory
+     * Validates a Tomcat installation directory
+     *
+     * @param homePath Path to Tomcat home directory
+     * @return true if the directory contains a valid Tomcat installation
      */
-    public static boolean isValidTomcatInstallation(@NotNull String tomcatHome) {
+    public static boolean isValidTomcatInstallation(@NotNull String homePath) {
         try {
-            Path tomcatPath = Paths.get(tomcatHome);
-            if (!Files.exists(tomcatPath) || !Files.isDirectory(tomcatPath)) {
+            Path home = Paths.get(homePath);
+
+            // Check required directories
+            if (!Files.isDirectory(home.resolve("bin"))) {
+                LOG.warn("DevTomcat: Missing bin directory in " + homePath);
                 return false;
             }
 
-            // Check for essential Tomcat directories and files
-            Path binDir = tomcatPath.resolve("bin");
-            Path libDir = tomcatPath.resolve("lib");
-            Path confDir = tomcatPath.resolve("conf");
-            Path bootstrapJar = libDir.resolve("bootstrap.jar");
-            Path catalinaJar = libDir.resolve("catalina.jar");
-
-            boolean isValid = Files.exists(binDir) && Files.isDirectory(binDir) &&
-                    Files.exists(libDir) && Files.isDirectory(libDir) &&
-                    Files.exists(confDir) && Files.isDirectory(confDir) &&
-                    Files.exists(bootstrapJar) && Files.isRegularFile(bootstrapJar) &&
-                    Files.exists(catalinaJar) && Files.isRegularFile(catalinaJar);
-
-            if (isValid) {
-                System.out.println("DevTomcat: Valid Tomcat installation found at: " + tomcatHome);
-            } else {
-                System.err.println("DevTomcat: Invalid Tomcat installation at: " + tomcatHome);
+            if (!Files.isDirectory(home.resolve("lib"))) {
+                LOG.warn("DevTomcat: Missing lib directory in " + homePath);
+                return false;
             }
 
-            return isValid;
+            // Check required JAR files
+            Path bootstrapJar = home.resolve("lib").resolve("bootstrap.jar");
+            Path catalinaJar = home.resolve("lib").resolve("catalina.jar");
 
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error validating Tomcat installation - " + e.getMessage());
+            boolean valid = Files.isRegularFile(bootstrapJar) && Files.isRegularFile(catalinaJar);
+
+            if (!valid) {
+                LOG.warn("DevTomcat: Missing required JAR files in " + homePath);
+            } else {
+                LOG.info("DevTomcat: Valid Tomcat installation found at " + homePath);
+            }
+
+            return valid;
+
+        } catch (Exception ex) {
+            LOG.error("DevTomcat: Error validating Tomcat installation at " + homePath, ex);
             return false;
         }
     }
 
     /**
-     * Detect Tomcat version from installation directory
+     * Attempts to detect Tomcat version from directory name or version file
+     *
+     * @param homePath Path to Tomcat home directory
+     * @return Detected version string, or "9.0.0" as fallback
      */
-    @Nullable
-    public static String detectTomcatVersion(@NotNull String tomcatHome) {
+    @NotNull
+    public static String detectTomcatVersion(@NotNull String homePath) {
         try {
-            // Try to get version from directory name
-            Path tomcatPath = Paths.get(tomcatHome);
-            String dirName = tomcatPath.getFileName().toString();
+            Path home = Paths.get(homePath);
 
-            // Common patterns: apache-tomcat-9.0.82, tomcat-10.1.15, etc.
-            if (dirName.contains("tomcat")) {
-                String[] parts = dirName.split("-");
-                for (String part : parts) {
-                    if (part.matches("\\d+\\.\\d+.*")) {
-                        System.out.println("DevTomcat: Detected Tomcat version: " + part);
-                        return part;
+            // First try: Check for version.sh/version.bat output
+            // (Would require running the script - not implemented here)
+
+            // Second try: Parse from directory name (e.g., "apache-tomcat-9.0.56")
+            String dirName = home.getFileName().toString();
+            String versionPattern = "\\d+\\.\\d+(\\.\\d+)?";
+
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(versionPattern);
+            java.util.regex.Matcher matcher = pattern.matcher(dirName);
+
+            if (matcher.find()) {
+                String version = matcher.group();
+                LOG.info("DevTomcat: Detected Tomcat version " + version + " from directory name");
+                return version;
+            }
+
+            // Third try: Check RELEASE-NOTES file
+            Path releaseNotes = home.resolve("RELEASE-NOTES");
+            if (Files.exists(releaseNotes)) {
+                try (Stream<String> lines = Files.lines(releaseNotes).limit(10)) {
+                    java.util.Optional<String> versionLine = lines
+                            .filter(line -> line.contains("Apache Tomcat Version"))
+                            .findFirst();
+
+                    if (versionLine.isPresent()) {
+                        matcher = pattern.matcher(versionLine.get());
+                        if (matcher.find()) {
+                            String version = matcher.group();
+                            LOG.info("DevTomcat: Detected Tomcat version " + version + " from RELEASE-NOTES");
+                            return version;
+                        }
                     }
                 }
             }
 
-            // Fallback: try to read from jar manifest or server info
-            // For now, return a default version
-            String defaultVersion = "9.0.0";
-            System.out.println("DevTomcat: Using default Tomcat version: " + defaultVersion);
-            return defaultVersion;
+            LOG.warn("DevTomcat: Could not detect Tomcat version, using default 9.0.0");
+            return "9.0.0";
 
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error detecting Tomcat version - " + e.getMessage());
+        } catch (Exception ex) {
+            LOG.error("DevTomcat: Error detecting Tomcat version", ex);
             return "9.0.0";
         }
     }
 
+    // =====================================================================
+    // CLEANUP UTILITIES
+    // =====================================================================
+
     /**
-     * Clean up temporary files and work directories
+     * Cleans temporary files from a Catalina base directory
+     *
+     * @param catalinaBase Path to the Catalina base directory
      */
     public static void cleanupTempFiles(@NotNull Path catalinaBase) {
         try {
-            // Clean temp directory
+            // Clean temp directory completely
             Path tempDir = catalinaBase.resolve(TEMP_DIR);
             if (Files.exists(tempDir)) {
                 deleteDirectoryContents(tempDir);
-                System.out.println("DevTomcat: Cleaned temp directory");
+                LOG.info("DevTomcat: Cleaned temp directory");
             }
 
-            // Clean work directory (except session files)
+            // Clean work directory selectively (preserve session files)
             Path workDir = catalinaBase.resolve(WORK_DIR);
             if (Files.exists(workDir)) {
                 cleanWorkDirectory(workDir);
-                System.out.println("DevTomcat: Cleaned work directory");
+                LOG.info("DevTomcat: Cleaned work directory");
             }
 
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error cleaning up temp files - " + e.getMessage());
+        } catch (Exception ex) {
+            LOG.error("DevTomcat: Cleanup failed for " + catalinaBase, ex);
         }
     }
 
     /**
-     * Delete directory contents
+     * Recursively deletes directory contents
      */
-    private static void deleteDirectoryContents(@NotNull Path directory) throws IOException {
-        if (!Files.exists(directory)) {
-            return;
-        }
+    private static void deleteDirectoryContents(@NotNull Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
 
-        try (Stream<Path> paths = Files.walk(directory)) {
-            paths.filter(path -> !path.equals(directory))
+        try (Stream<Path> paths = Files.walk(dir)) {
+            paths.filter(path -> !path.equals(dir))
                     .sorted((a, b) -> b.compareTo(a)) // Delete files before directories
                     .forEach(path -> {
                         try {
                             Files.deleteIfExists(path);
                         } catch (IOException e) {
-                            System.err.println("DevTomcat: Error deleting: " + path + " - " + e.getMessage());
+                            LOG.warn("DevTomcat: Could not delete " + path, e);
                         }
                     });
         }
     }
 
     /**
-     * Clean work directory while preserving session files
+     * Selectively cleans work directory, preserving session files
      */
     private static void cleanWorkDirectory(@NotNull Path workDir) throws IOException {
-        if (!Files.exists(workDir)) {
-            return;
-        }
+        if (!Files.exists(workDir)) return;
 
         try (Stream<Path> paths = Files.walk(workDir)) {
             paths.filter(Files::isRegularFile)
@@ -365,81 +272,151 @@ public class DevTomcatUtils {
                         try {
                             Files.deleteIfExists(path);
                         } catch (IOException e) {
-                            System.err.println("DevTomcat: Error deleting work file: " + path + " - " + e.getMessage());
+                            LOG.warn("DevTomcat: Could not delete " + path, e);
                         }
                     });
         }
     }
 
+    // =====================================================================
+    // XML UTILITIES (SECURE)
+    // =====================================================================
+
     /**
-     * Create DevTomcat working directory structure
+     * Creates a secure DocumentBuilder with XXE protection
+     *
+     * @return Configured DocumentBuilder
+     * @throws ParserConfigurationException if configuration fails
      */
-    public static void initializeDevTomcatStructure(@NotNull Project project) {
+    @NotNull
+    public static DocumentBuilder createSecureDocumentBuilder() throws ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+
         try {
-            String projectBasePath = project.getBasePath();
-            if (projectBasePath == null) {
-                return;
+            // Disable DTDs completely
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+
+            // Disable external entities
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+
+            // Disable external DTDs and schemas
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        } catch (IllegalArgumentException e) {
+            // Some XML processors don't support these features, continue with basic security
+            LOG.warn("DevTomcat: Some XXE protection features not supported", e);
+        }
+
+        // Configure for safety
+        factory.setExpandEntityReferences(false);
+        factory.setNamespaceAware(true);
+        factory.setValidating(false);
+
+        return factory.newDocumentBuilder();
+    }
+
+    /**
+     * Creates a secure Transformer for XML output
+     *
+     * @return Configured Transformer
+     * @throws TransformerConfigurationException if configuration fails
+     */
+    @NotNull
+    public static Transformer createSecureTransformer() throws TransformerConfigurationException {
+        TransformerFactory factory = TransformerFactory.newInstance();
+
+        try {
+            // Secure the factory
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
+        } catch (IllegalArgumentException e) {
+            // Some transformers don't support these attributes
+            LOG.warn("DevTomcat: Some transformer security features not supported", e);
+        }
+
+        Transformer transformer = factory.newTransformer();
+
+        // Configure output properties
+        transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+        transformer.setOutputProperty(OutputKeys.METHOD, "xml");
+
+        try {
+            // Try to set indent amount (not all transformers support this)
+            transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
+        } catch (IllegalArgumentException ignored) {
+            // Not critical if not supported
+        }
+
+        return transformer;
+    }
+
+    // =====================================================================
+    // UTILITY METHODS
+    // =====================================================================
+
+    /**
+     * Checks if a directory is empty
+     *
+     * @param dir Directory to check
+     * @return true if directory doesn't exist or is empty
+     */
+    public static boolean isEmptyDirectory(@NotNull Path dir) {
+        try {
+            if (!Files.exists(dir) || !Files.isDirectory(dir)) {
+                return true;
             }
 
-            Path devTomcatDir = Paths.get(projectBasePath, CATALINA_BASE_DIR);
-            Files.createDirectories(devTomcatDir);
-
-            // Create .gitignore for DevTomcat directory
-            Path gitIgnore = devTomcatDir.resolve(".gitignore");
-            if (!Files.exists(gitIgnore)) {
-                String gitIgnoreContent = "# DevTomcat generated files\n" +
-                        "*/temp/\n" +
-                        "*/work/\n" +
-                        "*/logs/\n" +
-                        "*.log\n";
-                Files.write(gitIgnore, gitIgnoreContent.getBytes());
+            try (Stream<Path> entries = Files.list(dir)) {
+                return !entries.findFirst().isPresent();
             }
 
-            System.out.println("DevTomcat: Initialized DevTomcat directory structure");
-
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error initializing DevTomcat structure - " + e.getMessage());
+        } catch (IOException e) {
+            LOG.warn("DevTomcat: Could not check if directory is empty: " + dir, e);
+            return true;
         }
     }
 
     /**
-     * Get DevTomcat plugin version
+     * Sanitizes a name for use in file paths
+     *
+     * @param name Name to sanitize
+     * @param defaultValue Default value if name is empty
+     * @return Sanitized name safe for filesystem use
      */
     @NotNull
-    public static String getPluginVersion() {
-        return "1.0.0-SNAPSHOT"; // Can be read from plugin.xml or build properties
+    public static String sanitizeName(@Nullable String name, @NotNull String defaultValue) {
+        if (name == null || name.trim().isEmpty()) {
+            return defaultValue;
+        }
+
+        // Replace problematic characters with underscore
+        return name.trim().replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
     /**
-     * Get DevTomcat home directory (in user's home)
+     * Get DevTomcat home directory
+     *
+     * @return Path to ~/.devtomcat directory
      */
     @NotNull
     public static Path getDevTomcatHome() {
-        String userHome = System.getProperty("user.home");
-        return Paths.get(userHome, ".devtomcat");
+        return Paths.get(System.getProperty("user.home"), ".devtomcat");
     }
 
     /**
-     * Validate file path
+     * Initialize DevTomcat home directory
      */
-    public static boolean isValidPath(@Nullable String path) {
-        if (path == null || path.trim().isEmpty()) {
-            return false;
-        }
-
+    public static void initializeDevTomcatHome() {
         try {
-            Path p = Paths.get(path);
-            return Files.exists(p);
-        } catch (Exception e) {
-            return false;
+            Path home = getDevTomcatHome();
+            Files.createDirectories(home);
+            Files.createDirectories(home.resolve("templates"));
+            Files.createDirectories(home.resolve("configs"));
+            LOG.info("DevTomcat: Home directory initialized at " + home);
+        } catch (IOException e) {
+            LOG.error("DevTomcat: Failed to initialize home directory", e);
         }
-    }
-
-    /**
-     * Get safe file name (remove invalid characters)
-     */
-    @NotNull
-    public static String getSafeFileName(@NotNull String name) {
-        return name.replaceAll("[^a-zA-Z0-9.-]", "_");
     }
 }

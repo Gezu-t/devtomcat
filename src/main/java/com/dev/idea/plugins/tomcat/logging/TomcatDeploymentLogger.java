@@ -1,11 +1,11 @@
 package com.dev.idea.plugins.tomcat.logging;
 
-
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -16,54 +16,60 @@ import java.time.format.DateTimeFormatter;
  *
  * Author: Gezahegn Lemma (Gezu)
  * Project: DevTomcat Plugin
- * Created: 6/9/25
  */
 public class TomcatDeploymentLogger {
 
-    private static final DateTimeFormatter TIME_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss,SSS");
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss,SSS");
 
     private final Project project;
     private ConsoleView consoleView;
+    private final long creationTime;
 
     public TomcatDeploymentLogger(@NotNull Project project) {
         this.project = project;
+        this.creationTime = System.currentTimeMillis();
     }
 
-    public void setConsoleView(ConsoleView consoleView) {
+    public void setConsoleView(@Nullable ConsoleView consoleView) {
         this.consoleView = consoleView;
     }
 
     /**
-     * Log deployment start - Professional enterprise style
+     * Log deployment started (no artifact name)
      */
-    public void logDeploymentStart(String artifactName) {
+    public void logDeploymentStarted() {
         String timestamp = getCurrentTimestamp();
-        String message = String.format("[%s] Artifact %s: Artifact is being deployed, please wait...%n",
-                timestamp, artifactName);
+        String message = String.format("[%s] DevTomcat: Starting deployment process...%n", timestamp);
         printToConsole(message, ConsoleViewContentType.SYSTEM_OUTPUT);
     }
 
     /**
-     * Log deployment success - Professional enterprise style
+     * Log deployment start for specific artifact
      */
-    public void logDeploymentSuccess(String artifactName, long durationMs) {
+    public void logDeploymentStart(@NotNull String artifactName) {
         String timestamp = getCurrentTimestamp();
-        String message = String.format("[%s] Artifact %s: Artifact is deployed successfully%n",
-                timestamp, artifactName);
-        printToConsole(message, ConsoleViewContentType.NORMAL_OUTPUT);
-
-        // Professional timing information
-        logServerInfo(String.format("DevTomcat: Deployment completed in %d ms", durationMs));
+        String message = String.format("[%s] Artifact %s: Artifact is being deployed, please wait...%n", timestamp, artifactName);
+        printToConsole(message, ConsoleViewContentType.SYSTEM_OUTPUT);
     }
 
     /**
-     * Log deployment error - Professional enterprise style
+     * Log deployment success
      */
-    public void logDeploymentError(String artifactName, String errorMessage) {
+    public void logDeploymentSuccess(@NotNull String artifactName, long durationMs) {
         String timestamp = getCurrentTimestamp();
-        String message = String.format("[%s] Artifact %s: Error during artifact deployment. %s%n",
-                timestamp, artifactName, errorMessage);
+        String message = String.format("[%s] Artifact %s: Artifact is deployed successfully%n", timestamp, artifactName);
+        printToConsole(message, ConsoleViewContentType.NORMAL_OUTPUT);
+
+        // Professional timing information
+        logServerInfo(String.format("Deployment completed in %d ms", durationMs));
+    }
+
+    /**
+     * Log deployment error
+     */
+    public void logDeploymentError(@NotNull String artifactName, @NotNull String errorMessage) {
+        String timestamp = getCurrentTimestamp();
+        String message = String.format("[%s] Artifact %s: Error during artifact deployment. %s%n", timestamp, artifactName, errorMessage);
         printToConsole(message, ConsoleViewContentType.ERROR_OUTPUT);
     }
 
@@ -85,7 +91,7 @@ public class TomcatDeploymentLogger {
     /**
      * Log general server information
      */
-    public void logServerInfo(String message) {
+    public void logServerInfo(@NotNull String message) {
         String formattedMessage = String.format("DevTomcat: %s%n", message);
         printToConsole(formattedMessage, ConsoleViewContentType.NORMAL_OUTPUT);
     }
@@ -93,28 +99,65 @@ public class TomcatDeploymentLogger {
     /**
      * Log server warnings
      */
-    public void logServerWarning(String message) {
+    public void logServerWarning(@NotNull String message) {
         String formattedMessage = String.format("DevTomcat: WARNING - %s%n", message);
-        printToConsole(formattedMessage, ConsoleViewContentType.ERROR_OUTPUT);
+        printToConsole(formattedMessage, ConsoleViewContentType.LOG_WARNING_OUTPUT);
+    }
+
+    /**
+     * Log warnings (alias for logServerWarning)
+     */
+    public void logWarning(@NotNull String message) {
+        logServerWarning(message);
     }
 
     /**
      * Log server errors
      */
-    public void logServerError(String message) {
+    public void logServerError(@NotNull String message) {
         String formattedMessage = String.format("DevTomcat: ERROR - %s%n", message);
         printToConsole(formattedMessage, ConsoleViewContentType.ERROR_OUTPUT);
     }
 
+    /**
+     * Log debug information
+     */
+    public void logDebug(@NotNull String message) {
+        if (isDebugEnabled()) {
+            String timestamp = getCurrentTimestamp();
+            String formattedMessage = String.format("[%s] DEBUG: %s%n", timestamp, message);
+            printToConsole(formattedMessage, ConsoleViewContentType.LOG_DEBUG_OUTPUT);
+        }
+    }
+
+    /**
+     * Get current timestamp
+     */
     private String getCurrentTimestamp() {
         return LocalDateTime.now().format(TIME_FORMAT);
     }
 
-    private void printToConsole(String message, ConsoleViewContentType contentType) {
-        if (consoleView != null) {
-            ApplicationManager.getApplication().invokeLater(() -> {
-                consoleView.print(message, contentType);
-            });
+    /**
+     * Print to console with proper thread handling
+     */
+    private void printToConsole(@NotNull String message, @NotNull ConsoleViewContentType contentType) {
+        if (consoleView != null && !project.isDisposed()) {
+            ApplicationManager.getApplication().invokeLater(() -> {if (!project.isDisposed() && consoleView != null) consoleView.print(message, contentType);});
         }
+    }
+
+    /**
+     * Check if debug logging is enabled
+     */
+    private boolean isDebugEnabled() {
+        // Could be configured via Registry or settings
+        return System.getProperty("devtomcat.debug", "false").equals("true");
+    }
+
+    /**
+     * Get uptime since logger creation
+     */
+    public long getUptime() {
+        return System.currentTimeMillis() - creationTime;
     }
 }
