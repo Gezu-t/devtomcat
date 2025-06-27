@@ -1,10 +1,10 @@
-# SmartTomcat
+# DevTomcat
 <!-- Plugin description -->
 The Tomcat plugin for Intellij IDEA
 
-The SmartTomcat will auto load the Webapp classes and libs from project and module, You needn't copy the classes and libs to the WEB-INF/classes and WEB-INF/lib.
-The Smart Tomcat plugin will auto config the classpath for tomcat server.
-The Smart Tomcat support Tomcat 6+
+The DevTomcat will auto load the Webapp classes and libs from project and module, You needn't copy the classes and libs to the WEB-INF/classes and WEB-INF/lib.
+The Dev Tomcat plugin will auto config the classpath for tomcat server.
+The Dev Tomcat support Tomcat 6+
 <!-- Plugin description end -->
 
 
@@ -18,7 +18,7 @@ The Smart Tomcat support Tomcat 6+
 * Run/Debug setup
         
         Navigat Run -> Edit Configrations to Open Run/Debug Configrations. 
-        In the Run/Debug Configrations, add new configration, choose Smart Tomcat, 
+        In the Run/Debug Configrations, add new configration, choose Dev Tomcat, 
         for detail config as below
         
 
