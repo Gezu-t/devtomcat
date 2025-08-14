@@ -3,23 +3,18 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
-import com.intellij.openapi.fileChooser.FileChooser;
-import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.AnActionButton;
 import com.intellij.ui.AnActionButtonRunnable;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -27,10 +22,10 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Professional Deployment Configuration Panel
+ * Professional Deployment Configuration Panel - Corrected Version
  * Manages the UI layout and components for deployment configuration
  *
- * Single Responsibility: UI layout and component management
+ * Works with existing TomcatRunConfiguration UI settings
  *
  * Author: Gezahegn Lemma (Gezu)
  * Project: DevTomcat Plugin
@@ -41,9 +36,7 @@ public class DeploymentConfigurationPanel extends JPanel {
     private final DeploymentTableManager tableManager;
     private final ArtifactSelectionHandler selectionHandler;
 
-    // UI Components
-    private JTextField applicationContextField;
-    private JButton browseApplicationContextButton;
+    // UI Components - Options only
     private JCheckBox showThisPageCheckBox;
     private JCheckBox activateToolWindowCheckBox;
     private JCheckBox focusToolWindowCheckBox;
@@ -51,6 +44,10 @@ public class DeploymentConfigurationPanel extends JPanel {
     // Parent coordination
     private TomcatConfigurationEditor parentEditor;
     private volatile boolean suppressEvents = false;
+
+    // UI components for empty state
+    private JPanel tablePanel;
+    private JLabel emptyStateLabel;
 
     public DeploymentConfigurationPanel(@NotNull Project project,
                                         @NotNull DeploymentTableManager tableManager,
@@ -83,37 +80,20 @@ public class DeploymentConfigurationPanel extends JPanel {
      * Initialize UI components
      */
     private void initializeComponents() {
-        // Application context field
-        applicationContextField = new JTextField();
-        applicationContextField.setPreferredSize(new Dimension(350, 25));
-        applicationContextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            @Override
-            public void insertUpdate(javax.swing.event.DocumentEvent e) { handleContextChange(); }
-            @Override
-            public void removeUpdate(javax.swing.event.DocumentEvent e) { handleContextChange(); }
-            @Override
-            public void changedUpdate(javax.swing.event.DocumentEvent e) { handleContextChange(); }
+        // Checkboxes for tool window behavior
+        showThisPageCheckBox = new JCheckBox("Show this page");
+        showThisPageCheckBox.setToolTipText("Show this configuration page when creating new run configurations");
 
-            private void handleContextChange() {
-                if (!isEventsSuppressed()) {
-                    System.out.println("DevTomcat: Application context changed: " + applicationContextField.getText());
-                }
-            }
-        });
+        activateToolWindowCheckBox = new JCheckBox("Activate tool window");
+        activateToolWindowCheckBox.setToolTipText("Activate the Run tool window when deployment starts");
 
-        // Browse button
-        browseApplicationContextButton = new JButton("...");
-        browseApplicationContextButton.setPreferredSize(new Dimension(25, 25));
-        browseApplicationContextButton.addActionListener(e -> {
-            if (!isEventsSuppressed()) {
-                browseApplicationContext();
-            }
-        });
+        focusToolWindowCheckBox = new JCheckBox("Focus tool window");
+        focusToolWindowCheckBox.setToolTipText("Focus the Run tool window when deployment starts");
 
-        // Checkboxes
-        showThisPageCheckBox = new JCheckBox("Show this page", false);
-        activateToolWindowCheckBox = new JCheckBox("Activate tool window", true);
-        focusToolWindowCheckBox = new JCheckBox("Focus tool window", false);
+        // Empty state label
+        emptyStateLabel = new JLabel("Nothing to deploy", SwingConstants.CENTER);
+        emptyStateLabel.setForeground(UIManager.getColor("Label.disabledForeground"));
+        emptyStateLabel.setFont(emptyStateLabel.getFont().deriveFont(14f));
 
         // Add listeners with event suppression
         addCheckBoxListeners();
@@ -123,15 +103,16 @@ public class DeploymentConfigurationPanel extends JPanel {
      * Add checkbox listeners with event suppression
      */
     private void addCheckBoxListeners() {
-        showThisPageCheckBox.addActionListener(e -> {
-            if (!isEventsSuppressed()) {
-                System.out.println("DevTomcat: Show this page: " + showThisPageCheckBox.isSelected());
-            }
-        });
-
         activateToolWindowCheckBox.addActionListener(e -> {
             if (!isEventsSuppressed()) {
                 System.out.println("DevTomcat: Activate tool window: " + activateToolWindowCheckBox.isSelected());
+                // If not activating, can't focus either
+                if (!activateToolWindowCheckBox.isSelected()) {
+                    focusToolWindowCheckBox.setSelected(false);
+                    focusToolWindowCheckBox.setEnabled(false);
+                } else {
+                    focusToolWindowCheckBox.setEnabled(true);
+                }
             }
         });
 
@@ -152,11 +133,8 @@ public class DeploymentConfigurationPanel extends JPanel {
         // Main content panel
         JPanel mainPanel = new JPanel(new BorderLayout());
 
-        // Deploy at server startup section
+        // Deploy at server startup section (table with toolbar)
         mainPanel.add(createDeploymentSection(), BorderLayout.CENTER);
-
-        // Application context section
-        mainPanel.add(createApplicationContextSection(), BorderLayout.SOUTH);
 
         add(mainPanel, BorderLayout.CENTER);
 
@@ -177,7 +155,7 @@ public class DeploymentConfigurationPanel extends JPanel {
         panel.add(titleLabel, BorderLayout.NORTH);
 
         // Table with toolbar
-        JPanel tablePanel = createTableWithToolbar();
+        tablePanel = createTableWithToolbar();
         panel.add(tablePanel, BorderLayout.CENTER);
 
         return panel;
@@ -202,7 +180,10 @@ public class DeploymentConfigurationPanel extends JPanel {
             decorator.setRemoveAction(new AnActionButtonRunnable() {
                 @Override
                 public void run(AnActionButton button) {
-                    tableManager.removeSelectedDeployment();
+                    if (tableManager.hasSelection()) {
+                        tableManager.removeSelectedDeployment();
+                        updateEmptyState();
+                    }
                 }
             });
 
@@ -214,23 +195,45 @@ public class DeploymentConfigurationPanel extends JPanel {
                 }
             });
 
-            // Disable move actions initially
-            decorator.disableUpDownActions();
+            // Move up/down actions
+            decorator.setMoveUpAction(new AnActionButtonRunnable() {
+                @Override
+                public void run(AnActionButton button) {
+                    tableManager.moveSelectedUp();
+                }
+            });
+
+            decorator.setMoveDownAction(new AnActionButtonRunnable() {
+                @Override
+                public void run(AnActionButton button) {
+                    tableManager.moveSelectedDown();
+                }
+            });
 
             JPanel decoratedPanel = decorator.createPanel();
-            decoratedPanel.setPreferredSize(new Dimension(600, 200));
+            decoratedPanel.setPreferredSize(new Dimension(600, 250));
             decoratedPanel.setBorder(JBUI.Borders.empty(5));
 
-            return decoratedPanel;
+            // Create layered panel for empty state
+            JPanel layeredPanel = new JPanel(new CardLayout());
+            layeredPanel.add(decoratedPanel, "table");
+
+            JPanel emptyPanel = new JPanel(new BorderLayout());
+            emptyPanel.add(emptyStateLabel, BorderLayout.CENTER);
+            emptyPanel.setBackground(decoratedPanel.getBackground());
+            layeredPanel.add(emptyPanel, "empty");
+
+            updateEmptyState();
+            return layeredPanel;
 
         } catch (Exception e) {
             System.err.println("DevTomcat: Error creating toolbar: " + e.getMessage());
             e.printStackTrace();
 
-            // Fallback to panel with scroll pane
+            // Fallback to simple scroll pane
             JPanel fallbackPanel = new JPanel(new BorderLayout());
             JScrollPane scrollPane = new JScrollPane(tableManager.getTable());
-            scrollPane.setPreferredSize(new Dimension(600, 200));
+            scrollPane.setPreferredSize(new Dimension(600, 250));
             fallbackPanel.add(scrollPane, BorderLayout.CENTER);
             fallbackPanel.setBorder(JBUI.Borders.empty(5));
             return fallbackPanel;
@@ -243,13 +246,19 @@ public class DeploymentConfigurationPanel extends JPanel {
     private void showAddArtifactPopup(AnActionButton button) {
         List<String> options = Arrays.asList("Artifact...", "External Source...");
 
-        BaseListPopupStep<String> step = new BaseListPopupStep<String>("Add Deployment", options) {
+        BaseListPopupStep<String> step = new BaseListPopupStep<String>("Deploy", options) {
             @Override
             public PopupStep onChosen(String selectedValue, boolean finalChoice) {
                 if ("Artifact...".equals(selectedValue)) {
-                    SwingUtilities.invokeLater(() -> selectionHandler.showArtifactSelectionDialog());
+                    SwingUtilities.invokeLater(() -> {
+                        selectionHandler.showArtifactSelectionDialog();
+                        updateEmptyState();
+                    });
                 } else if ("External Source...".equals(selectedValue)) {
-                    SwingUtilities.invokeLater(() -> selectionHandler.showExternalSourceDialog());
+                    SwingUtilities.invokeLater(() -> {
+                        selectionHandler.showExternalSourceDialog();
+                        updateEmptyState();
+                    });
                 }
                 return FINAL_CHOICE;
             }
@@ -265,7 +274,12 @@ public class DeploymentConfigurationPanel extends JPanel {
     private void editSelectedArtifact() {
         DeploymentArtifact deployment = tableManager.getSelectedDeployment();
         if (deployment != null) {
-            ArtifactDeploymentEditDialog dialog = new ArtifactDeploymentEditDialog(this, deployment);
+            // Use the improved edit dialog
+            com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactDeploymentEditDialog dialog =
+                    new com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactDeploymentEditDialog(
+                            this, deployment
+                    );
+
             if (dialog.showAndGet()) {
                 tableManager.updateSelectedDeployment(deployment);
                 System.out.println("DevTomcat: Updated deployment: " + deployment.getDisplayName());
@@ -274,25 +288,18 @@ public class DeploymentConfigurationPanel extends JPanel {
     }
 
     /**
-     * Create application context section
+     * Update empty state display
      */
-    private JPanel createApplicationContextSection() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(JBUI.Borders.emptyTop(15));
-
-        JPanel contextPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-
-        JBLabel contextLabel = new JBLabel("Application context: ");
-        contextLabel.setPreferredSize(new Dimension(120, 25));
-
-        contextPanel.add(contextLabel);
-        contextPanel.add(applicationContextField);
-        contextPanel.add(Box.createHorizontalStrut(5));
-        contextPanel.add(browseApplicationContextButton);
-
-        panel.add(contextPanel, BorderLayout.WEST);
-
-        return panel;
+    private void updateEmptyState() {
+        if (tablePanel != null && tablePanel.getLayout() instanceof CardLayout) {
+            CardLayout layout = (CardLayout) tablePanel.getLayout();
+            if (tableManager.getDeploymentCount() == 0) {
+                layout.show(tablePanel, "empty");
+            } else {
+                layout.show(tablePanel, "table");
+            }
+        }
+        tableManager.refreshTable();
     }
 
     /**
@@ -300,7 +307,7 @@ public class DeploymentConfigurationPanel extends JPanel {
      */
     private JPanel createBottomCheckboxPanel() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 5));
-        panel.setBorder(JBUI.Borders.emptyTop(20));
+        panel.setBorder(JBUI.Borders.emptyTop(10));
 
         panel.add(showThisPageCheckBox);
         panel.add(Box.createHorizontalStrut(20));
@@ -312,41 +319,23 @@ public class DeploymentConfigurationPanel extends JPanel {
     }
 
     /**
-     * Browse for application context directory
-     */
-    private void browseApplicationContext() {
-        FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false);
-        descriptor.setTitle("Select Application Context Directory");
-
-        VirtualFile file = FileChooser.chooseFile(descriptor, project, null);
-        if (file != null) {
-            applicationContextField.setText(file.getPath());
-        }
-    }
-
-    /**
-     * Set application context
-     */
-    public void setApplicationContext(String contextPath) {
-        if (applicationContextField != null) {
-            applicationContextField.setText(contextPath);
-        }
-    }
-
-    /**
      * Reset from configuration
      */
     public void resetFrom(@NotNull TomcatRunConfiguration config) {
         suppressEvents = true;
         try {
-            // Reset application context
-            String contextPath = config.getContextPath();
-            applicationContextField.setText(contextPath != null ? contextPath : "");
-
-            // Reset checkboxes to Ultimate defaults
+            // Reset checkboxes from configuration
+            // Note: TomcatRunConfiguration doesn't have getShowSettings() method
+            // so we'll use defaults for now
             showThisPageCheckBox.setSelected(false);
-            activateToolWindowCheckBox.setSelected(true);
-            focusToolWindowCheckBox.setSelected(false);
+            activateToolWindowCheckBox.setSelected(config.isActivateToolWindow());
+            focusToolWindowCheckBox.setSelected(config.isFocusToolWindow());
+
+            // Update focus checkbox state
+            focusToolWindowCheckBox.setEnabled(activateToolWindowCheckBox.isSelected());
+
+            // Update empty state
+            updateEmptyState();
 
         } finally {
             suppressEvents = false;
@@ -357,59 +346,11 @@ public class DeploymentConfigurationPanel extends JPanel {
      * Apply to configuration
      */
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
-        // Apply application context
-        String contextPath = applicationContextField.getText().trim();
-        if (!contextPath.isEmpty() && !contextPath.startsWith("/")) {
-            contextPath = "/" + contextPath;
-        }
-        config.setContextPath(contextPath);
+        // Apply checkbox states that the configuration supports
+        config.setActivateToolWindow(activateToolWindowCheckBox.isSelected());
+        config.setFocusToolWindow(focusToolWindowCheckBox.isSelected());
 
-        // Note: Checkbox states could be stored in enhanced options if needed
-    }
-
-    /**
-     * Inner class for Edit Dialog
-     * (Can be moved to separate file if preferred)
-     */
-    private static class ArtifactDeploymentEditDialog extends DialogWrapper {
-        private final DeploymentArtifact deployment;
-        private JTextField contextPathField;
-
-        public ArtifactDeploymentEditDialog(Component parent, DeploymentArtifact deployment) {
-            super(parent, true);
-            this.deployment = deployment;
-            setTitle("Edit Artifact Deployment");
-            init();
-        }
-
-        @Override
-        protected @Nullable JComponent createCenterPanel() {
-            JPanel panel = new JPanel(new GridBagLayout());
-            panel.setPreferredSize(new Dimension(400, 120));
-
-            GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = JBUI.insets(5);
-            gbc.anchor = GridBagConstraints.WEST;
-
-            contextPathField = new JTextField(deployment.getServerPath(), 25);
-
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JBLabel("Artifact:"), gbc);
-            gbc.gridx = 1;
-            panel.add(new JBLabel(deployment.getDisplayName()), gbc);
-
-            gbc.gridx = 0; gbc.gridy = 1;
-            panel.add(new JBLabel("Context Path:"), gbc);
-            gbc.gridx = 1;
-            panel.add(contextPathField, gbc);
-
-            return panel;
-        }
-
-        @Override
-        protected void doOKAction() {
-            deployment.setServerPath(contextPathField.getText().trim());
-            super.doOKAction();
-        }
+        // Note: showThisPageCheckBox state would need to be stored elsewhere
+        // as TomcatRunConfiguration doesn't have a setShowSettings method
     }
 }

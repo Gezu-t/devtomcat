@@ -15,14 +15,14 @@ import java.awt.*;
 import java.util.List;
 
 /**
- * Professional IntelliJ Artifact-Integrated Deployment Configuration Tab
- * Refactored for professional maintainability and separation of concerns
+ * DevTomcat Deployment Configuration Tab - Corrected Version
+ * Professional deployment management for Apache Tomcat
  *
- * This main class coordinates between different components while keeping
- * the codebase clean and maintainable.
+ * This version works with the existing DeploymentArtifact model
+ * that has serverPath, localPath, and applicationContext fields.
  *
  * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin - Ultimate Integration
+ * Project: DevTomcat Plugin
  */
 public class DeploymentConfigurationTab extends JPanel {
 
@@ -30,7 +30,7 @@ public class DeploymentConfigurationTab extends JPanel {
     private final Project project;
     private final ArtifactManager artifactManager;
 
-    // Delegated managers
+    // UI Components
     private final DeploymentTableManager tableManager;
     private final ArtifactSelectionHandler selectionHandler;
     private final DeploymentConfigurationPanel configPanel;
@@ -46,19 +46,19 @@ public class DeploymentConfigurationTab extends JPanel {
         this.project = project;
         this.artifactManager = initializeArtifactManager();
 
-        // Initialize managers with delegation pattern
+        // Initialize managers with clear responsibilities
         this.tableManager = new DeploymentTableManager();
         this.selectionHandler = new ArtifactSelectionHandler(project, artifactManager, tableManager);
         this.configPanel = new DeploymentConfigurationPanel(project, tableManager, selectionHandler);
 
         initializeUI();
 
-        // Load default configuration if not in operation
+        // Load default configuration if available
         if (!isInGlobalOperation()) {
             loadDefaultConfiguration();
         }
 
-        System.out.println("DevTomcat: Professional Deployment tab initialized with delegation pattern");
+        System.out.println("DevTomcat: Deployment tab initialized");
     }
 
     /**
@@ -81,7 +81,7 @@ public class DeploymentConfigurationTab extends JPanel {
     }
 
     /**
-     * Set parent editor for loop prevention coordination
+     * Set parent editor for coordination
      */
     public void setParentEditor(TomcatConfigurationEditor parentEditor) {
         this.parentEditor = parentEditor;
@@ -99,18 +99,19 @@ public class DeploymentConfigurationTab extends JPanel {
     }
 
     /**
-     * Initialize UI using the configuration panel
+     * Initialize UI components - Simplified layout
      */
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBorder(JBUI.Borders.empty(10));
+        setBorder(JBUI.Borders.empty(5));
 
-        // Add the configuration panel which handles all UI
+        // Main content is just the configuration panel
+        // It contains the table, toolbar, and bottom options
         add(configPanel, BorderLayout.CENTER);
     }
 
     /**
-     * Load default configuration using selection handler
+     * Load default configuration
      */
     private void loadDefaultConfiguration() {
         try {
@@ -121,21 +122,13 @@ public class DeploymentConfigurationTab extends JPanel {
                 return;
             }
 
-            // Delegate to selection handler for auto-detection
+            // Auto-detect web artifacts
             List<Artifact> webArtifacts = selectionHandler.detectWebArtifacts();
 
             if (!webArtifacts.isEmpty()) {
-                // Add first web artifact automatically
+                // Add first web artifact automatically with generated context
                 Artifact firstArtifact = webArtifacts.get(0);
                 selectionHandler.addArtifact(firstArtifact);
-
-                // Set application context
-                String contextPath = selectionHandler.generateContextPath(
-                        firstArtifact.getName(),
-                        firstArtifact.getArtifactType()
-                );
-                configPanel.setApplicationContext(contextPath);
-
                 System.out.println("DevTomcat: Auto-loaded artifact: " + firstArtifact.getName());
             } else {
                 System.out.println("DevTomcat: No web artifacts found for auto-loading");
@@ -169,14 +162,27 @@ public class DeploymentConfigurationTab extends JPanel {
             if (configArtifacts != null && !configArtifacts.isEmpty()) {
                 System.out.println("DevTomcat: Loading " + configArtifacts.size() + " artifacts from config");
 
-                for (DeploymentArtifact artifact : configArtifacts) {
-                    DeploymentArtifact deployment = new DeploymentArtifact(
-                            selectionHandler.findArtifactByName(artifact.getName()),
-                            artifact.getName(),
-                            artifact.getType(),
-                            artifact.getServerPath(),
-                            artifact.getLocalPath()
-                    );
+                for (DeploymentArtifact savedArtifact : configArtifacts) {
+                    // Try to find the IntelliJ artifact
+                    Artifact intellijArtifact = selectionHandler.findArtifactByName(savedArtifact.getName());
+
+                    DeploymentArtifact deployment;
+                    if (intellijArtifact != null) {
+                        // Create from IntelliJ artifact preserving saved values
+                        deployment = DeploymentArtifact.fromIntellijArtifact(
+                                intellijArtifact,
+                                savedArtifact.getApplicationContext()
+                        );
+                        // Preserve other saved values
+                        deployment.setServerPath(savedArtifact.getServerPath());
+                        deployment.setLocalPath(savedArtifact.getLocalPath());
+                        deployment.setDeployed(savedArtifact.isDeployed());
+                        deployment.setUsingDefaultContext(savedArtifact.isUsingDefaultContext());
+                    } else {
+                        // Use saved data (external source or missing artifact)
+                        deployment = savedArtifact.clone();
+                    }
+
                     tableManager.addDeployment(deployment);
                 }
             } else {
@@ -216,27 +222,23 @@ public class DeploymentConfigurationTab extends JPanel {
             // Apply UI settings
             configPanel.applyTo(config);
 
-            // Apply deployment artifacts
-            List<DeploymentArtifact> configArtifacts =
-                    tableManager.getDeployments().stream()
-                            .map(deployment -> new DeploymentArtifact(
-                                    deployment.getDisplayName(),
-                                    deployment.getType(),
-                                    deployment.getServerPath(),
-                                    deployment.getLocalPath()
-                            ))
-                            .collect(java.util.stream.Collectors.toList());
+            // Get deployments from table (includes any inline edits)
+            List<DeploymentArtifact> deployments = tableManager.getDeployments();
 
-            config.setDeploymentArtifacts(configArtifacts);
+            // Save to configuration
+            config.setDeploymentArtifacts(deployments);
 
-            // Apply primary artifact settings
-            if (!configArtifacts.isEmpty()) {
-                DeploymentArtifact primary = configArtifacts.get(0);
+            // Set primary context path and docBase for backward compatibility
+            if (!deployments.isEmpty()) {
+                DeploymentArtifact primary = deployments.get(0);
+                config.setContextPath(primary.getApplicationContext());
                 config.setDocBase(primary.getLocalPath());
-                // Note: Context path is set by configPanel.applyTo()
+            } else {
+                config.setContextPath("/");
+                config.setDocBase("");
             }
 
-            System.out.println("DevTomcat: Apply completed - " + configArtifacts.size() + " artifacts");
+            System.out.println("DevTomcat: Apply completed - " + deployments.size() + " artifacts");
 
         } catch (Exception e) {
             System.err.println("DevTomcat: Error during apply: " + e.getMessage());
@@ -244,5 +246,67 @@ public class DeploymentConfigurationTab extends JPanel {
         } finally {
             isApplying = false;
         }
+    }
+
+    /**
+     * Validate the deployment configuration
+     */
+    public void validateConfiguration() throws ConfigurationException {
+        // Validate each deployment
+        List<DeploymentArtifact> deployments = tableManager.getDeployments();
+
+        if (deployments.isEmpty()) {
+            throw new ConfigurationException("At least one deployment artifact must be configured");
+        }
+
+        // Check for duplicate contexts
+        for (int i = 0; i < deployments.size(); i++) {
+            String context1 = deployments.get(i).getApplicationContext();
+
+            // Validate context path format
+            if (!isValidContextPath(context1)) {
+                throw new ConfigurationException(
+                        "Invalid context path '" + context1 + "' for artifact: " + deployments.get(i).getName()
+                );
+            }
+
+            // Check for duplicates
+            for (int j = i + 1; j < deployments.size(); j++) {
+                String context2 = deployments.get(j).getApplicationContext();
+                if (context1.equals(context2)) {
+                    throw new ConfigurationException(
+                            "Duplicate context path '" + context1 + "' for artifacts: " +
+                                    deployments.get(i).getName() + " and " + deployments.get(j).getName()
+                    );
+                }
+            }
+        }
+
+        // Validate each artifact
+        for (DeploymentArtifact deployment : deployments) {
+            try {
+                deployment.validate();
+            } catch (IllegalStateException e) {
+                throw new ConfigurationException(
+                        "Invalid deployment configuration for " + deployment.getName() + ": " + e.getMessage()
+                );
+            }
+        }
+    }
+
+    /**
+     * Validate context path
+     */
+    private boolean isValidContextPath(String context) {
+        if (context == null || context.isEmpty()) {
+            return false;
+        }
+
+        if (!context.equals("/") && !context.startsWith("/")) {
+            return false;
+        }
+
+        // Check for valid URL characters
+        return context.matches("^/[a-zA-Z0-9\\-_.~!$&'()*+,;=:@/]*$");
     }
 }
