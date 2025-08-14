@@ -2,27 +2,29 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.IntelliJArtifactSelectionDialog;
+import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactContextDialog;
+import com.intellij.openapi.fileChooser.FileChooser;
+import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.artifacts.ArtifactType;
 import com.intellij.packaging.impl.artifacts.JarArtifactType;
-import com.intellij.packaging.impl.artifacts.PlainArtifactType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Professional Artifact Selection Handler
- * Manages artifact selection, detection, and addition logic
+ * Professional Artifact Selection Handler - Corrected Version
+ * Handles artifact selection, context generation, and deployment creation
  *
- * Single Responsibility: Handling artifact selection and detection
+ * Works with existing DeploymentArtifact model structure
  *
  * Author: Gezahegn Lemma (Gezu)
  * Project: DevTomcat Plugin
@@ -39,47 +41,83 @@ public class ArtifactSelectionHandler {
         this.project = project;
         this.artifactManager = artifactManager;
         this.tableManager = tableManager;
-
-        System.out.println("DevTomcat: ArtifactSelectionHandler initialized");
     }
 
     /**
-     * Show artifact selection dialog
+     * Show artifact selection dialog with context input
      */
     public void showArtifactSelectionDialog() {
         try {
-            System.out.println("DevTomcat: Opening artifact selection dialog...");
-
             if (artifactManager == null) {
                 showArtifactManagerError();
                 return;
             }
 
-            IntelliJArtifactSelectionDialog dialog = new IntelliJArtifactSelectionDialog(project, artifactManager);
+            // Get available artifacts
+            List<Artifact> availableArtifacts = getSelectableArtifacts();
+            if (availableArtifacts.isEmpty()) {
+                Messages.showWarningDialog(project,
+                        "No deployable artifacts found in the project.\n" +
+                                "Please create a WAR or Web artifact in Project Structure.",
+                        "No Artifacts Available"
+                );
+                return;
+            }
+
+            // Show artifact selection dialog
+            IntelliJArtifactSelectionDialog dialog = new IntelliJArtifactSelectionDialog(
+                    project, artifactManager
+            );
+
             if (dialog.showAndGet()) {
                 List<Artifact> selectedArtifacts = dialog.getSelectedArtifacts();
-                System.out.println("DevTomcat: User selected " + selectedArtifacts.size() + " artifacts");
 
-                if (!selectedArtifacts.isEmpty()) {
-                    for (Artifact artifact : selectedArtifacts) {
-                        addArtifact(artifact);
+                for (Artifact artifact : selectedArtifacts) {
+                    // Check if already added
+                    if (tableManager.hasDeployment(artifact.getName())) {
+                        Messages.showWarningDialog(project,
+                                "Artifact '" + artifact.getName() + "' is already deployed.",
+                                "Duplicate Artifact"
+                        );
+                        continue;
                     }
 
-                    // Refresh table after adding all
-                    tableManager.refreshTable();
+                    // Generate context path
+                    String suggestedContext = generateContextPath(artifact);
 
-                    System.out.println("DevTomcat: Added " + selectedArtifacts.size() + " artifacts");
+                    // Show context dialog
+                    ArtifactContextDialog contextDialog = new ArtifactContextDialog(
+                            project,
+                            artifact.getName(),
+                            suggestedContext
+                    );
+
+                    if (contextDialog.showAndGet()) {
+                        String applicationContext = contextDialog.getApplicationContext();
+
+                        // Check for duplicate context
+                        if (isContextInUse(applicationContext)) {
+                            Messages.showErrorDialog(project,
+                                    "Context path '" + applicationContext + "' is already in use.",
+                                    "Duplicate Context Path"
+                            );
+                            continue;
+                        }
+
+                        addArtifactWithContext(artifact, applicationContext);
+                    }
                 }
-            } else {
-                System.out.println("DevTomcat: User cancelled artifact selection");
+
+                tableManager.refreshTable();
             }
 
         } catch (Exception e) {
             System.err.println("DevTomcat: Error showing artifact dialog: " + e.getMessage());
             e.printStackTrace();
             Messages.showErrorDialog(project,
-                    "Error opening artifact selection dialog: " + e.getMessage(),
-                    "DevTomcat - Dialog Error");
+                    "Error selecting artifacts: " + e.getMessage(),
+                    "Selection Error"
+            );
         }
     }
 
@@ -87,42 +125,128 @@ public class ArtifactSelectionHandler {
      * Show external source dialog
      */
     public void showExternalSourceDialog() {
-        // Future enhancement
-        Messages.showInfoMessage(project,
-                "External Source deployment will be available in future releases.",
-                "DevTomcat - External Source");
+        FileChooserDescriptor descriptor = new FileChooserDescriptor(
+                true,  // files
+                true,  // directories
+                true,  // jar files
+                false, // jar contents
+                false, // recursive
+                false  // multiple
+        );
+
+        descriptor.setTitle("Select External WAR or Directory");
+        descriptor.setDescription("Select a WAR file or exploded web application directory");
+
+        // Set file filter for WAR files
+        descriptor.withFileFilter(file -> {
+            String name = file.getName().toLowerCase();
+            return file.isDirectory() || name.endsWith(".war");
+        });
+
+        VirtualFile chosen = FileChooser.chooseFile(descriptor, project, null);
+        if (chosen != null) {
+            String name = chosen.getName();
+            String type = chosen.isDirectory() ? DeploymentArtifact.TYPE_DIRECTORY : DeploymentArtifact.TYPE_WAR;
+            String localPath = chosen.getPath();
+
+            // Generate context from file name
+            String suggestedContext = generateContextFromFileName(name);
+
+            // Show context dialog
+            ArtifactContextDialog contextDialog = new ArtifactContextDialog(
+                    project,
+                    name + " (External)",
+                    suggestedContext
+            );
+
+            if (contextDialog.showAndGet()) {
+                String applicationContext = contextDialog.getApplicationContext();
+
+                // Check for duplicate context
+                if (isContextInUse(applicationContext)) {
+                    Messages.showErrorDialog(project,
+                            "Context path '" + applicationContext + "' is already in use.",
+                            "Duplicate Context Path"
+                    );
+                    return;
+                }
+
+                // Create external deployment using the full constructor
+                DeploymentArtifact deployment = new DeploymentArtifact(
+                        name,
+                        type,
+                        applicationContext,
+                        localPath,
+                        applicationContext
+                );
+
+                tableManager.addDeployment(deployment);
+                System.out.println("DevTomcat: Added external source: " + name);
+            }
+        }
     }
 
     /**
-     * Add artifact to deployment
+     * Get selectable artifacts (not already deployed)
      */
-    public void addArtifact(@NotNull Artifact artifact) {
+    private List<Artifact> getSelectableArtifacts() {
+        if (artifactManager == null) {
+            return new ArrayList<>();
+        }
+
+        return Stream.of(artifactManager.getArtifacts())
+                .filter(artifact -> !tableManager.hasDeployment(artifact.getName()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Check if context is already in use
+     */
+    private boolean isContextInUse(String context) {
+        return tableManager.getDeployments().stream()
+                .anyMatch(d -> d.getApplicationContext().equals(context));
+    }
+
+    /**
+     * Add artifact with specific application context
+     */
+    private void addArtifactWithContext(@NotNull Artifact artifact, @NotNull String applicationContext) {
         try {
-            String artifactName = artifact.getName();
-
-            // Check if already added
-            if (tableManager.hasDeployment(artifactName)) {
-                System.out.println("DevTomcat: Artifact already in deployment table: " + artifactName);
-                return;
-            }
-
-            String contextPath = generateContextPath(artifactName, artifact.getArtifactType());
-            String outputPath = artifact.getOutputPath();
-
             DeploymentArtifact deployment = DeploymentArtifact.fromIntellijArtifact(
                     artifact,
-                    contextPath
+                    applicationContext
             );
+
+            // Set server path same as application context if using default
+            if (deployment.isUsingDefaultContext()) {
+                deployment.setServerPath(applicationContext);
+            }
 
             tableManager.addDeployment(deployment);
 
-            System.out.println("DevTomcat: Added artifact: " + artifactName +
-                    " with context: " + contextPath);
+            System.out.println("DevTomcat: Added artifact: " + artifact.getName() +
+                    " with context: " + applicationContext);
 
         } catch (Exception e) {
             System.err.println("DevTomcat: Error adding artifact: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Add artifact with auto-generated context (for auto-detection)
+     */
+    public void addArtifact(@NotNull Artifact artifact) {
+        String contextPath = generateContextPath(artifact);
+
+        // Check if context is already in use
+        int counter = 1;
+        String originalContext = contextPath;
+        while (isContextInUse(contextPath)) {
+            contextPath = originalContext + "-" + counter++;
+        }
+
+        addArtifactWithContext(artifact, contextPath);
     }
 
     /**
@@ -135,8 +259,6 @@ public class ArtifactSelectionHandler {
 
         try {
             Artifact[] allArtifacts = artifactManager.getArtifacts();
-            System.out.println("DevTomcat: Analyzing " + allArtifacts.length + " artifacts for web detection");
-
             return Stream.of(allArtifacts)
                     .filter(this::isWebArtifact)
                     .collect(Collectors.toList());
@@ -158,7 +280,7 @@ public class ArtifactSelectionHandler {
             String typeId = type.getId();
             String typeName = type.getPresentableName();
 
-            // Check for web artifact types
+            // Check type ID
             boolean isWeb = typeId != null && (
                     typeId.toLowerCase().contains("war") ||
                             typeId.toLowerCase().contains("web") ||
@@ -172,16 +294,12 @@ public class ArtifactSelectionHandler {
                         typeName.toLowerCase().contains("war");
             }
 
-            // Special handling for JAR files
-            if (!isWeb && typeId != null && typeId.toLowerCase().contains("jar")) {
+            // Check artifact name for JAR artifacts that might be web apps
+            if (!isWeb && type instanceof JarArtifactType) {
                 String artifactName = artifact.getName().toLowerCase();
                 isWeb = artifactName.contains("web") ||
                         artifactName.contains("spring-boot") ||
                         artifactName.contains("webapp");
-            }
-
-            if (isWeb) {
-                System.out.println("DevTomcat: Detected web artifact: " + artifact.getName());
             }
 
             return isWeb;
@@ -195,35 +313,42 @@ public class ArtifactSelectionHandler {
     /**
      * Generate context path from artifact
      */
-    public String generateContextPath(@NotNull String artifactName, @NotNull ArtifactType artifactType) {
-        // Clean artifact name
-        String cleanName = artifactName
-                .replaceAll(":(war|jar)( exploded)?$", "")
-                .replaceAll("[^a-zA-Z0-9-]", "")
-                .toLowerCase();
-
-        // Handle ROOT context
-        if (cleanName.isEmpty() || "root".equals(cleanName)) {
-            return "/";
-        }
-
-        // Ensure starts with /
-        return "/" + cleanName;
+    public String generateContextPath(@NotNull Artifact artifact) {
+        return generateContextFromFileName(artifact.getName());
     }
 
     /**
-     * Get artifact type display name
+     * Generate context path from file/artifact name
      */
-    private String getArtifactTypeDisplayName(@NotNull ArtifactType type) {
-        if (type instanceof JarArtifactType) {
-            return "jar";
-        } else if (type.getId().contains("war")) {
-            return type.getId().contains("exploded") ? "war exploded" : "war";
-        } else if (type instanceof PlainArtifactType) {
-            return "directory";
-        } else {
-            return type.getPresentableName().toLowerCase();
+    private String generateContextFromFileName(@NotNull String fileName) {
+        // Remove common suffixes and extensions
+        String context = fileName
+                .replaceAll(":(war|jar)(\\s+exploded)?$", "")
+                .replaceAll("\\.(war|jar)$", "")
+                .replaceAll("[-_]?exploded$", "");
+
+        // Special cases
+        if (context.equalsIgnoreCase("ROOT") ||
+                context.equalsIgnoreCase("root.war")) {
+            return "/";
         }
+
+        // Handle version numbers (e.g., myapp-1.0.0 -> myapp)
+        context = context.replaceAll("-\\d+(\\.\\d+)*(-SNAPSHOT)?$", "");
+
+        // Convert to URL-safe format
+        context = context
+                .replaceAll("[^a-zA-Z0-9\\-_]", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^-|-$", "")
+                .toLowerCase();
+
+        // Empty or just dashes -> root
+        if (context.isEmpty() || context.matches("-+")) {
+            return "/";
+        }
+
+        return "/" + context;
     }
 
     /**
@@ -247,12 +372,13 @@ public class ArtifactSelectionHandler {
     }
 
     /**
-     * Show artifact manager error message
+     * Show artifact manager error
      */
     private void showArtifactManagerError() {
-        System.err.println("DevTomcat: Cannot show artifact dialog - ArtifactManager is null");
         Messages.showErrorDialog(project,
-                "Artifact manager not available. Please ensure the project is properly loaded.",
-                "DevTomcat - Artifact Error");
+                "Artifact manager is not available.\n" +
+                        "Please ensure the project is properly loaded and try again.",
+                "Artifact Manager Error"
+        );
     }
 }

@@ -2,9 +2,12 @@ package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.ui.server.sections.*;
-
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -12,77 +15,75 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /**
- * Professional Server Configuration Tab - Clean Architecture
+ * Server Configuration Tab
+ * Main configuration panel for Tomcat server settings. This tab provides
+ * a comprehensive UI for configuring all aspects of a Tomcat run configuration
+ * including server selection, ports, VM options, and deployment settings.
+ * The UI is organized into logical sections following the Single Responsibility
+ * Principle, with each section handling a specific aspect of the configuration.
  *
- * This class follows Single Responsibility Principle by delegating
- * specific concerns to dedicated section classes.
- *
- * Provides professional IDE-level Tomcat Server configuration:
- * - Application server section (no module selection)
- * - Open browser section
- * - VM options section (user defines own, no pre-population)
- * - On 'Update' action section
- * - JRE configuration section
- * - Tomcat settings section (ONLY HTTP and JMX ports)
- * - Before launch section
- * - Bottom options section
- *
- * @author Gezahegn Lemma (Gezu)
- * @version 3.1 - Professional Clean Architecture
+ * @author Dev Tomcat Team
  */
-public class ServerConfigurationTab extends JPanel {
+public class ServerConfigurationTab extends JPanel implements Disposable {
 
-    private final Project project;
+    private static final Logger LOG = Logger.getInstance(ServerConfigurationTab.class);
 
-    // === SECTION COMPONENTS (Clean Separation - Professional Layout) ===
+    // Store the last configuration for comparison
+    private TomcatRunConfiguration lastConfiguration;
+
+    // === SECTION COMPONENTS ===
     private final ApplicationServerSection serverSection;
     private final BrowserLaunchSection browserSection;
     private final VmOptionsSection vmSection;
-    private final UpdateActionsSection updateSection;
-    private final JreConfigurationSection jreSection;
     private final TomcatSettingsSection tomcatSection;
-    private final BeforeLaunchSection beforeLaunchSection;
     private final BottomOptionsSection bottomSection;
 
     private final List<ConfigurationSection> allSections;
 
+    /**
+     * Create a new server configuration tab
+     *
+     * @param project The current project
+     */
     public ServerConfigurationTab(@NotNull Project project) {
-        this.project = project;
 
-        // Initialize all sections - Professional order and components
+        // Initialize all sections
         this.serverSection = new ApplicationServerSection(project);
         this.browserSection = new BrowserLaunchSection(project);
         this.vmSection = new VmOptionsSection();
-        this.updateSection = new UpdateActionsSection();
-        this.jreSection = new JreConfigurationSection(project);
+        UpdateActionsSection updateSection = new UpdateActionsSection();
+        JreConfigurationSection jreSection = new JreConfigurationSection(project);
         this.tomcatSection = new TomcatSettingsSection();
-        this.beforeLaunchSection = new BeforeLaunchSection();
+        BeforeLaunchSection beforeLaunchSection = new BeforeLaunchSection();
         this.bottomSection = new BottomOptionsSection();
 
-        // Store all sections for easy iteration - Professional IDE order
+        // Store all sections for easy iteration
         this.allSections = Arrays.asList(
-                serverSection,           // Application server dropdown + Configure button
-                browserSection,          // Open browser section
-                vmSection,              // VM options (empty by default)
-                updateSection,          // On 'Update' action dropdown + Show dialog
-                jreSection,             // JRE dropdown + configure button
-                tomcatSection,          // Tomcat Server Settings (HTTP + JMX ports only)
-                beforeLaunchSection,    // Collapsible Before launch with Build task
-                bottomSection           // Bottom checkboxes
+                serverSection,
+                browserSection,
+                vmSection,
+                updateSection,
+                jreSection,
+                tomcatSection,
+                beforeLaunchSection,
+                bottomSection
         );
 
         initializeLayout();
         loadAllConfigurations();
 
-        System.out.println("DevTomcat: Professional ServerConfigurationTab initialized with " +
-                allSections.size() + " sections");
+        // Register for disposal TODO: it need a check up for this part because you
+        //  need to use the parent class not like this one and let me know when you are done for this part.
+        Disposer.register(project, this);
+
+        LOG.info("ServerConfigurationTab initialized with " + allSections.size() + " sections");
     }
 
     /**
-     * Simple layout initialization - delegates UI creation to sections
-     * Updated to match Ultimate's exact layout spacing
+     * Initialize the UI layout
      */
     private void initializeLayout() {
         setLayout(new BorderLayout());
@@ -90,7 +91,7 @@ public class ServerConfigurationTab extends JPanel {
 
         JPanel mainPanel = createMainPanel();
 
-        JScrollPane scrollPane = new JScrollPane(mainPanel);
+        JBScrollPane scrollPane = new JBScrollPane(mainPanel);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setBorder(null);
@@ -99,7 +100,7 @@ public class ServerConfigurationTab extends JPanel {
     }
 
     /**
-     * Create main panel with all sections - Ultimate spacing and layout
+     * Create the main panel with all sections
      */
     private JPanel createMainPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
@@ -107,19 +108,16 @@ public class ServerConfigurationTab extends JPanel {
         gbc.anchor = GridBagConstraints.NORTHWEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        gbc.insets = JBUI.insets(8, 0, 8, 0); // Professional IDE spacing
+        gbc.insets = JBUI.insets(8, 0);
 
-        // Add all sections in professional order with proper spacing
+        // Add all sections
         int row = 0;
         for (ConfigurationSection section : allSections) {
             gbc.gridy = row++;
 
-            // Special handling for sections that need vertical space (VM options, Before launch)
-            if (section instanceof VmOptionsSection) {
-                gbc.weighty = 0.2;
-                gbc.fill = GridBagConstraints.BOTH;
-            } else if (section instanceof BeforeLaunchSection) {
-                gbc.weighty = 0.1;
+            // Adjust constraints based on section needs
+            if (section.shouldFillVertically()) {
+                gbc.weighty = section instanceof VmOptionsSection ? 0.2 : 0.1;
                 gbc.fill = GridBagConstraints.BOTH;
             } else {
                 gbc.weighty = 0.0;
@@ -146,56 +144,181 @@ public class ServerConfigurationTab extends JPanel {
     }
 
     /**
-     * Reset configuration from TomcatRunConfiguration - Professional IDE alignment
+     * Reset configuration from TomcatRunConfiguration
+     *
+     * @param configuration The configuration to load
      */
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
-        System.out.println("DevTomcat: Loading professional configuration into ServerTab");
+        LOG.debug("Loading configuration into ServerTab");
 
-        allSections.forEach(section -> section.resetFrom(configuration));
+        this.lastConfiguration = configuration;
 
-        System.out.println("DevTomcat: Professional configuration loaded - Server: " +
+        allSections.forEach(section -> {
+            try {
+                section.resetFrom(configuration);
+            } catch (Exception e) {
+                LOG.error("Error resetting section " + section.getClass().getSimpleName(), e);
+            }
+        });
+
+        LOG.info("Configuration loaded - Server: " +
                 (configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "None") +
-                ", HTTP Port: " + (configuration.getPort() != null ? configuration.getPort() : "8080") +
-                ", JMX Port: " + (configuration.getJmxPort() != null ? configuration.getJmxPort() : "1099"));
+                ", HTTP Port: " + configuration.getPort() +
+                ", JMX: " + (configuration.isJmxEnabled() ? configuration.getJmxPort() : "disabled"));
     }
 
     /**
-     * Apply configuration to TomcatRunConfiguration - Professional IDE alignment
+     * Apply configuration to TomcatRunConfiguration
+     *
+     * @param configuration The configuration to update
+     * @throws ConfigurationException if validation fails
      */
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        System.out.println("DevTomcat: Applying professional ServerTab configuration");
+        LOG.debug("Applying ServerTab configuration");
 
-        // Apply configurations from all sections with validation
+        // Validate first
+        validateSettings();
+
+        // Apply configurations from all sections
         for (ConfigurationSection section : allSections) {
             try {
                 section.applyTo(configuration);
             } catch (ConfigurationException e) {
-                System.err.println("DevTomcat: Error applying " + section.getClass().getSimpleName() + ": " + e.getMessage());
+                LOG.error("Error applying section " + section.getClass().getSimpleName(), e);
                 throw e;
+            } catch (Exception e) {
+                LOG.error("Unexpected error in section " + section.getClass().getSimpleName(), e);
+                throw new ConfigurationException("Error applying configuration: " + e.getMessage());
             }
         }
 
-        System.out.println("DevTomcat: Professional configuration applied successfully - " +
-                "Server: " + (configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "None") +
+        LOG.info("Configuration applied - Server: " +
+                (configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "None") +
                 ", Ports: HTTP=" + configuration.getPort() + ", JMX=" + configuration.getJmxPort());
     }
 
     /**
-     * Validate all sections
+     * Validate all settings
+     *
+     * @throws ConfigurationException if validation fails
      */
-    public boolean isConfigurationValid() {
-        return allSections.stream().allMatch(ConfigurationSection::isValid);
+    public void validateSettings() throws ConfigurationException {
+        // Check if server is selected
+        if (!hasSelectedTomcatServer()) {
+            throw new ConfigurationException("Please select a Tomcat server");
+        }
+
+        // Validate HTTP port
+        int httpPort = getHttpPort();
+        if (httpPort < 1 || httpPort > 65535) {
+            throw new ConfigurationException("HTTP port must be between 1 and 65535");
+        }
+
+        // Validate JMX port if enabled
+        if (isJmxEnabled()) {
+            int jmxPort = getJmxPort();
+            if (jmxPort < 1 || jmxPort > 65535) {
+                throw new ConfigurationException("JMX port must be between 1 and 65535");
+            }
+
+            if (httpPort == jmxPort) {
+                throw new ConfigurationException("HTTP and JMX ports cannot be the same");
+            }
+        }
+
+        // Validate all sections
+        for (ConfigurationSection section : allSections) {
+            if (!section.isValid()) {
+                throw new ConfigurationException("Invalid configuration in " +
+                        section.getClass().getSimpleName());
+            }
+        }
     }
 
-    // === DELEGATION METHODS FOR EXTERNAL ACCESS - Professional IDE Pattern ===
+    /**
+     * Check if the configuration has been modified
+     *
+     * @param configuration The configuration to compare against
+     * @return true if modified
+     */
+    public boolean isModified(@NotNull TomcatRunConfiguration configuration) {
+        // Check if we have a different configuration object
+        if (lastConfiguration != configuration) {
+            return true;
+        }
+
+        // Check major settings for modifications
+        try {
+            // Server selection
+            if (configuration.getTomcatInfo() != serverSection.getSelectedTomcatServer()) {
+                return true;
+            }
+
+            // Port settings
+            if (!Objects.equals(configuration.getPort(), getHttpPort())) {
+                return true;
+            }
+
+            if (!Objects.equals(configuration.getJmxPort(), getJmxPort())) {
+                return true;
+            }
+
+            if (configuration.isJmxEnabled() != isJmxEnabled()) {
+                return true;
+            }
+
+            // VM options
+            String currentVmOptions = configuration.getVmOptions();
+            String uiVmOptions = getVmOptions();
+            if (!Objects.equals(currentVmOptions, uiVmOptions)) {
+                return true;
+            }
+
+            // Browser settings
+            if (configuration.isAfterLaunchEnabled() != isAfterLaunchEnabled()) {
+                return true;
+            }
+
+            if (!Objects.equals(configuration.getBrowserUrl(), getBrowserUrl())) {
+                return true;
+            }
+
+            // Tool window settings
+            if (configuration.isActivateToolWindow() != isActivateToolWindowEnabled()) {
+                return true;
+            }
+
+            if (configuration.isFocusToolWindow() != isFocusToolWindowEnabled()) {
+                return true;
+            }
+
+        } catch (Exception e) {
+            LOG.warn("Error checking modifications", e);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Dispose of resources
+     */
+    @Override
+    public void dispose() {
+        LOG.debug("Disposing ServerConfigurationTab");
+
+        // Dispose any disposable sections
+        for (ConfigurationSection section : allSections) {
+            if (section instanceof Disposable) {
+                Disposer.dispose((Disposable) section);
+            }
+        }
+    }
+
+    // === DELEGATION METHODS ===
 
     public boolean hasSelectedTomcatServer() {
         return serverSection.getSelectedTomcatServer() != null;
-    }
-
-    public String getSelectedTomcatServerName() {
-        return serverSection.getSelectedTomcatServer() != null ?
-                serverSection.getSelectedTomcatServer().getName() : "None";
     }
 
     public int getHttpPort() {
@@ -222,30 +345,6 @@ public class ServerConfigurationTab extends JPanel {
         return browserSection.isAfterLaunchEnabled();
     }
 
-    public String getUpdateAction() {
-        return updateSection.getSelectedAction();
-    }
-
-    public boolean isShowDialogEnabled() {
-        return updateSection.isShowDialogEnabled();
-    }
-
-    public String getSelectedJRE() {
-        return jreSection.getSelectedJRE();
-    }
-
-    public boolean isDeployAppsEnabled() {
-        return tomcatSection.isDeployAppsEnabled();
-    }
-
-    public boolean isPreserveSessionsEnabled() {
-        return tomcatSection.isPreserveSessionsEnabled();
-    }
-
-    public java.util.List<String> getBeforeLaunchTasks() {
-        return beforeLaunchSection.getTasks();
-    }
-
     public boolean isActivateToolWindowEnabled() {
         return bottomSection.isActivateToolWindowEnabled();
     }
@@ -254,45 +353,5 @@ public class ServerConfigurationTab extends JPanel {
         return bottomSection.isFocusToolWindowEnabled();
     }
 
-    // === PROFESSIONAL IDE CONFIGURATION SUMMARY ===
 
-    public String getConfigurationSummary() {
-        StringBuilder summary = new StringBuilder("DevTomcat Professional Configuration Summary:\n");
-        summary.append("├─ Server: ").append(getSelectedTomcatServerName()).append("\n");
-        summary.append("├─ HTTP Port: ").append(getHttpPort()).append("\n");
-        summary.append("├─ JMX Port: ").append(getJmxPort()).append(" (").append(isJmxEnabled() ? "enabled" : "disabled").append(")\n");
-        summary.append("├─ VM Options: ").append(getVmOptions().isEmpty() ? "None" : "Configured").append("\n");
-        summary.append("├─ Browser Launch: ").append(isAfterLaunchEnabled() ? "Enabled" : "Disabled").append("\n");
-        summary.append("├─ Update Action: ").append(getUpdateAction()).append("\n");
-        summary.append("├─ JRE: ").append(getSelectedJRE()).append("\n");
-        summary.append("├─ Deploy Apps: ").append(isDeployAppsEnabled() ? "Yes" : "No").append("\n");
-        summary.append("├─ Preserve Sessions: ").append(isPreserveSessionsEnabled() ? "Yes" : "No").append("\n");
-        summary.append("├─ Before Launch Tasks: ").append(getBeforeLaunchTasks().size()).append("\n");
-        summary.append("└─ Tool Window: Activate=").append(isActivateToolWindowEnabled()).append(", Focus=").append(isFocusToolWindowEnabled()).append("\n");
-        return summary.toString();
-    }
-
-    // === PROFESSIONAL IDE VALIDATION ===
-
-    public String validateConfiguration() {
-        StringBuilder errors = new StringBuilder();
-
-        if (!hasSelectedTomcatServer()) {
-            errors.append("- No Tomcat server selected\n");
-        }
-
-        if (getHttpPort() < 1 || getHttpPort() > 65535) {
-            errors.append("- Invalid HTTP port: ").append(getHttpPort()).append("\n");
-        }
-
-        if (isJmxEnabled() && (getJmxPort() < 1 || getJmxPort() > 65535)) {
-            errors.append("- Invalid JMX port: ").append(getJmxPort()).append("\n");
-        }
-
-        if (getHttpPort() == getJmxPort() && isJmxEnabled()) {
-            errors.append("- HTTP and JMX ports cannot be the same\n");
-        }
-
-        return errors.toString();
-    }
 }

@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Port Management Utility for DevTomcat
+ * Port Management Utility
  * Handles port conflict detection and resolution
  *
  * @author Gezahegn Lemma (Gezu)

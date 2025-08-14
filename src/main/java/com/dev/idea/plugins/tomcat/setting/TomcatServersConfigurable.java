@@ -1,122 +1,206 @@
 package com.dev.idea.plugins.tomcat.setting;
 
+import com.dev.idea.plugins.tomcat.utils.TomcatServerUtils;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.MasterDetailsComponent;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.CommonActionsPanel;
 import com.intellij.util.IconUtil;
-import com.dev.idea.plugins.tomcat.utils.PluginUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
- * DevTomcat Server Configuration UI
- * Provides professional server management interface
- * Allows adding, editing, and removing Tomcat server instances
+ * Dev Tomcat Servers Configurable
  *
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
- * Created: 6/9/25
+ * Main configuration panel for managing Tomcat servers in the IDE settings.
+ * Provides a tree view of all configured servers with add/remove/edit capabilities.
+ *
+ * This class integrates with IntelliJ's settings dialog to provide a professional
+ * server management interface.
+ *
+ * @author Dev Tomcat Team
  */
 public class TomcatServersConfigurable extends MasterDetailsComponent {
 
-    @Override
-    public String getDisplayName() {
-        return "Tomcat Server";
-    }
+    private static final Logger LOG = Logger.getInstance(TomcatServersConfigurable.class);
 
-    @Override
-    public String getHelpTopic() {
-        return "DevTomcat Help";
-    }
+    private static final String DISPLAY_NAME = "Dev Tomcat Servers";
+    private static final String HELP_TOPIC = "dev.tomcat.servers";
 
+    /**
+     * Create a new servers configurable
+     */
     public TomcatServersConfigurable() {
         initTree();
-        System.out.println("DevTomcat: TomcatServersConfigurable initialized");
+        LOG.info("Initialized Dev Tomcat servers configuration panel");
     }
 
     @Override
-    protected @Nullable List<AnAction> createActions(boolean fromPopup) {
+    @NotNull
+    public String getDisplayName() {
+        return DISPLAY_NAME;
+    }
+
+    @Override
+    @Nullable
+    public String getHelpTopic() {
+        return HELP_TOPIC;
+    }
+
+    /**
+     * Create actions for the toolbar
+     *
+     * @param fromPopup Whether creating for popup menu
+     * @return List of actions
+     */
+    @Override
+    @Nullable
+    protected List<AnAction> createActions(boolean fromPopup) {
         List<AnAction> actions = new ArrayList<>();
         actions.add(new AddTomcatAction());
         actions.add(new MyDeleteAction());
-        System.out.println("DevTomcat: Created server management actions");
+        actions.add(new DuplicateServerAction());
+
+        LOG.debug("Created " + actions.size() + " server management actions");
         return actions;
     }
 
+    /**
+     * Check if the configuration has been modified
+     *
+     * @return true if modified
+     */
     @Override
     public boolean isModified() {
-        boolean modified = super.isModified();
-        if (modified) {
+        // Check base modifications
+        if (super.isModified()) {
             return true;
         }
 
-        int configuredServers = TomcatServerManagerState.getInstance().getTomcatInfos().size();
-        int displayedServers = myRoot.getChildCount();
-        boolean hasChanges = displayedServers != configuredServers;
+        // Check if server count has changed
+        int configuredCount = TomcatServerManagerState.getInstance().getTomcatInfos().size();
+        int displayedCount = myRoot.getChildCount();
 
-        if (hasChanges) {
-            System.out.println("DevTomcat: Server configuration modified - " +
-                    configuredServers + " configured, " + displayedServers + " displayed");
+        if (configuredCount != displayedCount) {
+            LOG.debug("Server count changed: " + configuredCount + " → " + displayedCount);
+            return true;
         }
 
-        return hasChanges;
+        return false;
     }
 
+    /**
+     * Reset the configuration to saved state
+     */
     @Override
     public void reset() {
         myRoot.removeAllChildren();
 
+        // Load all configured servers
         TomcatServerManagerState state = TomcatServerManagerState.getInstance();
         List<TomcatInfo> servers = state.getTomcatInfos();
 
         for (TomcatInfo info : servers) {
-            addNode(info, false);
+            addServerNode(info, false);
         }
 
         super.reset();
-        System.out.println("DevTomcat: Reset server configuration - loaded " + servers.size() + " servers");
+        LOG.info("Reset configuration with " + servers.size() + " servers");
     }
 
+    /**
+     * Apply the configuration changes
+     *
+     * @throws ConfigurationException if validation fails
+     */
     @Override
     public void apply() throws ConfigurationException {
+        // Validate all servers before applying
+        validateAllServers();
+
         super.apply();
 
+        // Update the persistent state
         List<TomcatInfo> tomcatInfos = TomcatServerManagerState.getInstance().getTomcatInfos();
         tomcatInfos.clear();
 
         for (int i = 0; i < myRoot.getChildCount(); i++) {
-            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) ((MyNode) myRoot.getChildAt(i)).getConfigurable();
-            tomcatInfos.add(configurable.getEditableObject());
+            MyNode node = (MyNode) myRoot.getChildAt(i);
+            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) node.getConfigurable();
+            TomcatInfo info = configurable.getEditableObject();
+            tomcatInfos.add(info);
         }
 
-        System.out.println("DevTomcat: Applied server configuration - saved " + tomcatInfos.size() + " servers");
+        LOG.info("Applied configuration with " + tomcatInfos.size() + " servers");
     }
 
+    /**
+     * Validate all server configurations
+     *
+     * @throws ConfigurationException if any server is invalid
+     */
+    private void validateAllServers() throws ConfigurationException {
+        for (int i = 0; i < myRoot.getChildCount(); i++) {
+            MyNode node = (MyNode) myRoot.getChildAt(i);
+            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) node.getConfigurable();
+            TomcatInfo info = configurable.getEditableObject();
+
+            try {
+                info.validate();
+            } catch (IllegalStateException e) {
+                throw new ConfigurationException(
+                        "Invalid server configuration for '" + info.getName() + "': " + e.getMessage()
+                );
+            }
+        }
+    }
+
+    /**
+     * Check if an object was stored in the configuration
+     *
+     * @param editableObject The object to check
+     * @return true if stored
+     */
     @Override
     protected boolean wasObjectStored(Object editableObject) {
-        List<TomcatInfo> storedServers = TomcatServerManagerState.getInstance().getTomcatInfos();
-        boolean isStored = storedServers.contains(editableObject);
-
-        if (editableObject instanceof TomcatInfo) {
-            TomcatInfo tomcatInfo = (TomcatInfo) editableObject;
-            System.out.println("DevTomcat: Checking if server '" + tomcatInfo.getName() + "' is stored: " + isStored);
+        if (!(editableObject instanceof TomcatInfo)) {
+            return false;
         }
 
+        TomcatInfo tomcatInfo = (TomcatInfo) editableObject;
+        List<TomcatInfo> storedServers = TomcatServerManagerState.getInstance().getTomcatInfos();
+
+        // Check by ID for accurate comparison
+        boolean isStored = storedServers.stream()
+                .anyMatch(stored -> stored.getId().equals(tomcatInfo.getId()));
+
+        LOG.debug("Server '" + tomcatInfo.getName() + "' stored: " + isStored);
         return isStored;
     }
 
     /**
-     * Add a new Tomcat server node to the tree
+     * Add a new server node to the tree
+     *
+     * @param tomcatInfo The server to add
+     * @param selectInTree Whether to select the node
      */
-    private void addNode(TomcatInfo tomcatInfo, boolean selectInTree) {
+    private void addServerNode(@NotNull TomcatInfo tomcatInfo, boolean selectInTree) {
         try {
-            TomcatInfoConfigurable configurable = new TomcatInfoConfigurable(tomcatInfo, TREE_UPDATER, this::validateName);
+            TomcatInfoConfigurable configurable = new TomcatInfoConfigurable(
+                    tomcatInfo,
+                    TREE_UPDATER,
+                    this::validateServerName
+            );
+
             MyNode node = new MyNode(configurable);
             addNode(node, myRoot);
 
@@ -124,83 +208,143 @@ public class TomcatServersConfigurable extends MasterDetailsComponent {
                 selectNodeInTree(node);
             }
 
-            System.out.println("DevTomcat: Added server node - " + tomcatInfo.getName() +
-                    " (version: " + tomcatInfo.getVersion() + ")");
+            LOG.info("Added server node: " + tomcatInfo.getDisplayString());
 
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error adding server node: " + e.getMessage());
-            throw new RuntimeException("Failed to add Tomcat server: " + tomcatInfo.getName(), e);
+            LOG.error("Failed to add server node", e);
+            Messages.showErrorDialog(
+                    "Failed to add Tomcat server: " + e.getMessage(),
+                    "Error Adding Server"
+            );
         }
     }
 
     /**
      * Validate server name uniqueness
+     *
+     * @param name The name to validate
+     * @throws ConfigurationException if invalid
      */
-    private void validateName(String name) throws ConfigurationException {
-        if (name == null || name.trim().isEmpty()) {
+    private void validateServerName(@NotNull String name) throws ConfigurationException {
+        // Check for empty name
+        if (name.trim().isEmpty()) {
             throw new ConfigurationException("Server name cannot be empty");
         }
 
+        // Check for duplicate names
         String trimmedName = name.trim();
         List<String> existingNames = new ArrayList<>();
 
         for (int i = 0; i < myRoot.getChildCount(); i++) {
-            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) ((MyNode) myRoot.getChildAt(i)).getConfigurable();
+            MyNode node = (MyNode) myRoot.getChildAt(i);
+            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) node.getConfigurable();
             String existingName = configurable.getEditableObject().getName();
+
+            if (!existingName.equals(configurable.getDisplayName())) {
+                // Skip if this is the node being edited
+                continue;
+            }
+
             existingNames.add(existingName);
 
             if (existingName.equals(trimmedName)) {
-                throw new ConfigurationException("Duplicate name: \"" + trimmedName + "\"");
+                throw new ConfigurationException("Server name already exists: \"" + trimmedName + "\"");
             }
         }
 
-        System.out.println("DevTomcat: Validated server name '" + trimmedName + "' - unique among " + existingNames.size() + " servers");
+        LOG.debug("Validated server name '" + trimmedName + "' (checked " + existingNames.size() + " existing names)");
     }
 
     /**
-     * Action to add new Tomcat server
+     * Action to add a new Tomcat server
      */
     private class AddTomcatAction extends DumbAwareAction {
-        public AddTomcatAction() {
-            super("Add", "Add a Tomcat server", IconUtil.getAddIcon());
+
+        AddTomcatAction() {
+            super("Add Tomcat Server", "Add a new Tomcat server configuration", IconUtil.getAddIcon());
             registerCustomShortcutSet(CommonActionsPanel.getCommonShortcut(CommonActionsPanel.Buttons.ADD), myTree);
         }
 
         @Override
         public void actionPerformed(@NotNull AnActionEvent e) {
-            System.out.println("DevTomcat: Add Tomcat server action triggered");
+            LOG.debug("Add Tomcat server action triggered");
 
             try {
-                PluginUtils.chooseTomcat(this::createUniqueName, tomcatInfo -> {
-                    addNode(tomcatInfo, true);
-                    System.out.println("DevTomcat: Successfully added new Tomcat server: " + tomcatInfo.getName());
-                });
+                TomcatServerUtils.selectTomcatInstallation(
+                        this::createUniqueName,
+                        tomcatInfo -> {
+                            addServerNode(tomcatInfo, true);
+                            LOG.info("Successfully added Tomcat server: " + tomcatInfo.getDisplayString());
+                        }
+                );
             } catch (Exception ex) {
-                System.err.println("DevTomcat: Error adding Tomcat server: " + ex.getMessage());
+                LOG.error("Error adding Tomcat server", ex);
+                Messages.showErrorDialog(
+                        "Failed to add Tomcat server: " + ex.getMessage(),
+                        "Error"
+                );
             }
         }
 
         /**
          * Create a unique name for the new server
          */
-        private String createUniqueName(String preferredName) {
-            List<String> existingNames = new ArrayList<>();
+        @NotNull
+        private String createUniqueName(@NotNull String preferredName) {
+            List<String> existingNames = getServerNames();
+            String uniqueName = TomcatServerUtils.generateUniqueName(existingNames, preferredName);
 
-            for (int i = 0; i < myRoot.getChildCount(); i++) {
-                String displayName = ((MyNode) myRoot.getChildAt(i)).getDisplayName();
-                existingNames.add(displayName);
-            }
-
-            String uniqueName = PluginUtils.generateSequentName(existingNames, preferredName);
-            System.out.println("DevTomcat: Generated unique server name: '" + uniqueName +
-                    "' from preferred: '" + preferredName + "'");
-
+            LOG.debug("Generated unique name: '" + uniqueName + "' (from: '" + preferredName + "')");
             return uniqueName;
         }
     }
 
     /**
+     * Action to duplicate a server configuration
+     */
+    private class DuplicateServerAction extends DumbAwareAction {
+
+        DuplicateServerAction() {
+            super("Duplicate", "Duplicate the selected server configuration", IconUtil.getAddIcon());
+        }
+
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            MyNode selectedNode = getSelectedNode();
+            if (selectedNode == null) {
+                return;
+            }
+
+            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) selectedNode.getConfigurable();
+            TomcatInfo original = configurable.getEditableObject();
+
+            // Create a copy
+            TomcatInfo copy = original.clone();
+            copy.setId(java.util.UUID.randomUUID().toString());
+            copy.setName(createUniqueName(original.getName() + " Copy"));
+
+            addServerNode(copy, true);
+
+            LOG.info("Duplicated server: " + original.getName() + " → " + copy.getName());
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setEnabled(getSelectedNode() != null);
+        }
+
+        private String createUniqueName(String baseName) {
+            List<String> existingNames = getServerNames();
+            return TomcatServerUtils.generateUniqueName(existingNames, baseName);
+        }
+    }
+
+    // === UTILITY METHODS ===
+
+    /**
      * Get count of configured servers
+     *
+     * @return The server count
      */
     public int getServerCount() {
         return myRoot.getChildCount();
@@ -208,20 +352,55 @@ public class TomcatServersConfigurable extends MasterDetailsComponent {
 
     /**
      * Get all configured server names
+     *
+     * @return List of server names
      */
+    @NotNull
     public List<String> getServerNames() {
         List<String> names = new ArrayList<>();
         for (int i = 0; i < myRoot.getChildCount(); i++) {
-            String displayName = ((MyNode) myRoot.getChildAt(i)).getDisplayName();
-            names.add(displayName);
+            MyNode node = (MyNode) myRoot.getChildAt(i);
+            names.add(node.getDisplayName());
         }
         return names;
     }
 
     /**
+     * Get all configured servers
+     *
+     * @return List of TomcatInfo objects
+     */
+    @NotNull
+    public List<TomcatInfo> getServers() {
+        List<TomcatInfo> servers = new ArrayList<>();
+        for (int i = 0; i < myRoot.getChildCount(); i++) {
+            MyNode node = (MyNode) myRoot.getChildAt(i);
+            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) node.getConfigurable();
+            servers.add(configurable.getEditableObject());
+        }
+        return servers;
+    }
+
+    /**
      * Check if any servers are configured
+     *
+     * @return true if at least one server is configured
      */
     public boolean hasConfiguredServers() {
         return getServerCount() > 0;
+    }
+
+    /**
+     * Find a server by name
+     *
+     * @param name The server name
+     * @return The server info or null
+     */
+    @Nullable
+    public TomcatInfo findServerByName(@NotNull String name) {
+        return getServers().stream()
+                .filter(info -> name.equals(info.getName()))
+                .findFirst()
+                .orElse(null);
     }
 }

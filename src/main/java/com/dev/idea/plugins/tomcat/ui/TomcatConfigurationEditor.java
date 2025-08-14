@@ -4,6 +4,7 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.intellij.ui.components.JBTabbedPane;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -20,7 +21,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private final Project project;
     private TomcatRunConfiguration currentConfiguration;
 
-    // ENHANCED loop prevention with atomic flags
+    // loop prevention with atomic flags
     private final AtomicBoolean isResetting = new AtomicBoolean(false);
     private final AtomicBoolean isApplying = new AtomicBoolean(false);
     private final AtomicBoolean editorInitialized = new AtomicBoolean(false);
@@ -34,7 +35,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private CodeCoverageTab codeCoverageTab;
 
     // Main UI
-    private JTabbedPane tabbedPane;
+    private JBTabbedPane tabbedPane;
 
     public TomcatConfigurationEditor(@NotNull Project project) {
         this.project = project;
@@ -44,12 +45,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     @Override
     protected void resetEditorFrom(@NotNull TomcatRunConfiguration configuration) {
-        // CRITICAL: Prevent all types of loops
         if (isResetting.get() || isApplying.get() || isDisposing.get()) {
             return;
         }
 
-        // Double-check locking pattern for thread safety
         if (!isResetting.compareAndSet(false, true)) {
             return;
         }
@@ -109,7 +108,6 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     @Override
     protected void applyEditorTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        // CRITICAL: Prevent all types of loops
         if (isApplying.get() || isResetting.get() || isDisposing.get()) {
             return;
         }
@@ -118,7 +116,6 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             return;
         }
 
-        // Double-check locking pattern for thread safety
         if (!isApplying.compareAndSet(false, true)) {
             return;
         }
@@ -128,7 +125,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             applyAllTabs(configuration);
             System.out.println("DevTomcat: Applied all tabs to configuration successfully");
         } catch (ConfigurationException e) {
-            System.err.println("DevTomcat: Configuration error: " + e.getMessage());
+            System.err.println("DevTomcat: Configuration error: " + e.getLocalizedMessage());
             throw e;
         } catch (Exception e) {
             System.err.println("DevTomcat: Unexpected error in apply: " + e.getMessage());
@@ -183,7 +180,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             System.out.println("DevTomcat: Creating professional 5-tab interface");
 
             // Create main tabbed pane
-            tabbedPane = new JTabbedPane();
+            tabbedPane = new JBTabbedPane();
 
             // Create all tabs with proper error handling
             createAllTabs();
@@ -206,8 +203,6 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
         } catch (Exception e) {
             System.err.println("DevTomcat: Error creating editor: " + e.getMessage());
-            e.printStackTrace();
-
             // Return error panel instead of empty panel
             JPanel errorPanel = new JPanel();
             errorPanel.add(new JLabel("Error creating configuration interface: " + e.getMessage()));
@@ -247,7 +242,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void createLogsTab() {
         try {
-            logsTab = new LogsConfigurationTab(project, currentConfiguration);
+            logsTab = new LogsConfigurationTab(project);
             tabbedPane.addTab("Logs", logsTab);
             System.out.println("DevTomcat: Added complete Logs tab");
         } catch (Exception e) {
@@ -258,7 +253,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void createStartupConnectionTab() {
         try {
-            startupConnectionTab = new StartupConnectionTab(project, currentConfiguration);
+            startupConnectionTab = new StartupConnectionTab(project);
             tabbedPane.addTab("Startup/Connection", startupConnectionTab);
             System.out.println("DevTomcat: Added complete Startup/Connection tab");
         } catch (Exception e) {
@@ -286,19 +281,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     // === PUBLIC API FOR LOOP PREVENTION ===
 
-    public boolean isCurrentlyResetting() {
-        return isResetting.get();
-    }
-
-    public boolean isCurrentlyApplying() {
-        return isApplying.get();
-    }
-
     public boolean isEventsSuppressed() {
         return isResetting.get() || isApplying.get() || isDisposing.get();
     }
 
-    // === CLEANUP ===
+    // ================ CLEANUP ===
 
     @Override
     public void disposeEditor() {

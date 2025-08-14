@@ -5,7 +5,9 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
-import com.intellij.execution.configurations.*;
+import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.execution.configurations.JavaCommandLineState;
+import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
@@ -13,13 +15,13 @@ import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManager;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Refactored Tomcat Command Line State
- * Uses reusable components for better maintainability
+ * Tomcat Command Line State
+ * Manages Tomcat process execution and console integration
  *
  * @author Gezahegn Lemma (Gezu)
  */
@@ -62,10 +64,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     @NotNull
     @Override
     protected OSProcessHandler startProcess() throws ExecutionException {
+        // Create the actual process
+        Process process = createCommandLine().createProcess();
+        String commandLineString = createCommandLine().getCommandLineString();
+
         // Create process handler
         TomcatProcessHandler handler = new TomcatProcessHandler(
-                createCommandLine().createProcess(),
-                StringUtil.notNullize(createCommandLine().getCommandLineString()),
+                process,
+                commandLineString,
                 createCommandLine().getCharset(),
                 deploymentLogger,
                 configuration
@@ -76,7 +82,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         ProcessTerminatedListener.attach(handler);
 
         // Setup console integration
-        setupConsoleIntegration(handler);
+        setupConsoleIntegration();
 
         return handler;
     }
@@ -90,6 +96,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // Use the reusable builder
         return TomcatJavaParametersBuilder.create(configuration).build();
     }
+
 
     // =====================================================================
     // CONSOLE INTEGRATION
@@ -111,18 +118,44 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     /**
      * Setup console integration with deployment logger
      */
-    private void setupConsoleIntegration(@NotNull TomcatProcessHandler handler) {
+    private void setupConsoleIntegration() {
+        final Project project = getEnvironment().getProject();
+
         // Try immediate setup
-        RunContentManager contentManager = RunContentManager.getInstance(getEnvironment().getProject());
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (project.isDisposed()) {
+                return;
+            }
+
+            RunContentManager contentManager = RunContentManager.getInstance(project);
+            ConsoleView console = findConsoleView(contentManager);
+
+            if (console != null) {
+                deploymentLogger.setConsoleView(console);
+                deploymentLogger.logDeploymentStarted();
+            } else {
+                // Retry after a short delay
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (!project.isDisposed()) {
+                        retryConsoleSetup(project);
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Retry console setup
+     */
+    private void retryConsoleSetup(@NotNull Project project) {
+        RunContentManager contentManager = RunContentManager.getInstance(project);
         ConsoleView console = findConsoleView(contentManager);
 
         if (console != null) {
             deploymentLogger.setConsoleView(console);
             deploymentLogger.logDeploymentStarted();
-        } else {
-            // Fall back to delayed setup
-            setupConsoleIntegrationDelayed();
         }
+        // If still no console, deployment logger will fallback to System.out
     }
 
     /**
@@ -130,48 +163,12 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     @Nullable
     private ConsoleView findConsoleView(@NotNull RunContentManager contentManager) {
-        return contentManager.getAllDescriptors().stream()
-                .map(RunContentDescriptor::getExecutionConsole)
-                .filter(c -> c instanceof ConsoleView)
-                .map(c -> (ConsoleView) c)
-                .findFirst()
-                .orElse(null);
-    }
-
-    /**
-     * Setup console integration with retry
-     */
-    private void setupConsoleIntegrationDelayed() {
-        ApplicationManager.getApplication().invokeLater(() -> {
-            RunContentManager contentManager = RunContentManager.getInstance(getEnvironment().getProject());
-            ConsoleView console = findConsoleView(contentManager);
-
-            if (console != null) {
-                deploymentLogger.setConsoleView(console);
-                deploymentLogger.logDeploymentStarted();
-            } else {
-                // Retry once more after a delay
-                ApplicationManager.getApplication().invokeLater(
-                        this::setupConsoleIntegrationFinal,
-                        project -> project.isDisposed()
-                );
+        for (RunContentDescriptor descriptor : contentManager.getAllDescriptors()) {
+            if (descriptor.getExecutionConsole() instanceof ConsoleView) {
+                return (ConsoleView) descriptor.getExecutionConsole();
             }
-        });
-    }
-
-    /**
-     * Final attempt to setup console integration
-     */
-    private void setupConsoleIntegrationFinal() {
-        RunContentManager contentManager = RunContentManager.getInstance(getEnvironment().getProject());
-        ConsoleView console = findConsoleView(contentManager);
-
-        if (console != null) {
-            deploymentLogger.setConsoleView(console);
-            deploymentLogger.logDeploymentStarted();
-        } else {
-            deploymentLogger.logWarning("Could not integrate with console view");
         }
+        return null;
     }
 
     // =====================================================================

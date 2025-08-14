@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
-import com.dev.idea.plugins.tomcat.utils.DevTomcatUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.ParametersList;
@@ -91,7 +91,8 @@ public class TomcatJavaParametersBuilder {
      */
     @NotNull
     private Path getCatalinaBase() throws ExecutionException {
-        Path base = DevTomcatUtils.getCatalinaBase(configuration);
+        // FIXED: Using TomcatProjectUtils instead of TomcatModuleUtils
+        Path base = TomcatProjectUtils.getCatalinaBase(configuration);
         if (base == null) {
             throw new ExecutionException("Unable to determine catalina.base directory");
         }

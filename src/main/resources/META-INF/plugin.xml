@@ -1,204 +1,193 @@
 <idea-plugin>
-    <!-- DevTomcat Plugin - Ultimate-Level Tomcat Integration for Community Edition -->
+    <!-- Dev Tomcat Plugin Configuration
+         Provides comprehensive Tomcat integration for IntelliJ IDEA Community Edition -->
+
     <id>com.dev.idea.plugins.tomcat</id>
-    <name>DevTomcat</name>
-    <vendor email="gezahegn.lemma@example.com" url="https://github.com/gezu/devtomcat">Gezahegn Lemma (Gezu)</vendor>
-    <version>1.0.0</version>
+    <name>Dev Tomcat</name>
+    <vendor email="support@devtomcat.com" url="https://github.com/yourusername/devtomcat">Dev Tomcat Team</vendor>
 
     <description><![CDATA[
-    <h2>DevTomcat - Professional Tomcat Integration for IntelliJ Community Edition</h2>
+    <h2>Dev Tomcat - Professional Tomcat Integration</h2>
 
-    <p><strong>Brings IntelliJ Ultimate's complete Tomcat functionality to Community Edition!</strong></p>
+    <p><strong>Comprehensive Apache Tomcat support for IntelliJ IDEA Community Edition</strong></p>
 
-    <h3>Professional Features:</h3>
+    <h3>Key Features:</h3>
     <ul>
-        <li><strong>5-Tab Configuration Interface</strong> - Server, Deployment, Logs, Startup/Connection, Code Coverage</li>
-        <li><strong>Professional Server Management</strong> - Complete application server configuration with JMX support</li>
-        <li><strong>Advanced Deployment Control</strong> - Artifact management with hot deployment and update classes/resources</li>
-        <li><strong>Multi-Log Monitoring</strong> - Separate console tabs for Catalina, Localhost, Access, and custom logs</li>
-        <li><strong>Environment & Script Management</strong> - Professional environment variables and startup/shutdown scripts</li>
-        <li><strong>Enterprise Code Coverage</strong> - JaCoCo, Emma, Cobertura, and IntelliJ coverage engines</li>
+        <li><strong>Full Server Management</strong> - Configure and manage multiple Tomcat instances</li>
+        <li><strong>Advanced Deployment</strong> - Deploy WAR files, exploded directories, and artifacts</li>
+        <li><strong>Integrated Debugging</strong> - Debug your applications with full IDE support</li>
+        <li><strong>Hot Deployment</strong> - Update classes and resources without restart</li>
+        <li><strong>Multi-Log Support</strong> - View Catalina, localhost, access, and custom logs</li>
+        <li><strong>JMX Monitoring</strong> - Monitor server performance and metrics</li>
     </ul>
 
-    <h3>Enhanced Development Experience:</h3>
+    <h3>Supported Project Types:</h3>
     <ul>
-        <li><strong>Real-Time Deployment Status</strong> - Professional deployment messages with progress indicators</li>
-        <li><strong>Intelligent Log Parsing</strong> - Smart detection of deployment events, errors, and performance metrics</li>
-        <li><strong>Hot Deployment Support</strong> - Update classes and resources without server restart</li>
-        <li><strong>JMX Integration</strong> - Remote monitoring and management capabilities</li>
-        <li><strong>Smart Project Detection</strong> - Auto-configuration for Spring Boot, Maven, Gradle projects</li>
-        <li><strong>Development Mode Optimizations</strong> - Faster development workflows with enhanced debugging</li>
+        <li>Java Web Applications (Servlets, JSP)</li>
+        <li>Spring Framework / Spring Boot</li>
+        <li>Maven and Gradle Projects</li>
+        <li>Multi-module Enterprise Applications</li>
     </ul>
 
-    <h3>Perfect For:</h3>
+    <h3>Requirements:</h3>
     <ul>
-        <li>JSP and Servlet development</li>
-        <li>Spring Boot web applications</li>
-        <li>Enterprise Java projects</li>
-        <li>Maven and Gradle multi-module projects</li>
-        <li>Professional Java web development</li>
+        <li>IntelliJ IDEA 2019.3 or newer</li>
+        <li>Apache Tomcat 7.0 or newer</li>
+        <li>Java 8 or newer</li>
     </ul>
 
-    <p><em>Experience professional Tomcat development with enhanced functionality!</em></p>
+    <p><em>Streamline your Java web development workflow with professional Tomcat integration.</em></p>
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>Version 1.0.0 - DevTomcat Professional Launch</h3>
-
-    <h4>Professional Features:</h4>
+    <h3>Version 4.7.5</h3>
     <ul>
-        <li><strong>Complete 5-Tab Interface</strong> - Professional configuration with comprehensive options</li>
-        <li><strong>Advanced Server Management</strong> - Application server configuration with JMX, ports, VM options</li>
-        <li><strong>Professional Deployment</strong> - Artifact management, hot deployment, update classes/resources</li>
-        <li><strong>Multi-Log Integration</strong> - Separate console tabs for different log files</li>
-        <li><strong>Environment Management</strong> - Professional environment variables and script configuration</li>
-        <li><strong>Enterprise Coverage</strong> - Multiple coverage engines with advanced configuration</li>
+        <li>Added support for IntelliJ IDEA 2024.1</li>
+        <li>Improved hot deployment performance</li>
+        <li>Enhanced Spring Boot project detection</li>
+        <li>Fixed compatibility issues with Tomcat 10.1</li>
+        <li>Improved error handling and user feedback</li>
     </ul>
 
-    <h4>Enhanced Development Features:</h4>
+    <h3>Version 4.7.4</h3>
     <ul>
-        <li><strong>Real-Time Status</strong> - Professional deployment progress with detailed messages</li>
-        <li><strong>Intelligent Monitoring</strong> - Smart log parsing, error detection, performance tracking</li>
-        <li><strong>Smart Detection</strong> - Auto-configuration for Spring Boot, Maven, Gradle projects</li>
-        <li><strong>Development Optimizations</strong> - Hot deployment, enhanced debugging, faster workflows</li>
-        <li><strong>Professional Logging</strong> - Structured console output with timestamps and status indicators</li>
+        <li>Added JMX monitoring support</li>
+        <li>Improved multi-module project support</li>
+        <li>Enhanced deployment status reporting</li>
+        <li>Fixed memory leak in log parsing</li>
     </ul>
 
-    <h4>Technical Excellence:</h4>
-    <ul>
-        <li>Professional XML configuration management</li>
-        <li>Advanced classpath handling</li>
-        <li>Comprehensive error handling and validation</li>
-        <li>Performance optimizations for large projects</li>
-        <li>Professional user experience throughout</li>
-    </ul>
+    <p>See full changelog at: https://github.com/yourusername/devtomcat/blob/main/CHANGELOG.md</p>
     ]]></change-notes>
 
-    <!-- Compatible with IntelliJ IDEA 2019.3+ through 2024.1+ -->
-    <idea-version since-build="193.5233" until-build="241.*"/>
+    <!-- Plugin compatibility range -->
+    <idea-version since-build="193.5233.102" until-build="252.*"/>
 
-    <!-- Core Dependencies -->
+    <!-- Required platform modules -->
     <depends>com.intellij.modules.java</depends>
     <depends>com.intellij.modules.platform</depends>
 
-    <!-- Plugin Extensions -->
+    <!-- Plugin components and extensions -->
     <extensions defaultExtensionNs="com.intellij">
 
-        <!-- Core DevTomcat Services -->
-        <applicationService serviceImplementation="com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState"/>
+        <!-- Application-level service for managing Tomcat servers -->
+        <applicationService
+                serviceImplementation="com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState"/>
 
-        <!-- Run Configuration System -->
-        <configurationType implementation="com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType"/>
-        <runConfigurationProducer implementation="com.dev.idea.plugins.tomcat.runner.TomcatRunConfigurationProducer"/>
+        <!-- Run configuration type for Tomcat -->
+        <configurationType
+                implementation="com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType"/>
 
-        <!-- Program Runners -->
-        <programRunner implementation="com.dev.idea.plugins.tomcat.runner.TomcatRunner"/>
-        <programRunner implementation="com.dev.idea.plugins.tomcat.runner.TomcatDebugger"/>
+        <!-- Automatic run configuration producer -->
+        <runConfigurationProducer
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatRunConfigurationProducer"/>
 
-        <!-- Settings and Configuration -->
-        <applicationConfigurable instance="com.dev.idea.plugins.tomcat.setting.TomcatServersConfigurable"
-                                 id="devtomcat.servers"
-                                 displayName="DevTomcat Servers"
-                                 groupId="build.tools"/>
+        <!-- Program runners for normal and debug modes -->
+        <programRunner
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatRunner"/>
+        <programRunner
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatDebugger"/>
 
-        <!-- DevTomcat Registry Configuration -->
-        <registryKey key="devTomcat.disableRunConfigurationProducer"
-                     description="Disable automatic DevTomcat run configuration creation"
-                     defaultValue="false"
-                     restartRequired="false" />
+        <!-- Settings page for server configuration -->
+        <applicationConfigurable
+                instance="com.dev.idea.plugins.tomcat.setting.TomcatServersConfigurable"
+                id="DevTomcat.Settings"
+                displayName="Dev Tomcat"
+                groupId="build.tools"/>
 
-        <registryKey key="devTomcat.enableProfessionalLogging"
-                     description="Enable professional deployment logging with Ultimate-style messages"
-                     defaultValue="true"
-                     restartRequired="false" />
+        <!-- Registry keys for advanced configuration -->
 
-        <registryKey key="devTomcat.developmentMode"
-                     description="Enable development mode optimizations (hot deployment, enhanced debugging)"
-                     defaultValue="true"
-                     restartRequired="false" />
+        <!-- Core functionality toggles -->
+        <registryKey
+                key="devtomcat.enable.auto.configuration"
+                description="Automatically configure Tomcat for detected web projects"
+                defaultValue="true"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.enableJmxByDefault"
-                     description="Enable JMX monitoring by default for new configurations"
-                     defaultValue="true"
-                     restartRequired="false" />
+        <registryKey
+                key="devtomcat.enable.hot.deployment"
+                description="Enable hot deployment of classes and resources"
+                defaultValue="true"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.enableHotDeployment"
-                     description="Enable hot deployment by default for development workflows"
-                     defaultValue="true"
-                     restartRequired="false" />
+        <registryKey
+                key="devtomcat.enable.jmx.monitoring"
+                description="Enable JMX monitoring for Tomcat instances"
+                defaultValue="false"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.autoDetectSpringBoot"
-                     description="Automatically detect and optimize for Spring Boot projects"
-                     defaultValue="true"
-                     restartRequired="false" />
+        <!-- Logging configuration -->
+        <registryKey
+                key="devtomcat.log.show.timestamps"
+                description="Show timestamps in Tomcat console output"
+                defaultValue="true"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.enableAdvancedLogging"
-                     description="Enable advanced log file monitoring with multiple console tabs"
-                     defaultValue="true"
-                     restartRequired="false" />
+        <registryKey
+                key="devtomcat.log.separate.tabs"
+                description="Show different log files in separate tabs"
+                defaultValue="true"
+                restartRequired="false"/>
 
-        <!-- Tomcat Server Resources Configuration -->
-        <registryKey key="devTomcat.resources.allowLinking"
-                     description="Allow symlinks in web applications pointing to external resources"
-                     defaultValue="false"
-                     restartRequired="false" />
+        <!-- Performance tuning -->
+        <registryKey
+                key="devtomcat.deployment.timeout"
+                description="Deployment timeout in seconds"
+                defaultValue="300"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.resources.cacheMaxSize"
-                     description="Maximum size of static resource cache in kilobytes"
-                     defaultValue="10240"
-                     restartRequired="false" />
+        <registryKey
+                key="devtomcat.startup.timeout"
+                description="Server startup timeout in seconds"
+                defaultValue="480"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.resources.cacheTtl"
-                     description="Time-to-live for cached resources in seconds"
-                     defaultValue="5000"
-                     restartRequired="false" />
+        <!-- Development mode optimizations -->
+        <registryKey
+                key="devtomcat.dev.skip.jsp.validation"
+                description="Skip JSP validation during development"
+                defaultValue="false"
+                restartRequired="false"/>
 
-        <!-- Performance and Memory Configuration -->
-        <registryKey key="devTomcat.performance.enableGcLogging"
-                     description="Enable garbage collection logging for performance analysis"
-                     defaultValue="false"
-                     restartRequired="false" />
+        <registryKey
+                key="devtomcat.dev.fast.shutdown"
+                description="Use fast shutdown mode for quicker restarts"
+                defaultValue="true"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.performance.defaultHeapSize"
-                     description="Default heap size for new Tomcat configurations (-Xmx)"
-                     defaultValue="512m"
-                     restartRequired="false" />
+        <!-- Memory configuration -->
+        <registryKey
+                key="devtomcat.default.xmx"
+                description="Default maximum heap size for new configurations"
+                defaultValue="512m"
+                restartRequired="false"/>
 
-        <!-- Coverage Integration Configuration -->
-        <registryKey key="devTomcat.coverage.enableByDefault"
-                     description="Enable code coverage by default for new configurations"
-                     defaultValue="false"
-                     restartRequired="false" />
+        <registryKey
+                key="devtomcat.default.xms"
+                description="Default initial heap size for new configurations"
+                defaultValue="256m"
+                restartRequired="false"/>
 
-        <registryKey key="devTomcat.coverage.defaultEngine"
-                     description="Default coverage engine (IntelliJ, JaCoCo, Emma, Cobertura)"
-                     defaultValue="IntelliJ IDEA (Built-in)"
-                     restartRequired="false" />
+        <!-- Default ports -->
+        <registryKey
+                key="devtomcat.default.http.port"
+                description="Default HTTP port for new configurations"
+                defaultValue="8080"
+                restartRequired="false"/>
+
+        <registryKey
+                key="devtomcat.default.jmx.port"
+                description="Default JMX port for new configurations"
+                defaultValue="1099"
+                restartRequired="false"/>
 
     </extensions>
 
-    <!-- DevTomcat Actions -->
+
+
+    <!-- Plugin actions -->
     <actions>
-        <!-- Future: Add DevTomcat-specific actions for enhanced workflows -->
-
-        <!-- Example action structure for future enhancements:
-        <action id="devtomcat.quickDeploy"
-                class="com.dev.idea.plugins.tomcat.actions.QuickDeployAction"
-                text="Quick Deploy to DevTomcat"
-                description="Quickly deploy current module to configured DevTomcat server">
-            <add-to-group group-id="RunMenu" anchor="first"/>
-        </action>
-        -->
+        <!-- Actions will be added in future versions -->
     </actions>
-
-    <!-- Extension Points for Future Extensibility -->
-    <extensionPoints>
-        <!-- Future: Allow other plugins to extend DevTomcat functionality -->
-
-        <!-- Example extension point for future enhancements:
-        <extensionPoint name="tomcatConfigurationProvider"
-                        interface="com.dev.idea.plugins.tomcat.api.TomcatConfigurationProvider"/>
-        -->
-    </extensionPoints>
 
 </idea-plugin>

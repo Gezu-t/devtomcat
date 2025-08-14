@@ -5,27 +5,44 @@ import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.RunConfiguration;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.IconLoader;
+import com.intellij.openapi.util.registry.Registry;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 
 /**
- * DevTomcat Run Configuration Type
- * Provides professional Tomcat server integration
+ * Dev Tomcat Run Configuration Type
  *
- * @author Gezahegn Lemma (Gezu)
+ * Defines the Dev Tomcat configuration type for IntelliJ IDEA, providing
+ * integration for Apache Tomcat server management within the IDE.
+ *
+ * This implementation uses dynamic configuration values from the registry
+ * instead of hardcoded values, making it more flexible and maintainable.
+ *
+ * @author Dev Tomcat Team
+ * @see ConfigurationType
  */
 public class TomcatRunConfigurationType implements ConfigurationType {
 
-    public static final String ID = "com.dev.idea.plugins.tomcat";
-    public static final String DISPLAY_NAME = "DevTomcat";
-    public static final String DESCRIPTION = "Professional Tomcat server with comprehensive development features";
+    private static final Logger LOG = Logger.getInstance(TomcatRunConfigurationType.class);
 
-    // Thread-safe factory instance
+    // Configuration constants
+    public static final String ID = "com.dev.idea.plugins.tomcat";
+    public static final String DISPLAY_NAME = "Dev Tomcat";
+    public static final String DESCRIPTION = "Apache Tomcat server integration for web application development";
+
+    // Icon paths
+    private static final String ICON_PATH_SVG = "/icons/tomcat.svg";
+    private static final String ICON_PATH_PNG = "/icons/tomcat.png";
+
+    // Thread-safe lazy initialization
     private volatile TomcatConfigurationFactory factory;
 
     @Override
@@ -43,16 +60,27 @@ public class TomcatRunConfigurationType implements ConfigurationType {
     @Override
     @Nullable
     public Icon getIcon() {
+        // Try loading icons in order of preference
+        Icon icon = loadIcon(ICON_PATH_SVG);
+        if (icon == null) {
+            icon = loadIcon(ICON_PATH_PNG);
+        }
+        return icon;
+    }
+
+    /**
+     * Safely load an icon from the specified path
+     *
+     * @param path The icon resource path
+     * @return The loaded icon, or null if loading fails
+     */
+    @Nullable
+    private Icon loadIcon(String path) {
         try {
-            return IconLoader.getIcon("/icon/tomcat.svg", TomcatRunConfigurationType.class);
+            return IconLoader.getIcon(path, getClass());
         } catch (Exception e) {
-            System.err.println("DevTomcat: Could not load Tomcat icon: " + e.getMessage());
-            try {
-                return IconLoader.getIcon("/icons/tomcat.png", TomcatRunConfigurationType.class);
-            } catch (Exception e2) {
-                System.err.println("DevTomcat: Alternative icon also not found, using default");
-                return null;
-            }
+            LOG.debug("Failed to load icon from path: " + path, e);
+            return null;
         }
     }
 
@@ -65,11 +93,12 @@ public class TomcatRunConfigurationType implements ConfigurationType {
     @Override
     @NotNull
     public ConfigurationFactory[] getConfigurationFactories() {
+        // Thread-safe lazy initialization
         if (factory == null) {
             synchronized (this) {
                 if (factory == null) {
                     factory = new TomcatConfigurationFactory(this);
-                    System.out.println("DevTomcat: Professional configuration factory initialized");
+                    LOG.debug("Dev Tomcat configuration factory initialized");
                 }
             }
         }
@@ -77,10 +106,23 @@ public class TomcatRunConfigurationType implements ConfigurationType {
     }
 
     /**
-     * Professional Configuration Factory
-     * Handles creation of Tomcat run configurations with professional features
+     * Configuration Factory for Dev Tomcat Run Configurations
+     *
+     * Creates and manages Tomcat run configurations with dynamic defaults
+     * loaded from the IDE registry.
      */
     public static class TomcatConfigurationFactory extends ConfigurationFactory {
+
+        // Registry key constants
+        private static final String REG_AUTO_CONFIG = "devtomcat.enable.auto.configuration";
+        private static final String REG_HOT_DEPLOYMENT = "devtomcat.enable.hot.deployment";
+        private static final String REG_JMX_ENABLED = "devtomcat.enable.jmx.monitoring";
+        private static final String REG_DEFAULT_HTTP_PORT = "devtomcat.default.http.port";
+        private static final String REG_DEFAULT_JMX_PORT = "devtomcat.default.jmx.port";
+        private static final String REG_DEFAULT_XMX = "devtomcat.default.xmx";
+        private static final String REG_DEFAULT_XMS = "devtomcat.default.xms";
+        private static final String REG_SHOW_TIMESTAMPS = "devtomcat.log.show.timestamps";
+        private static final String REG_FAST_SHUTDOWN = "devtomcat.dev.fast.shutdown";
 
         protected TomcatConfigurationFactory(@NotNull ConfigurationType type) {
             super(type);
@@ -89,125 +131,128 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         @Override
         @NotNull
         public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
-            try {
-                System.out.println("DevTomcat: Creating professional configuration for project: " + project.getName());
+            LOG.debug("Creating Dev Tomcat configuration for project: " + project.getName());
 
-                TomcatRunConfiguration configuration = new TomcatRunConfiguration(project, this, "");
+            TomcatRunConfiguration configuration = new TomcatRunConfiguration(project, this, "");
 
-                // Apply professional defaults
-                applyProfessionalDefaults(configuration, project);
+            // Apply dynamic defaults from registry
+            applyDynamicDefaults(configuration, project);
 
-                System.out.println("DevTomcat: Professional configuration created successfully");
-                return configuration;
+            return configuration;
+        }
 
-            } catch (Exception e) {
-                System.err.println("DevTomcat: ERROR creating professional configuration: " + e.getMessage());
-                e.printStackTrace();
-                throw new RuntimeException("Failed to create DevTomcat configuration", e);
+        /**
+         * Apply configuration defaults using dynamic values from the registry
+         *
+         * @param configuration The configuration to initialize
+         * @param project The current project
+         */
+        private void applyDynamicDefaults(TomcatRunConfiguration configuration, Project project) {
+            // Port configuration
+            configuration.setPort(Registry.intValue(REG_DEFAULT_HTTP_PORT));
+            configuration.setJmxPort(Registry.intValue(REG_DEFAULT_JMX_PORT));
+            configuration.setJmxEnabled(Registry.is(REG_JMX_ENABLED));
+
+            // Development features
+            configuration.setHotDeploymentEnabled(Registry.is(REG_HOT_DEPLOYMENT));
+            configuration.setUpdateClassesAndResources(Registry.is(REG_HOT_DEPLOYMENT));
+            configuration.setPassParentEnvs(true);
+
+            // Context path
+            configuration.setContextPath("/");
+
+            // VM options
+            String vmOptions = buildDynamicVmOptions();
+            configuration.setVmOptions(vmOptions);
+
+            // Environment variables
+            setupDynamicEnvironmentVariables(configuration);
+
+            // Auto-select server if enabled
+            if (Registry.is(REG_AUTO_CONFIG)) {
+                autoSelectTomcatServer(configuration);
             }
+
+            LOG.debug("Applied dynamic defaults to Dev Tomcat configuration");
         }
 
         /**
-         * Apply professional default settings to new configurations
+         * Build VM options using dynamic values from registry
+         *
+         * @return VM options string
          */
-        private void applyProfessionalDefaults(TomcatRunConfiguration configuration, Project project) {
-            try {
-                // Basic server configuration
-                configuration.setPort(8080);
+        private String buildDynamicVmOptions() {
+            StringBuilder options = new StringBuilder();
 
-                // JMX configuration (enabled by default for professional monitoring)
-                configuration.setJmxEnabled(true);
-                configuration.setJmxPort(1099);
+            // Memory settings from registry
+            String xmx = Registry.stringValue(REG_DEFAULT_XMX);
+            String xms = Registry.stringValue(REG_DEFAULT_XMS);
 
-                // Development optimization defaults
-                configuration.setHotDeploymentEnabled(true);
-                configuration.setUpdateClassesAndResources(true);
-                configuration.setPassParentEnvs(true);
+            options.append("-Xmx").append(xmx).append(" ");
+            options.append("-Xms").append(xms).append(" ");
 
-                // Professional VM options
-                String vmOptions = buildProfessionalVmOptions();
-                configuration.setVmOptions(vmOptions);
+            // Standard options
+            options.append("-Dfile.encoding=UTF-8 ");
 
-                // Context path configuration
-                configuration.setContextPath("/");
+            // Development mode
+            options.append("-Ddev.mode=true ");
 
-                // Environment variables for development
-                setupDevelopmentEnvironmentVariables(configuration);
-
-                // Server selection if available
-                setupServerSelection(configuration);
-
-                System.out.println("DevTomcat: Applied comprehensive professional defaults");
-
-            } catch (Exception e) {
-                System.err.println("DevTomcat: Warning - Could not apply all defaults: " + e.getMessage());
+            // Fast shutdown if enabled
+            if (Registry.is(REG_FAST_SHUTDOWN)) {
+                options.append("-Dorg.apache.catalina.startup.EXIT_ON_INIT_FAILURE=true ");
             }
+
+            // Enable assertions for development
+            options.append("-ea ");
+
+            return options.toString().trim();
         }
 
         /**
-         * Build professional VM options for optimal development
+         * Set up environment variables with dynamic values
+         *
+         * @param configuration The configuration to update
          */
-        private String buildProfessionalVmOptions() {
-            StringBuilder vmOptions = new StringBuilder();
-
-            // Professional encoding and locale settings
-            vmOptions.append("-Dfile.encoding=UTF-8 ");
-            vmOptions.append("-Duser.timezone=GMT ");
-            vmOptions.append("-Djava.awt.headless=true ");
-
-            // Memory optimization for development
-            vmOptions.append("-Xmx1024m -Xms512m ");
-
-            // Garbage collection optimization
-            vmOptions.append("-XX:+UseG1GC ");
-            vmOptions.append("-XX:+UseStringDeduplication ");
-
-            // Development flags
-            vmOptions.append("-Ddevelopment=true ");
-            vmOptions.append("-Dspring.profiles.active=dev ");
-
-            return vmOptions.toString().trim();
-        }
-
-        /**
-         * Setup professional development environment variables
-         */
-        private void setupDevelopmentEnvironmentVariables(TomcatRunConfiguration configuration) {
-            // Professional Java development options
+        private void setupDynamicEnvironmentVariables(TomcatRunConfiguration configuration) {
+            // Basic JAVA_OPTS
             configuration.getEnvironmentVariables().put("JAVA_OPTS",
-                    "-Xmx1024m -Xms512m -XX:+UseG1GC -Dfile.encoding=UTF-8");
+                    "-Dfile.encoding=UTF-8 -Duser.timezone=UTC");
 
-            // Professional Catalina development options
-            configuration.getEnvironmentVariables().put("CATALINA_OPTS",
-                    "-Ddevelopment=true -Dspring.profiles.active=dev");
+            // Development mode indicator
+            configuration.getEnvironmentVariables().put("DEV_MODE", "true");
 
-            // Development flags
-            configuration.getEnvironmentVariables().put("DEVTOMCAT_MODE", "development");
-
-            System.out.println("DevTomcat: Professional development environment variables configured");
+            // Logging configuration
+            if (Registry.is(REG_SHOW_TIMESTAMPS)) {
+                configuration.getEnvironmentVariables().put("CATALINA_OPTS",
+                        "-Djava.util.logging.SimpleFormatter.format=[%1$tF %1$tT] [%4$-7s] %5$s %n");
+            }
         }
 
         /**
-         * Setup professional server selection with intelligent defaults
+         * Automatically select the most appropriate Tomcat server
+         *
+         * @param configuration The configuration to update
          */
-        private void setupServerSelection(TomcatRunConfiguration configuration) {
+        private void autoSelectTomcatServer(TomcatRunConfiguration configuration) {
             try {
                 List<TomcatInfo> servers = TomcatServerManagerState.getInstance().getTomcatInfos();
 
                 if (!servers.isEmpty()) {
-                    // Server selection strategy - prefer latest version
+                    // Select the newest version by default
                     TomcatInfo selectedServer = servers.stream()
-                            .max((s1, s2) -> s1.getVersion().compareTo(s2.getVersion()))
+                            .filter(Objects::nonNull)
+                            .max(Comparator.comparing(TomcatInfo::getVersion,
+                                    Comparator.nullsLast(Comparator.naturalOrder())))
                             .orElse(servers.get(0));
 
                     configuration.setTomcatInfo(selectedServer);
-                    System.out.println("DevTomcat: Professional server selected - " +
-                            selectedServer.getName() + " " + selectedServer.getVersion());
+                    LOG.info("Auto-selected Tomcat server: " + selectedServer.getName() +
+                            " (version " + selectedServer.getVersion() + ")");
                 } else {
-                    System.out.println("DevTomcat: No Tomcat servers configured - configuration will require server setup");
+                    LOG.debug("No Tomcat servers configured for auto-selection");
                 }
             } catch (Exception e) {
-                System.err.println("DevTomcat: Could not setup server selection: " + e.getMessage());
+                LOG.warn("Failed to auto-select Tomcat server", e);
             }
         }
 
@@ -225,90 +270,61 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
         @Override
         public boolean isApplicable(@NotNull Project project) {
-            // Available for all projects with web development potential
+            // Dev Tomcat is applicable to all Java projects
             return true;
         }
 
         @Override
-        public @NotNull RunConfiguration createConfiguration(@Nullable String name, @NotNull RunConfiguration template) {
-            try {
-                if (template instanceof TomcatRunConfiguration) {
-                    // Professional configuration cloning
-                    TomcatRunConfiguration cloned = (TomcatRunConfiguration) template.clone();
-
-                    if (name != null && !name.trim().isEmpty()) {
-                        cloned.setName(name);
-                    }
-
-                    // Ensure professional defaults are maintained
-                    validateConfiguration(cloned);
-
-                    System.out.println("DevTomcat: Professional configuration cloned - " +
-                            (name != null ? name : "unnamed"));
-                    return cloned;
-
-                } else {
-                    // Create new professional configuration
-                    System.out.println("DevTomcat: Creating new configuration from non-Tomcat template");
-                    return createTemplateConfiguration(template.getProject());
-                }
-            } catch (Exception e) {
-                System.err.println("DevTomcat: Error creating configuration from template: " + e.getMessage());
+        public @NotNull RunConfiguration createConfiguration(@Nullable String name,
+                                                             @NotNull RunConfiguration template) {
+            if (!(template instanceof TomcatRunConfiguration)) {
+                // Fallback to creating new configuration
+                LOG.debug("Template is not TomcatRunConfiguration, creating new instance");
                 return createTemplateConfiguration(template.getProject());
             }
+
+            TomcatRunConfiguration cloned = (TomcatRunConfiguration) template.clone();
+
+            if (name != null && !name.trim().isEmpty()) {
+                cloned.setName(name);
+            }
+
+            // Validate configuration integrity
+            validateConfiguration(cloned);
+
+            LOG.debug("Created Dev Tomcat configuration: " +
+                    (name != null ? name : "unnamed"));
+            return cloned;
         }
 
         /**
-         * Validate configuration standards
+         * Validate and fix configuration if needed
+         *
+         * @param configuration The configuration to validate
          */
         private void validateConfiguration(TomcatRunConfiguration configuration) {
-            try {
-                // Professional validation checks
-                if (!configuration.isJmxEnabled()) {
-                    System.out.println("DevTomcat: JMX not enabled - consider enabling for professional monitoring");
-                }
-
-                if (!configuration.isHotDeploymentEnabled()) {
-                    System.out.println("DevTomcat: Hot deployment not enabled - enabling for development productivity");
-                    configuration.setHotDeploymentEnabled(true);
-                }
-
-                if (configuration.getEnvironmentVariables().isEmpty()) {
-                    System.out.println("DevTomcat: No environment variables - applying professional defaults");
-                    setupDevelopmentEnvironmentVariables(configuration);
-                }
-
-                System.out.println("DevTomcat: Professional configuration validation completed");
-
-            } catch (Exception e) {
-                System.err.println("DevTomcat: Configuration validation error: " + e.getMessage());
+            // Ensure critical settings are present
+            if (configuration.getTomcatInfo() == null) {
+                autoSelectTomcatServer(configuration);
             }
-        }
 
-        /**
-         * Get professional configuration summary for diagnostics
-         */
-        public String getConfigurationSummary(TomcatRunConfiguration configuration) {
-            StringBuilder summary = new StringBuilder();
-            summary.append("DevTomcat Professional Configuration:\n");
-            summary.append("- Name: ").append(configuration.getName()).append("\n");
-            summary.append("- JMX: ").append(configuration.isJmxEnabled() ?
-                    "Enabled(" + configuration.getJmxPort() + ")" : "Disabled").append("\n");
-            summary.append("- Hot Deploy: ").append(configuration.isHotDeploymentEnabled() ? "Enabled" : "Disabled").append("\n");
-            summary.append("- Server: ").append(configuration.getTomcatInfo() != null ?
-                    configuration.getTomcatInfo().getName() : "Not Selected").append("\n");
-            summary.append("- Environment Variables: ").append(configuration.getEnvironmentVariables().size()).append("\n");
+            // Ensure hot deployment is configured according to registry
+            if (configuration.isHotDeploymentEnabled() != Registry.is(REG_HOT_DEPLOYMENT)) {
+                LOG.debug("Updating hot deployment setting to match registry");
+                configuration.setHotDeploymentEnabled(Registry.is(REG_HOT_DEPLOYMENT));
+            }
 
-            return summary.toString();
-        }
+            // Validate port ranges
+            int httpPort = configuration.getPort();
+            if (httpPort < 1 || httpPort > 65535) {
+                LOG.warn("Invalid HTTP port " + httpPort + ", resetting to default");
+                configuration.setPort(Registry.intValue(REG_DEFAULT_HTTP_PORT));
+            }
 
-        /**
-         * Check if configuration meets professional standards
-         */
-        public boolean meetsProfessionalStandards(TomcatRunConfiguration configuration) {
-            return configuration.isHotDeploymentEnabled() &&
-                    !configuration.getEnvironmentVariables().isEmpty() &&
-                    configuration.getTomcatInfo() != null;
+            // Ensure environment variables are set
+            if (configuration.getEnvironmentVariables().isEmpty()) {
+                setupDynamicEnvironmentVariables(configuration);
+            }
         }
     }
 }

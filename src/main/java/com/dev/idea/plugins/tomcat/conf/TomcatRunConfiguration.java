@@ -13,10 +13,12 @@ import com.intellij.execution.configurations.LocatableConfigurationBase;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -25,45 +27,104 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * DevTomcat Run Configuration - Refactored with Reusable Models
- * Uses TomcatConfigurationData for better organization and reusability
+ * Dev Tomcat Run Configuration
  *
- * @author Gezahegn Lemma (Gezu)
+ * Represents a single Tomcat server run configuration with all necessary
+ * settings for deployment, debugging, and server management.
+ *
+ * This class encapsulates:
+ * - Server selection and configuration
+ * - Deployment artifacts and settings
+ * - VM options and environment variables
+ * - Logging configuration
+ * - Browser integration settings
+ *
+ * All configuration data is stored in a reusable model (TomcatConfigurationData)
+ * for better organization and maintainability.
+ *
+ * @author Dev Tomcat Team
+ * @see TomcatConfigurationData
+ * @see LocatableConfigurationBase
  */
 public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRunConfiguration> {
 
-    // === CONFIGURATION DATA MODEL ===
+    private static final Logger LOG = Logger.getInstance(TomcatRunConfiguration.class);
+
+    // XML attribute names for persistence
+    private static final String ATTR_PORT = "port";
+    private static final String ATTR_JMX_PORT = "jmxPort";
+    private static final String ATTR_JMX_ENABLED = "jmxEnabled";
+    private static final String ATTR_DOC_BASE = "docBase";
+    private static final String ATTR_CONTEXT_PATH = "contextPath";
+    private static final String ATTR_VM_OPTIONS = "vmOptions";
+    private static final String ATTR_BROWSER_URL = "browserUrl";
+    private static final String ATTR_AFTER_LAUNCH = "afterLaunchEnabled";
+    private static final String ATTR_BROWSER_NAME = "browserName";
+    private static final String ATTR_HOT_DEPLOY = "hotDeploymentEnabled";
+    private static final String ATTR_UPDATE_CLASSES = "updateClassesAndResources";
+    private static final String ATTR_PASS_PARENT_ENVS = "passParentEnvs";
+
+    // XML element names
+    private static final String ELEM_DEPLOYMENTS = "deployments";
+    private static final String ELEM_ARTIFACT = "artifact";
+    private static final String ELEM_ENV_VARS = "environmentVariables";
+    private static final String ELEM_ENV_VAR = "variable";
+    private static final String ELEM_LOG_FILES = "logFiles";
+    private static final String ELEM_LOG_FILE = "logFile";
+    private static final String ELEM_TOMCAT_INFO = "tomcatInfo";
+
+    // Configuration data model
     private final TomcatConfigurationData configData = new TomcatConfigurationData();
 
-    // === LOOP PREVENTION ===
+    // Thread safety for updates
     private final AtomicBoolean isUpdating = new AtomicBoolean(false);
 
-    // === LEGACY FIELDS (for backward compatibility) ===
+    // Legacy field for backward compatibility
     private String docBase = "";
-    private boolean showThisPage = false;
 
+    /**
+     * Creates a new Tomcat run configuration
+     *
+     * @param project The project this configuration belongs to
+     * @param factory The factory that created this configuration
+     * @param name The configuration name
+     */
     public TomcatRunConfiguration(@NotNull Project project,
                                   @NotNull ConfigurationFactory factory,
                                   String name) {
         super(project, factory, name);
         initializeDefaults();
-        System.out.println("DevTomcat: TomcatRunConfiguration created with reusable models");
     }
 
+    /**
+     * Initialize configuration with sensible defaults
+     */
     private void initializeDefaults() {
-        // Initialize Tomcat server
+        LOG.debug("Initializing Dev Tomcat configuration defaults");
+
+        // Try to auto-select a Tomcat server
         try {
-            List<TomcatInfo> tomcatInfos = TomcatServerManagerState.getInstance().getTomcatInfos();
-            if (!tomcatInfos.isEmpty()) {
-                configData.setTomcatInfo(tomcatInfos.get(0));
-                System.out.println("DevTomcat: Using Tomcat server: " + configData.getTomcatInfo().getName());
+            List<TomcatInfo> servers = TomcatServerManagerState.getInstance().getTomcatInfos();
+            if (!servers.isEmpty()) {
+                configData.setTomcatInfo(servers.get(0));
+                LOG.debug("Auto-selected Tomcat server: " + configData.getTomcatInfo().getName());
             }
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error loading Tomcat servers: " + e.getMessage());
+            LOG.warn("Failed to auto-select Tomcat server", e);
         }
 
-        // Configuration data already has professional defaults
-        System.out.println("DevTomcat: Configuration initialized with " +
+        // Initialize with default log configurations if empty
+        if (configData.getLogFileConfigurations().isEmpty()) {
+            List<LogFileConfiguration> defaultLogs = new ArrayList<>();
+            defaultLogs.add(LogFileConfiguration.createCatalinaLog());
+            defaultLogs.add(LogFileConfiguration.createLocalhostLog());
+            defaultLogs.add(LogFileConfiguration.createManagerLog());
+            defaultLogs.add(LogFileConfiguration.createHostManagerLog());
+            configData.setLogFileConfigurations(defaultLogs);
+            LOG.debug("Initialized with default log configurations");
+        }
+
+        LOG.debug("Configuration initialized with " +
                 configData.getLogFileConfigurations().size() + " log files, " +
                 configData.getVmConfig().getEnvironmentVariables().size() + " environment variables");
     }
@@ -79,8 +140,9 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // === STATE CREATION ===
 
     @Override
-    public @Nullable TomcatCommandLineState getState(@NotNull Executor executor,
-                                                     @NotNull ExecutionEnvironment env) {
+    @Nullable
+    public TomcatCommandLineState getState(@NotNull Executor executor,
+                                           @NotNull ExecutionEnvironment env) {
         return new TomcatCommandLineState(env, this);
     }
 
@@ -88,18 +150,36 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     @Override
     public void checkConfiguration() throws RuntimeConfigurationException {
+        // Validate using the model's validation
         try {
             configData.validate();
-
-            // Additional validation
-            if (docBase == null || docBase.trim().isEmpty()) {
-                throw new RuntimeConfigurationException("Document base cannot be empty");
-            }
-
-            System.out.println("DevTomcat: Configuration validation passed");
         } catch (TomcatConfigurationData.ValidationException e) {
             throw new RuntimeConfigurationException(e.getMessage());
         }
+
+        // Additional validation - make docBase optional for now
+        // Remove this check or make it conditional based on deployment artifacts
+        if (configData.getDeploymentConfig().getArtifacts().isEmpty() && StringUtil.isEmpty(docBase)) {
+            throw new RuntimeConfigurationException("At least one deployment artifact must be configured");
+        }
+
+        // Validate port ranges
+        int port = configData.getPortConfig().getHttpPort();
+        if (port < 1 || port > 65535) {
+            throw new RuntimeConfigurationException("HTTP port must be between 1 and 65535");
+        }
+
+        if (configData.getPortConfig().isJmxEnabled()) {
+            int jmxPort = configData.getPortConfig().getJmxPort();
+            if (jmxPort < 1 || jmxPort > 65535) {
+                throw new RuntimeConfigurationException("JMX port must be between 1 and 65535");
+            }
+            if (jmxPort == port) {
+                throw new RuntimeConfigurationException("JMX port cannot be the same as HTTP port");
+            }
+        }
+
+        LOG.debug("Configuration validation passed");
     }
 
     // === PERSISTENCE ===
@@ -111,7 +191,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         isUpdating.set(true);
         try {
             readConfigurationFromXml(element);
-            System.out.println("DevTomcat: Configuration loaded from XML");
+            LOG.debug("Configuration loaded from XML");
         } finally {
             isUpdating.set(false);
         }
@@ -124,102 +204,331 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         isUpdating.set(true);
         try {
             writeConfigurationToXml(element);
-            System.out.println("DevTomcat: Configuration saved to XML");
+            LOG.debug("Configuration saved to XML");
         } finally {
             isUpdating.set(false);
         }
     }
 
+    /**
+     * Read configuration from XML element
+     *
+     * @param element The XML element to read from
+     */
     private void readConfigurationFromXml(Element element) {
-        try {
-            // Read ports
-            String portStr = element.getAttributeValue("port");
-            if (portStr != null) {
-                configData.getPortConfig().setHttpPort(Integer.parseInt(portStr));
+        // Read port configuration
+        readAttribute(element, ATTR_PORT, value ->
+                configData.getPortConfig().setHttpPort(Integer.parseInt(value)));
+        readAttribute(element, ATTR_JMX_PORT, value ->
+                configData.getPortConfig().setJmxPort(Integer.parseInt(value)));
+        readAttribute(element, ATTR_JMX_ENABLED, value ->
+                configData.getPortConfig().setJmxEnabled(Boolean.parseBoolean(value)));
+
+        // Read paths
+        docBase = element.getAttributeValue(ATTR_DOC_BASE, "");
+        configData.setContextPath(element.getAttributeValue(ATTR_CONTEXT_PATH, "/"));
+
+        // Read VM options
+        configData.getVmConfig().setVmOptions(
+                element.getAttributeValue(ATTR_VM_OPTIONS, ""));
+
+        // Read browser configuration
+        readAttribute(element, ATTR_BROWSER_URL,
+                configData.getBrowserConfig()::setBrowserUrl);
+        readAttribute(element, ATTR_AFTER_LAUNCH, value ->
+                configData.getBrowserConfig().setAfterLaunchEnabled(Boolean.parseBoolean(value)));
+        readAttribute(element, ATTR_BROWSER_NAME,
+                configData.getBrowserConfig()::setBrowserName);
+
+        // Read deployment configuration
+        readAttribute(element, ATTR_HOT_DEPLOY, value ->
+                configData.getDeploymentConfig().setHotDeploymentEnabled(Boolean.parseBoolean(value)));
+        readAttribute(element, ATTR_UPDATE_CLASSES, value ->
+                configData.getDeploymentConfig().setUpdateClassesAndResources(Boolean.parseBoolean(value)));
+        readAttribute(element, ATTR_PASS_PARENT_ENVS, value ->
+                configData.getVmConfig().setPassParentEnvs(Boolean.parseBoolean(value)));
+
+        // Read complex elements
+        readTomcatInfo(element);
+        readDeploymentArtifacts(element);
+        readEnvironmentVariables(element);
+        readLogFiles(element);
+    }
+
+    /**
+     * Helper method to safely read an attribute and apply it
+     */
+    private void readAttribute(Element element, String attribute, AttributeConsumer consumer) {
+        String value = element.getAttributeValue(attribute);
+        if (value != null) {
+            try {
+                consumer.accept(value);
+            } catch (Exception e) {
+                LOG.warn("Failed to read attribute: " + attribute, e);
             }
-
-            String jmxPortStr = element.getAttributeValue("jmxPort");
-            if (jmxPortStr != null) {
-                configData.getPortConfig().setJmxPort(Integer.parseInt(jmxPortStr));
-            }
-
-            String jmxEnabledStr = element.getAttributeValue("jmxEnabled");
-            if (jmxEnabledStr != null) {
-                configData.getPortConfig().setJmxEnabled(Boolean.parseBoolean(jmxEnabledStr));
-            }
-
-            // Read paths
-            docBase = element.getAttributeValue("docBase");
-            if (docBase == null) docBase = "";
-
-            String contextPath = element.getAttributeValue("contextPath");
-            configData.setContextPath(contextPath != null ? contextPath : "/");
-
-            // Read VM options
-            String vmOptions = element.getAttributeValue("vmOptions");
-            configData.getVmConfig().setVmOptions(vmOptions != null ? vmOptions : "");
-
-            // Read deployment artifacts
-            Element deploymentsElement = element.getChild("deployments");
-            if (deploymentsElement != null) {
-                List<DeploymentArtifact> artifacts = new ArrayList<>();
-                for (Element artifactElement : deploymentsElement.getChildren("artifact")) {
-                    DeploymentArtifact artifact = new DeploymentArtifact(
-                            artifactElement.getAttributeValue("name"),
-                            artifactElement.getAttributeValue("type"),
-                            artifactElement.getAttributeValue("serverPath"),
-                            artifactElement.getAttributeValue("localPath")
-                    );
-                    artifacts.add(artifact);
-                }
-                configData.getDeploymentConfig().setArtifacts(artifacts);
-            }
-
-            // Read browser config
-            String browserUrl = element.getAttributeValue("browserUrl");
-            if (browserUrl != null) {
-                configData.getBrowserConfig().setBrowserUrl(browserUrl);
-            }
-
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error reading XML configuration: " + e.getMessage());
         }
     }
 
+    /**
+     * Read Tomcat server information from XML
+     */
+    private void readTomcatInfo(Element element) {
+        Element tomcatElement = element.getChild(ELEM_TOMCAT_INFO);
+        if (tomcatElement != null) {
+            String serverId = tomcatElement.getAttributeValue("id");
+            if (serverId != null) {
+                // Find the server by ID
+                TomcatServerManagerState.getInstance().getTomcatInfos().stream()
+                        .filter(info -> serverId.equals(info.getId()))
+                        .findFirst()
+                        .ifPresent(configData::setTomcatInfo);
+            }
+        }
+    }
+
+    /**
+     * Read deployment artifacts from XML
+     */
+    private void readDeploymentArtifacts(Element element) {
+        Element deploymentsElement = element.getChild(ELEM_DEPLOYMENTS);
+        if (deploymentsElement != null) {
+            List<DeploymentArtifact> artifacts = new ArrayList<>();
+            for (Element artifactElement : deploymentsElement.getChildren(ELEM_ARTIFACT)) {
+                try {
+                    String name = artifactElement.getAttributeValue("name");
+                    String type = artifactElement.getAttributeValue("type");
+                    String serverPath = artifactElement.getAttributeValue("serverPath");
+                    String localPath = artifactElement.getAttributeValue("localPath");
+
+                    // Check for required attributes
+                    if (StringUtil.isEmpty(name) || StringUtil.isEmpty(type)) {
+                        LOG.warn("Skipping invalid deployment artifact: name=" + name + ", type=" + type);
+                        continue;
+                    }
+
+                    DeploymentArtifact artifact = new DeploymentArtifact(
+                            name,
+                            type,
+                            StringUtil.notNullize(serverPath, "/"),
+                            StringUtil.notNullize(localPath, "")
+                    );
+
+                    // Read additional attributes if present
+                    String applicationContext = artifactElement.getAttributeValue("applicationContext");
+                    if (!StringUtil.isEmpty(applicationContext)) {
+                        artifact.setApplicationContext(applicationContext);
+                    }
+
+                    String deployed = artifactElement.getAttributeValue("deployed");
+                    if (deployed != null) {
+                        artifact.setDeployed(Boolean.parseBoolean(deployed));
+                    }
+
+                    artifacts.add(artifact);
+                } catch (Exception e) {
+                    LOG.warn("Error reading deployment artifact", e);
+                }
+            }
+            configData.getDeploymentConfig().setArtifacts(artifacts);
+        }
+    }
+
+    /**
+     * Read environment variables from XML
+     */
+    private void readEnvironmentVariables(Element element) {
+        Element envVarsElement = element.getChild(ELEM_ENV_VARS);
+        if (envVarsElement != null) {
+            Map<String, String> envVars = new HashMap<>();
+            for (Element varElement : envVarsElement.getChildren(ELEM_ENV_VAR)) {
+                String name = varElement.getAttributeValue("name");
+                String value = varElement.getAttributeValue("value");
+                if (name != null && value != null) {
+                    envVars.put(name, value);
+                }
+            }
+            configData.getVmConfig().setEnvironmentVariables(envVars);
+        }
+    }
+
+    /**
+     * Read log file configurations from XML
+     */
+    private void readLogFiles(Element element) {
+        Element logFilesElement = element.getChild(ELEM_LOG_FILES);
+        if (logFilesElement != null) {
+            List<LogFileConfiguration> logFiles = new ArrayList<>();
+            for (Element logElement : logFilesElement.getChildren(ELEM_LOG_FILE)) {
+                try {
+                    String id = logElement.getAttributeValue("id");
+                    String path = logElement.getAttributeValue("path");
+
+                    // Skip invalid entries
+                    if (StringUtil.isEmpty(id) || StringUtil.isEmpty(path)) {
+                        LOG.warn("Skipping invalid log file configuration: id=" + id + ", path=" + path);
+                        continue;
+                    }
+
+                    boolean enabled = Boolean.parseBoolean(
+                            logElement.getAttributeValue("enabled", "true")
+                    );
+
+                    // Use the constructor that matches the parameters
+                    LogFileConfiguration logFile = new LogFileConfiguration(id, path, enabled);
+                    logFiles.add(logFile);
+                } catch (Exception e) {
+                    LOG.warn("Error reading log file configuration", e);
+                }
+            }
+
+            // Only set if we found valid log files
+            if (!logFiles.isEmpty()) {
+                configData.setLogFileConfigurations(logFiles);
+            } else {
+                // If no valid log files found, initialize with defaults
+                LOG.debug("No valid log files found in configuration, using defaults");
+                List<LogFileConfiguration> defaultLogs = new ArrayList<>();
+                defaultLogs.add(LogFileConfiguration.createCatalinaLog());
+                defaultLogs.add(LogFileConfiguration.createLocalhostLog());
+                defaultLogs.add(LogFileConfiguration.createManagerLog());
+                defaultLogs.add(LogFileConfiguration.createHostManagerLog());
+                configData.setLogFileConfigurations(defaultLogs);
+            }
+        }
+    }
+
+    /**
+     * Write configuration to XML element
+     *
+     * @param element The XML element to write to
+     */
     private void writeConfigurationToXml(Element element) {
-        try {
-            // Write ports
-            element.setAttribute("port", String.valueOf(configData.getPortConfig().getHttpPort()));
-            element.setAttribute("jmxPort", String.valueOf(configData.getPortConfig().getJmxPort()));
-            element.setAttribute("jmxEnabled", String.valueOf(configData.getPortConfig().isJmxEnabled()));
+        // Write port configuration
+        element.setAttribute(ATTR_PORT,
+                String.valueOf(configData.getPortConfig().getHttpPort()));
+        element.setAttribute(ATTR_JMX_PORT,
+                String.valueOf(configData.getPortConfig().getJmxPort()));
+        element.setAttribute(ATTR_JMX_ENABLED,
+                String.valueOf(configData.getPortConfig().isJmxEnabled()));
 
-            // Write paths
-            element.setAttribute("docBase", docBase);
-            element.setAttribute("contextPath", configData.getContextPath());
+        // Write paths
+        element.setAttribute(ATTR_DOC_BASE, docBase);
+        element.setAttribute(ATTR_CONTEXT_PATH, configData.getContextPath());
 
-            // Write VM options
-            element.setAttribute("vmOptions", configData.getVmConfig().getVmOptions());
+        // Write VM options
+        element.setAttribute(ATTR_VM_OPTIONS, configData.getVmConfig().getVmOptions());
 
-            // Write browser config
-            element.setAttribute("browserUrl", configData.getBrowserConfig().getBrowserUrl());
+        // Write browser configuration
+        element.setAttribute(ATTR_BROWSER_URL,
+                configData.getBrowserConfig().getBrowserUrl());
+        element.setAttribute(ATTR_AFTER_LAUNCH,
+                String.valueOf(configData.getBrowserConfig().isAfterLaunchEnabled()));
+        element.setAttribute(ATTR_BROWSER_NAME,
+                configData.getBrowserConfig().getBrowserName());
 
-            // Write deployment artifacts
-            List<DeploymentArtifact> artifacts = configData.getDeploymentConfig().getArtifacts();
-            if (!artifacts.isEmpty()) {
-                Element deploymentsElement = new Element("deployments");
-                for (DeploymentArtifact artifact : artifacts) {
-                    Element artifactElement = new Element("artifact");
+        // Write deployment configuration
+        element.setAttribute(ATTR_HOT_DEPLOY,
+                String.valueOf(configData.getDeploymentConfig().isHotDeploymentEnabled()));
+        element.setAttribute(ATTR_UPDATE_CLASSES,
+                String.valueOf(configData.getDeploymentConfig().isUpdateClassesAndResources()));
+        element.setAttribute(ATTR_PASS_PARENT_ENVS,
+                String.valueOf(configData.getVmConfig().isPassParentEnvs()));
+
+        // Write complex elements
+        writeTomcatInfo(element);
+        writeDeploymentArtifacts(element);
+        writeEnvironmentVariables(element);
+        writeLogFiles(element);
+    }
+
+    /**
+     * Write Tomcat server information to XML
+     */
+    private void writeTomcatInfo(Element element) {
+        TomcatInfo tomcatInfo = configData.getTomcatInfo();
+        if (tomcatInfo != null) {
+            Element tomcatElement = new Element(ELEM_TOMCAT_INFO);
+            tomcatElement.setAttribute("id", tomcatInfo.getId());
+            tomcatElement.setAttribute("name", tomcatInfo.getName());
+            tomcatElement.setAttribute("version", tomcatInfo.getVersion());
+            element.addContent(tomcatElement);
+        }
+    }
+
+    /**
+     * Write deployment artifacts to XML
+     */
+    private void writeDeploymentArtifacts(Element element) {
+        List<DeploymentArtifact> artifacts = configData.getDeploymentConfig().getArtifacts();
+        if (!artifacts.isEmpty()) {
+            Element deploymentsElement = new Element(ELEM_DEPLOYMENTS);
+            for (DeploymentArtifact artifact : artifacts) {
+                try {
+                    Element artifactElement = new Element(ELEM_ARTIFACT);
                     artifactElement.setAttribute("name", artifact.getName());
                     artifactElement.setAttribute("type", artifact.getType());
                     artifactElement.setAttribute("serverPath", artifact.getServerPath());
                     artifactElement.setAttribute("localPath", artifact.getLocalPath());
-                    deploymentsElement.addContent(artifactElement);
-                }
-                element.addContent(deploymentsElement);
-            }
 
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error writing XML configuration: " + e.getMessage());
+                    // Write additional attributes
+                    artifactElement.setAttribute("applicationContext", artifact.getApplicationContext());
+                    artifactElement.setAttribute("deployed", String.valueOf(artifact.isDeployed()));
+
+                    deploymentsElement.addContent(artifactElement);
+                } catch (Exception e) {
+                    LOG.warn("Error writing deployment artifact: " + artifact.getName(), e);
+                }
+            }
+            element.addContent(deploymentsElement);
+        }
+    }
+
+    /**
+     * Write environment variables to XML
+     */
+    private void writeEnvironmentVariables(Element element) {
+        Map<String, String> envVars = configData.getVmConfig().getEnvironmentVariables();
+        if (!envVars.isEmpty()) {
+            Element envVarsElement = new Element(ELEM_ENV_VARS);
+            envVars.forEach((name, value) -> {
+                Element varElement = new Element(ELEM_ENV_VAR);
+                varElement.setAttribute("name", name);
+                varElement.setAttribute("value", value);
+                envVarsElement.addContent(varElement);
+            });
+            element.addContent(envVarsElement);
+        }
+    }
+
+    /**
+     * Write log file configurations to XML
+     */
+    private void writeLogFiles(Element element) {
+        List<LogFileConfiguration> logFiles = configData.getLogFileConfigurations();
+        if (!logFiles.isEmpty()) {
+            Element logFilesElement = new Element(ELEM_LOG_FILES);
+            for (LogFileConfiguration logFile : logFiles) {
+                try {
+                    Element logElement = new Element(ELEM_LOG_FILE);
+
+                    // Ensure we have valid values before writing
+                    String id = logFile.getId();
+                    String path = logFile.getPath();
+
+                    if (StringUtil.isEmpty(id) || StringUtil.isEmpty(path)) {
+                        LOG.warn("Skipping invalid log file during save: id=" + id + ", path=" + path);
+                        continue;
+                    }
+
+                    logElement.setAttribute("id", id);
+                    logElement.setAttribute("path", path);
+                    logElement.setAttribute("enabled", String.valueOf(logFile.isEnabled()));
+                    logFilesElement.addContent(logElement);
+                } catch (Exception e) {
+                    LOG.warn("Error writing log file configuration", e);
+                }
+            }
+            element.addContent(logFilesElement);
         }
     }
 
@@ -228,31 +537,33 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         TomcatRunConfiguration clone = (TomcatRunConfiguration) super.clone();
 
         // Deep clone the configuration data
-        // Note: Would need to implement clone() in TomcatConfigurationData
-        // For now, manually clone important parts
+        // TODO: Implement proper clone() in TomcatConfigurationData
         clone.configData.setTomcatInfo(this.configData.getTomcatInfo());
         clone.configData.setContextPath(this.configData.getContextPath());
-        clone.configData.getPortConfig().setHttpPort(this.configData.getPortConfig().getHttpPort());
-        clone.configData.getPortConfig().setJmxPort(this.configData.getPortConfig().getJmxPort());
-        clone.configData.getPortConfig().setJmxEnabled(this.configData.getPortConfig().isJmxEnabled());
+        clone.configData.getPortConfig().setHttpPort(
+                this.configData.getPortConfig().getHttpPort());
+        clone.configData.getPortConfig().setJmxPort(
+                this.configData.getPortConfig().getJmxPort());
+        clone.configData.getPortConfig().setJmxEnabled(
+                this.configData.getPortConfig().isJmxEnabled());
 
         // Clone collections
         clone.configData.getDeploymentConfig().setArtifacts(
-                new ArrayList<>(this.configData.getDeploymentConfig().getArtifacts())
-        );
+                new ArrayList<>(this.configData.getDeploymentConfig().getArtifacts()));
         clone.configData.setLogFileConfigurations(
-                new ArrayList<>(this.configData.getLogFileConfigurations())
-        );
+                new ArrayList<>(this.configData.getLogFileConfigurations()));
+        clone.configData.getVmConfig().setEnvironmentVariables(
+                new HashMap<>(this.configData.getVmConfig().getEnvironmentVariables()));
 
         clone.docBase = this.docBase;
 
-        System.out.println("DevTomcat: Configuration cloned");
+        LOG.debug("Configuration cloned");
         return clone;
     }
 
     // === DELEGATE GETTERS/SETTERS ===
+    // These delegate to the configuration data model
 
-    // Core configuration
     public TomcatInfo getTomcatInfo() {
         return configData.getTomcatInfo();
     }
@@ -277,7 +588,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.setContextPath(contextPath);
     }
 
-    // Port configuration
     public Integer getPort() {
         return configData.getPortConfig().getHttpPort();
     }
@@ -287,12 +597,26 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             Integer oldPort = getPort();
             configData.getPortConfig().setHttpPort(port);
 
-            // Update browser URL
+            // Update browser URL if needed
             updateBrowserUrl(port);
 
-            System.out.println("DevTomcat: HTTP port updated from " + oldPort + " to " + port);
+            LOG.debug("HTTP port updated from " + oldPort + " to " + port);
         } else {
             configData.getPortConfig().setHttpPort(port);
+        }
+    }
+
+    /**
+     * Update browser URL when port changes
+     */
+    private void updateBrowserUrl(Integer newPort) {
+        if (newPort != null) {
+            String currentUrl = configData.getBrowserConfig().getBrowserUrl();
+            if (currentUrl != null && currentUrl.contains("localhost:")) {
+                String newUrl = currentUrl.replaceAll("localhost:\\d+", "localhost:" + newPort);
+                configData.getBrowserConfig().setBrowserUrl(newUrl);
+                LOG.debug("Browser URL updated to: " + newUrl);
+            }
         }
     }
 
@@ -301,13 +625,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     public void setJmxPort(Integer jmxPort) {
-        if (!isUpdating.get() && !Objects.equals(getJmxPort(), jmxPort)) {
-            Integer oldPort = getJmxPort();
-            configData.getPortConfig().setJmxPort(jmxPort);
-            System.out.println("DevTomcat: JMX port updated from " + oldPort + " to " + jmxPort);
-        } else {
-            configData.getPortConfig().setJmxPort(jmxPort);
-        }
+        configData.getPortConfig().setJmxPort(jmxPort);
     }
 
     public boolean isJmxEnabled() {
@@ -318,7 +636,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.getPortConfig().setJmxEnabled(jmxEnabled);
     }
 
-    // Browser configuration
     public boolean isAfterLaunchEnabled() {
         return configData.getBrowserConfig().isAfterLaunchEnabled();
     }
@@ -343,18 +660,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.getBrowserConfig().setBrowserName(name);
     }
 
-    private void updateBrowserUrl(Integer newPort) {
-        if (newPort != null) {
-            String currentUrl = configData.getBrowserConfig().getBrowserUrl();
-            if (currentUrl != null && currentUrl.contains("localhost:")) {
-                String newUrl = currentUrl.replaceAll("localhost:\\d+", "localhost:" + newPort);
-                configData.getBrowserConfig().setBrowserUrl(newUrl);
-                System.out.println("DevTomcat: Browser URL updated to: " + newUrl);
-            }
-        }
-    }
-
-    // VM and environment
     public String getVmOptions() {
         return configData.getVmConfig().getVmOptions();
     }
@@ -379,7 +684,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.getVmConfig().setPassParentEnvs(pass);
     }
 
-    // Deployment configuration
     public boolean isHotDeploymentEnabled() {
         return configData.getDeploymentConfig().isHotDeploymentEnabled();
     }
@@ -404,7 +708,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.getDeploymentConfig().setArtifacts(artifacts);
     }
 
-    // Log configuration
     public List<LogFileConfiguration> getLogFileConfigurations() {
         return configData.getLogFileConfigurations();
     }
@@ -413,7 +716,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.setLogFileConfigurations(configs);
     }
 
-    // Update configuration
     public String getUpdateAction() {
         return configData.getUpdateConfig().getUpdateAction();
     }
@@ -430,7 +732,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.getUpdateConfig().setShowDialog(show);
     }
 
-    // JRE configuration
     public String getJreSelection() {
         return configData.getJreSelection();
     }
@@ -439,7 +740,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.setJreSelection(selection);
     }
 
-    // UI configuration
     public boolean isActivateToolWindow() {
         return configData.getUiConfig().isActivateToolWindow();
     }
@@ -456,22 +756,26 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         configData.getUiConfig().setFocusToolWindow(focus);
     }
 
-    public boolean isShowThisPage() {
-        return showThisPage;
+    /**
+     * Get the configuration data model for advanced usage
+     *
+     * @return The underlying configuration data model
+     */
+    public TomcatConfigurationData getConfigurationData() {
+        return configData;
     }
 
-    public void setShowThisPage(boolean show) {
-        this.showThisPage = show;
-    }
-
-    // === UTILITY METHODS ===
-
+    /**
+     * Get a human-readable summary of this configuration
+     *
+     * @return Configuration summary string
+     */
     public String getConfigurationSummary() {
         TomcatInfo info = configData.getTomcatInfo();
         TomcatConfigurationData.PortConfiguration ports = configData.getPortConfig();
         TomcatConfigurationData.DeploymentConfiguration deployment = configData.getDeploymentConfig();
 
-        StringBuilder summary = new StringBuilder("DevTomcat Configuration: ");
+        StringBuilder summary = new StringBuilder("Dev Tomcat Configuration: ");
         summary.append("Server=").append(info != null ? info.getName() : "None");
         summary.append(", HTTP=").append(ports.getHttpPort());
         summary.append(", Context=").append(configData.getContextPath());
@@ -481,7 +785,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         }
 
         if (deployment.isHotDeploymentEnabled()) {
-            summary.append(", HotDeploy=true");
+            summary.append(", HotDeploy=Enabled");
         }
 
         summary.append(", Artifacts=").append(deployment.getArtifacts().size());
@@ -492,9 +796,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     /**
-     * Get the configuration data model for advanced usage
+     * Functional interface for attribute reading
      */
-    public TomcatConfigurationData getConfigurationData() {
-        return configData;
+    @FunctionalInterface
+    private interface AttributeConsumer {
+        void accept(String value) throws Exception;
     }
 }

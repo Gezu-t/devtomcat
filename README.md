@@ -1,4 +1,4 @@
-# DevTomcat
+# Tomcat
 <!-- Plugin description -->
 The Tomcat plugin for Intellij IDEA
 

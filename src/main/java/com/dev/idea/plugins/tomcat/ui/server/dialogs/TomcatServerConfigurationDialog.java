@@ -20,6 +20,7 @@ import java.awt.event.ActionEvent;
 import java.io.File;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Comprehensive Tomcat Server Configuration Dialog
@@ -581,10 +582,9 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
 
         public List<TomcatInfo> getDetectedServers() {
             List<TomcatInfo> selected = detectedList.getSelectedValuesList();
-            // Filter out the "no servers found" placeholder
             return selected.stream()
                     .filter(server -> !server.getName().equals("No Tomcat installations found"))
-                    .toList();
+                    .collect(Collectors.toList());
         }
     }
 }

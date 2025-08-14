@@ -1,72 +1,87 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.dev.idea.plugins.tomcat.conf.TomcatLogFile;
 import com.dev.idea.plugins.tomcat.logging.LogFileConfiguration;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.util.registry.Registry;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
- * Professional Tomcat Configuration Data Model
- * Central data model for all Tomcat configuration settings
+ * Tomcat Configuration Data Model
  *
- * This model can be:
- * - Used across all UI components
- * - Serialized/deserialized
- * - Validated
- * - Cloned for configuration copies
+ * Central data model that holds all configuration settings for a Tomcat run configuration.
+ * This model provides:
+ * - Type-safe access to all configuration options
+ * - Validation of configuration values
+ * - Deep cloning support for configuration copying
+ * - Serialization support for persistence
  *
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
+ * The model is organized into logical sub-configurations for better maintainability
+ * and clear separation of concerns.
+ *
+ * @author Dev Tomcat Team
+ * @see TomcatInfo
+ * @see DeploymentArtifact
+ * @see LogFileConfiguration
  */
 public class TomcatConfigurationData implements Serializable, Cloneable {
 
     private static final long serialVersionUID = 1L;
 
-    // === SERVER CONFIGURATION ===
-    private TomcatInfo tomcatInfo;
-    private String docBase = "";
-    private String contextPath = "/";
+    // === CORE CONFIGURATION ===
+    @Nullable private TomcatInfo tomcatInfo;
+    @NotNull private String contextPath = "/";
 
-    // === PORTS ===
-    private PortConfiguration portConfig = new PortConfiguration();
+    // === SUB-CONFIGURATIONS ===
+    @NotNull private final PortConfiguration portConfig = new PortConfiguration();
+    @NotNull private final VmConfiguration vmConfig = new VmConfiguration();
+    @NotNull private final BrowserConfiguration browserConfig = new BrowserConfiguration();
+    @NotNull private final DeploymentConfiguration deploymentConfig = new DeploymentConfiguration();
+    @NotNull private final UpdateConfiguration updateConfig = new UpdateConfiguration();
+    @NotNull private final UiConfiguration uiConfig = new UiConfiguration();
 
-    // === VM AND ENVIRONMENT ===
-    private VmConfiguration vmConfig = new VmConfiguration();
-
-    // === BROWSER CONFIGURATION ===
-    private BrowserConfiguration browserConfig = new BrowserConfiguration();
-
-    // === DEPLOYMENT ===
-    private DeploymentConfiguration deploymentConfig = new DeploymentConfiguration();
-
-    // === LOGS ===
-    private List<LogFileConfiguration> logFileConfigurations = new ArrayList<>();
-
-    // === UPDATE ACTIONS ===
-    private UpdateConfiguration updateConfig = new UpdateConfiguration();
-
-    // === JRE CONFIGURATION ===
-    private String jreSelection = "Project default";
-
-    // === UI OPTIONS ===
-    private UiConfiguration uiConfig = new UiConfiguration();
+    // === ADDITIONAL SETTINGS ===
+    @NotNull private List<LogFileConfiguration> logFileConfigurations = new ArrayList<>();
+    @NotNull private String jreSelection = "Project default";
 
     /**
-     * Default constructor with professional defaults
+     * Default constructor that initializes with sensible defaults
      */
     public TomcatConfigurationData() {
         initializeDefaults();
     }
 
+    /**
+     * Initialize configuration with default values from registry
+     */
     private void initializeDefaults() {
-        // Professional environment variables
-        vmConfig.getEnvironmentVariables().put("JAVA_OPTS", "-Xmx512m -Xms256m");
-        vmConfig.getEnvironmentVariables().put("CATALINA_OPTS", "-Dfile.encoding=UTF-8 -Ddevelopment=true");
+        // Port defaults from registry
+        portConfig.setHttpPort(Registry.intValue("devtomcat.default.http.port"));
+        portConfig.setJmxPort(Registry.intValue("devtomcat.default.jmx.port"));
+        portConfig.setJmxEnabled(Registry.is("devtomcat.enable.jmx.monitoring"));
 
-        // Professional log files
+        // VM defaults
+        String xmx = Registry.stringValue("devtomcat.default.xmx");
+        String xms = Registry.stringValue("devtomcat.default.xms");
+        vmConfig.setVmOptions(String.format("-Xmx%s -Xms%s", xmx, xms));
+
+        // Environment variables
+        vmConfig.getEnvironmentVariables().put("JAVA_OPTS",
+                String.format("-Xmx%s -Xms%s -Dfile.encoding=UTF-8", xmx, xms));
+        vmConfig.getEnvironmentVariables().put("CATALINA_OPTS",
+                "-Ddev.mode=true");
+
+        // Deployment defaults
+        deploymentConfig.setHotDeploymentEnabled(
+                Registry.is("devtomcat.enable.hot.deployment"));
+
+        // Default log files
         logFileConfigurations.add(LogFileConfiguration.createCatalinaLog());
         logFileConfigurations.add(LogFileConfiguration.createLocalhostLog());
     }
@@ -74,120 +89,263 @@ public class TomcatConfigurationData implements Serializable, Cloneable {
     // === NESTED CONFIGURATION CLASSES ===
 
     /**
-     * Port configuration model
+     * Port configuration for HTTP, HTTPS, and JMX
      */
     public static class PortConfiguration implements Serializable, Cloneable {
-        private Integer httpPort = 8080;
-        private Integer httpsPort = 8443;
-        private Integer jmxPort = 1099;
-        private boolean jmxEnabled = true;
+        private static final int MIN_PORT = 1;
+        private static final int MAX_PORT = 65535;
+
+        private int httpPort = 8080;
+        private int httpsPort = 8443;
+        private int jmxPort = 1099;
+        private boolean jmxEnabled = false;
         private boolean httpsEnabled = false;
 
-        // Getters and setters
-        public Integer getHttpPort() { return httpPort; }
-        public void setHttpPort(Integer httpPort) { this.httpPort = httpPort; }
+        public int getHttpPort() {
+            return httpPort;
+        }
 
-        public Integer getHttpsPort() { return httpsPort; }
-        public void setHttpsPort(Integer httpsPort) { this.httpsPort = httpsPort; }
+        public void setHttpPort(int port) {
+            validatePort("HTTP", port);
+            this.httpPort = port;
+        }
 
-        public Integer getJmxPort() { return jmxPort; }
-        public void setJmxPort(Integer jmxPort) { this.jmxPort = jmxPort; }
+        public int getHttpsPort() {
+            return httpsPort;
+        }
 
-        public boolean isJmxEnabled() { return jmxEnabled; }
-        public void setJmxEnabled(boolean jmxEnabled) { this.jmxEnabled = jmxEnabled; }
+        public void setHttpsPort(int port) {
+            validatePort("HTTPS", port);
+            this.httpsPort = port;
+        }
 
-        public boolean isHttpsEnabled() { return httpsEnabled; }
-        public void setHttpsEnabled(boolean httpsEnabled) { this.httpsEnabled = httpsEnabled; }
+        public int getJmxPort() {
+            return jmxPort;
+        }
+
+        public void setJmxPort(int port) {
+            validatePort("JMX", port);
+            this.jmxPort = port;
+        }
+
+        public boolean isJmxEnabled() {
+            return jmxEnabled;
+        }
+
+        public void setJmxEnabled(boolean enabled) {
+            this.jmxEnabled = enabled;
+        }
+
+        public boolean isHttpsEnabled() {
+            return httpsEnabled;
+        }
+
+        public void setHttpsEnabled(boolean enabled) {
+            this.httpsEnabled = enabled;
+        }
+
+        private void validatePort(String name, int port) {
+            if (port < MIN_PORT || port > MAX_PORT) {
+                throw new IllegalArgumentException(
+                        String.format("Invalid %s port: %d. Must be between %d and %d",
+                                name, port, MIN_PORT, MAX_PORT));
+            }
+        }
+
+        /**
+         * Get all active ports
+         */
+        @NotNull
+        public Set<Integer> getActivePorts() {
+            Set<Integer> ports = new HashSet<>();
+            ports.add(httpPort);
+            if (httpsEnabled) {
+                ports.add(httpsPort);
+            }
+            if (jmxEnabled) {
+                ports.add(jmxPort);
+            }
+            return ports;
+        }
 
         @Override
         public PortConfiguration clone() {
             try {
                 return (PortConfiguration) super.clone();
             } catch (CloneNotSupportedException e) {
-                throw new RuntimeException(e);
+                throw new AssertionError("Clone not supported", e);
             }
         }
     }
 
     /**
-     * VM configuration model
+     * VM and environment configuration
      */
     public static class VmConfiguration implements Serializable, Cloneable {
-        private String vmOptions = "";
-        private Map<String, String> environmentVariables = new HashMap<>();
+        @NotNull private String vmOptions = "";
+        @NotNull private Map<String, String> environmentVariables = new LinkedHashMap<>();
         private boolean passParentEnvs = true;
 
-        public String getVmOptions() { return vmOptions; }
-        public void setVmOptions(String vmOptions) { this.vmOptions = vmOptions; }
-
-        public Map<String, String> getEnvironmentVariables() { return environmentVariables; }
-        public void setEnvironmentVariables(Map<String, String> vars) {
-            this.environmentVariables = vars != null ? vars : new HashMap<>();
+        @NotNull
+        public String getVmOptions() {
+            return vmOptions;
         }
 
-        public boolean isPassParentEnvs() { return passParentEnvs; }
-        public void setPassParentEnvs(boolean passParentEnvs) { this.passParentEnvs = passParentEnvs; }
+        public void setVmOptions(@NotNull String vmOptions) {
+            this.vmOptions = StringUtil.notNullize(vmOptions);
+        }
+
+        @NotNull
+        public Map<String, String> getEnvironmentVariables() {
+            return environmentVariables;
+        }
+
+        public void setEnvironmentVariables(@NotNull Map<String, String> vars) {
+            this.environmentVariables = new LinkedHashMap<>(vars);
+        }
+
+        public boolean isPassParentEnvs() {
+            return passParentEnvs;
+        }
+
+        public void setPassParentEnvs(boolean pass) {
+            this.passParentEnvs = pass;
+        }
+
+        /**
+         * Add or update an environment variable
+         */
+        public void addEnvironmentVariable(@NotNull String name, @NotNull String value) {
+            environmentVariables.put(name, value);
+        }
+
+        /**
+         * Remove an environment variable
+         */
+        public void removeEnvironmentVariable(@NotNull String name) {
+            environmentVariables.remove(name);
+        }
 
         @Override
         public VmConfiguration clone() {
             try {
                 VmConfiguration cloned = (VmConfiguration) super.clone();
-                cloned.environmentVariables = new HashMap<>(this.environmentVariables);
+                cloned.environmentVariables = new LinkedHashMap<>(this.environmentVariables);
                 return cloned;
             } catch (CloneNotSupportedException e) {
-                throw new RuntimeException(e);
+                throw new AssertionError("Clone not supported", e);
             }
         }
     }
 
     /**
-     * Browser configuration model
+     * Browser launch configuration
      */
     public static class BrowserConfiguration implements Serializable, Cloneable {
         private boolean afterLaunchEnabled = false;
-        private String browserUrl = "http://localhost:8080/";
-        private String browserName = "System Default";
+        @NotNull private String browserUrl = "http://localhost:8080/";
+        @NotNull private String browserName = "System Default";
         private boolean withJavaScriptDebugger = false;
 
-        public boolean isAfterLaunchEnabled() { return afterLaunchEnabled; }
-        public void setAfterLaunchEnabled(boolean enabled) { this.afterLaunchEnabled = enabled; }
+        public boolean isAfterLaunchEnabled() {
+            return afterLaunchEnabled;
+        }
 
-        public String getBrowserUrl() { return browserUrl; }
-        public void setBrowserUrl(String url) { this.browserUrl = url; }
+        public void setAfterLaunchEnabled(boolean enabled) {
+            this.afterLaunchEnabled = enabled;
+        }
 
-        public String getBrowserName() { return browserName; }
-        public void setBrowserName(String name) { this.browserName = name; }
+        @NotNull
+        public String getBrowserUrl() {
+            return browserUrl;
+        }
 
-        public boolean isWithJavaScriptDebugger() { return withJavaScriptDebugger; }
-        public void setWithJavaScriptDebugger(boolean enabled) { this.withJavaScriptDebugger = enabled; }
+        public void setBrowserUrl(@NotNull String url) {
+            this.browserUrl = StringUtil.notNullize(url);
+        }
+
+        @NotNull
+        public String getBrowserName() {
+            return browserName;
+        }
+
+        public void setBrowserName(@NotNull String name) {
+            this.browserName = StringUtil.notNullize(name);
+        }
+
+        public boolean isWithJavaScriptDebugger() {
+            return withJavaScriptDebugger;
+        }
+
+        public void setWithJavaScriptDebugger(boolean enabled) {
+            this.withJavaScriptDebugger = enabled;
+        }
 
         @Override
         public BrowserConfiguration clone() {
             try {
                 return (BrowserConfiguration) super.clone();
             } catch (CloneNotSupportedException e) {
-                throw new RuntimeException(e);
+                throw new AssertionError("Clone not supported", e);
             }
         }
     }
 
     /**
-     * Deployment configuration model
+     * Deployment configuration
      */
     public static class DeploymentConfiguration implements Serializable, Cloneable {
         private boolean hotDeploymentEnabled = true;
         private boolean updateClassesAndResources = true;
-        private List<DeploymentArtifact> artifacts = new ArrayList<>();
+        @NotNull private List<DeploymentArtifact> artifacts = new ArrayList<>();
 
-        public boolean isHotDeploymentEnabled() { return hotDeploymentEnabled; }
-        public void setHotDeploymentEnabled(boolean enabled) { this.hotDeploymentEnabled = enabled; }
+        public boolean isHotDeploymentEnabled() {
+            return hotDeploymentEnabled;
+        }
 
-        public boolean isUpdateClassesAndResources() { return updateClassesAndResources; }
-        public void setUpdateClassesAndResources(boolean enabled) { this.updateClassesAndResources = enabled; }
+        public void setHotDeploymentEnabled(boolean enabled) {
+            this.hotDeploymentEnabled = enabled;
+        }
 
-        public List<DeploymentArtifact> getArtifacts() { return artifacts; }
-        public void setArtifacts(List<DeploymentArtifact> artifacts) {
-            this.artifacts = artifacts != null ? artifacts : new ArrayList<>();
+        public boolean isUpdateClassesAndResources() {
+            return updateClassesAndResources;
+        }
+
+        public void setUpdateClassesAndResources(boolean enabled) {
+            this.updateClassesAndResources = enabled;
+        }
+
+        @NotNull
+        public List<DeploymentArtifact> getArtifacts() {
+            return artifacts;
+        }
+
+        public void setArtifacts(@NotNull List<DeploymentArtifact> artifacts) {
+            this.artifacts = new ArrayList<>(artifacts);
+        }
+
+        /**
+         * Add a deployment artifact
+         */
+        public void addArtifact(@NotNull DeploymentArtifact artifact) {
+            artifacts.add(artifact);
+        }
+
+        /**
+         * Remove a deployment artifact
+         */
+        public void removeArtifact(@NotNull DeploymentArtifact artifact) {
+            artifacts.remove(artifact);
+        }
+
+        /**
+         * Get only deployed artifacts
+         */
+        @NotNull
+        public List<DeploymentArtifact> getDeployedArtifacts() {
+            return artifacts.stream()
+                    .filter(DeploymentArtifact::isDeployed)
+                    .collect(Collectors.toList());
         }
 
         @Override
@@ -200,57 +358,78 @@ public class TomcatConfigurationData implements Serializable, Cloneable {
                 }
                 return cloned;
             } catch (CloneNotSupportedException e) {
-                throw new RuntimeException(e);
+                throw new AssertionError("Clone not supported", e);
             }
         }
     }
 
     /**
-     * Update configuration model
+     * Update action configuration
      */
     public static class UpdateConfiguration implements Serializable, Cloneable {
-        private String updateAction = "Restart server";
+        public static final String ACTION_RESTART = "Restart server";
+        public static final String ACTION_REDEPLOY = "Redeploy";
+        public static final String ACTION_UPDATE_CLASSES = "Update classes and resources";
+
+        @NotNull private String updateAction = ACTION_RESTART;
         private boolean showDialog = true;
 
-        public String getUpdateAction() { return updateAction; }
-        public void setUpdateAction(String action) { this.updateAction = action; }
+        @NotNull
+        public String getUpdateAction() {
+            return updateAction;
+        }
 
-        public boolean isShowDialog() { return showDialog; }
-        public void setShowDialog(boolean show) { this.showDialog = show; }
+        public void setUpdateAction(@NotNull String action) {
+            this.updateAction = StringUtil.notNullize(action);
+        }
+
+        public boolean isShowDialog() {
+            return showDialog;
+        }
+
+        public void setShowDialog(boolean show) {
+            this.showDialog = show;
+        }
 
         @Override
         public UpdateConfiguration clone() {
             try {
                 return (UpdateConfiguration) super.clone();
             } catch (CloneNotSupportedException e) {
-                throw new RuntimeException(e);
+                throw new AssertionError("Clone not supported", e);
             }
         }
     }
 
     /**
-     * UI configuration model
+     * UI behavior configuration
      */
     public static class UiConfiguration implements Serializable, Cloneable {
-        private boolean showThisPage = false;
         private boolean activateToolWindow = true;
         private boolean focusToolWindow = false;
 
-        public boolean isShowThisPage() { return showThisPage; }
-        public void setShowThisPage(boolean show) { this.showThisPage = show; }
+        public boolean isActivateToolWindow() {
+            return activateToolWindow;
+        }
 
-        public boolean isActivateToolWindow() { return activateToolWindow; }
-        public void setActivateToolWindow(boolean activate) { this.activateToolWindow = activate; }
+        public void setActivateToolWindow(boolean activate) {
+            this.activateToolWindow = activate;
+        }
 
-        public boolean isFocusToolWindow() { return focusToolWindow; }
-        public void setFocusToolWindow(boolean focus) { this.focusToolWindow = focus; }
+        public boolean isFocusToolWindow() {
+            return focusToolWindow;
+        }
+
+        public void setFocusToolWindow(boolean focus) {
+            this.focusToolWindow = focus;
+        }
 
         @Override
         public UiConfiguration clone() {
             try {
                 return (UiConfiguration) super.clone();
             } catch (CloneNotSupportedException e) {
-                throw new RuntimeException(e);
+                throw new AssertionError("Clone not supported", e);
             }
         }
     }
@@ -258,114 +437,147 @@ public class TomcatConfigurationData implements Serializable, Cloneable {
     // === MAIN GETTERS/SETTERS ===
 
     @Nullable
-    public TomcatInfo getTomcatInfo() { return tomcatInfo; }
-    public void setTomcatInfo(@Nullable TomcatInfo info) { this.tomcatInfo = info; }
+    public TomcatInfo getTomcatInfo() {
+        return tomcatInfo;
+    }
 
-    @NotNull
-    public String getDocBase() { return docBase; }
-    public void setDocBase(@NotNull String docBase) { this.docBase = docBase; }
-
-    @NotNull
-    public String getContextPath() { return contextPath; }
-    public void setContextPath(@NotNull String path) { this.contextPath = path; }
-
-    @NotNull
-    public PortConfiguration getPortConfig() { return portConfig; }
-    public void setPortConfig(@NotNull PortConfiguration config) { this.portConfig = config; }
-
-    @NotNull
-    public VmConfiguration getVmConfig() { return vmConfig; }
-    public void setVmConfig(@NotNull VmConfiguration config) { this.vmConfig = config; }
-
-    @NotNull
-    public BrowserConfiguration getBrowserConfig() { return browserConfig; }
-    public void setBrowserConfig(@NotNull BrowserConfiguration config) { this.browserConfig = config; }
-
-    @NotNull
-    public DeploymentConfiguration getDeploymentConfig() { return deploymentConfig; }
-    public void setDeploymentConfig(@NotNull DeploymentConfiguration config) { this.deploymentConfig = config; }
-
-    @NotNull
-    public List<LogFileConfiguration> getLogFileConfigurations() { return logFileConfigurations; }
-    public void setLogFileConfigurations(@NotNull List<LogFileConfiguration> configs) {
-        this.logFileConfigurations = configs;
+    public void setTomcatInfo(@Nullable TomcatInfo info) {
+        this.tomcatInfo = info;
     }
 
     @NotNull
-    public UpdateConfiguration getUpdateConfig() { return updateConfig; }
-    public void setUpdateConfig(@NotNull UpdateConfiguration config) { this.updateConfig = config; }
+    public String getContextPath() {
+        return contextPath;
+    }
+
+    public void setContextPath(@NotNull String path) {
+        this.contextPath = StringUtil.notNullize(path);
+    }
 
     @NotNull
-    public String getJreSelection() { return jreSelection; }
-    public void setJreSelection(@NotNull String selection) { this.jreSelection = selection; }
+    public PortConfiguration getPortConfig() {
+        return portConfig;
+    }
 
     @NotNull
-    public UiConfiguration getUiConfig() { return uiConfig; }
-    public void setUiConfig(@NotNull UiConfiguration config) { this.uiConfig = config; }
+    public VmConfiguration getVmConfig() {
+        return vmConfig;
+    }
 
-    // === UTILITY METHODS ===
+    @NotNull
+    public BrowserConfiguration getBrowserConfig() {
+        return browserConfig;
+    }
+
+    @NotNull
+    public DeploymentConfiguration getDeploymentConfig() {
+        return deploymentConfig;
+    }
+
+    @NotNull
+    public UpdateConfiguration getUpdateConfig() {
+        return updateConfig;
+    }
+
+    @NotNull
+    public UiConfiguration getUiConfig() {
+        return uiConfig;
+    }
+
+    @NotNull
+    public List<LogFileConfiguration> getLogFileConfigurations() {
+        return logFileConfigurations;
+    }
+
+    public void setLogFileConfigurations(@NotNull List<LogFileConfiguration> configs) {
+        this.logFileConfigurations = new ArrayList<>(configs);
+    }
+
+    @NotNull
+    public String getJreSelection() {
+        return jreSelection;
+    }
+
+    public void setJreSelection(@NotNull String selection) {
+        this.jreSelection = StringUtil.notNullize(selection);
+    }
+
+    // === VALIDATION ===
 
     /**
-     * Validate the configuration
+     * Validate the entire configuration
+     *
+     * @throws ValidationException if validation fails
      */
     public void validate() throws ValidationException {
+        // Validate server selection
         if (tomcatInfo == null) {
             throw new ValidationException("No Tomcat server selected");
         }
 
         // Validate ports
-        validatePort("HTTP", portConfig.getHttpPort());
-        if (portConfig.isHttpsEnabled()) {
-            validatePort("HTTPS", portConfig.getHttpsPort());
-        }
-        if (portConfig.isJmxEnabled()) {
-            validatePort("JMX", portConfig.getJmxPort());
-        }
-
-        // Check port conflicts
         Set<Integer> usedPorts = new HashSet<>();
+
         usedPorts.add(portConfig.getHttpPort());
-        if (portConfig.isHttpsEnabled() && !usedPorts.add(portConfig.getHttpsPort())) {
-            throw new ValidationException("Port conflict: HTTPS port is already in use");
-        }
-        if (portConfig.isJmxEnabled() && !usedPorts.add(portConfig.getJmxPort())) {
-            throw new ValidationException("Port conflict: JMX port is already in use");
+
+        if (portConfig.isHttpsEnabled()) {
+            if (!usedPorts.add(portConfig.getHttpsPort())) {
+                throw new ValidationException(
+                        "Port conflict: HTTPS port " + portConfig.getHttpsPort() +
+                                " is already used by another service");
+            }
         }
 
-        // Validate paths
-        if (docBase == null || docBase.trim().isEmpty()) {
-            throw new ValidationException("Document base cannot be empty");
+        if (portConfig.isJmxEnabled()) {
+            if (!usedPorts.add(portConfig.getJmxPort())) {
+                throw new ValidationException(
+                        "Port conflict: JMX port " + portConfig.getJmxPort() +
+                                " is already used by another service");
+            }
+        }
+
+        // Validate context path
+        if (!isValidContextPath(contextPath)) {
+            throw new ValidationException(
+                    "Invalid context path: " + contextPath +
+                            ". Must start with '/' or be empty for root context");
+        }
+
+        // Validate artifacts
+        for (DeploymentArtifact artifact : deploymentConfig.getArtifacts()) {
+            try {
+                artifact.validate();
+            } catch (IllegalStateException e) {
+                throw new ValidationException("Invalid artifact: " + e.getMessage());
+            }
         }
     }
 
-    private void validatePort(String name, Integer port) throws ValidationException {
-        if (port == null || port < 1 || port > 65535) {
-            throw new ValidationException("Invalid " + name + " port: " + port);
-        }
+    /**
+     * Check if a context path is valid
+     */
+    private static boolean isValidContextPath(@NotNull String path) {
+        return path.isEmpty() || path.equals("/") ||
+                (path.startsWith("/") && !path.contains(" "));
     }
+
+    // === CLONING ===
 
     @Override
     public TomcatConfigurationData clone() {
         try {
             TomcatConfigurationData cloned = (TomcatConfigurationData) super.clone();
 
-            // Deep clone nested objects
-            cloned.portConfig = this.portConfig.clone();
-            cloned.vmConfig = this.vmConfig.clone();
-            cloned.browserConfig = this.browserConfig.clone();
-            cloned.deploymentConfig = this.deploymentConfig.clone();
-            cloned.updateConfig = this.updateConfig.clone();
-            cloned.uiConfig = this.uiConfig.clone();
-
-            // Clone log configurations
+            // Note: sub-configurations are final fields, so they're already cloned
+            // Just need to clone collections
             cloned.logFileConfigurations = new ArrayList<>();
             for (LogFileConfiguration config : this.logFileConfigurations) {
-                cloned.logFileConfigurations.add(new LogFileConfiguration(config));
+                cloned.logFileConfigurations.add(config.clone());
             }
 
             return cloned;
         } catch (CloneNotSupportedException e) {
-            throw new RuntimeException("Failed to clone configuration", e);
+            throw new AssertionError("Clone not supported", e);
         }
     }
 
@@ -373,7 +585,7 @@ public class TomcatConfigurationData implements Serializable, Cloneable {
      * Custom exception for validation errors
      */
     public static class ValidationException extends Exception {
-        public ValidationException(String message) {
+        public ValidationException(@NotNull String message) {
             super(message);
         }
     }

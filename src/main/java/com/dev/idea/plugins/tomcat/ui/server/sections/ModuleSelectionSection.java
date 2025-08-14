@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.utils.PluginUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.ConfigurationException;
@@ -72,15 +72,26 @@ public class ModuleSelectionSection implements ConfigurationSection {
     @Override
     public void loadConfiguration() {
         moduleCombo.removeAllItems();
-        moduleCombo.addItem(null); // “<none>”
+        moduleCombo.addItem(null); // "<none>"
+
+        Module selectedModule = null;
 
         for (Module m : ModuleManager.getInstance(project).getModules()) {
             moduleCombo.addItem(m);
+
+            // Check if this module is a web module
+            if (selectedModule == null && TomcatModuleUtils.isWebModule(m)) {
+                selectedModule = m;
+            }
         }
 
-        // Pre-select a sensible default
-        Module guess = PluginUtils.guessModule(project);
-        moduleCombo.setSelectedItem(guess);
+        // Pre-select the first web module found, or leave as null
+        if (selectedModule != null) {
+            moduleCombo.setSelectedItem(selectedModule);
+            System.out.println("DevTomcat: Auto-selected web module: " + selectedModule.getName());
+        } else {
+            System.out.println("DevTomcat: No web module found for auto-selection");
+        }
     }
 
     @Override
@@ -109,9 +120,10 @@ public class ModuleSelectionSection implements ConfigurationSection {
         public Component getListCellRendererComponent(JList<?> list, Object value,
                                                       int index, boolean isSelected, boolean cellHasFocus) {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            if (value instanceof Module m) {
-                setText(m.getName());
-                setToolTipText("Module: " + m.getName());
+            if (value instanceof Module) {
+                Module module = (Module) value;
+                setText(module.getName());
+                setToolTipText("Module: " + module.getName());
             } else {
                 setText("<No module>");
                 setToolTipText("No module selected");

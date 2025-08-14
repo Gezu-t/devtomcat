@@ -2,6 +2,8 @@ package com.dev.idea.plugins.tomcat.conf;
 
 import com.intellij.execution.impl.ConsoleViewImpl;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Url;
 import com.intellij.util.Urls;
@@ -9,271 +11,367 @@ import org.jetbrains.annotations.NotNull;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Fixed server console with professional deployment logging
- * Provides sophisticated log parsing and URL generation
+ * Dev Tomcat Server Console View
  *
- * @author Gezahegn Lemma (Gezu)
+ * Enhanced console view that provides intelligent log parsing, deployment
+ * tracking, and server status monitoring. Features include:
+ * - Automatic detection of server ports and connectors
+ * - Deployment progress tracking with timing information
+ * - Error highlighting and categorization
+ * - Clickable URLs for easy access to deployed applications
+ *
+ * @author Dev Tomcat Team
+ * @see ConsoleViewImpl
  */
 public class ServerConsoleView extends ConsoleViewImpl {
 
-    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss,SSS");
+    private static final Logger LOG = Logger.getInstance(ServerConsoleView.class);
 
+    // Registry keys
+    private static final String REG_SHOW_TIMESTAMPS = "devtomcat.log.show.timestamps";
+
+    // Time formatting
+    private static final DateTimeFormatter TIMESTAMP_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+
+    // Regex patterns for log parsing
+    private static final Pattern HTTP_CONNECTOR_PATTERN =
+            Pattern.compile("http-nio-(\\d+)");
+    private static final Pattern HTTPS_CONNECTOR_PATTERN =
+            Pattern.compile("https-jsse-nio-(\\d+)");
+    private static final Pattern AJP_CONNECTOR_PATTERN =
+            Pattern.compile("ajp-nio-(\\d+)");
+    private static final Pattern DEPLOYMENT_START_PATTERN =
+            Pattern.compile("Deploying web application.*?(?:directory|archive).*?\\[(.+?)\\]");
+    private static final Pattern DEPLOYMENT_FINISH_PATTERN =
+            Pattern.compile("Deployment of web application.*?\\[(.+?)\\].*?finished");
+    private static final Pattern SERVER_STARTUP_PATTERN =
+            Pattern.compile("Server startup in (\\d+) ms");
+    private static final Pattern ERROR_PATTERN =
+            Pattern.compile("(ERROR|SEVERE|FATAL)\\s*[:|-](.*)");
+    private static final Pattern WARNING_PATTERN =
+            Pattern.compile("(WARN|WARNING)\\s*[:|-](.*)");
+
+    // Console output categories
+    private enum OutputCategory {
+        SERVER_LIFECYCLE("SERVER", ConsoleViewContentType.SYSTEM_OUTPUT),
+        DEPLOYMENT("DEPLOY", ConsoleViewContentType.SYSTEM_OUTPUT),
+        ERROR("ERROR", ConsoleViewContentType.ERROR_OUTPUT),
+        WARNING("WARN", ConsoleViewContentType.LOG_WARNING_OUTPUT),
+        INFO("INFO", ConsoleViewContentType.NORMAL_OUTPUT),
+        DEBUG("DEBUG", ConsoleViewContentType.LOG_DEBUG_OUTPUT);
+
+        private final String prefix;
+        private final ConsoleViewContentType contentType;
+
+        OutputCategory(String prefix, ConsoleViewContentType contentType) {
+            this.prefix = prefix;
+            this.contentType = contentType;
+        }
+    }
+
+    // State tracking
     private final TomcatRunConfiguration configuration;
-    private boolean deploymentStarted = false;
-    private boolean serverReady = false;
-    private final List<String> httpPorts = new ArrayList<>();
-    private final List<String> httpsPorts = new ArrayList<>();
-    private final List<String> ajpPorts = new ArrayList<>();
-    private long startTime = System.currentTimeMillis();
+    private final Set<String> httpPorts = ConcurrentHashMap.newKeySet();
+    private final Set<String> httpsPorts = ConcurrentHashMap.newKeySet();
+    private final Set<String> ajpPorts = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> deploymentStartTimes = new ConcurrentHashMap<>();
 
+    private volatile boolean serverReady = false;
+    private final long startTime = System.currentTimeMillis();
+    private boolean showTimestamps;
+
+    /**
+     * Creates a new server console view
+     *
+     * @param configuration The Tomcat run configuration
+     */
     public ServerConsoleView(TomcatRunConfiguration configuration) {
         super(configuration.getProject(), true);
         this.configuration = configuration;
+        this.showTimestamps = Registry.is(REG_SHOW_TIMESTAMPS);
+
         printServerHeader();
     }
 
     @Override
-    public void print(@NotNull String s, @NotNull ConsoleViewContentType contentType) {
-        // Parse and enhance the output before printing
-        String enhancedOutput = parseAndEnhanceOutput(s);
-        super.print(enhancedOutput, contentType);
-
-        // Skip processing exception traces
-        if (s.trim().startsWith("at ") || s.trim().startsWith("Caused by:")) {
+    public void print(@NotNull String text, @NotNull ConsoleViewContentType contentType) {
+        // Skip empty lines
+        if (text.trim().isEmpty()) {
+            super.print(text, contentType);
             return;
         }
 
-        // Parse connector information
-        if (parseConnectorInfo(s)) {
-            return;
-        }
+        // Parse and categorize the output
+        OutputCategory category = categorizeOutput(text);
+        String enhancedText = enhanceOutput(text, category);
 
-        // Detect deployment events
-        detectDeploymentEvents(s);
+        // Print with appropriate formatting
+        super.print(enhancedText, category.contentType);
 
-        // Check for server startup completion
-        checkServerStartupCompletion(s);
+        // Process for state tracking
+        processOutputForState(text);
     }
 
     /**
-     * Print server header with DevTomcat branding
+     * Print professional server startup header
      */
     private void printServerHeader() {
         String header = String.format(
-                "%n=== DevTomcat Server Console ===%n" +
-                        "Project: %s%n" +
-                        "Configuration: %s%n" +
-                        "Started: %s%n" +
-                        "=================================%n%n",
-                configuration.getProject().getName(),
-                configuration.getName(),
+                "\n╔════════════════════════════════════════════════════════════════╗\n" +
+                        "║                    Dev Tomcat Server Console                    ║\n" +
+                        "╠════════════════════════════════════════════════════════════════╣\n" +
+                        "║ Project: %-53s ║\n" +
+                        "║ Configuration: %-47s ║\n" +
+                        "║ Started: %-53s ║\n" +
+                        "╚════════════════════════════════════════════════════════════════╝\n\n",
+                truncate(configuration.getProject().getName(), 53),
+                truncate(configuration.getName(), 47),
                 LocalDateTime.now().format(TIMESTAMP_FORMAT)
         );
         super.print(header, ConsoleViewContentType.SYSTEM_OUTPUT);
     }
 
     /**
-     * Parse and enhance output with professional formatting
+     * Categorize output based on content
      */
-    private String parseAndEnhanceOutput(String s) {
-        // Add timestamps to important messages
-        if (s.contains("INFO") && (s.contains("Starting") || s.contains("Started") || s.contains("Initializing"))) {
-            return addTimestamp(s);
+    private OutputCategory categorizeOutput(String text) {
+        // Check for errors
+        if (ERROR_PATTERN.matcher(text).find()) {
+            return OutputCategory.ERROR;
         }
 
-        // Highlight deployment messages
-        if (s.contains("Deploying") || s.contains("deployment") || s.contains("Context")) {
-            return addTimestamp("DEPLOY: " + s.trim()) + "\n";
+        // Check for warnings
+        if (WARNING_PATTERN.matcher(text).find()) {
+            return OutputCategory.WARNING;
         }
 
-        // Highlight server lifecycle messages
-        if (s.contains("Server startup") || s.contains("Catalina.start")) {
-            return addTimestamp("SERVER: " + s.trim()) + "\n";
+        // Check for deployment messages
+        if (text.contains("Deploy") || text.contains("deployment")) {
+            return OutputCategory.DEPLOYMENT;
         }
 
-        return s;
+        // Check for server lifecycle
+        if (text.contains("Server startup") || text.contains("Catalina.start") ||
+                text.contains("Stopping") || text.contains("Shutdown")) {
+            return OutputCategory.SERVER_LIFECYCLE;
+        }
+
+        // Check for debug level
+        if (text.contains("DEBUG") || text.contains("FINE")) {
+            return OutputCategory.DEBUG;
+        }
+
+        // Default to info
+        return OutputCategory.INFO;
     }
 
     /**
-     * Add professional timestamp
+     * Enhance output with timestamps and formatting
      */
-    private String addTimestamp(String message) {
-        String timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
-        return String.format("[%s] %s", timestamp, message.trim());
+    private String enhanceOutput(String text, OutputCategory category) {
+        StringBuilder enhanced = new StringBuilder();
+
+        // Add timestamp if enabled
+        if (showTimestamps && !text.trim().isEmpty()) {
+            enhanced.append("[")
+                    .append(LocalDateTime.now().format(TIMESTAMP_FORMAT))
+                    .append("] ");
+        }
+
+        // Add category prefix for important messages
+        if (category != OutputCategory.INFO && category != OutputCategory.DEBUG) {
+            enhanced.append("[").append(category.prefix).append("] ");
+        }
+
+        // Append the actual text
+        enhanced.append(text);
+
+        // Ensure newline at end if not present
+        if (!text.endsWith("\n")) {
+            enhanced.append("\n");
+        }
+
+        return enhanced.toString();
     }
 
     /**
-     * Parse connector information (HTTP, HTTPS, AJP)
+     * Process output for state tracking and special handling
      */
-    private boolean parseConnectorInfo(String s) {
-        boolean parsed = false;
+    private void processOutputForState(String text) {
+        // Skip processing for stack traces
+        if (text.trim().startsWith("at ") || text.trim().startsWith("Caused by:")) {
+            return;
+        }
 
-        // HTTP Connector Pattern
-        Pattern httpPattern = Pattern.compile("http-nio-(\\d+)");
-        Matcher httpMatcher = httpPattern.matcher(s);
+        // Parse connector information
+        parseConnectorInfo(text);
+
+        // Track deployment progress
+        trackDeploymentProgress(text);
+
+        // Check for server startup completion
+        checkServerStartup(text);
+    }
+
+    /**
+     * Parse and track connector information
+     */
+    private void parseConnectorInfo(String text) {
+        // HTTP connector
+        Matcher httpMatcher = HTTP_CONNECTOR_PATTERN.matcher(text);
         if (httpMatcher.find()) {
             String port = httpMatcher.group(1);
-            if (!httpPorts.contains(port)) {
-                httpPorts.add(port);
+            if (httpPorts.add(port)) {
                 printConnectorInfo("HTTP", port);
             }
-            parsed = true;
         }
 
-        // HTTPS Connector Pattern
-        Pattern httpsPattern = Pattern.compile("https-jsse-nio-(\\d+)");
-        Matcher httpsMatcher = httpsPattern.matcher(s);
+        // HTTPS connector
+        Matcher httpsMatcher = HTTPS_CONNECTOR_PATTERN.matcher(text);
         if (httpsMatcher.find()) {
             String port = httpsMatcher.group(1);
-            if (!httpsPorts.contains(port)) {
-                httpsPorts.add(port);
+            if (httpsPorts.add(port)) {
                 printConnectorInfo("HTTPS", port);
             }
-            parsed = true;
         }
 
-        // AJP Connector Pattern
-        Pattern ajpPattern = Pattern.compile("ajp-nio-(\\d+)");
-        Matcher ajpMatcher = ajpPattern.matcher(s);
+        // AJP connector
+        Matcher ajpMatcher = AJP_CONNECTOR_PATTERN.matcher(text);
         if (ajpMatcher.find()) {
             String port = ajpMatcher.group(1);
-            if (!ajpPorts.contains(port)) {
-                ajpPorts.add(port);
+            if (ajpPorts.add(port)) {
                 printConnectorInfo("AJP", port);
             }
-            parsed = true;
         }
-
-        return parsed;
     }
 
     /**
-     * Print professional connector information
+     * Print connector information
      */
     private void printConnectorInfo(String type, String port) {
-        String message = String.format("%s Connector configured on port %s%n", type, port);
-        super.print(addTimestamp(message), ConsoleViewContentType.SYSTEM_OUTPUT);
+        String message = String.format("✓ %s connector initialized on port %s\n", type, port);
+        super.print(formatWithTimestamp(message), ConsoleViewContentType.SYSTEM_OUTPUT);
     }
 
     /**
-     * Detect deployment events and provide professional feedback
+     * Track deployment progress
      */
-    private void detectDeploymentEvents(String s) {
-        String contextPath = configuration.getContextPath();
-        String normalizedContext = StringUtil.trimStart(contextPath, "/");
+    private void trackDeploymentProgress(String text) {
+        // Deployment start
+        Matcher startMatcher = DEPLOYMENT_START_PATTERN.matcher(text);
+        if (startMatcher.find()) {
+            String context = startMatcher.group(1);
+            deploymentStartTimes.put(context, System.currentTimeMillis());
 
-        // Deployment start detection
-        if (s.contains("Deploying web application") && s.contains(normalizedContext)) {
-            if (!deploymentStarted) {
-                deploymentStarted = true;
-                String message = String.format("Artifact %s:war exploded: Artifact is being deployed, please wait...%n",
-                        normalizedContext.isEmpty() ? "ROOT" : normalizedContext);
-                super.print(addTimestamp(message), ConsoleViewContentType.SYSTEM_OUTPUT);
-            }
+            String message = String.format("→ Deploying application: %s\n",
+                    getApplicationName(context));
+            super.print(formatWithTimestamp(message), ConsoleViewContentType.SYSTEM_OUTPUT);
         }
 
-        // Deployment completion detection
-        if (s.contains("Deployment of web application") && s.contains("finished") && s.contains(normalizedContext)) {
-            if (deploymentStarted) {
-                long deployTime = System.currentTimeMillis() - startTime;
-                String message = String.format("Artifact %s:war exploded: Artifact is deployed successfully%n",
-                        normalizedContext.isEmpty() ? "ROOT" : normalizedContext);
-                super.print(addTimestamp(message), ConsoleViewContentType.SYSTEM_OUTPUT);
+        // Deployment completion
+        Matcher finishMatcher = DEPLOYMENT_FINISH_PATTERN.matcher(text);
+        if (finishMatcher.find()) {
+            String context = finishMatcher.group(1);
+            Long startTime = deploymentStartTimes.remove(context);
 
-                // Print deployment time
-                String timeMessage = String.format("Deployment completed in %d ms%n", deployTime);
-                super.print(addTimestamp(timeMessage), ConsoleViewContentType.SYSTEM_OUTPUT);
+            if (startTime != null) {
+                long duration = System.currentTimeMillis() - startTime;
+                String message = String.format("✓ Deployed successfully: %s (took %d ms)\n",
+                        getApplicationName(context), duration);
+                super.print(formatWithTimestamp(message), ConsoleViewContentType.SYSTEM_OUTPUT);
             }
         }
     }
 
     /**
-     * Check for server startup completion and print application URLs
+     * Check for server startup completion
      */
-    private void checkServerStartupCompletion(String s) {
-        if (!serverReady && (s.contains("org.apache.catalina.startup.Catalina start")
-                || s.contains("Server startup"))) {
-
+    private void checkServerStartup(String text) {
+        Matcher startupMatcher = SERVER_STARTUP_PATTERN.matcher(text);
+        if (startupMatcher.find() && !serverReady) {
             serverReady = true;
+            String startupTime = startupMatcher.group(1);
 
-            // Use configured ports if not detected from logs
+            // Use configured port if no connectors detected
             if (httpPorts.isEmpty() && httpsPorts.isEmpty()) {
-                // Use the port from configuration (removed getSslPort() since it doesn't exist)
                 httpPorts.add(String.valueOf(configuration.getPort()));
             }
 
-            // Print server startup completion
-            long startupTime = System.currentTimeMillis() - startTime;
-            String startupMessage = String.format("%nServer startup completed in %d ms%n", startupTime);
-            super.print(addTimestamp(startupMessage), ConsoleViewContentType.SYSTEM_OUTPUT);
-
-            // Print application URLs
-            printApplicationUrls();
-
-            // Print JMX information if enabled
-            if (configuration.isJmxEnabled()) {
-                String jmxMessage = String.format("JMX monitoring available on port %d%n",
-                        configuration.getJmxPort());
-                super.print(addTimestamp(jmxMessage), ConsoleViewContentType.SYSTEM_OUTPUT);
-            }
-
-            printReadyMessage();
+            printServerReadyMessage(startupTime);
         }
     }
 
     /**
-     * Print application URLs
+     * Print server ready message with URLs
      */
-    private void printApplicationUrls() {
-        List<Url> urls = buildApplicationUrls();
-        if (!urls.isEmpty()) {
-            super.print(addTimestamp("Application URLs:") + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
-            for (Url url : urls) {
-                String urlMessage = String.format("  %s%n", url.toString());
-                super.print(urlMessage, ConsoleViewContentType.SYSTEM_OUTPUT);
-            }
-            super.print("\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+    private void printServerReadyMessage(String startupTime) {
+        StringBuilder message = new StringBuilder();
+        message.append("\n╔════════════════════════════════════════════════════════════════╗\n");
+        message.append("║                    Server Started Successfully                  ║\n");
+        message.append("╠════════════════════════════════════════════════════════════════╣\n");
+        message.append(String.format("║ Startup time: %-48s ║\n", startupTime + " ms"));
+        message.append(String.format("║ Hot deployment: %-45s ║\n",
+                configuration.isHotDeploymentEnabled() ? "Enabled" : "Disabled"));
+
+        if (configuration.isJmxEnabled()) {
+            message.append(String.format("║ JMX monitoring: Port %-40s ║\n",
+                    configuration.getJmxPort()));
         }
+
+        message.append("╠════════════════════════════════════════════════════════════════╣\n");
+        message.append("║ Application URLs:                                              ║\n");
+
+        // Print application URLs
+        List<Url> urls = buildApplicationUrls();
+        for (Url url : urls) {
+            String urlStr = url.toExternalForm();
+            message.append(String.format("║ • %-59s ║\n", truncate(urlStr, 59)));
+        }
+
+        message.append("╚════════════════════════════════════════════════════════════════╝\n\n");
+
+        super.print(message.toString(), ConsoleViewContentType.SYSTEM_OUTPUT);
     }
 
     /**
-     * Build application URLs
+     * Build list of application URLs
      */
     private List<Url> buildApplicationUrls() {
         List<Url> urls = new ArrayList<>();
         String contextPath = configuration.getContextPath();
-        String path = "/" + StringUtil.trimStart(contextPath, "/");
-
-        // Normalize path for ROOT context
-        if ("/".equals(path) || path.isEmpty()) {
+        String path = StringUtil.trimStart(contextPath, "/");
+        if (path.isEmpty()) {
             path = "/";
+        } else {
+            path = "/" + path;
         }
 
         // HTTP URLs
-        for (String httpPort : httpPorts) {
+        for (String port : httpPorts) {
             try {
-                boolean isDefaultPort = "80".equals(httpPort);
-                String authority = "localhost" + (isDefaultPort ? "" : ":" + httpPort);
+                boolean isDefault = "80".equals(port);
+                String authority = "localhost" + (isDefault ? "" : ":" + port);
                 urls.add(Urls.newHttpUrl(authority, path));
             } catch (Exception e) {
-                // Ignore malformed URLs
+                LOG.debug("Failed to create HTTP URL for port: " + port, e);
             }
         }
 
-        // HTTPS URLs (only if detected from logs, since we removed SSL port support)
-        for (String httpsPort : httpsPorts) {
+        // HTTPS URLs
+        for (String port : httpsPorts) {
             try {
-                boolean isDefaultPort = "443".equals(httpsPort);
-                String authority = "localhost" + (isDefaultPort ? "" : ":" + httpsPort);
+                boolean isDefault = "443".equals(port);
+                String authority = "localhost" + (isDefault ? "" : ":" + port);
                 urls.add(Urls.newUrl("https", authority, path));
             } catch (Exception e) {
-                // Ignore malformed URLs
+                LOG.debug("Failed to create HTTPS URL for port: " + port, e);
             }
         }
 
@@ -281,44 +379,52 @@ public class ServerConsoleView extends ConsoleViewImpl {
     }
 
     /**
-     * Print server ready message
+     * Format text with timestamp if enabled
      */
-    private void printReadyMessage() {
-        String readyMessage = String.format(
-                "%n=== DevTomcat Server Ready ===%n" +
-                        "Hot deployment: %s%n" +
-                        "JMX monitoring: %s%n" +
-                        "Environment variables: %d configured%n" +
-                        "=============================%n%n",
-                configuration.isHotDeploymentEnabled() ? "Enabled" : "Disabled",
-                configuration.isJmxEnabled() ? "Port " + configuration.getJmxPort() : "Disabled",
-                configuration.getEnvironmentVariables().size()
-        );
-        super.print(readyMessage, ConsoleViewContentType.SYSTEM_OUTPUT);
+    private String formatWithTimestamp(String text) {
+        if (showTimestamps) {
+            return "[" + LocalDateTime.now().format(TIMESTAMP_FORMAT) + "] " + text;
+        }
+        return text;
     }
 
     /**
-     * Print error message
+     * Get user-friendly application name from context path
+     */
+    private String getApplicationName(String context) {
+        if (context.isEmpty() || "/".equals(context) || "ROOT".equals(context)) {
+            return "ROOT (/)";
+        }
+        return context.startsWith("/") ? context : "/" + context;
+    }
+
+    /**
+     * Truncate string to specified length
+     */
+    private String truncate(String str, int maxLength) {
+        if (str == null) return "";
+        return str.length() <= maxLength ? str : str.substring(0, maxLength - 3) + "...";
+    }
+
+    /**
+     * Print an error message
      */
     public void printError(String message) {
-        String errorMessage = addTimestamp("ERROR: " + message) + "\n";
-        super.print(errorMessage, ConsoleViewContentType.ERROR_OUTPUT);
+        print("[ERROR] " + message + "\n", ConsoleViewContentType.ERROR_OUTPUT);
     }
 
     /**
-     * Print warning message
+     * Print a warning message
      */
     public void printWarning(String message) {
-        String warningMessage = addTimestamp("WARNING: " + message) + "\n";
-        super.print(warningMessage, ConsoleViewContentType.SYSTEM_OUTPUT);
+        print("[WARN] " + message + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT);
     }
 
     /**
-     * Print info message
+     * Print an info message
      */
     public void printInfo(String message) {
-        String infoMessage = addTimestamp("INFO: " + message) + "\n";
-        super.print(infoMessage, ConsoleViewContentType.NORMAL_OUTPUT);
+        print("[INFO] " + message + "\n", ConsoleViewContentType.NORMAL_OUTPUT);
     }
 
     /**
@@ -331,15 +437,15 @@ public class ServerConsoleView extends ConsoleViewImpl {
     /**
      * Get detected HTTP ports
      */
-    public List<String> getHttpPorts() {
-        return new ArrayList<>(httpPorts);
+    public Set<String> getHttpPorts() {
+        return new HashSet<>(httpPorts);
     }
 
     /**
      * Get detected HTTPS ports
      */
-    public List<String> getHttpsPorts() {
-        return new ArrayList<>(httpsPorts);
+    public Set<String> getHttpsPorts() {
+        return new HashSet<>(httpsPorts);
     }
 
     /**

@@ -14,15 +14,13 @@ import org.jetbrains.annotations.NotNull;
 /**
  * Professional Enterprise Tomcat Runner
  * Provides comprehensive enterprise-level Tomcat execution capabilities
- *
  * Enterprise Features:
- * - Professional artifact deployment with intelligent hot swap
+ * - Artifact deployment with intelligent hot swap
  * - Advanced JMX monitoring and management integration
  * - Comprehensive debugging preparation and environment setup
- * - Professional console management with structured output
+ * - Console management with structured output
  * - Intelligent deployment status monitoring and reporting
  * - Enterprise error handling with automated recovery suggestions
- *
  * Author: Gezahegn Lemma (Gezu)
  * Project: DevTomcat Plugin
  * Created: 6/9/25
@@ -50,14 +48,14 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
         TomcatRunConfiguration configuration = (TomcatRunConfiguration) env.getRunProfile();
 
         // Professional enterprise pre-execution setup
-        prepareEnterpriseExecution(configuration, env);
+        prepareEnterpriseExecution(configuration);
 
         // Enterprise-grade execution with comprehensive monitoring
         RunContentDescriptor descriptor = super.doExecute(state, env);
 
         if (descriptor != null) {
             // Professional enterprise post-execution setup
-            setupEnterpriseMonitoring(configuration, descriptor, env);
+            setupEnterpriseMonitoring(configuration, descriptor);
         }
 
         return descriptor;
@@ -67,8 +65,7 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
      * Prepare enterprise-grade execution environment
      * Comprehensive professional pre-execution setup
      */
-    private void prepareEnterpriseExecution(@NotNull TomcatRunConfiguration configuration,
-                                            @NotNull ExecutionEnvironment env) {
+    private void prepareEnterpriseExecution(@NotNull TomcatRunConfiguration configuration) {
 
         // Professional document management before deployment
         FileDocumentManager.getInstance().saveAllDocuments();
@@ -108,7 +105,7 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
                     configuration.getLogFileConfigurations().size() + " log files");
         }
 
-        System.out.println("DevTomcat: " + enterpriseFeatures.toString());
+        System.out.println("DevTomcat: " + enterpriseFeatures);
         System.out.println("DevTomcat: Professional enterprise Tomcat execution starting");
     }
 
@@ -117,8 +114,7 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
      * Comprehensive professional post-execution monitoring
      */
     private void setupEnterpriseMonitoring(@NotNull TomcatRunConfiguration configuration,
-                                           @NotNull RunContentDescriptor descriptor,
-                                           @NotNull ExecutionEnvironment env) {
+                                           @NotNull RunContentDescriptor descriptor) {
 
         System.out.println("DevTomcat: Professional enterprise Tomcat execution started successfully");
         System.out.println("DevTomcat: Enterprise monitoring and management systems active");
@@ -128,7 +124,7 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
             System.out.println("DevTomcat: Enterprise console management initialized");
 
             // Setup professional deployment status monitoring
-            setupDeploymentStatusMonitoring(configuration, descriptor);
+            setupDeploymentStatusMonitoring(configuration);
         }
 
         // Enterprise server management integration
@@ -175,8 +171,7 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
     /**
      * Setup deployment status monitoring for enterprise standards
      */
-    private void setupDeploymentStatusMonitoring(@NotNull TomcatRunConfiguration configuration,
-                                                 @NotNull RunContentDescriptor descriptor) {
+    private void setupDeploymentStatusMonitoring(@NotNull TomcatRunConfiguration configuration) {
 
         System.out.println("DevTomcat: Professional deployment monitoring initialized");
         System.out.println("DevTomcat: Real-time deployment status tracking active");
@@ -213,66 +208,7 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
         }
     }
 
-    /**
-     * Get execution summary for enterprise reporting
-     */
-    public String getExecutionSummary(@NotNull TomcatRunConfiguration configuration) {
-        StringBuilder summary = new StringBuilder();
-        summary.append("DevTomcat Enterprise Execution Summary:\n");
-        summary.append("- Server: ").append(configuration.getTomcatInfo() != null ?
-                configuration.getTomcatInfo().getName() : "Default").append("\n");
-        summary.append("- Context: ").append(configuration.getContextPath()).append("\n");
-        summary.append("- JMX: ").append(configuration.isJmxEnabled() ?
-                "Enabled(" + configuration.getJmxPort() + ")" : "Disabled").append("\n");
-        summary.append("- Hot Deploy: ").append(configuration.isHotDeploymentEnabled() ? "Enabled" : "Disabled").append("\n");
-        summary.append("- Environment Variables: ").append(configuration.getEnvironmentVariables().size()).append("\n");
-        summary.append("- Log Monitoring: ").append(configuration.getLogFileConfigurations().size()).append(" files\n");
 
-        return summary.toString();
-    }
 
-    /**
-     * Check if configuration has enterprise-grade features
-     */
-    public boolean hasEnterpriseFeatures(@NotNull TomcatRunConfiguration configuration) {
-        return configuration.isJmxEnabled() ||
-                configuration.isHotDeploymentEnabled() ||
-                !configuration.getEnvironmentVariables().isEmpty() ||
-                !configuration.getLogFileConfigurations().isEmpty();
-    }
 
-    /**
-     * Get enterprise feature count for reporting
-     */
-    public int getEnterpriseFeatureCount(@NotNull TomcatRunConfiguration configuration) {
-        int count = 0;
-        if (configuration.isJmxEnabled()) count++;
-        if (configuration.isHotDeploymentEnabled()) count++;
-        if (!configuration.getEnvironmentVariables().isEmpty()) count++;
-        if (!configuration.getLogFileConfigurations().isEmpty()) count++;
-        return count;
-    }
-
-    /**
-     * Get professional performance metrics
-     */
-    public String getPerformanceMetrics(@NotNull TomcatRunConfiguration configuration) {
-        StringBuilder metrics = new StringBuilder();
-        metrics.append("DevTomcat Performance Profile: ");
-
-        if (configuration.isJmxEnabled()) {
-            metrics.append("JMX-Monitored ");
-        }
-
-        if (configuration.isHotDeploymentEnabled()) {
-            metrics.append("HotSwap-Optimized ");
-        }
-
-        String vmOptions = configuration.getVmOptions();
-        if (vmOptions != null && vmOptions.contains("-Xmx")) {
-            metrics.append("Memory-Tuned ");
-        }
-
-        return metrics.toString();
-    }
 }

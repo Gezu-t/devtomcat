@@ -10,7 +10,9 @@ package com.dev.idea.plugins.tomcat.ui;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
@@ -24,7 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Startup/Connection configuration tab - matches Ultimate interface exactly
+ * Startup/Connection configuration tab - matches interface exactly
  * Simple, clean layout focusing on the essential configuration elements
  */
 public class StartupConnectionTab extends JPanel {
@@ -42,13 +44,11 @@ public class StartupConnectionTab extends JPanel {
     // Environment variables section
     private JBTable environmentTable;
     private DefaultTableModel envTableModel;
-    private JButton addEnvButton;
     private JButton removeEnvButton;
     private JButton editEnvButton;
-    private JButton importEnvButton;
     private JCheckBox passParentEnvsCheckBox;
 
-    public StartupConnectionTab(@NotNull Project project, TomcatRunConfiguration configuration) {
+    public StartupConnectionTab(@NotNull Project project) {
         this.project = project;
         initializeUI();
     }
@@ -61,7 +61,7 @@ public class StartupConnectionTab extends JPanel {
         JPanel mainPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.NORTHWEST;
-        gbc.insets = JBUI.insets(10, 0, 10, 0);
+        gbc.insets = JBUI.insets(10, 0);
 
         // Startup script section
         gbc.gridx = 0; gbc.gridy = 0; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
@@ -105,7 +105,6 @@ public class StartupConnectionTab extends JPanel {
         );
         panel.add(startupScriptField, gbc);
 
-        // Browse button (already included in TextFieldWithBrowseButton)
         gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
         gbc.insets = JBUI.insets(2, 0, 2, 10);
         JButton browseButton = new JButton("...");
@@ -195,12 +194,11 @@ public class StartupConnectionTab extends JPanel {
         // Table panel
         JPanel tablePanel = new JPanel(new BorderLayout());
 
-        // Create simple 2-column table like Ultimate
         String[] columnNames = {"Name", "Value"};
         envTableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // Read-only table, use dialogs for editing
+                return false;
             }
         };
 
@@ -212,18 +210,17 @@ public class StartupConnectionTab extends JPanel {
         environmentTable.getSelectionModel().addListSelectionListener(e -> updateEnvButtonStates());
 
         // Show "No variables" when empty
-        JScrollPane envScrollPane = new JScrollPane(environmentTable);
+        JBScrollPane envScrollPane = new JBScrollPane(environmentTable);
         envScrollPane.setPreferredSize(new Dimension(0, 200));
         envScrollPane.setBorder(BorderFactory.createLoweredBevelBorder());
         tablePanel.add(envScrollPane, BorderLayout.CENTER);
 
-        // Buttons panel - horizontal layout like Ultimate
         JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 5));
 
-        addEnvButton = new JButton("+");
+        JButton addEnvButton = new JButton("+");
         removeEnvButton = new JButton("-");
         editEnvButton = new JButton("Edit");
-        importEnvButton = new JButton("Import");
+        JButton importEnvButton = new JButton("Import");
 
         Dimension buttonSize = new Dimension(30, 25);
         addEnvButton.setPreferredSize(buttonSize);
@@ -310,10 +307,9 @@ public class StartupConnectionTab extends JPanel {
         Map<String, String> systemEnv = System.getenv();
         String[] envNames = systemEnv.keySet().toArray(new String[0]);
 
-        JList<String> envList = new JList<>(envNames);
+        JBList<String> envList = new JBList<>(envNames);
         envList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
-        // Pre-select common Java/Tomcat variables
         java.util.List<Integer> preSelected = new java.util.ArrayList<>();
         for (int i = 0; i < envNames.length; i++) {
             String name = envNames[i];
@@ -425,12 +421,10 @@ public class StartupConnectionTab extends JPanel {
             envTableModel.setRowCount(0);
 
             // Load from configuration
-            if (configuration != null) {
-                Map<String, String> envVars = configuration.getEnvironmentVariables();
-                if (envVars != null && !envVars.isEmpty()) {
-                    for (Map.Entry<String, String> entry : envVars.entrySet()) {
-                        envTableModel.addRow(new Object[]{entry.getKey(), entry.getValue()});
-                    }
+            Map<String, String> envVars = configuration.getEnvironmentVariables();
+            if (envVars != null && !envVars.isEmpty()) {
+                for (Map.Entry<String, String> entry : envVars.entrySet()) {
+                    envTableModel.addRow(new Object[]{entry.getKey(), entry.getValue()});
                 }
             }
 
@@ -468,18 +462,7 @@ public class StartupConnectionTab extends JPanel {
         }
     }
 
-    // Utility methods
-    public int getEnvironmentVariableCount() {
-        return envTableModel.getRowCount();
-    }
 
-    public boolean hasCustomStartupScript() {
-        return !useDefaultStartupCheckBox.isSelected();
-    }
-
-    public boolean hasCustomShutdownScript() {
-        return !useDefaultShutdownCheckBox.isSelected();
-    }
 
     /**
      * Simple Environment Variable Dialog
@@ -488,7 +471,7 @@ public class StartupConnectionTab extends JPanel {
 
         private JTextField nameField;
         private JTextField valueField;
-        private JComboBox<String> commonVarsCombo;
+        private ComboBox<String> commonVarsCombo;
 
         protected EnvironmentVariableDialog(@NotNull Project project, String name, String value) {
             super(project);
@@ -516,7 +499,7 @@ public class StartupConnectionTab extends JPanel {
             gbc.gridx = 0; gbc.gridy = 0;
             panel.add(new JLabel("Common:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            commonVarsCombo = new JComboBox<>(new String[]{
+            commonVarsCombo = new ComboBox<>(new String[]{
                     "Custom Variable", "JAVA_OPTS", "CATALINA_OPTS", "CATALINA_HOME",
                     "CATALINA_BASE", "JAVA_HOME", "CLASSPATH", "PATH"
             });
@@ -580,4 +563,5 @@ public class StartupConnectionTab extends JPanel {
             };
         }
     }
+
 }
