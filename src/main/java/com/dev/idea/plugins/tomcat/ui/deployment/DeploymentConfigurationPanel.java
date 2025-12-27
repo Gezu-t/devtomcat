@@ -10,7 +10,6 @@ import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.ui.AnActionButton;
-import com.intellij.ui.AnActionButtonRunnable;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
@@ -32,27 +31,17 @@ import java.util.List;
  */
 public class DeploymentConfigurationPanel extends JPanel {
 
-    private final Project project;
     private final DeploymentTableManager tableManager;
     private final ArtifactSelectionHandler selectionHandler;
 
-    // UI Components - Options only
+    // UI components
+    private JPanel tablePanel;
     private JCheckBox showThisPageCheckBox;
     private JCheckBox activateToolWindowCheckBox;
-    private JCheckBox focusToolWindowCheckBox;
-
-    // Parent coordination
-    private TomcatConfigurationEditor parentEditor;
-    private volatile boolean suppressEvents = false;
-
-    // UI components for empty state
-    private JPanel tablePanel;
-    private JLabel emptyStateLabel;
 
     public DeploymentConfigurationPanel(@NotNull Project project,
                                         @NotNull DeploymentTableManager tableManager,
                                         @NotNull ArtifactSelectionHandler selectionHandler) {
-        this.project = project;
         this.tableManager = tableManager;
         this.selectionHandler = selectionHandler;
 
@@ -62,65 +51,25 @@ public class DeploymentConfigurationPanel extends JPanel {
         System.out.println("DevTomcat: DeploymentConfigurationPanel initialized");
     }
 
-    /**
-     * Set parent editor for event coordination
-     */
-    public void setParentEditor(TomcatConfigurationEditor parentEditor) {
-        this.parentEditor = parentEditor;
+    @Override
+    public Dimension getPreferredSize() {
+        return new Dimension(720, 320);
     }
 
     /**
-     * Check if events should be suppressed
+     * Set parent editor for event coordination (kept for API compatibility)
      */
-    private boolean isEventsSuppressed() {
-        return suppressEvents || (parentEditor != null && parentEditor.isEventsSuppressed());
+    public void setParentEditor(TomcatConfigurationEditor parentEditor) {
+        // No-op: event coordination not needed in simplified implementation
     }
 
     /**
      * Initialize UI components
      */
     private void initializeComponents() {
-        // Checkboxes for tool window behavior
         showThisPageCheckBox = new JCheckBox("Show this page");
-        showThisPageCheckBox.setToolTipText("Show this configuration page when creating new run configurations");
-
         activateToolWindowCheckBox = new JCheckBox("Activate tool window");
-        activateToolWindowCheckBox.setToolTipText("Activate the Run tool window when deployment starts");
-
-        focusToolWindowCheckBox = new JCheckBox("Focus tool window");
-        focusToolWindowCheckBox.setToolTipText("Focus the Run tool window when deployment starts");
-
-        // Empty state label
-        emptyStateLabel = new JLabel("Nothing to deploy", SwingConstants.CENTER);
-        emptyStateLabel.setForeground(UIManager.getColor("Label.disabledForeground"));
-        emptyStateLabel.setFont(emptyStateLabel.getFont().deriveFont(14f));
-
-        // Add listeners with event suppression
-        addCheckBoxListeners();
-    }
-
-    /**
-     * Add checkbox listeners with event suppression
-     */
-    private void addCheckBoxListeners() {
-        activateToolWindowCheckBox.addActionListener(e -> {
-            if (!isEventsSuppressed()) {
-                System.out.println("DevTomcat: Activate tool window: " + activateToolWindowCheckBox.isSelected());
-                // If not activating, can't focus either
-                if (!activateToolWindowCheckBox.isSelected()) {
-                    focusToolWindowCheckBox.setSelected(false);
-                    focusToolWindowCheckBox.setEnabled(false);
-                } else {
-                    focusToolWindowCheckBox.setEnabled(true);
-                }
-            }
-        });
-
-        focusToolWindowCheckBox.addActionListener(e -> {
-            if (!isEventsSuppressed()) {
-                System.out.println("DevTomcat: Focus tool window: " + focusToolWindowCheckBox.isSelected());
-            }
-        });
+        activateToolWindowCheckBox.setSelected(true);
     }
 
     /**
@@ -128,18 +77,22 @@ public class DeploymentConfigurationPanel extends JPanel {
      */
     private void setupLayout() {
         setLayout(new BorderLayout());
-        setBorder(JBUI.Borders.empty(10));
+        setBorder(JBUI.Borders.empty(8, 12, 8, 12));
 
         // Main content panel
         JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setPreferredSize(new Dimension(720, 320));
+        mainPanel.setMinimumSize(new Dimension(640, 260));
+        mainPanel.setOpaque(true);
 
-        // Deploy at server startup section (table with toolbar)
-        mainPanel.add(createDeploymentSection(), BorderLayout.CENTER);
+        // Deploy at server startup section (table with toolbar) wrapped in scroll for safety
+        JPanel deploymentSection = createDeploymentSection();
+        JScrollPane scrollPane = new JScrollPane(deploymentSection);
+        scrollPane.setBorder(null);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
 
         add(mainPanel, BorderLayout.CENTER);
-
-        // Bottom checkboxes
-        add(createBottomCheckboxPanel(), BorderLayout.SOUTH);
+        add(createBottomOptions(), BorderLayout.SOUTH);
     }
 
     /**
@@ -157,74 +110,50 @@ public class DeploymentConfigurationPanel extends JPanel {
         // Table with toolbar
         tablePanel = createTableWithToolbar();
         panel.add(tablePanel, BorderLayout.CENTER);
+        panel.setPreferredSize(new Dimension(640, 260));
+        panel.setMinimumSize(new Dimension(640, 220));
 
+        return panel;
+    }
+
+    private JPanel createBottomOptions() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        panel.setBorder(JBUI.Borders.empty(8, 0, 0, 0));
+        panel.add(showThisPageCheckBox);
+        panel.add(activateToolWindowCheckBox);
         return panel;
     }
 
     /**
      * Create table with toolbar
+     * Toolbar is ALWAYS visible, table shows empty state when needed
      */
     private JPanel createTableWithToolbar() {
         try {
+            // Create the toolbar decorator - ALWAYS VISIBLE
             ToolbarDecorator decorator = ToolbarDecorator.createDecorator(tableManager.getTable());
 
             // Add button with dropdown
-            decorator.setAddAction(new AnActionButtonRunnable() {
-                @Override
-                public void run(AnActionButton button) {
-                    showAddArtifactPopup(button);
-                }
-            });
+            decorator.setAddAction(button -> showAddArtifactPopup(button));
 
             // Remove button
-            decorator.setRemoveAction(new AnActionButtonRunnable() {
-                @Override
-                public void run(AnActionButton button) {
-                    if (tableManager.hasSelection()) {
-                        tableManager.removeSelectedDeployment();
-                        updateEmptyState();
-                    }
-                }
-            });
+            decorator.setRemoveAction(button -> tableManager.removeSelectedDeployment());
 
             // Edit button
-            decorator.setEditAction(new AnActionButtonRunnable() {
-                @Override
-                public void run(AnActionButton button) {
-                    editSelectedArtifact();
-                }
-            });
+            decorator.setEditAction(button -> editSelectedArtifact());
 
             // Move up/down actions
-            decorator.setMoveUpAction(new AnActionButtonRunnable() {
-                @Override
-                public void run(AnActionButton button) {
-                    tableManager.moveSelectedUp();
-                }
-            });
+            decorator.setMoveUpAction(button -> tableManager.moveSelectedUp());
+            decorator.setMoveDownAction(button -> tableManager.moveSelectedDown());
 
-            decorator.setMoveDownAction(new AnActionButtonRunnable() {
-                @Override
-                public void run(AnActionButton button) {
-                    tableManager.moveSelectedDown();
-                }
-            });
-
+            // Create the decorated panel with toolbar (no empty overlay)
             JPanel decoratedPanel = decorator.createPanel();
-            decoratedPanel.setPreferredSize(new Dimension(600, 250));
-            decoratedPanel.setBorder(JBUI.Borders.empty(5));
+            decoratedPanel.setPreferredSize(new Dimension(620, 240));
+            decoratedPanel.setMinimumSize(new Dimension(620, 200));
+            decoratedPanel.setBorder(JBUI.Borders.empty(4));
 
-            // Create layered panel for empty state
-            JPanel layeredPanel = new JPanel(new CardLayout());
-            layeredPanel.add(decoratedPanel, "table");
-
-            JPanel emptyPanel = new JPanel(new BorderLayout());
-            emptyPanel.add(emptyStateLabel, BorderLayout.CENTER);
-            emptyPanel.setBackground(decoratedPanel.getBackground());
-            layeredPanel.add(emptyPanel, "empty");
-
-            updateEmptyState();
-            return layeredPanel;
+            System.out.println("DevTomcat: Toolbar created successfully with table");
+            return decoratedPanel;
 
         } catch (Exception e) {
             System.err.println("DevTomcat: Error creating toolbar: " + e.getMessage());
@@ -233,7 +162,7 @@ public class DeploymentConfigurationPanel extends JPanel {
             // Fallback to simple scroll pane
             JPanel fallbackPanel = new JPanel(new BorderLayout());
             JScrollPane scrollPane = new JScrollPane(tableManager.getTable());
-            scrollPane.setPreferredSize(new Dimension(600, 250));
+            scrollPane.setPreferredSize(new Dimension(600, 200));
             fallbackPanel.add(scrollPane, BorderLayout.CENTER);
             fallbackPanel.setBorder(JBUI.Borders.empty(5));
             return fallbackPanel;
@@ -248,7 +177,7 @@ public class DeploymentConfigurationPanel extends JPanel {
 
         BaseListPopupStep<String> step = new BaseListPopupStep<String>("Deploy", options) {
             @Override
-            public PopupStep onChosen(String selectedValue, boolean finalChoice) {
+            public PopupStep<?> onChosen(String selectedValue, boolean finalChoice) {
                 if ("Artifact...".equals(selectedValue)) {
                     SwingUtilities.invokeLater(() -> {
                         selectionHandler.showArtifactSelectionDialog();
@@ -288,69 +217,49 @@ public class DeploymentConfigurationPanel extends JPanel {
     }
 
     /**
-     * Update empty state display
+     * Update table display (just refresh the table)
      */
     private void updateEmptyState() {
-        if (tablePanel != null && tablePanel.getLayout() instanceof CardLayout) {
-            CardLayout layout = (CardLayout) tablePanel.getLayout();
-            if (tableManager.getDeploymentCount() == 0) {
-                layout.show(tablePanel, "empty");
-            } else {
-                layout.show(tablePanel, "table");
-            }
-        }
         tableManager.refreshTable();
-    }
-
-    /**
-     * Create bottom checkbox panel
-     */
-    private JPanel createBottomCheckboxPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 5));
-        panel.setBorder(JBUI.Borders.emptyTop(10));
-
-        panel.add(showThisPageCheckBox);
-        panel.add(Box.createHorizontalStrut(20));
-        panel.add(activateToolWindowCheckBox);
-        panel.add(Box.createHorizontalStrut(20));
-        panel.add(focusToolWindowCheckBox);
-
-        return panel;
     }
 
     /**
      * Reset from configuration
      */
     public void resetFrom(@NotNull TomcatRunConfiguration config) {
-        suppressEvents = true;
-        try {
-            // Reset checkboxes from configuration
-            // Note: TomcatRunConfiguration doesn't have getShowSettings() method
-            // so we'll use defaults for now
-            showThisPageCheckBox.setSelected(false);
-            activateToolWindowCheckBox.setSelected(config.isActivateToolWindow());
-            focusToolWindowCheckBox.setSelected(config.isFocusToolWindow());
+        tableManager.clearAll();
 
-            // Update focus checkbox state
-            focusToolWindowCheckBox.setEnabled(activateToolWindowCheckBox.isSelected());
-
-            // Update empty state
-            updateEmptyState();
-
-        } finally {
-            suppressEvents = false;
+        // Load artifacts from configuration
+        if (config.getConfigData().getDeploymentConfig() != null &&
+                config.getConfigData().getDeploymentConfig().getArtifacts() != null) {
+            for (DeploymentArtifact artifact : config.getConfigData().getDeploymentConfig().getArtifacts()) {
+                if (artifact != null) {
+                    tableManager.addDeployment(artifact.clone());
+                }
+            }
         }
+
+        updateEmptyState();
+
+        // UI options
+        activateToolWindowCheckBox.setSelected(config.getConfigData().getUiConfig().isActivateToolWindow());
+        showThisPageCheckBox.setSelected(false);
     }
 
     /**
      * Apply to configuration
      */
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
-        // Apply checkbox states that the configuration supports
-        config.setActivateToolWindow(activateToolWindowCheckBox.isSelected());
-        config.setFocusToolWindow(focusToolWindowCheckBox.isSelected());
+        List<DeploymentArtifact> artifacts = tableManager.getDeployments();
+        config.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
+        config.getConfigData().getUiConfig().setActivateToolWindow(activateToolWindowCheckBox.isSelected());
+    }
 
-        // Note: showThisPageCheckBox state would need to be stored elsewhere
-        // as TomcatRunConfiguration doesn't have a setShowSettings method
+    /**
+     * Check if configuration is valid
+     */
+    public boolean isValid() {
+        // Deployment configuration is always valid (artifacts are optional)
+        return true;
     }
 }

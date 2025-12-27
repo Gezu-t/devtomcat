@@ -12,153 +12,95 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Professional IntelliJ Artifact Selection Dialog
- * Provides a clean interface for selecting project artifacts to deploy
- *
- * Matches IntelliJ Ultimate's artifact selection style
- *
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
- */
 public class IntelliJArtifactSelectionDialog extends DialogWrapper {
-
     private final Project project;
     private final ArtifactManager artifactManager;
-    private JBList<Artifact> artifactsList;
-    private DefaultListModel<Artifact> listModel;
+    private JBList<Artifact> artifactList;
+    private final List<Artifact> selectedArtifacts = new ArrayList<>();
 
-    public IntelliJArtifactSelectionDialog(@NotNull Project project,
-                                           @NotNull ArtifactManager artifactManager) {
+    public IntelliJArtifactSelectionDialog(@NotNull Project project, @NotNull ArtifactManager artifactManager) {
         super(project);
         this.project = project;
         this.artifactManager = artifactManager;
-
         setTitle("Select Artifacts to Deploy");
         setModal(true);
-
+        System.out.println("DevTomcat: IntelliJArtifactSelectionDialog created");
         init();
+        System.out.println("DevTomcat: IntelliJArtifactSelectionDialog initialized");
     }
 
     @Override
     protected @Nullable JComponent createCenterPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setPreferredSize(new Dimension(500, 350));
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setPreferredSize(new Dimension(400, 300));
 
-        // Description label
-        JBLabel descriptionLabel = new JBLabel(
-                "Select artifacts from Project Structure to deploy at server startup"
-        );
-        descriptionLabel.setBorder(JBUI.Borders.emptyBottom(10));
-        panel.add(descriptionLabel, BorderLayout.NORTH);
+        // Description label at top - matching IntelliJ style
+        JBLabel descriptionLabel = new JBLabel("Selected artifacts will be deployed at server startup");
+        descriptionLabel.setBorder(JBUI.Borders.empty(0, 0, 8, 0));
+        mainPanel.add(descriptionLabel, BorderLayout.NORTH);
 
-        // Create and populate artifacts list
-        createArtifactsList();
+        // Get all artifacts
+        List<Artifact> artifacts = new ArrayList<>();
+        Artifact[] allArtifacts = artifactManager.getArtifacts();
+        System.out.println("DevTomcat: Total artifacts in project: " + allArtifacts.length);
 
-        JScrollPane scrollPane = new JScrollPane(artifactsList);
-        scrollPane.setPreferredSize(new Dimension(480, 250));
-        panel.add(scrollPane, BorderLayout.CENTER);
-
-        // Info panel
-        panel.add(createInfoPanel(), BorderLayout.SOUTH);
-
-        return panel;
-    }
-
-    /**
-     * Create artifacts list with custom renderer
-     */
-    private void createArtifactsList() {
-        listModel = new DefaultListModel<>();
-        artifactsList = new JBList<>(listModel);
-        artifactsList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-
-        // Custom cell renderer
-        artifactsList.setCellRenderer(new ArtifactListCellRenderer());
-
-        // Populate list
-        populateArtifactsList();
-    }
-
-    /**
-     * Populate artifacts list from project
-     */
-    private void populateArtifactsList() {
-        try {
-            Artifact[] artifacts = artifactManager.getArtifacts();
-            System.out.println("DevTomcat: Found " + artifacts.length + " artifacts in project");
-
-            for (Artifact artifact : artifacts) {
-                listModel.addElement(artifact);
+        for (Artifact artifact : allArtifacts) {
+            String typeId = artifact.getArtifactType().getId().toLowerCase();
+            System.out.println("DevTomcat: Checking artifact '" + artifact.getName() + "' with type: " + typeId);
+            // Show all WAR and exploded WAR artifacts
+            if (typeId.contains("war") || typeId.contains("ear") || typeId.contains("web") ||
+                typeId.contains("exploded")) {
+                artifacts.add(artifact);
+                System.out.println("DevTomcat: Added artifact: " + artifact.getName());
             }
-
-            // Pre-select first artifact if available
-            if (listModel.getSize() > 0) {
-                artifactsList.setSelectedIndex(0);
-            }
-
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error populating artifacts: " + e.getMessage());
         }
-    }
 
-    /**
-     * Create info panel
-     */
-    private JPanel createInfoPanel() {
-        JPanel infoPanel = new JPanel(new BorderLayout());
-        infoPanel.setBorder(JBUI.Borders.emptyTop(10));
+        System.out.println("DevTomcat: Found " + artifacts.size() + " deployable artifacts");
 
-        JBLabel infoLabel = new JBLabel(
-                "<html><i>Artifacts are configured in File | Project Structure | Artifacts</i></html>"
-        );
-        infoLabel.setForeground(UIManager.getColor("Label.disabledForeground"));
-        infoPanel.add(infoLabel, BorderLayout.WEST);
+        // Create list with simple artifact names (matching IntelliJ official style)
+        artifactList = new JBList<>(artifacts);
+        artifactList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
-        return infoPanel;
-    }
+        // Simple cell renderer - just show artifact name with icon
+        artifactList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                         boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof Artifact) {
+                    Artifact artifact = (Artifact) value;
+                    setText(artifact.getName());
+                    setIcon(artifact.getArtifactType().getIcon());
+                }
+                return this;
+            }
+        });
 
-    /**
-     * Get selected artifacts
-     */
-    public List<Artifact> getSelectedArtifacts() {
-        return artifactsList.getSelectedValuesList();
+        JScrollPane scrollPane = new JScrollPane(artifactList);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // Show message if no artifacts found
+        if (artifacts.isEmpty()) {
+            JBLabel noArtifactsLabel = new JBLabel("No deployable artifacts found in project");
+            noArtifactsLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            noArtifactsLabel.setForeground(UIManager.getColor("Label.disabledForeground"));
+            mainPanel.add(noArtifactsLabel, BorderLayout.CENTER);
+        }
+
+        return mainPanel;
     }
 
     @Override
     protected void doOKAction() {
-        List<Artifact> selected = getSelectedArtifacts();
-        if (selected.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    getContentPane(),
-                    "Please select at least one artifact to deploy.",
-                    "No Selection",
-                    JOptionPane.WARNING_MESSAGE
-            );
-            return;
-        }
+        selectedArtifacts.clear();
+        selectedArtifacts.addAll(artifactList.getSelectedValuesList());
         super.doOKAction();
     }
 
-    /**
-     * Custom cell renderer for artifacts
-     */
-    private static class ArtifactListCellRenderer extends DefaultListCellRenderer {
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value,
-                                                      int index, boolean isSelected,
-                                                      boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-
-            if (value instanceof Artifact) {
-                Artifact artifact = (Artifact) value;
-                setText(artifact.getName() + " (" + artifact.getArtifactType().getPresentableName() + ")");
-                setIcon(artifact.getArtifactType().getIcon());
-            }
-
-            return this;
-        }
+    public List<Artifact> getSelectedArtifacts() {
+        return new ArrayList<>(selectedArtifacts);
     }
 }

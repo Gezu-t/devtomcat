@@ -134,16 +134,17 @@ public class TomcatDebugger extends GenericDebuggerRunner {
      * Professional JMX remote debugging configuration
      */
     private void setupJmxDebugging(@NotNull TomcatRunConfiguration configuration) {
-        int jmxPort = configuration.getJmxPort();
+        Integer jmxPort = configuration.getJmxPort();
+        int port = jmxPort != null ? jmxPort : DEFAULT_DEBUG_PORT;
 
         System.out.println("DevTomcat: Professional JMX debugging enabled");
-        System.out.println("DevTomcat: JMX debug port: " + jmxPort);
+        System.out.println("DevTomcat: JMX debug port: " + port);
 
         // Professional JMX debug validation
-        if (jmxPort == DEFAULT_DEBUG_PORT || jmxPort == TOMCAT_JPDA_PORT) {
+        if (port == DEFAULT_DEBUG_PORT || port == TOMCAT_JPDA_PORT) {
             System.out.println("DevTomcat: Using standard debug port configuration");
         } else {
-            System.out.println("DevTomcat: Custom JMX debug port configured: " + jmxPort);
+            System.out.println("DevTomcat: Custom JMX debug port configured: " + port);
         }
 
         // Professional JMX debug VM options validation
@@ -282,7 +283,8 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         StringBuilder features = new StringBuilder("DevTomcat Debug Features Active: ");
 
         if (configuration.isJmxEnabled()) {
-            features.append("JMX-Debug(").append(configuration.getJmxPort()).append(") ");
+            Integer jmxPort = configuration.getJmxPort();
+            features.append("JMX-Debug(").append(jmxPort != null ? jmxPort : "N/A").append(") ");
         }
 
         if (configuration.isHotDeploymentEnabled()) {
@@ -310,7 +312,8 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         info.append(", Context: ").append(configuration.getContextPath());
 
         if (configuration.isJmxEnabled()) {
-            info.append(", JMX: ").append(configuration.getJmxPort());
+            Integer jmxPort = configuration.getJmxPort();
+            info.append(", JMX: ").append(jmxPort != null ? jmxPort : "N/A");
         }
 
         if (configuration.isHotDeploymentEnabled()) {

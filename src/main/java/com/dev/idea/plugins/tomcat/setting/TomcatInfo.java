@@ -1,42 +1,24 @@
 package com.dev.idea.plugins.tomcat.setting;
 
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Tomcat Server Information
- *
- * Represents a configured Apache Tomcat server instance with its
- * installation path, version information, and unique identification.
- *
- * This class is serializable for persistence in IntelliJ's settings
- * and provides proper equals/hashCode for collections.
- *
- * @author Dev Tomcat Team
- */
 public class TomcatInfo implements Serializable, Cloneable {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
-    // Unique identifier for this server instance
-    @NotNull private String id;
+    private String id;
+    private String name;
+    private String version;
+    private String path;
 
-    // User-friendly display name
-    @NotNull private String name;
-
-    // Tomcat version (e.g., "9.0.54")
-    @NotNull private String version;
-
-    // Installation path (CATALINA_HOME)
-    @NotNull private String path;
-
-    /**
-     * Default constructor for serialization
-     */
     public TomcatInfo() {
         this.id = UUID.randomUUID().toString();
         this.name = "";
@@ -44,133 +26,98 @@ public class TomcatInfo implements Serializable, Cloneable {
         this.path = "";
     }
 
-    /**
-     * Constructor with all fields
-     *
-     * @param name Display name
-     * @param version Tomcat version
-     * @param path Installation path
-     */
     public TomcatInfo(@NotNull String name, @NotNull String version, @NotNull String path) {
         this.id = UUID.randomUUID().toString();
-        this.name = name;
-        this.version = version;
-        this.path = path;
+        this.name = Objects.requireNonNull(name);
+        this.version = Objects.requireNonNull(version);
+        this.path = Objects.requireNonNull(path);
     }
 
-    /**
-     * Full constructor including ID
-     *
-     * @param id Unique identifier
-     * @param name Display name
-     * @param version Tomcat version
-     * @param path Installation path
-     */
-    public TomcatInfo(@NotNull String id, @NotNull String name, @NotNull String version, @NotNull String path) {
-        this.id = id;
-        this.name = name;
-        this.version = version;
-        this.path = path;
-    }
-
-    // === GETTERS AND SETTERS ===
-
-    /**
-     * Get unique identifier
-     *
-     * @return The server ID
-     */
     @NotNull
     public String getId() {
-        // Generate ID if not set (for backward compatibility)
-        if (id == null || id.isEmpty()) {
-            id = UUID.randomUUID().toString();
-        }
-        return id;
+        return StringUtil.notNullize(id);
     }
 
-    /**
-     * Set unique identifier
-     *
-     * @param id The server ID
-     */
-    public void setId(@NotNull String id) {
-        this.id = id;
+    public void setId(@Nullable String id) {
+        String normalized = StringUtil.notNullize(id).trim();
+        this.id = normalized.isEmpty() ? UUID.randomUUID().toString() : normalized;
     }
 
-    /**
-     * Get display name
-     *
-     * @return The server name
-     */
     @NotNull
     public String getName() {
-        return name != null ? name : "";
+        return StringUtil.notNullize(name);
     }
 
-    /**
-     * Set display name
-     *
-     * @param name The server name
-     */
-    public void setName(@NotNull String name) {
-        this.name = name;
+    public void setName(@Nullable String name) {
+        this.name = StringUtil.notNullize(name);
     }
 
-    /**
-     * Get Tomcat version
-     *
-     * @return The version string
-     */
     @NotNull
     public String getVersion() {
-        return version != null ? version : "";
+        return StringUtil.notNullize(version);
+    }
+
+    public void setVersion(@Nullable String version) {
+        this.version = StringUtil.notNullize(version);
     }
 
     /**
-     * Set Tomcat version
+     * Get the major version number from the version string.
+     * For example, "9.0.56" returns 9, "10.1.2" returns 10.
      *
-     * @param version The version string
+     * @return the major version number, or 0 if version cannot be parsed
      */
-    public void setVersion(@NotNull String version) {
-        this.version = version;
+    public int getMajorVersion() {
+        try {
+            String ver = getVersion();
+            if (ver.isEmpty()) {
+                return 0;
+            }
+            // Extract first number before the first dot
+            int dotIndex = ver.indexOf('.');
+            String majorStr = dotIndex > 0 ? ver.substring(0, dotIndex) : ver;
+            return Integer.parseInt(majorStr.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
-    /**
-     * Get installation path
-     *
-     * @return The Tomcat home directory path
-     */
     @NotNull
     public String getPath() {
-        return path != null ? path : "";
+        return StringUtil.notNullize(path);
+    }
+
+    public void setPath(@Nullable String path) {
+        this.path = StringUtil.notNullize(path);
+    }
+
+    public boolean isValid() {
+        return !getName().isEmpty() && !getPath().isEmpty();
     }
 
     /**
-     * Set installation path
+     * Validate this TomcatInfo configuration.
+     * Throws IllegalStateException if validation fails.
      *
-     * @param path The Tomcat home directory path
+     * @throws IllegalStateException if name or path is empty
      */
-    public void setPath(@NotNull String path) {
-        this.path = path;
-    }
-
-    // === UTILITY METHODS ===
-
-    /**
-     * Get display string for UI
-     *
-     * @return Name and version combined
-     */
-    @NotNull
-    public String getDisplayString() {
-        return String.format("%s (%s)", getName(), getVersion());
+    public void validate() throws IllegalStateException {
+        if (getName().isEmpty()) {
+            throw new IllegalStateException("Tomcat name cannot be empty");
+        }
+        if (getPath().isEmpty()) {
+            throw new IllegalStateException("Tomcat path cannot be empty");
+        }
+        if (!new java.io.File(getPath()).exists()) {
+            throw new IllegalStateException("Tomcat path does not exist: " + getPath());
+        }
     }
 
     /**
-     * Get CATALINA_HOME path
+     * Get CATALINA_HOME path.
+     * This is the Tomcat installation directory.
      *
-     * @return Same as getPath()
+     * @return the Tomcat installation path (same as getPath())
      */
     @NotNull
     public String getCatalinaHome() {
@@ -178,141 +125,47 @@ public class TomcatInfo implements Serializable, Cloneable {
     }
 
     /**
-     * Get CATALINA_BASE path (defaults to CATALINA_HOME)
+     * Get CATALINA_BASE path.
+     * For a standard installation, this is the same as CATALINA_HOME.
+     * For run configurations, this is typically the project-specific directory.
      *
-     * @return The base directory path
+     * @return the Tomcat installation path (same as getPath())
      */
     @NotNull
     public String getCatalinaBase() {
-        // In Dev Tomcat, we use the same directory for both
         return getPath();
     }
 
-    /**
-     * Check if this server configuration is valid
-     *
-     * @return true if all required fields are set
-     */
-    public boolean isValid() {
-        return !getName().isEmpty() &&
-                !getVersion().isEmpty() &&
-                !getPath().isEmpty() &&
-                new java.io.File(getPath()).exists();
-    }
-
-    /**
-     * Validate and throw exception if invalid
-     *
-     * @throws IllegalStateException if validation fails
-     */
-    public void validate() {
-        if (getName().isEmpty()) {
-            throw new IllegalStateException("Server name cannot be empty");
-        }
-        if (getVersion().isEmpty()) {
-            throw new IllegalStateException("Server version cannot be empty");
-        }
-        if (getPath().isEmpty()) {
-            throw new IllegalStateException("Server path cannot be empty");
-        }
-
-        java.io.File tomcatHome = new java.io.File(getPath());
-        if (!tomcatHome.exists()) {
-            throw new IllegalStateException("Tomcat home directory does not exist: " + getPath());
-        }
-        if (!tomcatHome.isDirectory()) {
-            throw new IllegalStateException("Tomcat home path is not a directory: " + getPath());
-        }
-
-        // Check for catalina.jar to verify it's a valid Tomcat installation
-        java.io.File catalinaJar = new java.io.File(tomcatHome, "lib/catalina.jar");
-        if (!catalinaJar.exists()) {
-            throw new IllegalStateException("Not a valid Tomcat installation (missing catalina.jar): " + getPath());
-        }
-    }
-
-    /**
-     * Get major version number
-     *
-     * @return Major version (e.g., 9 for "9.0.54")
-     */
-    public int getMajorVersion() {
-        try {
-            String ver = getVersion();
-            int dotIndex = ver.indexOf('.');
-            if (dotIndex > 0) {
-                return Integer.parseInt(ver.substring(0, dotIndex));
-            }
-            return Integer.parseInt(ver);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
-    /**
-     * Check if this is Tomcat 7 or newer
-     *
-     * @return true if version >= 7
-     */
-    public boolean isTomcat7OrNewer() {
-        return getMajorVersion() >= 7;
-    }
-
-    // === OBJECT METHODS ===
-
     @Override
+    @NotNull
     public TomcatInfo clone() {
         try {
-            TomcatInfo cloned = (TomcatInfo) super.clone();
-            // Strings are immutable, so shallow copy is fine
-            return cloned;
+            return (TomcatInfo) super.clone();
         } catch (CloneNotSupportedException e) {
-            // Should never happen
-            throw new AssertionError("Clone not supported", e);
+            TomcatInfo copy = new TomcatInfo();
+            copy.setId(this.id);
+            copy.setName(this.name);
+            copy.setVersion(this.version);
+            copy.setPath(this.path);
+            return copy;
         }
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof TomcatInfo)) return false;
-
+        if (o == null || getClass() != o.getClass()) return false;
         TomcatInfo that = (TomcatInfo) o;
-
-        // Use ID for equality if both have IDs
-        if (id != null && that.id != null && !id.isEmpty() && !that.id.isEmpty()) {
-            return id.equals(that.id);
-        }
-
-        // Fallback to comparing all fields
-        return Objects.equals(name, that.name) &&
-                Objects.equals(version, that.version) &&
-                Objects.equals(path, that.path);
+        return Objects.equals(getId(), that.getId());
     }
 
     @Override
     public int hashCode() {
-        // Use ID for hash if available
-        if (id != null && !id.isEmpty()) {
-            return id.hashCode();
-        }
-        // Fallback to all fields
-        return Objects.hash(name, version, path);
+        return Objects.hash(getId());
     }
 
     @Override
     public String toString() {
-        // Return just the name for UI components
-        return getName();
-    }
-
-    /**
-     * Get detailed string representation
-     *
-     * @return Full details of this server
-     */
-    public String toDetailedString() {
-        return String.format("TomcatInfo{id='%s', name='%s', version='%s', path='%s'}",
-                getId(), getName(), getVersion(), getPath());
+        return getName() + " (" + getVersion() + ")";
     }
 }

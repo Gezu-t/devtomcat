@@ -1,128 +1,100 @@
-/**
- * Author: GTLTek
- * Project: DevTomcat
- * Created: 11/2/25
- *
- * UI Configuration Manager
- * Handles tool window and instance management settings
- */
-package com.dev.idea.plugins.tomcat.conf;
+package com.dev.idea.plugins.tomcat.model;
 
-import java.io.Serializable;
-import java.util.Objects;
+        import org.jetbrains.annotations.NotNull;
 
-public class UiConfig implements Serializable, Cloneable {
+        import java.io.Serial;
+        import java.io.Serializable;
+        import java.util.Objects;
 
-    // === DEFAULT VALUES ===
-    public static final boolean DEFAULT_ACTIVATE_TOOL_WINDOW = true;
-    public static final boolean DEFAULT_FOCUS_TOOL_WINDOW = false;
-    public static final boolean DEFAULT_ALLOW_MULTIPLE_INSTANCES = false;
+        /**
+         * UI Configuration for Tool Window Behavior.
+         */
+        public class UiConfig implements Serializable, Cloneable {
 
-    private boolean activateToolWindow;
-    private boolean focusToolWindow;
-    private boolean allowMultipleInstances;
+            @Serial
+            private static final long serialVersionUID = 1L;
 
-    public UiConfig() {
-        this.activateToolWindow = DEFAULT_ACTIVATE_TOOL_WINDOW;
-        this.focusToolWindow = DEFAULT_FOCUS_TOOL_WINDOW;
-        this.allowMultipleInstances = DEFAULT_ALLOW_MULTIPLE_INSTANCES;
-    }
+            public static final boolean DEFAULT_ACTIVATE_TOOL_WINDOW = true;
+            public static final boolean DEFAULT_FOCUS_TOOL_WINDOW = false;
+            public static final boolean DEFAULT_ALLOW_MULTIPLE_INSTANCES = false;
 
-    public UiConfig(UiConfig other) {
-        this.activateToolWindow = other.activateToolWindow;
-        this.focusToolWindow = other.focusToolWindow;
-        this.allowMultipleInstances = other.allowMultipleInstances;
-    }
+            private boolean activateToolWindow;
+            private boolean focusToolWindow;
+            private boolean allowMultipleInstances;
 
-    // === GETTERS/SETTERS ===
+            public UiConfig() {
+                this.activateToolWindow = DEFAULT_ACTIVATE_TOOL_WINDOW;
+                this.focusToolWindow = DEFAULT_FOCUS_TOOL_WINDOW;
+                this.allowMultipleInstances = DEFAULT_ALLOW_MULTIPLE_INSTANCES;
+            }
 
-    public boolean isActivateToolWindow() {
-        return activateToolWindow;
-    }
+            public UiConfig(@NotNull UiConfig other) {
+                Objects.requireNonNull(other, "UiConfig cannot be null");
+                this.activateToolWindow = other.activateToolWindow;
+                this.focusToolWindow = other.focusToolWindow;
+                this.allowMultipleInstances = other.allowMultipleInstances;
+            }
 
-    public void setActivateToolWindow(boolean activate) {
-        this.activateToolWindow = activate;
-    }
+            public boolean isActivateToolWindow() { return activateToolWindow; }
 
-    public boolean isFocusToolWindow() {
-        return focusToolWindow;
-    }
+            public void setActivateToolWindow(boolean activate) {
+                this.activateToolWindow = activate;
+                if (!activate && this.focusToolWindow) {
+                    this.focusToolWindow = false;
+                }
+            }
 
-    public void setFocusToolWindow(boolean focus) {
-        this.focusToolWindow = focus;
-        // If focus is enabled, activation must also be enabled
-        if (focus) {
-            this.activateToolWindow = true;
+            public boolean isFocusToolWindow() { return focusToolWindow; }
+
+            public void setFocusToolWindow(boolean focus) {
+                this.focusToolWindow = focus;
+                if (focus && !this.activateToolWindow) {
+                    this.activateToolWindow = true;
+                }
+            }
+
+            public boolean isAllowMultipleInstances() { return allowMultipleInstances; }
+            public void setAllowMultipleInstances(boolean allow) { this.allowMultipleInstances = allow; }
+
+            public void resetToDefaults() {
+                this.activateToolWindow = DEFAULT_ACTIVATE_TOOL_WINDOW;
+                this.focusToolWindow = DEFAULT_FOCUS_TOOL_WINDOW;
+                this.allowMultipleInstances = DEFAULT_ALLOW_MULTIPLE_INSTANCES;
+            }
+
+            public boolean shouldShowToolWindow() { return activateToolWindow; }
+            public boolean shouldFocusToolWindow() { return activateToolWindow && focusToolWindow; }
+
+            @NotNull
+            @Override
+            public UiConfig clone() {
+                try {
+                    return (UiConfig) super.clone();
+                } catch (CloneNotSupportedException e) {
+                    return new UiConfig(this);
+                }
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                UiConfig that = (UiConfig) o;
+                return activateToolWindow == that.activateToolWindow &&
+                        focusToolWindow == that.focusToolWindow &&
+                        allowMultipleInstances == that.allowMultipleInstances;
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(activateToolWindow, focusToolWindow, allowMultipleInstances);
+            }
+
+            @NotNull
+            @Override
+            public String toString() {
+                return "UiConfig{activate=" + activateToolWindow +
+                        ", focus=" + focusToolWindow +
+                        ", multiInstance=" + allowMultipleInstances + '}';
+            }
         }
-    }
-
-    public boolean isAllowMultipleInstances() {
-        return allowMultipleInstances;
-    }
-
-    public void setAllowMultipleInstances(boolean allow) {
-        this.allowMultipleInstances = allow;
-    }
-
-    // === UTILITY METHODS ===
-
-    /**
-     * Reset to default values
-     */
-    public void resetToDefaults() {
-        this.activateToolWindow = DEFAULT_ACTIVATE_TOOL_WINDOW;
-        this.focusToolWindow = DEFAULT_FOCUS_TOOL_WINDOW;
-        this.allowMultipleInstances = DEFAULT_ALLOW_MULTIPLE_INSTANCES;
-    }
-
-    /**
-     * Check if tool window should be shown
-     */
-    public boolean shouldShowToolWindow() {
-        return activateToolWindow;
-    }
-
-    /**
-     * Check if tool window should receive focus
-     */
-    public boolean shouldFocusToolWindow() {
-        return focusToolWindow && activateToolWindow;
-    }
-
-    // === CLONING ===
-
-    @Override
-    public UiConfig clone() {
-        try {
-            return (UiConfig) super.clone();
-        } catch (CloneNotSupportedException e) {
-            throw new RuntimeException("Failed to clone UiConfig", e);
-        }
-    }
-
-    // === OBJECT METHODS ===
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        UiConfig uiConfig = (UiConfig) o;
-        return activateToolWindow == uiConfig.activateToolWindow &&
-                focusToolWindow == uiConfig.focusToolWindow &&
-                allowMultipleInstances == uiConfig.allowMultipleInstances;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(activateToolWindow, focusToolWindow, allowMultipleInstances);
-    }
-
-    @Override
-    public String toString() {
-        return "UiConfig{" +
-                "activateToolWindow=" + activateToolWindow +
-                ", focusToolWindow=" + focusToolWindow +
-                ", allowMultipleInstances=" + allowMultipleInstances +
-                '}';
-    }
-}

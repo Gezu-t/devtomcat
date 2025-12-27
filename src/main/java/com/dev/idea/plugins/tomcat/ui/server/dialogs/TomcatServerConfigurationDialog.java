@@ -288,11 +288,18 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
             return panel;
         }
 
+        @SuppressWarnings("deprecation")
         private void browseTomcatHome() {
+            if (pathField == null) {
+                return;
+            }
+
             FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false);
             descriptor.setTitle("Select Tomcat Installation Directory");
 
-            VirtualFile file = FileChooser.chooseFile(descriptor, project, null);
+            VirtualFile file = com.intellij.util.SlowOperations.allowSlowOperations(
+                    () -> FileChooser.chooseFile(descriptor, project, null)
+            );
             if (file != null) {
                 pathField.setText(file.getPath());
                 detectVersion(file.getPath());
@@ -300,6 +307,9 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         }
 
         private void detectVersion(String path) {
+            if (versionField == null) {
+                return;
+            }
             try {
                 Optional<TomcatInfo> detected = TomcatServerManagerState.createTomcatInfo(path);
                 if (detected.isPresent()) {
@@ -467,14 +477,12 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
      * Auto-detect Tomcat installations dialog
      */
     private static class AutoDetectDialog extends DialogWrapper {
-        private final Project project;
         private JBList<TomcatInfo> detectedList;
         private DefaultListModel<TomcatInfo> detectedModel;
         private JButton scanButton;
 
         public AutoDetectDialog(@NotNull Project project) {
             super(project);
-            this.project = project;
             setTitle("Auto-Detect Tomcat Servers");
             init();
         }

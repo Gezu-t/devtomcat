@@ -2,604 +2,383 @@
  * Author: Gezahegn Lemma (Gezu)
  * Project: Dev Tomcat Plugin
  * Created: 6/9/25
- * Phase 2: Logs configuration tab - Matches Ultimate exactly
+ * Phase 2: Logs configuration tab - Simple log file management
  */
 
 package com.dev.idea.plugins.tomcat.ui;
 
-import com.intellij.openapi.fileChooser.FileChooser;
-import com.intellij.openapi.fileChooser.FileChooserDescriptor;
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
+import com.intellij.openapi.fileChooser.FileChooserFactory;
+import com.intellij.openapi.fileChooser.PathChooserDialog;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.ui.ToolbarDecorator;
+import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
-import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.logging.LogFileConfiguration;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
+import javax.swing.table.AbstractTableModel;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
- * Logs configuration tab - matches Ultimate interface exactly
- * Simple, clean layout with checkbox table and console options
+ * Logs configuration tab - manages log file paths for Tomcat
  */
 public class LogsConfigurationTab extends JPanel {
 
     private final Project project;
 
-    // Logs table and model
     private JBTable logsTable;
-    private DefaultTableModel tableModel;
+    private LogTableModel tableModel;
 
-    // Management buttons
-    private JButton addButton;
-    private JButton removeButton;
-    private JButton editButton;
+    private final List<LogRow> logRows = new ArrayList<>();
 
-    // Bottom console options
-    private JCheckBox saveConsoleOutputCheckBox;
-    private JTextField saveToFileField;
-    private JButton browseFileButton;
-    private JCheckBox showConsoleStdOutCheckBox;
-    private JCheckBox showConsoleStdErrCheckBox;
+    private final JBCheckBox stdoutCheck = new JBCheckBox("Show console when a message is printed to standard output stream", true);
+    private final JBCheckBox stderrCheck = new JBCheckBox("Show console when a message is printed to standard error stream", true);
+    private final JBCheckBox showPageCheck = new JBCheckBox("Show this page", false);
+    private final JBCheckBox activateToolWindowCheck = new JBCheckBox("Activate tool window", true);
+    private final JBCheckBox saveToFileCheck = new JBCheckBox("Save console output to file:");
+    private final JTextField saveToFileField = new JTextField();
+    private final JButton saveToFileBrowse = new JButton("...");
 
-    // Log configurations storage
-    private List<LogFileConfiguration> logConfigurations = new ArrayList<>();
-
-    public LogsConfigurationTab(@NotNull Project project, TomcatRunConfiguration configuration) {
+    public LogsConfigurationTab(@NotNull Project project, @Nullable TomcatRunConfiguration configuration) {
         this.project = project;
         initializeUI();
         initializeDefaultLogs();
+
+        if (configuration != null) {
+            resetFrom(configuration);
+        }
     }
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBorder(JBUI.Borders.empty(15));
+        setBorder(JBUI.Borders.empty(10, 12));
 
-        // Create main panel with proper Ultimate layout
-        JPanel mainPanel = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.anchor = GridBagConstraints.NORTHWEST;
-        gbc.insets = JBUI.insets(10, 0, 10, 0);
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 
-        // Log files section
-        gbc.gridx = 0; gbc.gridy = 0; gbc.fill = GridBagConstraints.BOTH;
-        gbc.weightx = 1.0; gbc.weighty = 1.0;
-        mainPanel.add(createLogsSection(), gbc);
+        content.add(createLogsSection());
+        content.add(Box.createVerticalStrut(12));
+        content.add(createSaveSection());
+        content.add(Box.createVerticalStrut(8));
+        content.add(stdoutCheck);
+        content.add(stderrCheck);
+        content.add(Box.createVerticalStrut(12));
+        content.add(createBottomOptions());
+        content.add(Box.createVerticalGlue());
 
-        // Console options section
-        gbc.gridy = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weighty = 0.0;
-        mainPanel.add(createConsoleOptionsSection(), gbc);
-
-        add(mainPanel, BorderLayout.CENTER);
+        add(content, BorderLayout.CENTER);
     }
 
     /**
-     * Initialize with default Tomcat logs matching Ultimate
+     * Initialize with default Tomcat logs (matching official IntelliJ Tomcat plugin)
      */
     private void initializeDefaultLogs() {
-        // Add default Tomcat logs exactly like Ultimate shows
-        logConfigurations.add(createTomcatLog("Tomcat Localhost Log", true));
-        logConfigurations.add(createTomcatLog("Tomcat Catalina Log", true));
-        logConfigurations.add(createTomcatLog("Tomcat Manager Log", false));
-        logConfigurations.add(createTomcatLog("Tomcat Host Manager Log", false));
-        logConfigurations.add(createTomcatLog("Tomcat Localhost Access Log", false));
-
-        refreshLogsTable();
+        logRows.clear();
+        // Match exact order and activation from official plugin
+        logRows.add(new LogRow(true, "Tomcat Localhost Access Log", false));
+        logRows.add(new LogRow(true, "Tomcat Localhost Log", false));
+        logRows.add(new LogRow(true, "Tomcat Catalina Log", false));
+        logRows.add(new LogRow(false, "Tomcat Manager Log", false));
+        logRows.add(new LogRow(false, "Tomcat Host Manager Log", false));
+        refreshTable();
     }
 
     /**
-     * Create a default Tomcat log configuration
-     */
-    private LogFileConfiguration createTomcatLog(String name, boolean active) {
-        LogFileConfiguration config = new LogFileConfiguration();
-        config.setAlias(name);
-        config.setActive(active);
-        config.setSkipContent(false);
-        config.setShowAllMessages(true);
-
-        // Set appropriate file paths
-        switch (name) {
-            case "Tomcat Localhost Log":
-                config.setFilePath("$CATALINA_BASE/logs/localhost.$DATE.log");
-                break;
-            case "Tomcat Catalina Log":
-                config.setFilePath("$CATALINA_BASE/logs/catalina.$DATE.log");
-                break;
-            case "Tomcat Manager Log":
-                config.setFilePath("$CATALINA_BASE/logs/manager.$DATE.log");
-                break;
-            case "Tomcat Host Manager Log":
-                config.setFilePath("$CATALINA_BASE/logs/host-manager.$DATE.log");
-                break;
-            case "Tomcat Localhost Access Log":
-                config.setFilePath("$CATALINA_BASE/logs/localhost_access_log.$DATE.txt");
-                break;
-        }
-
-        return config;
-    }
-
-    /**
-     * Create logs section - matches Ultimate exactly
+     * Create logs section with table and buttons
      */
     private JPanel createLogsSection() {
         JPanel panel = new JPanel(new BorderLayout());
 
-        // Section title
-        JLabel titleLabel = new JLabel("Log files to be shown in console");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD));
-        titleLabel.setBorder(JBUI.Borders.emptyBottom(10));
-        panel.add(titleLabel, BorderLayout.NORTH);
+        JBLabel title = new JBLabel("Log files to be shown in console");
+        title.setBorder(JBUI.Borders.emptyBottom(6));
+        panel.add(title, BorderLayout.NORTH);
 
-        // Center panel with table and buttons
-        JPanel centerPanel = new JPanel(new BorderLayout());
-        centerPanel.add(createLogsTablePanel(), BorderLayout.CENTER);
-        centerPanel.add(createButtonsPanel(), BorderLayout.SOUTH);
+        tableModel = new LogTableModel();
+        logsTable = new JBTable(tableModel);
+        logsTable.setShowGrid(false);
+        logsTable.setRowHeight(24);
+        logsTable.setAutoCreateRowSorter(false);
+        logsTable.getColumnModel().getColumn(0).setMaxWidth(70);
+        logsTable.getColumnModel().getColumn(2).setMaxWidth(100);
 
-        panel.add(centerPanel, BorderLayout.CENTER);
+        ToolbarDecorator decorator = ToolbarDecorator.createDecorator(logsTable)
+                .setAddAction(button -> addLogFile())
+                .setEditAction(button -> editSelected())
+                .setRemoveAction(button -> removeSelected())
+                .disableUpDownActions();
+
+        JComponent tableComponent = decorator.createPanel();
+        tableComponent.setPreferredSize(new Dimension(600, 220));
+        panel.add(tableComponent, BorderLayout.CENTER);
         return panel;
     }
 
-    /**
-     * Create the logs table - matches Ultimate exactly
-     */
-    private JPanel createLogsTablePanel() {
-        JPanel panel = new JPanel(new BorderLayout());
+    private JPanel createSaveSection() {
+        JPanel panel = new JPanel(new BorderLayout(6, 0));
+        panel.add(saveToFileCheck, BorderLayout.WEST);
 
-        // Create table model with 3 columns matching Ultimate
-        String[] columnNames = {"Is Active", "Log File Entry", "Skip Content"};
-        tableModel = new DefaultTableModel(columnNames, 0) {
-            @Override
-            public Class<?> getColumnClass(int column) {
-                switch (column) {
-                    case 0: // Is Active
-                    case 2: // Skip Content
-                        return Boolean.class;
-                    case 1: // Log File Entry
-                        return String.class;
-                    default:
-                        return Object.class;
+        JPanel pathPanel = new JPanel(new BorderLayout(6, 0));
+        pathPanel.add(saveToFileField, BorderLayout.CENTER);
+        saveToFileBrowse.setMargin(JBUI.insets(2, 8));
+        saveToFileBrowse.addActionListener(e -> openFileChooser());
+        pathPanel.add(saveToFileBrowse, BorderLayout.EAST);
+
+        panel.add(pathPanel, BorderLayout.CENTER);
+        panel.setBorder(JBUI.Borders.empty(4, 0, 0, 0));
+        saveToFileField.setEnabled(false);
+        saveToFileBrowse.setEnabled(false);
+        saveToFileCheck.addActionListener(e -> {
+            boolean enabled = saveToFileCheck.isSelected();
+            saveToFileField.setEnabled(enabled);
+            saveToFileBrowse.setEnabled(enabled);
+        });
+        return panel;
+    }
+
+    private JPanel createBottomOptions() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        panel.add(showPageCheck);
+        panel.add(activateToolWindowCheck);
+        return panel;
+    }
+
+    private void openFileChooser() {
+        PathChooserDialog dialog = FileChooserFactory.getInstance()
+                .createPathChooser(FileChooserDescriptorFactory.createSingleFileOrExecutableAppDescriptor(), project, this);
+        dialog.choose(null, (chosen) -> {
+            if (!chosen.isEmpty()) {
+                VirtualFile vf = chosen.get(0);
+                if (vf != null) {
+                    saveToFileField.setText(vf.getPath());
                 }
             }
-
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return column == 0 || column == 2; // Only checkboxes editable
-            }
-        };
-
-        logsTable = new JBTable(tableModel);
-        logsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        logsTable.getTableHeader().setReorderingAllowed(false);
-        logsTable.setRowHeight(25);
-
-        // Set column widths to match Ultimate
-        logsTable.getColumnModel().getColumn(0).setPreferredWidth(80);   // Is Active
-        logsTable.getColumnModel().getColumn(1).setPreferredWidth(300);  // Log File Entry
-        logsTable.getColumnModel().getColumn(2).setPreferredWidth(100);  // Skip Content
-
-        // Add table listener for real-time updates
-        tableModel.addTableModelListener(e -> {
-            if (e.getColumn() >= 0 && e.getFirstRow() >= 0) {
-                updateLogConfigurationFromTable(e.getFirstRow());
-            }
         });
+    }
 
-        // Add selection listener
-        logsTable.getSelectionModel().addListSelectionListener(e -> updateButtonStates());
-
-        JScrollPane scrollPane = new JScrollPane(logsTable);
-        scrollPane.setPreferredSize(new Dimension(0, 200));
-        scrollPane.setBorder(BorderFactory.createLoweredBevelBorder());
-        panel.add(scrollPane, BorderLayout.CENTER);
-
-        return panel;
+    private void refreshTable() {
+        if (tableModel != null) {
+            tableModel.fireTableDataChanged();
+        }
     }
 
     /**
-     * Create buttons panel - horizontal layout like Ultimate
-     */
-    private JPanel createButtonsPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 5));
-
-        addButton = new JButton("+");
-        removeButton = new JButton("-");
-        editButton = new JButton("Edit");
-
-        Dimension buttonSize = new Dimension(30, 25);
-        addButton.setPreferredSize(buttonSize);
-        removeButton.setPreferredSize(buttonSize);
-        editButton.setPreferredSize(new Dimension(50, 25));
-
-        addButton.setToolTipText("Add log file");
-        removeButton.setToolTipText("Remove selected log file");
-        editButton.setToolTipText("Edit selected log file");
-
-        addButton.addActionListener(e -> addLogFile());
-        removeButton.addActionListener(e -> removeLogFile());
-        editButton.addActionListener(e -> editLogFile());
-
-        panel.add(addButton);
-        panel.add(removeButton);
-        panel.add(editButton);
-
-        updateButtonStates();
-        return panel;
-    }
-
-    /**
-     * Create console options section - matches Ultimate exactly
-     */
-    private JPanel createConsoleOptionsSection() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(JBUI.Borders.emptyTop(20));
-
-        // Save console output option
-        JPanel savePanel = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = JBUI.insets(2);
-
-        gbc.gridx = 0; gbc.gridy = 0;
-        saveConsoleOutputCheckBox = new JCheckBox("Save console output to file:");
-        savePanel.add(saveConsoleOutputCheckBox, gbc);
-
-        gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = JBUI.insets(2, 10, 2, 5);
-        saveToFileField = new JTextField();
-        saveToFileField.setEnabled(false);
-        savePanel.add(saveToFileField, gbc);
-
-        gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
-        gbc.insets = JBUI.insets(2);
-        browseFileButton = new JButton("...");
-        browseFileButton.setPreferredSize(new Dimension(30, 25));
-        browseFileButton.setEnabled(false);
-        browseFileButton.addActionListener(e -> browseSaveToFile());
-        savePanel.add(browseFileButton, gbc);
-
-        saveConsoleOutputCheckBox.addActionListener(e -> {
-            boolean enabled = saveConsoleOutputCheckBox.isSelected();
-            saveToFileField.setEnabled(enabled);
-            browseFileButton.setEnabled(enabled);
-        });
-
-        // Console stream options
-        showConsoleStdOutCheckBox = new JCheckBox(
-                "Show console when a message is printed to standard output stream", false);
-        showConsoleStdErrCheckBox = new JCheckBox(
-                "Show console when a message is printed to standard error stream", false);
-
-        panel.add(savePanel);
-        panel.add(Box.createVerticalStrut(8));
-        panel.add(showConsoleStdOutCheckBox);
-        panel.add(Box.createVerticalStrut(5));
-        panel.add(showConsoleStdErrCheckBox);
-
-        return panel;
-    }
-
-    /**
-     * Add new log file
+     * Add a new log file path
      */
     private void addLogFile() {
-        LogFileConfigurationDialog dialog = new LogFileConfigurationDialog(project, null);
-        if (dialog.showAndGet()) {
-            LogFileConfiguration config = dialog.getLogFileConfiguration();
-            logConfigurations.add(config);
-            refreshLogsTable();
+        String path = promptForLogPath("Add Log File", null);
 
-            // Select the new row
-            int newRow = logConfigurations.size() - 1;
-            logsTable.setRowSelectionInterval(newRow, newRow);
-            updateButtonStates();
+        if (path != null && !path.trim().isEmpty()) {
+            String normalized = path.trim();
+            logRows.add(new LogRow(true, normalized, false));
+            refreshTable();
         }
     }
 
-    /**
-     * Remove selected log file
-     */
-    private void removeLogFile() {
-        int selectedRow = logsTable.getSelectedRow();
-        if (selectedRow >= 0 && selectedRow < logConfigurations.size()) {
-            LogFileConfiguration config = logConfigurations.get(selectedRow);
+    private String promptForLogPath(String title, String currentValue) {
+        return (String) JOptionPane.showInputDialog(
+                this,
+                "Enter log file name or path:",
+                title,
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                null,
+                currentValue == null ? "" : currentValue
+        );
+    }
 
-            int result = JOptionPane.showConfirmDialog(this,
-                    "Remove log file '" + config.getAlias() + "'?",
-                    "Remove Log File",
-                    JOptionPane.YES_NO_OPTION);
+    private void editSelected() {
+        int selected = logsTable.getSelectedRow();
+        if (selected < 0) return;
+        selected = logsTable.convertRowIndexToModel(selected);
 
-            if (result == JOptionPane.YES_OPTION) {
-                logConfigurations.remove(selectedRow);
-                refreshLogsTable();
-                updateButtonStates();
-            }
+        LogRow row = logRows.get(selected);
+        String newPath = promptForLogPath("Edit Log File", row.entry);
+        if (newPath != null && !newPath.trim().isEmpty()) {
+            row.entry = newPath.trim();
+            refreshTable();
+            logsTable.setRowSelectionInterval(selected, selected);
         }
     }
 
-    /**
-     * Edit selected log file
-     */
-    private void editLogFile() {
-        int selectedRow = logsTable.getSelectedRow();
-        if (selectedRow >= 0 && selectedRow < logConfigurations.size()) {
-            LogFileConfiguration config = logConfigurations.get(selectedRow);
-
-            LogFileConfigurationDialog dialog = new LogFileConfigurationDialog(project, config);
-            if (dialog.showAndGet()) {
-                LogFileConfiguration updated = dialog.getLogFileConfiguration();
-                logConfigurations.set(selectedRow, updated);
-                refreshLogsTable();
-                logsTable.setRowSelectionInterval(selectedRow, selectedRow);
-            }
-        }
+    private void removeSelected() {
+        int selected = logsTable.getSelectedRow();
+        if (selected < 0) return;
+        selected = logsTable.convertRowIndexToModel(selected);
+        logRows.remove(selected);
+        refreshTable();
     }
 
     /**
-     * Browse for save file
-     */
-    private void browseSaveToFile() {
-        FileChooserDescriptor descriptor = new FileChooserDescriptor(false, false, false, false, false, true);
-        descriptor.setTitle("Save Console Output");
-        descriptor.setDescription("Choose where to save console output");
-        descriptor.withFileFilter(file -> {
-            String name = file.getName().toLowerCase();
-            return name.endsWith(".log") || name.endsWith(".txt") || name.endsWith(".out");
-        });
-
-        VirtualFile file = FileChooser.chooseFile(descriptor, this, project, null);
-        if (file != null) {
-            saveToFileField.setText(file.getPath());
-        }
-    }
-
-    /**
-     * Update configuration from table changes
-     */
-    private void updateLogConfigurationFromTable(int row) {
-        if (row >= 0 && row < logConfigurations.size()) {
-            LogFileConfiguration config = logConfigurations.get(row);
-
-            Boolean isActive = (Boolean) tableModel.getValueAt(row, 0);
-            Boolean skipContent = (Boolean) tableModel.getValueAt(row, 2);
-
-            if (isActive != null) {
-                config.setActive(isActive);
-            }
-            if (skipContent != null) {
-                config.setSkipContent(skipContent);
-                config.setShowAllMessages(!skipContent);
-            }
-        }
-    }
-
-    /**
-     * Refresh table from configurations
-     */
-    private void refreshLogsTable() {
-        tableModel.setRowCount(0);
-
-        for (LogFileConfiguration config : logConfigurations) {
-            tableModel.addRow(new Object[]{
-                    config.isActive(),
-                    config.getAlias(),
-                    config.isSkipContent()
-            });
-        }
-
-        updateButtonStates();
-    }
-
-    /**
-     * Update button states
-     */
-    private void updateButtonStates() {
-        int selectedRow = logsTable.getSelectedRow();
-        boolean hasSelection = selectedRow >= 0;
-
-        removeButton.setEnabled(hasSelection);
-        editButton.setEnabled(hasSelection);
-    }
-
-    /**
-     * Reset from configuration
+     * Reset UI from configuration
      */
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
-        try {
-            logConfigurations.clear();
+        logRows.clear();
 
-            List<LogFileConfiguration> configLogs = configuration.getLogFileConfigurations();
-            if (configLogs != null && !configLogs.isEmpty()) {
-                logConfigurations.addAll(configLogs);
-            } else {
-                initializeDefaultLogs();
-                return;
+        List<String> configLogFiles = configuration.getLogFileConfigurations();
+        if (configLogFiles != null && !configLogFiles.isEmpty()) {
+            for (String path : configLogFiles) {
+                if (path != null && !path.trim().isEmpty()) {
+                    logRows.add(new LogRow(true, path.trim(), false));
+                }
             }
-
-            refreshLogsTable();
-
-            // Reset console options
-            saveConsoleOutputCheckBox.setSelected(false);
-            saveToFileField.setText("");
-            saveToFileField.setEnabled(false);
-            browseFileButton.setEnabled(false);
-            showConsoleStdOutCheckBox.setSelected(false);
-            showConsoleStdErrCheckBox.setSelected(false);
-
-            System.out.println("DevTomcat: Reset logs configuration");
-
-        } catch (Exception e) {
-            System.err.println("DevTomcat: Error resetting logs: " + e.getMessage());
-            logConfigurations.clear();
-            initializeDefaultLogs();
         }
+
+        if (logRows.isEmpty()) {
+            initializeDefaultLogs();
+        } else {
+            refreshTable();
+        }
+
+        activateToolWindowCheck.setSelected(configuration.getConfigData().getUiConfig().isActivateToolWindow());
+        showPageCheck.setSelected(false);
     }
 
     /**
-     * Apply to configuration
+     * Apply UI settings to configuration
      */
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        try {
-            // Update all configurations from table
-            for (int i = 0; i < Math.min(tableModel.getRowCount(), logConfigurations.size()); i++) {
-                updateLogConfigurationFromTable(i);
+        List<String> activeLogs = new ArrayList<>();
+        for (LogRow row : logRows) {
+            if (row != null && row.active && row.entry != null && !row.entry.trim().isEmpty()) {
+                activeLogs.add(row.entry.trim());
             }
-
-            // Copy configurations to avoid reference issues
-            List<LogFileConfiguration> configLogs = new ArrayList<>();
-            for (LogFileConfiguration config : logConfigurations) {
-                configLogs.add(new LogFileConfiguration(config));
-            }
-
-            configuration.setLogFileConfigurations(configLogs);
-
-            long activeCount = configLogs.stream().filter(LogFileConfiguration::isActive).count();
-            System.out.println("DevTomcat: Applied " + configLogs.size() +
-                    " log configurations (" + activeCount + " active)");
-
-        } catch (Exception e) {
-            throw new ConfigurationException("Failed to apply log configuration: " + e.getMessage());
         }
-    }
 
-    // Utility methods
-    public int getActiveLogFileCount() {
-        return (int) logConfigurations.stream().filter(LogFileConfiguration::isActive).count();
-    }
-
-    public boolean hasLogFiles() {
-        return !logConfigurations.isEmpty();
+        configuration.getConfigData().getLogFileConfig().setLogFiles(activeLogs);
+        configuration.getConfigData().getUiConfig().setActivateToolWindow(activateToolWindowCheck.isSelected());
+        configuration.getConfigData().getUiConfig().setFocusToolWindow(activateToolWindowCheck.isSelected());
     }
 
     /**
-     * Simple Log File Configuration Dialog
+     * Validate settings
      */
-    private static class LogFileConfigurationDialog extends com.intellij.openapi.ui.DialogWrapper {
+    public void validateSettings() throws ConfigurationException {
+        if (logRows == null) {
+            return;
+        }
 
-        private final Project project;
-        private LogFileConfiguration config;
+        for (LogRow row : logRows) {
+            if (row.entry == null || row.entry.trim().isEmpty()) {
+                throw new ConfigurationException("Log file path cannot be empty");
+            }
+            if (row.entry.length() > 1024) {
+                throw new ConfigurationException("Log file path too long: " + row.entry);
+            }
+        }
+    }
 
-        private JTextField aliasField;
-        private JTextField filePathField;
-        private JButton browsePathButton;
-        private JCheckBox activeCheckBox;
-        private JCheckBox skipContentCheckBox;
+    /**
+     * Check if settings are valid
+     */
+    public boolean isValid() {
+        try {
+            validateSettings();
+            return true;
+        } catch (ConfigurationException e) {
+            return false;
+        }
+    }
 
-        protected LogFileConfigurationDialog(@NotNull Project project, LogFileConfiguration existing) {
-            super(project);
-            this.project = project;
-            this.config = existing;
+    /**
+     * Get current log files
+     */
+    @NotNull
+    public List<String> getLogFiles() {
+        List<String> files = new ArrayList<>();
+        for (LogRow row : logRows) {
+            if (row != null && row.entry != null) {
+                files.add(row.entry);
+            }
+        }
+        return files;
+    }
 
-            setTitle(existing == null ? "Add Log File" : "Edit Log File");
-            setSize(500, 250);
-            init();
+    /**
+     * Set log files
+     */
+    public void setLogFiles(@NotNull List<String> logFiles) {
+        this.logRows.clear();
+        for (String path : logFiles) {
+            if (path != null && !path.trim().isEmpty()) {
+                this.logRows.add(new LogRow(true, path.trim(), false));
+            }
+        }
+        refreshTable();
+    }
+
+    private static class LogRow {
+        boolean active;
+        String entry;
+        boolean skipContent;
+
+        LogRow(boolean active, String entry, boolean skipContent) {
+            this.active = active;
+            this.entry = entry;
+            this.skipContent = skipContent;
+        }
+    }
+
+    private class LogTableModel extends AbstractTableModel {
+        private final String[] columns = {"Is Active", "Log File Entry", "Skip Content"};
+
+        @Override
+        public int getRowCount() {
+            return logRows.size();
         }
 
         @Override
-        protected JComponent createCenterPanel() {
-            JPanel panel = new JPanel(new GridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(15));
-
-            GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = JBUI.insets(5);
-            gbc.anchor = GridBagConstraints.WEST;
-
-            // Alias field
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("Alias:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            aliasField = new JTextField(25);
-            panel.add(aliasField, gbc);
-
-            // File path field
-            gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("File Path:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 0.8;
-
-            JPanel pathPanel = new JPanel(new BorderLayout());
-            filePathField = new JTextField();
-            browsePathButton = new JButton("Browse");
-            browsePathButton.addActionListener(e -> browseLogFile());
-
-            pathPanel.add(filePathField, BorderLayout.CENTER);
-            pathPanel.add(browsePathButton, BorderLayout.EAST);
-            panel.add(pathPanel, gbc);
-
-            // Options
-            gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2;
-            activeCheckBox = new JCheckBox("Active (monitor this log file)", true);
-            panel.add(activeCheckBox, gbc);
-
-            gbc.gridy = 3;
-            skipContentCheckBox = new JCheckBox("Skip content (show file name only)");
-            panel.add(skipContentCheckBox, gbc);
-
-            // Initialize fields
-            if (config != null) {
-                aliasField.setText(config.getAlias());
-                filePathField.setText(config.getFilePath());
-                activeCheckBox.setSelected(config.isActive());
-                skipContentCheckBox.setSelected(config.isSkipContent());
-            }
-
-            return panel;
-        }
-
-        private void browseLogFile() {
-            FileChooserDescriptor descriptor = new FileChooserDescriptor(true, false, false, false, false, false);
-            descriptor.setTitle("Select Log File");
-            descriptor.withFileFilter(file -> {
-                String name = file.getName().toLowerCase();
-                return name.endsWith(".log") || name.endsWith(".txt") || name.endsWith(".out");
-            });
-
-            VirtualFile file = FileChooser.chooseFile(descriptor, getContentPane(), project, null);
-            if (file != null) {
-                filePathField.setText(file.getPath());
-            }
+        public int getColumnCount() {
+            return columns.length;
         }
 
         @Override
-        protected void doOKAction() {
-            String alias = aliasField.getText().trim();
-            String filePath = filePathField.getText().trim();
-
-            if (alias.isEmpty()) {
-                JOptionPane.showMessageDialog(getContentPane(),
-                        "Alias is required", "Validation Error", JOptionPane.ERROR_MESSAGE);
-                aliasField.requestFocus();
-                return;
-            }
-
-            if (filePath.isEmpty()) {
-                JOptionPane.showMessageDialog(getContentPane(),
-                        "File path is required", "Validation Error", JOptionPane.ERROR_MESSAGE);
-                filePathField.requestFocus();
-                return;
-            }
-
-            if (config == null) {
-                config = new LogFileConfiguration();
-            }
-
-            config.setAlias(alias);
-            config.setFilePath(filePath);
-            config.setActive(activeCheckBox.isSelected());
-            config.setSkipContent(skipContentCheckBox.isSelected());
-            config.setShowAllMessages(!skipContentCheckBox.isSelected());
-
-            super.doOKAction();
+        public String getColumnName(int column) {
+            return columns[column];
         }
 
-        public LogFileConfiguration getLogFileConfiguration() {
-            return config;
+        @Override
+        public Class<?> getColumnClass(int columnIndex) {
+            if (columnIndex == 0 || columnIndex == 2) return Boolean.class;
+            return String.class;
+        }
+
+        @Override
+        public boolean isCellEditable(int rowIndex, int columnIndex) {
+            return true;
+        }
+
+        @Override
+        public Object getValueAt(int rowIndex, int columnIndex) {
+            LogRow row = logRows.get(rowIndex);
+            return switch (columnIndex) {
+                case 0 -> row.active;
+                case 1 -> row.entry;
+                case 2 -> row.skipContent;
+                default -> null;
+            };
+        }
+
+        @Override
+        public void setValueAt(Object aValue, int rowIndex, int columnIndex) {
+            LogRow row = logRows.get(rowIndex);
+            switch (columnIndex) {
+                case 0 -> row.active = Objects.equals(aValue, Boolean.TRUE);
+                case 1 -> row.entry = aValue != null ? aValue.toString() : "";
+                case 2 -> row.skipContent = Objects.equals(aValue, Boolean.TRUE);
+                default -> {
+                }
+            }
+            fireTableCellUpdated(rowIndex, columnIndex);
         }
     }
 }

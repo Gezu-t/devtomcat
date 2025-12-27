@@ -2,19 +2,26 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Before Launch Section
- *
- * A collapsible "Before launch" section with "Build" task and +/-/↑/↓ buttons
+ * Collapsible section with task list and buttons
  */
 public class BeforeLaunchSection implements ConfigurationSection {
+
+    private static final Logger LOG = Logger.getInstance(BeforeLaunchSection.class);
 
     private DefaultListModel<String> beforeLaunchModel;
     private JList<String> beforeLaunchList;
@@ -23,7 +30,7 @@ public class BeforeLaunchSection implements ConfigurationSection {
     private JButton moveUpButton;
     private JButton moveDownButton;
     private JPanel panel;
-    private boolean isExpanded = false;
+    private boolean isExpanded = true;
 
     @Override
     @NotNull
@@ -31,11 +38,9 @@ public class BeforeLaunchSection implements ConfigurationSection {
         if (panel == null) {
             panel = new JPanel(new BorderLayout());
 
-            // Create collapsible header
             JPanel headerPanel = createHeaderPanel();
             panel.add(headerPanel, BorderLayout.NORTH);
 
-            // Create content panel (initially hidden)
             JPanel contentPanel = createContentPanel();
             contentPanel.setVisible(isExpanded);
             panel.add(contentPanel, BorderLayout.CENTER);
@@ -46,7 +51,6 @@ public class BeforeLaunchSection implements ConfigurationSection {
     private JPanel createHeaderPanel() {
         JPanel headerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 5));
 
-        // Collapsible arrow button
         JButton expandButton = new JButton();
         expandButton.setIcon(isExpanded ? AllIcons.General.ArrowDown : AllIcons.General.ArrowRight);
         expandButton.setBorderPainted(false);
@@ -65,20 +69,18 @@ public class BeforeLaunchSection implements ConfigurationSection {
 
     private JPanel createContentPanel() {
         JPanel contentPanel = new JPanel(new BorderLayout());
-        contentPanel.setBorder(JBUI.Borders.empty(5, 20, 5, 5)); // Indent content
+        contentPanel.setBorder(JBUI.Borders.empty(5, 20, 5, 5));
 
-        // Task list
         beforeLaunchModel = new DefaultListModel<>();
-        beforeLaunchModel.addElement("Build"); // Default task as shown in Ultimate
+        beforeLaunchModel.addElement("Build");
 
         beforeLaunchList = new JList<>(beforeLaunchModel);
         beforeLaunchList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         beforeLaunchList.setPreferredSize(new Dimension(0, 60));
 
-        JScrollPane scrollPane = new JScrollPane(beforeLaunchList);
+        JBScrollPane scrollPane = new JBScrollPane(beforeLaunchList);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 
-        // Button panel
         JPanel buttonPanel = createButtonPanel();
 
         contentPanel.add(scrollPane, BorderLayout.CENTER);
@@ -92,7 +94,6 @@ public class BeforeLaunchSection implements ConfigurationSection {
         buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.Y_AXIS));
         buttonPanel.setBorder(JBUI.Borders.empty(0, 5, 0, 0));
 
-        // Create buttons with icons
         addButton = new JButton("+");
         addButton.setPreferredSize(new Dimension(25, 25));
         addButton.setToolTipText("Add");
@@ -128,14 +129,12 @@ public class BeforeLaunchSection implements ConfigurationSection {
     private void toggleExpanded() {
         isExpanded = !isExpanded;
 
-        // Update arrow icon
         Component[] components = ((JPanel) panel.getComponent(0)).getComponents();
         if (components[0] instanceof JButton) {
             JButton expandButton = (JButton) components[0];
             expandButton.setIcon(isExpanded ? AllIcons.General.ArrowDown : AllIcons.General.ArrowRight);
         }
 
-        // Show/hide content
         panel.getComponent(1).setVisible(isExpanded);
         panel.revalidate();
         panel.repaint();
@@ -177,7 +176,6 @@ public class BeforeLaunchSection implements ConfigurationSection {
 
     @Override
     public void loadConfiguration() {
-        // Ensure "Build" task is present as default
         if (beforeLaunchModel.isEmpty()) {
             beforeLaunchModel.addElement("Build");
         }
@@ -185,29 +183,41 @@ public class BeforeLaunchSection implements ConfigurationSection {
 
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
-        // Reset to default "Build" task
         beforeLaunchModel.clear();
         beforeLaunchModel.addElement("Build");
     }
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        // Before launch tasks are typically handled at the IDE level
-        System.out.println("DevTomcat: Before launch tasks count: " + beforeLaunchModel.getSize());
+        LOG.info("Before launch tasks count: " + beforeLaunchModel.getSize());
     }
 
     @Override
     public boolean isValid() {
-        return true; // Before launch tasks are always valid
+        return true;
+    }
+
+    @Override
+    public boolean isModified(@NotNull TomcatRunConfiguration config) {
+        // Before launch tasks are not currently stored in configuration
+        // so we always return false (no changes to persist)
+        return false;
+    }
+
+    @Override
+    @NotNull
+    public List<ValidationInfo> validateSettings() {
+        // Before launch section has no validation requirements
+        return Collections.emptyList();
     }
 
     @Override
     public boolean shouldFillVertically() {
-        return isExpanded; // Only fill vertically when expanded
+        return isExpanded;
     }
 
-    public java.util.List<String> getTasks() {
-        java.util.List<String> tasks = new java.util.ArrayList<>();
+    public List<String> getTasks() {
+        List<String> tasks = new ArrayList<>();
         for (int i = 0; i < beforeLaunchModel.getSize(); i++) {
             tasks.add(beforeLaunchModel.getElementAt(i));
         }

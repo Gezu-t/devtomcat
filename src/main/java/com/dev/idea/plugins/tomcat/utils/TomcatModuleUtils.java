@@ -1,40 +1,36 @@
 package com.dev.idea.plugins.tomcat.utils;
 
-import com.intellij.execution.Location;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
-import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Module and Project utilities for DevTomcat plugin.
+ * Provides methods to identify web modules, locate web roots, and extract context paths
+ * from IntelliJ IDEA modules, ensuring compatibility with various web project structures.
  *
- * This class handles all module-related operations including:
- * - Finding web modules in a project
- * - Locating web roots and resources
- * - Determining test vs production code
- * - Extracting context paths from modules
+ * This class handles:
+ * - Detection of web modules based on web roots and build configurations
+ * - Identification of web root directories (e.g., src/main/webapp, WebContent)
+ * - Extraction of context paths from module names
+ * - Test vs. production source detection
  *
  * @author Gezahegn Lemma (Gezu)
+ * @version 1.1
  */
 public final class TomcatModuleUtils {
-
-    private static final Logger LOG = Logger.getInstance(TomcatModuleUtils.class);
 
     // Common web root directory names
     private static final Set<String> WEB_ROOT_NAMES = Set.of(
@@ -49,7 +45,15 @@ public final class TomcatModuleUtils {
             "src/webapp",
             "webapp",
             "WebRoot",
-            "src/main/web"
+            "src/main/web",
+            "src/main/resources/static",
+            "public"
+    );
+
+    // Common web file extensions
+    private static final Set<String> WEB_FILE_EXTENSIONS = Set.of(
+            "html", "jsp", "xhtml", "js", "ts", // Frontend files
+            "xml" // web.xml for traditional Java web apps
     );
 
     private TomcatModuleUtils() {
@@ -57,47 +61,10 @@ public final class TomcatModuleUtils {
     }
 
     /**
-     * Finds the most appropriate web module in the project.
-     * This method uses intelligent heuristics to identify the main web module.
-     *
-     * @param project The current project
-     * @return The most likely web module, or null if none found
-     */
-    @Nullable
-    public static Module findWebModule(@NotNull Project project) {
-        List<Module> webModules = findAllWebModules(project);
-
-        if (webModules.isEmpty()) {
-            // No web modules found, try to find any suitable module
-            return findBestModule(project);
-        }
-
-        if (webModules.size() == 1) {
-            return webModules.get(0);
-        }
-
-        // Multiple web modules - use heuristics to find the best one
-        return selectBestWebModule(webModules, project);
-    }
-
-    /**
-     * Finds all modules that appear to be web modules.
-     *
-     * @param project The current project
-     * @return List of web modules (never null)
-     */
-    @NotNull
-    public static List<Module> findAllWebModules(@NotNull Project project) {
-        return Arrays.stream(ModuleManager.getInstance(project).getModules())
-                .filter(TomcatModuleUtils::isWebModule)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Checks if a module is a web module by looking for web resources.
+     * Checks if a module is a web module by looking for web roots or build tool configurations.
      *
      * @param module Module to check
-     * @return true if the module contains web resources
+     * @return true if the module contains web resources or is configured as a web module
      */
     public static boolean isWebModule(@NotNull Module module) {
         // Skip test modules
@@ -105,9 +72,14 @@ public final class TomcatModuleUtils {
             return false;
         }
 
-        // Check for web resources
+        // Check for web roots
         List<VirtualFile> webRoots = findWebRoots(module);
-        return !webRoots.isEmpty();
+        if (!webRoots.isEmpty()) {
+            return true;
+        }
+
+        // Check for build tool configurations (e.g., Maven war plugin)
+        return hasWebBuildConfiguration(module);
     }
 
     /**
@@ -130,7 +102,7 @@ public final class TomcatModuleUtils {
                 }
             }
 
-            // Also check direct children with web root names
+            // Check direct children with web root names
             for (VirtualFile child : contentRoot.getChildren()) {
                 if (child.isDirectory() && WEB_ROOT_NAMES.contains(child.getName())) {
                     if (isValidWebRoot(child)) {
@@ -141,68 +113,6 @@ public final class TomcatModuleUtils {
         }
 
         return webRoots;
-    }
-
-    /**
-     * Gets the primary web root for a module.
-     *
-     * @param module Module to check
-     * @return Path to the web root, or null if not found
-     */
-    @Nullable
-    public static VirtualFile getWebRoot(@NotNull Module module) {
-        List<VirtualFile> webRoots = findWebRoots(module);
-
-        if (webRoots.isEmpty()) {
-            return null;
-        }
-
-        // Prefer src/main/webapp (Maven standard)
-        for (VirtualFile root : webRoots) {
-            if (root.getPath().endsWith("src/main/webapp")) {
-                return root;
-            }
-        }
-
-        // Return first found
-        return webRoots.get(0);
-    }
-
-    /**
-     * Creates a web root directory for a module if it doesn't exist.
-     *
-     * @param module Module to create web root for
-     * @return Path to the created or existing web root
-     */
-    @Nullable
-    public static Path createWebRoot(@NotNull Module module) {
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-        if (contentRoots.length == 0) {
-            return null;
-        }
-
-        // Try Maven structure first
-        Path webRoot = Paths.get(contentRoots[0].getPath(), "src", "main", "webapp");
-        try {
-            Files.createDirectories(webRoot);
-            Files.createDirectories(webRoot.resolve("WEB-INF"));
-            LOG.info("Created web root at: " + webRoot);
-            return webRoot;
-        } catch (Exception e) {
-            LOG.warn("Failed to create Maven web structure", e);
-        }
-
-        // Fallback to simple structure
-        webRoot = Paths.get(contentRoots[0].getPath(), "web");
-        try {
-            Files.createDirectories(webRoot);
-            Files.createDirectories(webRoot.resolve("WEB-INF"));
-            LOG.info("Created web root at: " + webRoot);
-            return webRoot;
-        } catch (Exception e) {
-            LOG.error("Failed to create web root", e);
-            return null;
-        }
     }
 
     /**
@@ -247,7 +157,7 @@ public final class TomcatModuleUtils {
      * @param location Location to check
      * @return true if the location is in test sources
      */
-    public static boolean isTestSource(@Nullable Location<? extends PsiElement> location) {
+    public static boolean isTestSource(@Nullable com.intellij.execution.Location<? extends PsiElement> location) {
         if (location == null) {
             return false;
         }
@@ -259,81 +169,47 @@ public final class TomcatModuleUtils {
 
         Project project = location.getProject();
         ProjectFileIndex projectFileIndex = ProjectFileIndex.getInstance(project);
-
         return projectFileIndex.isInTestSourceContent(file);
-    }
-
-    /**
-     * Finds the module containing a file path.
-     *
-     * @param filePath Path to the file
-     * @param project Current project
-     * @return Module containing the file, or null
-     */
-    @Nullable
-    public static Module getModuleForPath(@Nullable String filePath, @NotNull Project project) {
-        if (StringUtil.isEmpty(filePath)) {
-            return null;
-        }
-
-        try {
-            Path path = Paths.get(filePath);
-            VirtualFile file = VfsUtil.findFile(path, true);
-
-            if (file != null) {
-                return ModuleUtilCore.findModuleForFile(file, project);
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to find module for path: " + filePath, e);
-        }
-
-        return null;
-    }
-
-    /**
-     * Gets all production (non-test) modules in the project.
-     *
-     * @param project Current project
-     * @return List of production modules
-     */
-    @NotNull
-    public static List<Module> getProductionModules(@NotNull Project project) {
-        return Arrays.stream(ModuleManager.getInstance(project).getModules())
-                .filter(module -> !isTestModule(module))
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Gets the web root path as a string for a module.
-     *
-     * @param module Module to check
-     * @return Path to web root, or null if not found
-     */
-    @Nullable
-    public static String getWebRootPath(@NotNull Module module) {
-        VirtualFile webRoot = getWebRoot(module);
-        return webRoot != null ? webRoot.getPath() : null;
     }
 
     // ===================== Private Helper Methods =====================
 
+    /**
+     * Validates a directory as a web root by checking for WEB-INF or common web files.
+     *
+     * @param dir Directory to validate
+     * @return true if the directory is a valid web root
+     */
     private static boolean isValidWebRoot(@Nullable VirtualFile dir) {
         if (dir == null || !dir.isDirectory()) {
             return false;
         }
 
-        // Check for WEB-INF directory
+        // Check for WEB-INF directory (traditional Java web apps)
         VirtualFile webInf = dir.findChild("WEB-INF");
         if (webInf != null && webInf.isDirectory()) {
             return true;
         }
 
-        // Check for common web files
-        return dir.findChild("index.html") != null ||
-                dir.findChild("index.jsp") != null ||
-                dir.findChild("index.xhtml") != null;
+        // Check for common web files (including SPA frameworks)
+        for (VirtualFile child : dir.getChildren()) {
+            if (child.isValid() && !child.isDirectory()) {
+                String extension = child.getExtension();
+                if (extension != null && WEB_FILE_EXTENSIONS.contains(extension.toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
+    /**
+     * Checks if a module is a test module based on its name.
+     *
+     * @param module Module to check
+     * @return true if the module is likely a test module
+     */
     private static boolean isTestModule(@NotNull Module module) {
         String name = module.getName().toLowerCase();
         return name.contains("test") ||
@@ -342,63 +218,49 @@ public final class TomcatModuleUtils {
                 name.endsWith("_test");
     }
 
-    @Nullable
-    private static Module findBestModule(@NotNull Project project) {
-        Module[] modules = ModuleManager.getInstance(project).getModules();
+    /**
+     * Checks if a module has a web build configuration (e.g., Maven war plugin or Gradle war plugin).
+     *
+     * @param module Module to check
+     * @return true if a web build configuration is detected
+     */
+    private static boolean hasWebBuildConfiguration(@NotNull Module module) {
+        Project project = module.getProject();
+        VirtualFile baseDir = module.getProject().getBaseDir();
 
-        if (modules.length == 0) {
-            return null;
+        if (baseDir == null) {
+            return false;
         }
 
-        if (modules.length == 1) {
-            return modules[0];
-        }
-
-        // Look for module with project name
-        String projectName = project.getName();
-        for (Module module : modules) {
-            if (module.getName().equals(projectName) ||
-                    module.getName().equals(projectName + ".main")) {
-                return module;
+        // Check for Maven pom.xml
+        VirtualFile pomFile = baseDir.findFileByRelativePath("pom.xml");
+        if (pomFile != null && pomFile.exists()) {
+            try {
+                String content = com.intellij.openapi.vfs.VfsUtil.loadText(pomFile);
+                if (content.contains("<packaging>war</packaging>") ||
+                        content.contains("maven-war-plugin") ||
+                        content.contains("spring-boot-starter-web")) {
+                    return true;
+                }
+            } catch (IOException e) {
+                // Ignore file read errors
             }
         }
 
-        // Look for common main module patterns
-        for (Module module : modules) {
-            String name = module.getName().toLowerCase();
-            if (name.equals("main") || name.equals("app") || name.contains("main")) {
-                return module;
+        // Check for Gradle build.gradle
+        VirtualFile gradleFile = baseDir.findFileByRelativePath("build.gradle");
+        if (gradleFile != null && gradleFile.exists()) {
+            try {
+                String content = com.intellij.openapi.vfs.VfsUtil.loadText(gradleFile);
+                if (content.contains("apply plugin: 'war'") ||
+                        content.contains("org.springframework.boot")) {
+                    return true;
+                }
+            } catch (IOException e) {
+                // Ignore file read errors
             }
         }
 
-        // Return first non-test module
-        return Arrays.stream(modules)
-                .filter(m -> !isTestModule(m))
-                .findFirst()
-                .orElse(modules[0]);
+        return false;
     }
-
-    @Nullable
-    private static Module selectBestWebModule(@NotNull List<Module> webModules, @NotNull Project project) {
-        // Prefer module with project name
-        String projectName = project.getName();
-        for (Module module : webModules) {
-            if (module.getName().equalsIgnoreCase(projectName)) {
-                return module;
-            }
-        }
-
-        // Prefer main web module
-        for (Module module : webModules) {
-            String name = module.getName().toLowerCase();
-            if (name.contains("main") && name.contains("web")) {
-                return module;
-            }
-        }
-
-        // Return first
-        return webModules.get(0);
-    }
-
-
 }

@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.IntelliJArtifactSelectionDialog;
-import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactContextDialog;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.project.Project;
@@ -146,7 +145,7 @@ public class ArtifactSelectionHandler {
         VirtualFile chosen = FileChooser.chooseFile(descriptor, project, null);
         if (chosen != null) {
             String name = chosen.getName();
-            String type = chosen.isDirectory() ? DeploymentArtifact.TYPE_DIRECTORY : DeploymentArtifact.TYPE_WAR;
+            String type = chosen.isDirectory() ? DeploymentArtifact.TYPE_EXPLODED : DeploymentArtifact.TYPE_WAR;
             String localPath = chosen.getPath();
 
             // Generate context from file name
@@ -171,14 +170,9 @@ public class ArtifactSelectionHandler {
                     return;
                 }
 
-                // Create external deployment using the full constructor
-                DeploymentArtifact deployment = new DeploymentArtifact(
-                        name,
-                        type,
-                        applicationContext,
-                        localPath,
-                        applicationContext
-                );
+                // Create external deployment
+                DeploymentArtifact deployment = new DeploymentArtifact(name, localPath, type);
+                deployment.setContextPath(applicationContext);
 
                 tableManager.addDeployment(deployment);
                 System.out.println("DevTomcat: Added external source: " + name);
@@ -212,10 +206,23 @@ public class ArtifactSelectionHandler {
      */
     private void addArtifactWithContext(@NotNull Artifact artifact, @NotNull String applicationContext) {
         try {
-            DeploymentArtifact deployment = DeploymentArtifact.fromIntellijArtifact(
-                    artifact,
-                    applicationContext
+            // Determine artifact type
+            String typeId = artifact.getArtifactType().getId().toLowerCase();
+            String type = typeId.contains("exploded") ? DeploymentArtifact.TYPE_EXPLODED : DeploymentArtifact.TYPE_WAR;
+
+            // Get artifact output path
+            String outputPath = artifact.getOutputFilePath();
+            if (outputPath == null) {
+                outputPath = "";
+            }
+
+            // Create deployment artifact
+            DeploymentArtifact deployment = new DeploymentArtifact(
+                    artifact.getName(),
+                    outputPath,
+                    type
             );
+            deployment.setContextPath(applicationContext);
 
             // Set server path same as application context if using default
             if (deployment.isUsingDefaultContext()) {

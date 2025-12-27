@@ -5,7 +5,6 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
-import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.Location;
 import com.intellij.execution.actions.ConfigurationContext;
 import com.intellij.execution.actions.ConfigurationFromContext;
@@ -16,7 +15,6 @@ import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
@@ -26,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.MissingResourceException;
 
 /**
  * Professional Enterprise DevTomcat Run Configuration Producer
@@ -52,14 +51,20 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     @Override
     public ConfigurationFactory getConfigurationFactory() {
         TomcatRunConfigurationType configurationType = ConfigurationTypeUtil.findConfigurationType(TomcatRunConfigurationType.class);
-        return configurationType.getConfigurationFactories()[0];
+        ConfigurationFactory[] factories = configurationType.getConfigurationFactories();
+        for (ConfigurationFactory factory : factories) {
+            if ("Local".equals(factory.getName())) {
+                return factory;
+            }
+        }
+        return factories[0];
     }
 
     @Override
     protected boolean setupConfigurationFromContext(@NotNull TomcatRunConfiguration configuration,
                                                     @NotNull ConfigurationContext context,
                                                     @NotNull Ref<PsiElement> sourceElement) {
-        if (Registry.is(DEVTOMCAT_REGISTRY_KEY)) {
+        if (isProducerDisabled()) {
             return false;
         }
 
@@ -104,13 +109,25 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     @Override
     public boolean isConfigurationFromContext(@NotNull TomcatRunConfiguration configuration,
                                               @NotNull ConfigurationContext context) {
-        if (Registry.is(DEVTOMCAT_REGISTRY_KEY)) {
+        if (isProducerDisabled()) {
             return false;
         }
 
         List<VirtualFile> webRoots = discoverEnterpriseWebRoots(context.getLocation());
         return webRoots.stream().anyMatch(webRoot ->
                 webRoot.getPath().equals(configuration.getDocBase()));
+    }
+
+    /**
+     * Registry-backed feature toggle, safe against missing keys.
+     */
+    private boolean isProducerDisabled() {
+        try {
+            // Registry key is optional; default to enabled if missing.
+            return com.intellij.openapi.util.registry.Registry.is(DEVTOMCAT_REGISTRY_KEY);
+        } catch (MissingResourceException ignore) {
+            return false;
+        }
     }
 
     /**
@@ -199,8 +216,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         String normalizedContextPath = normalizeAndValidateContextPath(contextPath);
         configuration.setContextPath(normalizedContextPath);
 
-        // Professional development mode optimization
-        enableDevelopmentModeOptimizations(configuration, module);
 
         System.out.println("Tomcat: Professional configuration setup complete - " + configName +
                 " at " + normalizedContextPath);
@@ -271,36 +286,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return contextPath;
     }
 
-    /**
-     * Enable development mode optimizations for enterprise development
-     */
-    private void enableDevelopmentModeOptimizations(@NotNull TomcatRunConfiguration configuration,
-                                                    @NotNull Module module) {
 
-        // Professional hot deployment optimization
-        configuration.setHotDeploymentEnabled(true);
-        configuration.setUpdateClassesAndResources(true);
-
-        // Professional development environment variables
-        configuration.getEnvironmentVariables().put("JAVA_OPTS",
-                "-Xmx1024m -Xms512m -XX:+UseG1GC -Dfile.encoding=UTF-8");
-        configuration.getEnvironmentVariables().put("CATALINA_OPTS",
-                "-Ddevelopment=true -Dspring.profiles.active=dev");
-
-        // Professional JMX setup for development monitoring
-        if (!configuration.isJmxEnabled()) {
-            configuration.setJmxEnabled(true);
-            configuration.setJmxPort(1099);
-        }
-
-        System.out.println("Tomcat: Professional development mode optimizations enabled");
-
-        // Professional project-specific optimizations
-        if (isSpringBootModule(module)) {
-            configuration.getEnvironmentVariables().put("SPRING_DEVTOOLS_RESTART_ENABLED", "true");
-            System.out.println("Tomcat: Spring Boot development optimizations applied");
-        }
-    }
 
     /**
      * Check if this is an enterprise web module context
@@ -507,122 +493,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
                 (bootstrapYml != null && bootstrapYml.exists());
     }
 
-    /**
-     * Get professional configuration summary for reporting
-     */
-    public String getConfigurationSummary(@NotNull TomcatRunConfiguration configuration) {
-        StringBuilder summary = new StringBuilder();
-        summary.append("Tomcat Professional Configuration Summary:\n");
-        summary.append("- Name: ").append(configuration.getName()).append("\n");
-        summary.append("- Context Path: ").append(configuration.getContextPath()).append("\n");
-        summary.append("- Document Base: ").append(configuration.getDocBase()).append("\n");
-        summary.append("- Server: ").append(configuration.getTomcatInfo() != null ?
-                configuration.getTomcatInfo().getName() : "Default").append("\n");
-        summary.append("- Hot Deployment: ").append(configuration.isHotDeploymentEnabled() ? "Enabled" : "Disabled").append("\n");
-        summary.append("- JMX Monitoring: ").append(configuration.isJmxEnabled() ?
-                "Enabled(" + configuration.getJmxPort() + ")" : "Disabled").append("\n");
-        summary.append("- Environment Variables: ").append(configuration.getEnvironmentVariables().size()).append("\n");
-
-        return summary.toString();
-    }
-
-    /**
-     * Get professional optimization recommendations
-     */
-    public List<String> getOptimizationRecommendations(@NotNull TomcatRunConfiguration configuration) {
-        List<String> recommendations = new ArrayList<>();
-
-        if (!configuration.isHotDeploymentEnabled()) {
-            recommendations.add("Enable hot deployment for faster development cycles");
-        }
-
-        if (!configuration.isJmxEnabled()) {
-            recommendations.add("Enable JMX monitoring for professional development insights");
-        }
-
-        if (configuration.getEnvironmentVariables().isEmpty()) {
-            recommendations.add("Configure development environment variables for optimal performance");
-        }
-
-        String vmOptions = configuration.getVmOptions();
-        if (vmOptions == null || !vmOptions.contains("-Xmx")) {
-            recommendations.add("Configure heap size for optimal memory usage");
-        }
-
-        if (configuration.getLogFileConfigurations().isEmpty()) {
-            recommendations.add("Add log file monitoring for comprehensive development tracking");
-        }
-
-        return recommendations;
-    }
-
-    /**
-     * Get enterprise feature analysis
-     */
-    public String getEnterpriseFeatureAnalysis(@NotNull TomcatRunConfiguration configuration) {
-        StringBuilder analysis = new StringBuilder();
-        analysis.append("Tomcat Enterprise Feature Analysis: ");
-
-        int featureCount = 0;
-
-        if (configuration.isJmxEnabled()) {
-            analysis.append("JMX-Professional ");
-            featureCount++;
-        }
-
-        if (configuration.isHotDeploymentEnabled()) {
-            analysis.append("HotDeploy-Enterprise ");
-            featureCount++;
-        }
-
-        if (!configuration.getEnvironmentVariables().isEmpty()) {
-            analysis.append("EnvConfig-Advanced ");
-            featureCount++;
-        }
-
-        if (!configuration.getLogFileConfigurations().isEmpty()) {
-            analysis.append("LogMonitoring-Professional ");
-            featureCount++;
-        }
-
-        analysis.append("(").append(featureCount).append(" enterprise features active)");
-
-        return analysis.toString();
-    }
-
-    /**
-     * Validate professional configuration standards
-     */
-    public boolean validateProfessionalStandards(@NotNull TomcatRunConfiguration configuration) {
-        boolean isValid = true;
-        List<String> issues = new ArrayList<>();
-
-        // Professional validation checks
-        if (configuration.getContextPath() == null || configuration.getContextPath().trim().isEmpty()) {
-            issues.add("Context path is required for professional deployment");
-            isValid = false;
-        }
-
-        if (configuration.getDocBase() == null || configuration.getDocBase().trim().isEmpty()) {
-            issues.add("Document base is required for professional configuration");
-            isValid = false;
-        }
-
-        if (configuration.getTomcatInfo() == null) {
-            issues.add("Tomcat server selection is required for professional deployment");
-            isValid = false;
-        }
-
-        // Report validation results
-        if (!issues.isEmpty()) {
-            System.out.println("Tomcat: Professional validation issues found:");
-            issues.forEach(issue -> System.out.println("  - " + issue));
-        } else {
-            System.out.println("Tomcat: Professional configuration validation successful");
-        }
-
-        return isValid;
-    }
 
     /**
      * Get professional project type analysis

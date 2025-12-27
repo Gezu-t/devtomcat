@@ -151,21 +151,22 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 		generateSessionSummary(duration, exitCode);
 	}
 
-	@Override
-	public void onTextAvailable(@NotNull ProcessEvent event, @NotNull Key outputType) {
-		String text = event.getText();
+		@Override
+		public void onTextAvailable(@NotNull ProcessEvent event, @NotNull Key outputType) {
+			String text = event.getText();
 
-		if (StringUtil.isNotEmpty(text)) {
-			// Professional output analysis
-			analyzeEnterpriseOutput(text, outputType);
+			if (StringUtil.isNotEmpty(text)) {
+				// Professional output analysis
+				Key<?> typedOutput = outputType;
+				analyzeEnterpriseOutput(text, typedOutput);
+			}
 		}
-	}
 
 	/**
 	 * Analyze output with enterprise-level intelligence
 	 */
-	private void analyzeEnterpriseOutput(@NotNull String text, @NotNull Key outputType) {
-		String cleanText = text.trim();
+		private void analyzeEnterpriseOutput(@NotNull String text, @NotNull Key<?> outputType) {
+			String cleanText = text.trim();
 
 		if (cleanText.isEmpty()) {
 			return;
@@ -193,7 +194,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 	/**
 	 * Analyze deployment status with professional intelligence
 	 */
-	private void analyzeDeploymentStatus(@NotNull String text, @NotNull Key outputType) {
+		private void analyzeDeploymentStatus(@NotNull String text, @NotNull Key<?> outputType) {
 		// Professional startup detection
 		Matcher startupMatcher = ENTERPRISE_STARTUP_PATTERN.matcher(text);
 		if (startupMatcher.find() && !serverStartupDetected) {
@@ -223,7 +224,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 	/**
 	 * Analyze errors and warnings with enterprise intelligence
 	 */
-	private void analyzeErrorsAndWarnings(@NotNull String text, @NotNull Key outputType) {
+		private void analyzeErrorsAndWarnings(@NotNull String text, @NotNull Key<?> outputType) {
 		// Professional error detection
 		if (ENTERPRISE_ERROR_PATTERN.matcher(text).find()) {
 			errorCount++;

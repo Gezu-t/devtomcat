@@ -1,10 +1,9 @@
-package com.dev.idea.plugins.tomcat.ui.deployment.dialogs;
+package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.components.JBLabel;
-import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;

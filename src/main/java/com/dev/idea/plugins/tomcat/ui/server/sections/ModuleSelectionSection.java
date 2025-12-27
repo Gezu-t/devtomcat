@@ -6,11 +6,15 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.ComboBox;
+import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Module Selection Section – UI only.
@@ -20,7 +24,7 @@ import java.awt.*;
 public class ModuleSelectionSection implements ConfigurationSection {
 
     private final Project project;
-    private JComboBox<Module> moduleCombo;
+    private ComboBox<Module> moduleCombo;
     private JPanel panel;
 
     public ModuleSelectionSection(Project project) {
@@ -50,7 +54,7 @@ public class ModuleSelectionSection implements ConfigurationSection {
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(8, 15, 8, 8);
 
-        moduleCombo = new JComboBox<>();
+        moduleCombo = new ComboBox<>();
         moduleCombo.setRenderer(new ModuleRenderer());
         panel.add(moduleCombo, g);
 
@@ -107,6 +111,21 @@ public class ModuleSelectionSection implements ConfigurationSection {
     @Override
     public boolean isValid() {
         return true; // module selection optional
+    }
+
+    @Override
+    public boolean isModified(@NotNull TomcatRunConfiguration config) {
+        // Module selection is UI-only and not persisted to configuration
+        // Therefore, there are no modifications to track
+        return false;
+    }
+
+    @Override
+    @NotNull
+    public List<ValidationInfo> validateSettings() {
+        // Module selection is optional and UI-only
+        // No validation required
+        return Collections.emptyList();
     }
 
     // ------------------------------------------------------------------ helpers

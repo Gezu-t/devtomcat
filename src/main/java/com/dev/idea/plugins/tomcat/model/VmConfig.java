@@ -1,159 +1,102 @@
-/**
- * Author: GTLTek
- * Project: DevTomcat
- * Created: 11/2/25
- *
- * VM Configuration Manager
- * Handles JVM options and environment variables
- */
-package com.dev.idea.plugins.tomcat.conf;
+package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.openapi.util.text.StringUtil;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+    import com.intellij.openapi.util.text.StringUtil;
+    import org.jetbrains.annotations.NotNull;
+    import org.jetbrains.annotations.Nullable;
 
-import java.io.Serializable;
-import java.util.*;
-
-public class VmConfig implements Serializable, Cloneable {
-
-    private String vmOptions;
-    private Map<String, String> environmentVariables;
-    private boolean passParentEnvs;
-
-    public VmConfig() {
-        this.vmOptions = "";
-        this.environmentVariables = new LinkedHashMap<>();
-        this.passParentEnvs = true;
-    }
-
-    public VmConfig(@NotNull VmConfig other) {
-        this.vmOptions = other.vmOptions;
-        this.environmentVariables = new LinkedHashMap<>(other.environmentVariables);
-        this.passParentEnvs = other.passParentEnvs;
-    }
-
-    // === GETTERS/SETTERS ===
-
-    @NotNull
-    public String getVmOptions() {
-        return StringUtil.notNullize(vmOptions);
-    }
-
-    public void setVmOptions(@Nullable String vmOptions) {
-        this.vmOptions = StringUtil.notNullize(vmOptions);
-    }
-
-    @NotNull
-    public Map<String, String> getEnvironmentVariables() {
-        return new LinkedHashMap<>(environmentVariables);
-    }
-
-    public void setEnvironmentVariables(@Nullable Map<String, String> vars) {
-        this.environmentVariables = vars != null ? new LinkedHashMap<>(vars) : new LinkedHashMap<>();
-    }
-
-    public boolean isPassParentEnvs() {
-        return passParentEnvs;
-    }
-
-    public void setPassParentEnvs(boolean pass) {
-        this.passParentEnvs = pass;
-    }
-
-    // === UTILITY METHODS ===
-
-    public void addEnvironmentVariable(@NotNull String key, @NotNull String value) {
-        environmentVariables.put(key, value);
-    }
-
-    public void removeEnvironmentVariable(@NotNull String key) {
-        environmentVariables.remove(key);
-    }
-
-    public boolean hasEnvironmentVariable(@NotNull String key) {
-        return environmentVariables.containsKey(key);
-    }
-
-    @Nullable
-    public String getEnvironmentVariable(@NotNull String key) {
-        return environmentVariables.get(key);
-    }
-
-    public void clearEnvironmentVariables() {
-        environmentVariables.clear();
-    }
-
-    public boolean hasVmOptions() {
-        return !StringUtil.isEmpty(vmOptions);
-    }
-
-    public boolean hasEnvironmentVariables() {
-        return !environmentVariables.isEmpty();
-    }
+    import java.io.Serial;
+    import java.io.Serializable;
+    import java.util.*;
 
     /**
-     * Parses VM options string into individual options
+     * VM Configuration for Tomcat process.
      */
-    @NotNull
-    public List<String> parseVmOptions() {
-        if (StringUtil.isEmpty(vmOptions)) {
-            return Collections.emptyList();
+    public class VmConfig implements Serializable, Cloneable {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        public static final String DEFAULT_VM_OPTIONS = "";
+        public static final boolean DEFAULT_PASS_PARENT_ENVS = true;
+
+        @NotNull private String vmOptions = DEFAULT_VM_OPTIONS;
+        @NotNull private Map<String, String> environmentVariables = new LinkedHashMap<>();
+        private boolean passParentEnvs = DEFAULT_PASS_PARENT_ENVS;
+
+        public VmConfig() {}
+
+        public VmConfig(@NotNull VmConfig other) {
+            Objects.requireNonNull(other, "VmConfig cannot be null");
+            this.vmOptions = StringUtil.notNullize(other.vmOptions);
+            this.environmentVariables = new LinkedHashMap<>(other.environmentVariables);
+            this.passParentEnvs = other.passParentEnvs;
         }
 
-        List<String> options = new ArrayList<>();
-        String[] parts = vmOptions.trim().split("\\s+");
-        for (String part : parts) {
-            if (!StringUtil.isEmpty(part)) {
-                options.add(part);
-            }
+        @NotNull
+        public String getVmOptions() { return vmOptions; }
+
+        public void setVmOptions(@Nullable String vmOptions) {
+            this.vmOptions = StringUtil.notNullize(vmOptions);
         }
-        return options;
-    }
 
-    /**
-     * Checks if a specific VM option is present
-     */
-    public boolean hasVmOption(@NotNull String option) {
-        return getVmOptions().contains(option);
-    }
+        @NotNull
+        public Map<String, String> getEnvironmentVariables() {
+            return new LinkedHashMap<>(environmentVariables);
+        }
 
-    // === CLONING ===
+        public void setEnvironmentVariables(@Nullable Map<String, String> vars) {
+            this.environmentVariables = vars != null ? new LinkedHashMap<>(vars) : new LinkedHashMap<>();
+        }
 
-    @Override
-    public VmConfig clone() {
-        try {
-            VmConfig cloned = (VmConfig) super.clone();
-            cloned.environmentVariables = new LinkedHashMap<>(this.environmentVariables);
-            return cloned;
-        } catch (CloneNotSupportedException e) {
-            throw new RuntimeException("Failed to clone VmConfig", e);
+        public boolean isPassParentEnvs() { return passParentEnvs; }
+        public void setPassParentEnvs(boolean pass) { this.passParentEnvs = pass; }
+
+        public void addEnvironmentVariable(@NotNull String key, @NotNull String value) {
+            environmentVariables.put(key, value);
+        }
+
+        public boolean removeEnvironmentVariable(@NotNull String key) {
+            return environmentVariables.remove(key) != null;
+        }
+
+        @Nullable
+        public String getEnvironmentVariable(@NotNull String key) {
+            return environmentVariables.get(key);
+        }
+
+        public boolean hasVmOptions() { return !vmOptions.isEmpty(); }
+        public boolean hasEnvironmentVariables() { return !environmentVariables.isEmpty(); }
+
+        @NotNull
+        public List<String> parseVmOptions() {
+            if (vmOptions.isEmpty()) return Collections.emptyList();
+            return Arrays.stream(vmOptions.trim().split("\\s+"))
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+        }
+
+        @NotNull
+        @Override
+        public VmConfig clone() { return new VmConfig(this); }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof VmConfig that)) return false;
+            return passParentEnvs == that.passParentEnvs &&
+                    Objects.equals(vmOptions, that.vmOptions) &&
+                    Objects.equals(environmentVariables, that.environmentVariables);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(vmOptions, environmentVariables, passParentEnvs);
+        }
+
+        @NotNull
+        @Override
+        public String toString() {
+            return "VmConfig{options=" + (hasVmOptions() ? "set" : "empty") +
+                    ", envVars=" + environmentVariables.size() + ", passParent=" + passParentEnvs + '}';
         }
     }
-
-    // === OBJECT METHODS ===
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        VmConfig vmConfig = (VmConfig) o;
-        return passParentEnvs == vmConfig.passParentEnvs &&
-                Objects.equals(vmOptions, vmConfig.vmOptions) &&
-                Objects.equals(environmentVariables, vmConfig.environmentVariables);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(vmOptions, environmentVariables, passParentEnvs);
-    }
-
-    @Override
-    public String toString() {
-        return "VmConfig{" +
-                "vmOptions='" + vmOptions + '\'' +
-                ", envVars=" + environmentVariables.size() +
-                ", passParent=" + passParentEnvs +
-                '}';
-    }
-}

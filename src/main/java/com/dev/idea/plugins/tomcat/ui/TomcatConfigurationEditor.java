@@ -1,71 +1,61 @@
 package com.dev.idea.plugins.tomcat.ui;
 
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
+import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
+import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
+import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentTableManager;
+import com.intellij.execution.configurations.ConfigurationFactory;
+import com.intellij.execution.configurations.ConfigurationTypeUtil;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
-import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.ui.components.JBTabbedPane;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Fixed Tomcat Configuration Editor
- * Prevents infinite loops and provides stable 5-tab interface
- *
- * @author Gezahegn Lemma (Gezu)
- */
 public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfiguration> {
-
+    private static final Logger LOG = Logger.getInstance(TomcatConfigurationEditor.class);
     private final Project project;
     private TomcatRunConfiguration currentConfiguration;
-
-    // loop prevention with atomic flags
     private final AtomicBoolean isResetting = new AtomicBoolean(false);
     private final AtomicBoolean isApplying = new AtomicBoolean(false);
     private final AtomicBoolean editorInitialized = new AtomicBoolean(false);
     private final AtomicBoolean isDisposing = new AtomicBoolean(false);
-
-    // Tab panels
     private ServerConfigurationTab serverTab;
-    private DeploymentConfigurationTab deploymentTab;
+    private DeploymentConfigurationPanel deploymentTab;
     private LogsConfigurationTab logsTab;
     private StartupConnectionTab startupConnectionTab;
     private CodeCoverageTab codeCoverageTab;
-
-    // Main UI
     private JBTabbedPane tabbedPane;
 
     public TomcatConfigurationEditor(@NotNull Project project) {
         this.project = project;
-        System.out.println("DevTomcat: Using professional 5-tab interface");
-        System.out.println("DevTomcat: TomcatConfigurationEditor created for project: " + project.getName());
+        LOG.info("DevTomcat: Initializing Ultimate-style configuration editor for project: " + project.getName());
     }
 
     @Override
     protected void resetEditorFrom(@NotNull TomcatRunConfiguration configuration) {
-        if (isResetting.get() || isApplying.get() || isDisposing.get()) {
-            return;
-        }
-
-        if (!isResetting.compareAndSet(false, true)) {
-            return;
-        }
+        if (isResetting.get() || isApplying.get() || isDisposing.get()) return;
+        if (!isResetting.compareAndSet(false, true)) return;
 
         try {
-            System.out.println("DevTomcat: Starting configuration reset");
-            this.currentConfiguration = (TomcatRunConfiguration) configuration.clone(); // Work with clone to prevent interference
-
-            // Only reset if editor is fully initialized
+            LOG.debug("DevTomcat: Resetting editor from configuration: " + configuration.getName());
+            this.currentConfiguration = (TomcatRunConfiguration) configuration.clone();
             if (editorInitialized.get() && tabbedPane != null) {
                 resetAllTabs(configuration);
-                System.out.println("DevTomcat: Reset all tabs from configuration successfully");
+                LOG.info("DevTomcat: Configuration loaded successfully - " + getConfigurationSummary(configuration));
             } else {
-                System.out.println("DevTomcat: Editor not initialized yet, configuration will be applied when tabs are created");
+                LOG.debug("DevTomcat: Editor not initialized, configuration will be applied after UI creation");
             }
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error in resetEditorFrom: " + e.getMessage());
+            LOG.error("DevTomcat: Error resetting editor from configuration", e);
+            notifyError("Failed to load configuration: " + e.getMessage());
         } finally {
             isResetting.set(false);
         }
@@ -75,138 +65,112 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         try {
             if (serverTab != null) {
                 serverTab.resetFrom(configuration);
-                System.out.println("DevTomcat: Loading professional configuration into ServerTab");
-                System.out.println("DevTomcat: Professional configuration loaded - Server: " +
-                        (configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "Apache Tomcat/11.0.8") +
-                        ", HTTP Port: " + configuration.getPort() + ", JMX Port: " + configuration.getJmxPort());
+                LOG.debug("DevTomcat: Server tab reset complete");
             }
-
             if (deploymentTab != null) {
                 deploymentTab.resetFrom(configuration);
-                System.out.println("DevTomcat: Configuration loaded - " +
-                        configuration.getDeploymentArtifacts().size() + " artifact deployments");
+                LOG.debug("DevTomcat: Deployment tab reset - " +
+                        configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
             }
-
             if (logsTab != null) {
                 logsTab.resetFrom(configuration);
-                System.out.println("DevTomcat: Reset logs configuration");
+                LOG.debug("DevTomcat: Logs tab reset - " +
+                        configuration.getLogFileConfigurations().size() + " log files");
             }
-
             if (startupConnectionTab != null) {
                 startupConnectionTab.resetFrom(configuration);
-                System.out.println("DevTomcat: Reset startup/connection configuration");
+                LOG.debug("DevTomcat: Startup/Connection tab reset");
             }
-
             if (codeCoverageTab != null) {
                 codeCoverageTab.resetFrom(configuration);
-                System.out.println("DevTomcat: Reset code coverage configuration");
+                LOG.debug("DevTomcat: Code Coverage tab reset");
             }
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error resetting tabs: " + e.getMessage());
+            LOG.error("DevTomcat: Error resetting tabs", e);
+            throw e;
         }
     }
 
     @Override
     protected void applyEditorTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        if (isApplying.get() || isResetting.get() || isDisposing.get()) {
-            return;
-        }
-
-        if (!editorInitialized.get() || tabbedPane == null) {
-            return;
-        }
-
-        if (!isApplying.compareAndSet(false, true)) {
-            return;
-        }
+        if (isApplying.get() || isResetting.get() || isDisposing.get()) return;
+        if (!editorInitialized.get() || tabbedPane == null) return;
+        if (!isApplying.compareAndSet(false, true)) return;
 
         try {
-            System.out.println("DevTomcat: Starting configuration apply");
+            LOG.debug("DevTomcat: Applying editor settings to configuration");
+            validateAllTabs();
             applyAllTabs(configuration);
-            System.out.println("DevTomcat: Applied all tabs to configuration successfully");
+            LOG.info("DevTomcat: Configuration applied successfully - " + getConfigurationSummary(configuration));
         } catch (ConfigurationException e) {
-            System.err.println("DevTomcat: Configuration error: " + e.getLocalizedMessage());
+            LOG.warn("DevTomcat: Configuration validation failed: " + e.getMessage());
             throw e;
         } catch (Exception e) {
-            System.err.println("DevTomcat: Unexpected error in apply: " + e.getMessage());
+            LOG.error("DevTomcat: Unexpected error applying configuration", e);
             throw new ConfigurationException("Failed to apply configuration: " + e.getMessage());
         } finally {
             isApplying.set(false);
         }
     }
 
+    private void validateAllTabs() throws ConfigurationException {
+        if (serverTab != null) serverTab.validateSettings();
+        if (deploymentTab != null && !deploymentTab.isValid()) {
+            throw new ConfigurationException("Invalid deployment configuration");
+        }
+        // Add validation for other tabs as needed
+    }
+
     private void applyAllTabs(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
         if (serverTab != null) {
             serverTab.applyTo(configuration);
-            System.out.println("DevTomcat: Applying professional ServerTab configuration");
-            System.out.println("DevTomcat: Professional configuration applied successfully - Server: " +
-                    (configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "Apache Tomcat/11.0.8") +
-                    ", Ports: HTTP=" + configuration.getPort() + ", JMX=" + configuration.getJmxPort());
-            System.out.println("DevTomcat: Applied professional ServerTab configuration");
+            LOG.debug("DevTomcat: Server tab applied");
         }
-
         if (deploymentTab != null) {
             deploymentTab.applyTo(configuration);
-            System.out.println("DevTomcat: Applied artifact deployment configuration - " +
-                    configuration.getDeploymentArtifacts().size() + " artifacts");
+            LOG.debug("DevTomcat: Deployment tab applied - " +
+                    configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
         }
-
         if (logsTab != null) {
             logsTab.applyTo(configuration);
-            int activeCount = (int) configuration.getLogFileConfigurations().stream().mapToLong(log -> log.isActive() ? 1 : 0).sum();
-            System.out.println("DevTomcat: Applied " + configuration.getLogFileConfigurations().size() +
-                    " log configurations (" + activeCount + " active)");
+            LOG.debug("DevTomcat: Logs tab applied - " +
+                    configuration.getLogFileConfigurations().size() + " log files");
         }
-
         if (startupConnectionTab != null) {
             startupConnectionTab.applyTo(configuration);
-            System.out.println("DevTomcat: Applied startup/connection configuration with " +
+            LOG.debug("DevTomcat: Startup/Connection tab applied - " +
                     configuration.getEnvironmentVariables().size() + " environment variables");
         }
-
         if (codeCoverageTab != null) {
             codeCoverageTab.applyTo(configuration);
-            System.out.println("DevTomcat: Applied code coverage patterns - 0 include, 0 exclude");
+            LOG.debug("DevTomcat: Code Coverage tab applied");
         }
     }
 
     @Override
-    protected @NotNull JComponent createEditor() {
-        if (isDisposing.get()) {
-            return new JPanel();
-        }
+    @NotNull
+    protected JComponent createEditor() {
+        if (isDisposing.get()) return createErrorPanel("Editor is being disposed");
 
         try {
-            System.out.println("DevTomcat: Creating professional 5-tab interface");
-
-            // Create main tabbed pane
+            LOG.info("DevTomcat: Creating Ultimate-style 5-tab configuration interface");
+            if (currentConfiguration == null) {
+                currentConfiguration = createTemplateConfiguration();
+            }
             tabbedPane = new JBTabbedPane();
-
-            // Create all tabs with proper error handling
             createAllTabs();
-
-            // Mark as initialized AFTER all tabs are created
             editorInitialized.set(true);
-
-            // Apply delayed configuration if available
             if (currentConfiguration != null) {
-                System.out.println("DevTomcat: Applying delayed configuration to newly created tabs");
+                LOG.debug("DevTomcat: Applying delayed configuration");
                 SwingUtilities.invokeLater(() -> {
-                    if (!isDisposing.get()) {
-                        resetEditorFrom(currentConfiguration);
-                    }
+                    if (!isDisposing.get()) resetEditorFrom(currentConfiguration);
                 });
             }
-
-            System.out.println("DevTomcat: Created professional 5-tab interface");
+            LOG.info("DevTomcat: Configuration interface created successfully");
             return tabbedPane;
-
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error creating editor: " + e.getMessage());
-            // Return error panel instead of empty panel
-            JPanel errorPanel = new JPanel();
-            errorPanel.add(new JLabel("Error creating configuration interface: " + e.getMessage()));
-            return errorPanel;
+            LOG.error("DevTomcat: Critical error creating editor", e);
+            return createErrorPanel("Failed to create configuration interface: " + e.getMessage());
         }
     }
 
@@ -220,44 +184,64 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void createServerTab() {
         try {
-            serverTab = new ServerConfigurationTab(project);
+            // PASS CONFIG HERE
+            serverTab = new ServerConfigurationTab(project, currentConfiguration);
             tabbedPane.addTab("Server", serverTab);
-            System.out.println("DevTomcat: Added complete Server tab");
+            LOG.debug("DevTomcat: Server tab created with dynamic Local/Remote");
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error creating Server tab: " + e.getMessage());
+            LOG.error("DevTomcat: Failed to create Server tab", e);
             tabbedPane.addTab("Server", createErrorPanel("Server tab error: " + e.getMessage()));
         }
     }
 
     private void createDeploymentTab() {
         try {
-            deploymentTab = new DeploymentConfigurationTab(project);
+            // Create shared table manager for both panel and handler
+            DeploymentTableManager tableManager = new DeploymentTableManager();
+            ArtifactSelectionHandler selectionHandler = new ArtifactSelectionHandler(
+                    project,
+                    ArtifactManager.getInstance(project),
+                    tableManager
+            );
+
+            deploymentTab = new DeploymentConfigurationPanel(
+                    project,
+                    tableManager,
+                    selectionHandler
+            );
+            deploymentTab.setParentEditor(this);
+
             tabbedPane.addTab("Deployment", deploymentTab);
-            System.out.println("DevTomcat: Added complete Deployment tab with loop prevention");
+            LOG.debug("DevTomcat: Deployment tab created");
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error creating Deployment tab: " + e.getMessage());
+            LOG.error("DevTomcat: Failed to create Deployment tab", e);
             tabbedPane.addTab("Deployment", createErrorPanel("Deployment tab error: " + e.getMessage()));
         }
     }
 
     private void createLogsTab() {
         try {
-            logsTab = new LogsConfigurationTab(project);
+            logsTab = new LogsConfigurationTab(project, null);
             tabbedPane.addTab("Logs", logsTab);
-            System.out.println("DevTomcat: Added complete Logs tab");
+            LOG.debug("DevTomcat: Logs tab created");
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error creating Logs tab: " + e.getMessage());
+            LOG.error("DevTomcat: Failed to create Logs tab", e);
             tabbedPane.addTab("Logs", createErrorPanel("Logs tab error: " + e.getMessage()));
         }
     }
 
     private void createStartupConnectionTab() {
         try {
-            startupConnectionTab = new StartupConnectionTab(project);
+            TomcatRunConfiguration tempConfig = currentConfiguration != null ?
+                    currentConfiguration : createTemplateConfiguration();
+            if (tempConfig == null) {
+                throw new IllegalStateException("No configuration available for Startup/Connection tab");
+            }
+            startupConnectionTab = new StartupConnectionTab(project, tempConfig);
             tabbedPane.addTab("Startup/Connection", startupConnectionTab);
-            System.out.println("DevTomcat: Added complete Startup/Connection tab");
+            LOG.debug("DevTomcat: Startup/Connection tab created");
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error creating Startup/Connection tab: " + e.getMessage());
+            LOG.error("DevTomcat: Failed to create Startup/Connection tab", e);
             tabbedPane.addTab("Startup/Connection", createErrorPanel("Startup/Connection tab error: " + e.getMessage()));
         }
     }
@@ -266,38 +250,59 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         try {
             codeCoverageTab = new CodeCoverageTab(project);
             tabbedPane.addTab("Code Coverage", codeCoverageTab);
-            System.out.println("DevTomcat: Added complete Code Coverage tab");
+            LOG.debug("DevTomcat: Code Coverage tab created");
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error creating Code Coverage tab: " + e.getMessage());
+            LOG.error("DevTomcat: Failed to create Code Coverage tab", e);
             tabbedPane.addTab("Code Coverage", createErrorPanel("Code Coverage tab error: " + e.getMessage()));
         }
     }
 
     private JPanel createErrorPanel(String errorMessage) {
         JPanel panel = new JPanel();
-        panel.add(new JLabel("Error: " + errorMessage));
+        panel.add(new JLabel("⚠ " + errorMessage));
         return panel;
     }
-
-    // === PUBLIC API FOR LOOP PREVENTION ===
 
     public boolean isEventsSuppressed() {
         return isResetting.get() || isApplying.get() || isDisposing.get();
     }
 
-    // ================ CLEANUP ===
+    private String getConfigurationSummary(@NotNull TomcatRunConfiguration configuration) {
+        return String.format("Server: %s, HTTP: %d, JMX: %s, Artifacts: %d, Logs: %d",
+                configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "None",
+                configuration.getHttpPort(),
+                configuration.isJmxEnabled() ? configuration.getJmxPort() : "disabled",
+                configuration.getConfigData().getDeploymentConfig().getArtifacts().size(),
+                configuration.getLogFileConfigurations().size());
+    }
+
+    @Nullable
+    private TomcatRunConfiguration createTemplateConfiguration() {
+        try {
+            TomcatRunConfigurationType type = ConfigurationTypeUtil.findConfigurationType(TomcatRunConfigurationType.class);
+            ConfigurationFactory[] factories = type != null ? type.getConfigurationFactories() : null;
+            if (factories != null && factories.length > 0) {
+                // Use the factory so dynamic defaults and metadata are applied exactly as the IDE expects.
+                return (TomcatRunConfiguration) factories[0].createTemplateConfiguration(project);
+            }
+            LOG.warn("DevTomcat: No configuration factory available for template configuration");
+        } catch (Exception e) {
+            LOG.warn("DevTomcat: Failed to create template configuration", e);
+        }
+        return null;
+    }
+    private void notifyError(String message) {
+        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+                tabbedPane, message, "Configuration Error", JOptionPane.ERROR_MESSAGE));
+    }
 
     @Override
     public void disposeEditor() {
         isDisposing.set(true);
-        System.out.println("DevTomcat: Disposing configuration editor");
-
-        // Reset all flags
+        LOG.debug("DevTomcat: Disposing configuration editor");
         editorInitialized.set(false);
         isResetting.set(false);
         isApplying.set(false);
-
-        // Clear references
         currentConfiguration = null;
         serverTab = null;
         deploymentTab = null;
@@ -305,7 +310,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         startupConnectionTab = null;
         codeCoverageTab = null;
         tabbedPane = null;
-
         super.disposeEditor();
+    }
+
+    @NotNull
+    public Project getProject() {
+        return project;
     }
 }

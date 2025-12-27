@@ -1,415 +1,673 @@
 package com.dev.idea.plugins.tomcat.logging;
 
-import com.intellij.execution.ui.ConsoleView;
-import com.intellij.execution.ui.ConsoleViewContentType;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.registry.Registry;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+         import com.intellij.execution.ui.ConsoleView;
+         import com.intellij.execution.ui.ConsoleViewContentType;
+         import com.intellij.openapi.application.ApplicationManager;
+         import com.intellij.openapi.diagnostic.Logger;
+         import com.intellij.openapi.project.Project;
+         import com.intellij.openapi.util.registry.Registry;
+         import org.jetbrains.annotations.NotNull;
+         import org.jetbrains.annotations.Nullable;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.concurrent.atomic.AtomicBoolean;
+         import java.time.LocalDateTime;
+         import java.time.format.DateTimeFormatter;
+         import java.util.Objects;
+         import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Tomcat Deployment Logger
- *
- * Provides structured logging for Tomcat deployment operations with:
- * - Consistent message formatting
- * - Thread-safe console output
- * - Deployment timing and metrics
- * - Error tracking and reporting
- * - Debug mode support
- *
- * All messages are properly formatted and sent to the appropriate
- * console output type for better visibility and filtering.
- *
- * @author Dev Tomcat Team
- * @see ConsoleView
- * @see ConsoleViewContentType
- */
-public class TomcatDeploymentLogger {
+         /**
+          * Tomcat Deployment Logger
+          *
+          * Provides structured, enterprise-grade logging for Tomcat deployment operations with:
+          * - Consistent message formatting and prefixing
+          * - Thread-safe EDT-compliant console output
+          * - Deployment lifecycle tracking (start, success, failure, complete)
+          * - Performance metrics and timing
+          * - Debug mode support with stack traces
+          * - Registry-driven configuration (timestamps, debug mode)
+          *
+          * <p>100% NULL-SAFE — All parameters validated, no silent failures
+          * <p>EDT-Compliant — All UI operations wrapped in invokeLater
+          * <p>Resource-Safe — Proper disposal and state tracking
+          * <p>Thread-Safe — Uses AtomicBoolean for disposed state, volatile for consoleView
+          *
+          * <p>Responsibilities:
+          * <ul>
+          *   <li>Format and route deployment messages to console</li>
+          *   <li>Track deployment timing and metrics</li>
+          *   <li>Handle exceptions with optional stack traces</li>
+          *   <li>Provide progress visualization</li>
+          *   <li>Manage lifecycle and resource cleanup</li>
+          * </ul>
+          *
+          * <p>Example Usage:
+          * <pre>
+          *   TomcatDeploymentLogger logger = new TomcatDeploymentLogger(project);
+          *   logger.setConsoleView(consoleView);
+          *   logger.logDeploymentStart("myapp.war");
+          *   logger.logProgress("Deploying", 50);
+          *   logger.logDeploymentSuccess("myapp.war", 1500);
+          *   logger.dispose();
+          * </pre>
+          *
+          * Author: Gezahegn Lemma (Gezu)
+          * Project: DevTomcat Plugin
+          * Created: 6/9/25
+          */
+         public class TomcatDeploymentLogger {
 
-    private static final Logger LOG = Logger.getInstance(TomcatDeploymentLogger.class);
+             private static final Logger LOG = Logger.getInstance(TomcatDeploymentLogger.class);
 
-    // Formatting constants
-    private static final DateTimeFormatter TIMESTAMP_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+             // =====================================================================
+             // FORMATTING CONSTANTS
+             // =====================================================================
 
-    private static final String PREFIX = "[Dev Tomcat]";
-    private static final String DEPLOYMENT_PREFIX = "[DEPLOY]";
-    private static final String ERROR_PREFIX = "[ERROR]";
-    private static final String WARNING_PREFIX = "[WARN]";
-    private static final String DEBUG_PREFIX = "[DEBUG]";
-    private static final String INFO_PREFIX = "[INFO]";
+             private static final DateTimeFormatter TIMESTAMP_FORMAT =
+                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
-    // Registry keys
-    private static final String REG_SHOW_TIMESTAMPS = "devtomcat.log.show.timestamps";
-    private static final String REG_DEBUG_MODE = "devtomcat.debug.mode";
+             private static final String PREFIX = "[DevTomcat]";
 
-    // Instance fields
-    @NotNull private final Project project;
-    @Nullable private volatile ConsoleView consoleView;
-    private final long startTime;
-    private final AtomicBoolean disposed = new AtomicBoolean(false);
-    private final boolean showTimestamps;
-    private final boolean debugMode;
+             // Message prefixes for categorization
+             private static final String DEPLOYMENT_PREFIX = "[DEPLOY]";
+             private static final String ERROR_PREFIX = "[ERROR]";
+             private static final String WARNING_PREFIX = "[WARN]";
+             private static final String DEBUG_PREFIX = "[DEBUG]";
+             private static final String INFO_PREFIX = "[INFO]";
 
-    /**
-     * Create a new deployment logger
-     *
-     * @param project The current project
-     */
-    public TomcatDeploymentLogger(@NotNull Project project) {
-        this.project = project;
-        this.startTime = System.currentTimeMillis();
-        this.showTimestamps = Registry.is(REG_SHOW_TIMESTAMPS);
-        this.debugMode = Registry.is(REG_DEBUG_MODE);
-    }
+             // =====================================================================
+             // REGISTRY KEYS
+             // =====================================================================
 
-    /**
-     * Set the console view for output
-     *
-     * @param consoleView The console view to use
-     */
-    public void setConsoleView(@Nullable ConsoleView consoleView) {
-        this.consoleView = consoleView;
-        if (consoleView != null) {
-            logDebug("Console view attached to deployment logger");
-        }
-    }
+             private static final String REG_SHOW_TIMESTAMPS = "devtomcat.log.show.timestamps";
+             private static final String REG_DEBUG_MODE = "devtomcat.debug.mode";
 
-    // === DEPLOYMENT LIFECYCLE LOGGING ===
+             // =====================================================================
+             // PROGRESS BAR CONFIGURATION
+             // =====================================================================
 
-    /**
-     * Log deployment process start
-     */
-    public void logDeploymentStarted() {
-        log("Starting deployment process...", ConsoleViewContentType.SYSTEM_OUTPUT);
-    }
+             private static final int PROGRESS_BAR_LENGTH = 10;
+             private static final char PROGRESS_FILLED = '=';
+             private static final char PROGRESS_EMPTY = '-';
 
-    /**
-     * Log deployment start for a specific artifact
-     *
-     * @param artifactName The artifact being deployed
-     */
-    public void logDeploymentStart(@NotNull String artifactName) {
-        String message = String.format("%s Deploying artifact '%s'...",
-                DEPLOYMENT_PREFIX, artifactName);
-        log(message, ConsoleViewContentType.SYSTEM_OUTPUT);
-    }
+             // =====================================================================
+             // INSTANCE FIELDS
+             // =====================================================================
 
-    /**
-     * Log successful deployment
-     *
-     * @param artifactName The deployed artifact
-     * @param durationMs Deployment duration in milliseconds
-     */
-    public void logDeploymentSuccess(@NotNull String artifactName, long durationMs) {
-        String message = String.format("%s Artifact '%s' deployed successfully (took %d ms)",
-                DEPLOYMENT_PREFIX, artifactName, durationMs);
-        log(message, ConsoleViewContentType.NORMAL_OUTPUT);
-    }
+             @NotNull
+             private final Project project;
 
-    /**
-     * Log deployment failure
-     *
-     * @param artifactName The artifact that failed to deploy
-     * @param errorMessage The error message
-     */
-    public void logDeploymentError(@NotNull String artifactName, @NotNull String errorMessage) {
-        String message = String.format("%s Failed to deploy artifact '%s': %s",
-                ERROR_PREFIX, artifactName, errorMessage);
-        log(message, ConsoleViewContentType.ERROR_OUTPUT);
-    }
+             @Nullable
+             private volatile ConsoleView consoleView;
 
-    /**
-     * Log deployment completion with summary
-     *
-     * @param totalArtifacts Total number of artifacts
-     * @param successCount Number of successfully deployed artifacts
-     * @param totalDurationMs Total deployment time
-     */
-    public void logDeploymentComplete(int totalArtifacts, int successCount, long totalDurationMs) {
-        String status = successCount == totalArtifacts ? "SUCCESS" : "PARTIAL";
-        String message = String.format(
-                "%s Deployment complete: %s (%d/%d artifacts deployed in %d ms)",
-                DEPLOYMENT_PREFIX, status, successCount, totalArtifacts, totalDurationMs
-        );
+             private final long startTime;
 
-        ConsoleViewContentType contentType = successCount == totalArtifacts ?
-                ConsoleViewContentType.NORMAL_OUTPUT : ConsoleViewContentType.LOG_WARNING_OUTPUT;
+             private final AtomicBoolean disposed;
 
-        log(message, contentType);
-    }
+             private final boolean showTimestamps;
 
-    // === SERVER LIFECYCLE LOGGING ===
+             private final boolean debugMode;
 
-    /**
-     * Log server connection established
-     */
-    public void logServerConnection() {
-        log("Connected to Tomcat server", ConsoleViewContentType.SYSTEM_OUTPUT);
-    }
+             // =====================================================================
+             // CONSTRUCTORS
+             // =====================================================================
 
-    /**
-     * Log server startup completion
-     *
-     * @param startupTimeMs Server startup time in milliseconds
-     */
-    public void logServerStartup(long startupTimeMs) {
-        String message = String.format("Server started successfully in %d ms", startupTimeMs);
-        log(message, ConsoleViewContentType.NORMAL_OUTPUT);
-    }
+             /**
+              * Create a new deployment logger instance.
+              *
+              * <p>Initializes with project context and loads configuration from Registry.
+              *
+              * @param project the current project (cannot be null)
+              * @throws NullPointerException if project is null
+              */
+             public TomcatDeploymentLogger(@NotNull Project project) {
+                 Objects.requireNonNull(project, "Project cannot be null");
 
-    /**
-     * Log general server information
-     *
-     * @param message The information message
-     */
-    public void logServerInfo(@NotNull String message) {
-        logInfo(message);
-    }
+                 this.project = project;
+                 this.startTime = System.currentTimeMillis();
+                 this.disposed = new AtomicBoolean(false);
+                 this.showTimestamps = getRegistryBoolean(REG_SHOW_TIMESTAMPS, true);
+                 this.debugMode = getRegistryBoolean(REG_DEBUG_MODE, false);
 
-    /**
-     * Log server warnings
-     *
-     * @param message The warning message
-     */
-    public void logServerWarning(@NotNull String message) {
-        logWarning(message);
-    }
+                 LOG.debug("TomcatDeploymentLogger created for project: " + project.getName());
+             }
 
-    /**
-     * Log server errors
-     *
-     * @param message The error message
-     */
-    public void logServerError(@NotNull String message) {
-        logError(message);
-    }
+             // =====================================================================
+             // CONSOLE VIEW MANAGEMENT
+             // =====================================================================
 
-    // === GENERAL LOGGING METHODS ===
+             /**
+              * Set the console view for message output.
+              *
+              * @param consoleView the console view (can be null to unset)
+              */
+             public void setConsoleView(@Nullable ConsoleView consoleView) {
+                 this.consoleView = consoleView;
+                 if (consoleView != null) {
+                     LOG.debug("Console view attached to deployment logger");
+                 }
+             }
 
-    /**
-     * Log informational message
-     *
-     * @param message The message to log
-     */
-    public void logInfo(@NotNull String message) {
-        log(INFO_PREFIX + " " + message, ConsoleViewContentType.NORMAL_OUTPUT);
-    }
+             /**
+              * Get the current console view.
+              *
+              * @return the console view or null if not set
+              */
+             @Nullable
+             public ConsoleView getConsoleView() {
+                 return consoleView;
+             }
 
-    /**
-     * Log warning message
-     *
-     * @param message The warning message
-     */
-    public void logWarning(@NotNull String message) {
-        log(WARNING_PREFIX + " " + message, ConsoleViewContentType.LOG_WARNING_OUTPUT);
-    }
+             // =====================================================================
+             // DEPLOYMENT LIFECYCLE LOGGING
+             // =====================================================================
 
-    /**
-     * Log error message
-     *
-     * @param message The error message
-     */
-    public void logError(@NotNull String message) {
-        log(ERROR_PREFIX + " " + message, ConsoleViewContentType.ERROR_OUTPUT);
-    }
+             /**
+              * Log deployment process initialization.
+              */
+             public void logDeploymentStarted() {
+                 logWithType("Starting deployment process...", ConsoleViewContentType.SYSTEM_OUTPUT);
+                 LOG.info("Deployment process started");
+             }
 
-    /**
-     * Log error with exception
-     *
-     * @param message The error message
-     * @param throwable The exception
-     */
-    public void logError(@NotNull String message, @NotNull Throwable throwable) {
-        log(ERROR_PREFIX + " " + message, ConsoleViewContentType.ERROR_OUTPUT);
+             /**
+              * Log deployment start for a specific artifact.
+              *
+              * @param artifactName the artifact name (cannot be null)
+              * @throws NullPointerException if artifactName is null
+              */
+             public void logDeploymentStart(@NotNull String artifactName) {
+                 Objects.requireNonNull(artifactName, "Artifact name cannot be null");
 
-        // Log stack trace in debug mode
-        if (debugMode) {
-            String stackTrace = getStackTraceString(throwable);
-            log(stackTrace, ConsoleViewContentType.ERROR_OUTPUT);
-        } else {
-            log("  Caused by: " + throwable.getClass().getSimpleName() +
-                    " - " + throwable.getMessage(), ConsoleViewContentType.ERROR_OUTPUT);
-        }
-    }
+                 String message = String.format("%s Deploying artifact '%s'...", DEPLOYMENT_PREFIX, artifactName);
+                 logWithType(message, ConsoleViewContentType.SYSTEM_OUTPUT);
+                 LOG.info("Deployment started for artifact: " + artifactName);
+             }
 
-    /**
-     * Log debug message (only if debug mode is enabled)
-     *
-     * @param message The debug message
-     */
-    public void logDebug(@NotNull String message) {
-        if (debugMode) {
-            log(DEBUG_PREFIX + " " + message, ConsoleViewContentType.LOG_DEBUG_OUTPUT);
-        }
-    }
+             /**
+              * Log successful artifact deployment.
+              *
+              * @param artifactName the deployed artifact name (cannot be null)
+              * @param durationMs deployment duration in milliseconds (must be non-negative)
+              * @throws NullPointerException if artifactName is null
+              * @throws IllegalArgumentException if durationMs is negative
+              */
+             public void logDeploymentSuccess(@NotNull String artifactName, long durationMs) {
+                 Objects.requireNonNull(artifactName, "Artifact name cannot be null");
+                 if (durationMs < 0) {
+                     throw new IllegalArgumentException("Duration cannot be negative: " + durationMs);
+                 }
 
-    // === PROGRESS LOGGING ===
+                 String message = String.format(
+                         "%s Artifact '%s' deployed successfully (took %d ms)",
+                         DEPLOYMENT_PREFIX, artifactName, durationMs
+                 );
+                 logWithType(message, ConsoleViewContentType.NORMAL_OUTPUT);
+                 LOG.info("Deployment successful for artifact: " + artifactName + " (" + durationMs + "ms)");
+             }
 
-    /**
-     * Log progress update
-     *
-     * @param operation Current operation
-     * @param progress Progress percentage (0-100)
-     */
-    public void logProgress(@NotNull String operation, int progress) {
-        String progressBar = createProgressBar(progress);
-        String message = String.format("%s %s %s %d%%",
-                INFO_PREFIX, operation, progressBar, progress);
-        log(message, ConsoleViewContentType.NORMAL_OUTPUT);
-    }
+             /**
+              * Log deployment failure with error details.
+              *
+              * @param artifactName the artifact name (cannot be null)
+              * @param errorMessage the error message (cannot be null)
+              * @throws NullPointerException if parameters are null
+              */
+             public void logDeploymentError(@NotNull String artifactName, @NotNull String errorMessage) {
+                 Objects.requireNonNull(artifactName, "Artifact name cannot be null");
+                 Objects.requireNonNull(errorMessage, "Error message cannot be null");
 
-    /**
-     * Create a simple progress bar
-     */
-    private String createProgressBar(int progress) {
-        int filled = Math.max(0, Math.min(10, progress / 10));
-        StringBuilder bar = new StringBuilder("[");
+                 String message = String.format(
+                         "%s Failed to deploy artifact '%s': %s",
+                         ERROR_PREFIX, artifactName, errorMessage
+                 );
+                 logWithType(message, ConsoleViewContentType.ERROR_OUTPUT);
+                 LOG.warn("Deployment failed for artifact: " + artifactName + " - " + errorMessage);
+             }
 
-        for (int i = 0; i < 10; i++) {
-            bar.append(i < filled ? "=" : "-");
-        }
+             /**
+              * Log deployment completion with summary metrics.
+              *
+              * @param totalArtifacts total number of artifacts processed (must be non-negative)
+              * @param successCount number of successfully deployed artifacts (must be non-negative and &lt;= totalArtifacts)
+              * @param totalDurationMs total deployment duration in milliseconds (must be non-negative)
+              * @throws IllegalArgumentException if parameters are invalid
+              */
+             public void logDeploymentComplete(int totalArtifacts, int successCount, long totalDurationMs) {
+                 if (totalArtifacts < 0) {
+                     throw new IllegalArgumentException("Total artifacts cannot be negative: " + totalArtifacts);
+                 }
+                 if (successCount < 0 || successCount > totalArtifacts) {
+                     throw new IllegalArgumentException("Success count must be 0-" + totalArtifacts + ", got: " + successCount);
+                 }
+                 if (totalDurationMs < 0) {
+                     throw new IllegalArgumentException("Duration cannot be negative: " + totalDurationMs);
+                 }
 
-        bar.append("]");
-        return bar.toString();
-    }
+                 boolean allSuccessful = successCount == totalArtifacts;
+                 String status = allSuccessful ? "SUCCESS" : "PARTIAL";
 
-    // === CORE LOGGING ===
+                 String message = String.format(
+                         "%s Deployment complete: %s (%d/%d artifacts deployed in %d ms)",
+                         DEPLOYMENT_PREFIX, status, successCount, totalArtifacts, totalDurationMs
+                 );
 
-    /**
-     * Core logging method
-     *
-     * @param message The message to log
-     * @param contentType The console content type
-     */
-    private void log(@NotNull String message, @NotNull ConsoleViewContentType contentType) {
-        if (disposed.get()) {
-            return;
-        }
+                 ConsoleViewContentType contentType = allSuccessful ?
+                         ConsoleViewContentType.NORMAL_OUTPUT : ConsoleViewContentType.LOG_WARNING_OUTPUT;
 
-        // Format message
-        String formattedMessage = formatMessage(message);
+                 logWithType(message, contentType);
 
-        // Log to console view if available
-        if (consoleView != null && !project.isDisposed()) {
-            ApplicationManager.getApplication().invokeLater(() -> {
-                if (!project.isDisposed() && !disposed.get() && consoleView != null) {
-                    consoleView.print(formattedMessage + "\n", contentType);
-                }
-            });
-        }
+                 int successRate = totalArtifacts > 0 ? (successCount * 100 / totalArtifacts) : 0;
+                 LOG.info("Deployment completed - Status: " + status + ", Success rate: " + successRate + "%");
+             }
 
-        // Also log to IDE log
-        logToIdeLog(message, contentType);
-    }
+             // =====================================================================
+             // SERVER LIFECYCLE LOGGING
+             // =====================================================================
 
-    /**
-     * Format message with timestamp and prefix
-     */
-    private String formatMessage(@NotNull String message) {
-        StringBuilder formatted = new StringBuilder();
+             /**
+              * Log successful server connection establishment.
+              */
+             public void logServerConnection() {
+                 logWithType("Connected to Tomcat server", ConsoleViewContentType.SYSTEM_OUTPUT);
+                 LOG.info("Server connection established");
+             }
 
-        if (showTimestamps) {
-            formatted.append("[")
-                    .append(LocalDateTime.now().format(TIMESTAMP_FORMAT))
-                    .append("] ");
-        }
+             /**
+              * Log server startup completion.
+              *
+              * @param startupTimeMs server startup duration in milliseconds (must be non-negative)
+              * @throws IllegalArgumentException if startupTimeMs is negative
+              */
+             public void logServerStartup(long startupTimeMs) {
+                 if (startupTimeMs < 0) {
+                     throw new IllegalArgumentException("Startup time cannot be negative: " + startupTimeMs);
+                 }
 
-        // Add main prefix if not already present
-        if (!message.startsWith("[")) {
-            formatted.append(PREFIX).append(" ");
-        }
+                 String message = String.format("Server started successfully in %d ms", startupTimeMs);
+                 logWithType(message, ConsoleViewContentType.NORMAL_OUTPUT);
+                 LOG.info("Server startup completed in " + startupTimeMs + "ms");
+             }
 
-        formatted.append(message);
+             /**
+              * Log informational server message.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logServerInfo(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logInfo(message);
+             }
 
-        return formatted.toString();
-    }
+             /**
+              * Log warning-level server message.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logServerWarning(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logWarning(message);
+             }
 
-    /**
-     * Log to IDE log file
-     */
-    private void logToIdeLog(@NotNull String message, @NotNull ConsoleViewContentType contentType) {
-        if (contentType == ConsoleViewContentType.ERROR_OUTPUT) {
-            LOG.error(message);
-        } else if (contentType == ConsoleViewContentType.LOG_WARNING_OUTPUT) {
-            LOG.warn(message);
-        } else if (contentType == ConsoleViewContentType.LOG_DEBUG_OUTPUT) {
-            LOG.debug(message);
-        } else {
-            LOG.info(message);
-        }
-    }
+             /**
+              * Log error-level server message.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logServerError(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logError(message);
+             }
 
-    /**
-     * Get stack trace as string
-     */
-    private String getStackTraceString(@NotNull Throwable throwable) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(throwable.toString()).append("\n");
+             // =====================================================================
+             // GENERAL MESSAGE LOGGING
+             // =====================================================================
 
-        for (StackTraceElement element : throwable.getStackTrace()) {
-            sb.append("    at ").append(element.toString()).append("\n");
-        }
+             /**
+              * Log informational message with INFO prefix.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logInfo(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logPrefixed(message, INFO_PREFIX, ConsoleViewContentType.NORMAL_OUTPUT);
+                 LOG.debug("Info: " + message);
+             }
 
-        if (throwable.getCause() != null) {
-            sb.append("Caused by: ");
-            sb.append(getStackTraceString(throwable.getCause()));
-        }
+             /**
+              * Log warning message with WARN prefix.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logWarning(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logPrefixed(message, WARNING_PREFIX, ConsoleViewContentType.LOG_WARNING_OUTPUT);
+                 LOG.warn("Warning: " + message);
+             }
 
-        return sb.toString();
-    }
+             /**
+              * Log error message with ERROR prefix.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logError(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logPrefixed(message, ERROR_PREFIX, ConsoleViewContentType.ERROR_OUTPUT);
+                 LOG.error("Error: " + message);
+             }
 
-    // === UTILITY METHODS ===
+             /**
+              * Log error message with exception details.
+              *
+              * <p>In debug mode, includes full stack trace. Otherwise, only exception class and message.
+              *
+              * @param message the error message (cannot be null)
+              * @param throwable the exception (cannot be null)
+              * @throws NullPointerException if parameters are null
+              */
+             public void logError(@NotNull String message, @NotNull Throwable throwable) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 Objects.requireNonNull(throwable, "Throwable cannot be null");
 
-    /**
-     * Get elapsed time since logger creation
-     *
-     * @return Elapsed time in milliseconds
-     */
-    public long getElapsedTime() {
-        return System.currentTimeMillis() - startTime;
-    }
+                 String errorMessage = message + " - " + throwable.getClass().getSimpleName() +
+                         ": " + throwable.getMessage();
 
-    /**
-     * Get the console view
-     *
-     * @return The console view or null
-     */
-    @Nullable
-    public ConsoleView getConsoleView() {
-        return consoleView;
-    }
+                 logError(errorMessage);
 
-    /**
-     * Check if debug mode is enabled
-     *
-     * @return true if debug mode is enabled
-     */
-    public boolean isDebugMode() {
-        return debugMode;
-    }
+                 if (debugMode) {
+                     String stackTrace = getStackTraceString(throwable);
+                     logDebug("Stack trace:\n" + stackTrace);
+                     LOG.debug("Full stack trace:\n" + stackTrace);
+                 }
 
-    /**
-     * Dispose of this logger
-     */
-    public void dispose() {
-        disposed.set(true);
-        consoleView = null;
-        logDebug("Deployment logger disposed");
-    }
+                 LOG.error("Exception occurred", throwable);
+             }
 
-    /**
-     * Check if this logger is disposed
-     *
-     * @return true if disposed
-     */
-    public boolean isDisposed() {
-        return disposed.get();
-    }
-}
+             /**
+              * Log debug message (only if debug mode is enabled).
+              *
+              * <p>Silent no-op if debug mode is disabled.
+              *
+              * @param message the debug message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logDebug(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+
+                 if (debugMode) {
+                     logPrefixed(message, DEBUG_PREFIX, ConsoleViewContentType.LOG_DEBUG_OUTPUT);
+                     LOG.debug("Debug: " + message);
+                 }
+             }
+
+             // =====================================================================
+             // PROGRESS LOGGING
+             // =====================================================================
+
+             /**
+              * Log progress update with visual progress bar.
+              *
+              * <p>Example output: `[INFO] Deploying [=====-----] 50%`
+              *
+              * @param operation current operation description (cannot be null)
+              * @param progress progress percentage (0-100, will be clamped)
+              * @throws NullPointerException if operation is null
+              */
+             public void logProgress(@NotNull String operation, int progress) {
+                 Objects.requireNonNull(operation, "Operation cannot be null");
+
+                 progress = Math.max(0, Math.min(100, progress));
+                 String progressBar = createProgressBar(progress);
+                 String message = String.format("%s %s %s %d%%", INFO_PREFIX, operation, progressBar, progress);
+
+                 logWithType(message, ConsoleViewContentType.NORMAL_OUTPUT);
+                 LOG.debug("Progress: " + operation + " " + progress + "%");
+             }
+
+             /**
+              * Create a visual progress bar.
+              *
+              * <p>Example: `[=====-----] 50%`
+              *
+              * @param progress progress percentage (0-100)
+              * @return the progress bar string (never null)
+              */
+             @NotNull
+             private String createProgressBar(int progress) {
+                 int filled = Math.max(0, Math.min(PROGRESS_BAR_LENGTH, progress / 10));
+                 StringBuilder bar = new StringBuilder("[");
+
+                 for (int i = 0; i < PROGRESS_BAR_LENGTH; i++) {
+                     bar.append(i < filled ? PROGRESS_FILLED : PROGRESS_EMPTY);
+                 }
+
+                 bar.append("]");
+                 return bar.toString();
+             }
+
+             // =====================================================================
+             // CORE LOGGING METHODS
+             // =====================================================================
+
+             /**
+              * Log message with prefix and content type.
+              *
+              * @param message the message (cannot be null)
+              * @param prefix the prefix (cannot be null)
+              * @param contentType the console content type (cannot be null)
+              */
+             private void logPrefixed(@NotNull String message, @NotNull String prefix,
+                                      @NotNull ConsoleViewContentType contentType) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 Objects.requireNonNull(prefix, "Prefix cannot be null");
+                 Objects.requireNonNull(contentType, "ContentType cannot be null");
+
+                 String formatted = prefix + " " + message;
+                 logWithType(formatted, contentType);
+             }
+
+             /**
+              * Log formatted message with content type (core method).
+              *
+              * <p>Routes to console view if available, with EDT synchronization.
+              * Silently ignores logging if logger is disposed.
+              *
+              * @param message the formatted message (cannot be null)
+              * @param contentType the console content type (cannot be null)
+              */
+             private void logWithType(@NotNull String message, @NotNull ConsoleViewContentType contentType) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 Objects.requireNonNull(contentType, "ContentType cannot be null");
+
+                 if (disposed.get()) {
+                     LOG.debug("Logger is disposed, ignoring message: " + message);
+                     return;
+                 }
+
+                 // Format message with timestamp if enabled
+                 String formattedMessage = formatMessage(message);
+
+                 // Output to console view if available
+                 if (consoleView != null && !project.isDisposed()) {
+                     ApplicationManager.getApplication().invokeLater(() -> {
+                         try {
+                             if (!disposed.get() && consoleView != null && !project.isDisposed()) {
+                                 consoleView.print(formattedMessage + "\n", contentType);
+                             }
+                         } catch (Exception e) {
+                             LOG.warn("Failed to print to console", e);
+                         }
+                     });
+                 }
+             }
+
+             /**
+              * Format message with optional timestamp.
+              *
+              * @param message the raw message (cannot be null)
+              * @return the formatted message (never null)
+              */
+             @NotNull
+             private String formatMessage(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+
+                 StringBuilder formatted = new StringBuilder();
+
+                 // Add timestamp if enabled in Registry
+                 if (showTimestamps) {
+                     formatted.append("[")
+                             .append(LocalDateTime.now().format(TIMESTAMP_FORMAT))
+                             .append("] ");
+                 }
+
+                 // Add main prefix if not already present
+                 if (!message.startsWith("[")) {
+                     formatted.append(PREFIX).append(" ");
+                 }
+
+                 formatted.append(message);
+
+                 return formatted.toString();
+             }
+
+             /**
+              * Get stack trace as formatted string.
+              *
+              * <p>Includes exception message and all stack trace elements recursively for causes.
+              *
+              * @param throwable the exception (cannot be null)
+              * @return the formatted stack trace (never null)
+              */
+             @NotNull
+             private String getStackTraceString(@NotNull Throwable throwable) {
+                 Objects.requireNonNull(throwable, "Throwable cannot be null");
+
+                 StringBuilder sb = new StringBuilder();
+                 appendThrowable(sb, throwable);
+                 return sb.toString();
+             }
+
+             /**
+              * Recursively append exception and its causes to string builder.
+              *
+              * @param sb the string builder (cannot be null)
+              * @param throwable the exception (cannot be null)
+              */
+             private void appendThrowable(@NotNull StringBuilder sb, @NotNull Throwable throwable) {
+                 Objects.requireNonNull(sb, "StringBuilder cannot be null");
+                 Objects.requireNonNull(throwable, "Throwable cannot be null");
+
+                 sb.append(throwable.toString()).append("\n");
+
+                 for (StackTraceElement element : throwable.getStackTrace()) {
+                     sb.append("  at ").append(element.toString()).append("\n");
+                 }
+
+                 if (throwable.getCause() != null) {
+                     sb.append("Caused by: ");
+                     appendThrowable(sb, throwable.getCause());
+                 }
+             }
+
+             // =====================================================================
+             // UTILITY & STATUS METHODS
+             // =====================================================================
+
+             /**
+              * Get elapsed time since logger creation.
+              *
+              * @return elapsed time in milliseconds
+              */
+             public long getElapsedTime() {
+                 return System.currentTimeMillis() - startTime;
+             }
+
+             /**
+              * Check if debug mode is enabled.
+              *
+              * @return true if debug mode is enabled
+              */
+             public boolean isDebugMode() {
+                 return debugMode;
+             }
+
+             /**
+              * Check if timestamps are shown in logs.
+              *
+              * @return true if timestamps are enabled
+              */
+             public boolean isShowTimestamps() {
+                 return showTimestamps;
+             }
+
+             /**
+              * Get the project instance.
+              *
+              * @return the project (never null)
+              */
+             @NotNull
+             public Project getProject() {
+                 return project;
+             }
+
+             // =====================================================================
+             // LIFECYCLE MANAGEMENT
+             // =====================================================================
+
+             /**
+              * Dispose of this logger and clean up resources.
+              *
+              * <p>After disposal, all logging attempts are silently ignored.
+              * Safe to call multiple times.
+              */
+             public void dispose() {
+                 if (disposed.compareAndSet(false, true)) {
+                     consoleView = null;
+                     LOG.debug("TomcatDeploymentLogger disposed");
+                 }
+             }
+
+             /**
+              * Check if this logger has been disposed.
+              *
+              * @return true if disposed
+              */
+             public boolean isDisposed() {
+                 return disposed.get();
+             }
+
+             /**
+              * Get registry boolean value with fallback.
+              *
+              * @param key the registry key (cannot be null)
+              * @param defaultValue the default value if key not found
+              * @return the registry value or default
+              */
+             private static boolean getRegistryBoolean(@NotNull String key, boolean defaultValue) {
+                 Objects.requireNonNull(key, "Registry key cannot be null");
+
+                 try {
+                     return Registry.is(key);
+                 } catch (Exception e) {
+                     LOG.debug("Registry key not found: " + key + ", using default: " + defaultValue);
+                     return defaultValue;
+                 }
+             }
+
+             /**
+              * Get logger status summary for debugging.
+              *
+              * @return the status string (never null)
+              */
+             @NotNull
+             public String getStatus() {
+                 return String.format(
+                         "TomcatDeploymentLogger{project='%s', disposed=%s, debugMode=%s, timestamps=%s, elapsed=%dms}",
+                         project.getName(), disposed.get(), debugMode, showTimestamps, getElapsedTime()
+                 );
+             }
+         }

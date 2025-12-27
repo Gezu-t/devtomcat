@@ -2,23 +2,29 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.ui.server.dialogs.WebBrowsersDialog;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
- * Fixed Browser Launch Section - Ultimate-Aligned
- * Handles browser launch configuration with proper null safety
- *
- * @author Gezahegn Lemma (Gezu)
+ * Browser Launch Section
+ * Handles browser launch configuration
  */
 public class BrowserLaunchSection implements ConfigurationSection {
+
+    private static final Logger LOG = Logger.getInstance(BrowserLaunchSection.class);
 
     private final Project project;
     private JCheckBox afterLaunchCheckBox;
@@ -28,7 +34,6 @@ public class BrowserLaunchSection implements ConfigurationSection {
     private JTextField urlField;
     private JPanel panel;
 
-    // Flag to track initialization
     private boolean isInitialized = false;
 
     public BrowserLaunchSection(Project project) {
@@ -42,78 +47,78 @@ public class BrowserLaunchSection implements ConfigurationSection {
             initializeComponents();
             createLayout();
             isInitialized = true;
-            // Load configuration AFTER components are created
             loadConfiguration();
         }
         return panel;
     }
 
     private void initializeComponents() {
-        // Initialize all components first
         afterLaunchCheckBox = new JCheckBox("After launch");
         browserComboBox = new JComboBox<>();
         browserConfigButton = new JButton("...");
         withJavaScriptDebuggerCheckBox = new JCheckBox("with JavaScript debugger");
         urlField = new JTextField();
 
-        // Set sizes
         browserComboBox.setPreferredSize(new Dimension(120, 25));
         browserConfigButton.setPreferredSize(new Dimension(30, 25));
 
-        // Add listeners
         afterLaunchCheckBox.addActionListener(e -> updateBrowserControls());
         browserConfigButton.addActionListener(e -> configureBrowsers());
     }
 
     private void createLayout() {
         panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("Open browser"));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1),
+                JBUI.Borders.empty(4, 4, 4, 4)
+        ));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = JBUI.insets(8, 8, 8, 8);
+        gbc.insets = JBUI.insets(4, 0, 4, 6);
 
-        // First row: After launch checkbox, browser combo, config button, JavaScript debugger
-        gbc.gridx = 0; gbc.gridy = 0;
+        // Heading
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 4;
+        panel.add(new JBLabel("Open browser"), gbc);
+        gbc.gridwidth = 1;
+
+        // Row 0: After launch, browser, configure, JS debugger
+        gbc.gridx = 0; gbc.gridy = 1;
         panel.add(afterLaunchCheckBox, gbc);
 
-        gbc.gridx = 1;
-        gbc.insets = JBUI.insets(8, 15, 8, 8);
+        gbc.gridx = 1; gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
         panel.add(browserComboBox, gbc);
 
         gbc.gridx = 2;
-        gbc.insets = JBUI.insets(8, 5, 8, 8);
+        gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
         panel.add(browserConfigButton, gbc);
 
         gbc.gridx = 3;
-        gbc.insets = JBUI.insets(8, 15, 8, 8);
         panel.add(withJavaScriptDebuggerCheckBox, gbc);
 
-        // Second row: URL label and field
-        gbc.gridx = 0; gbc.gridy = 1;
-        gbc.insets = JBUI.insets(8, 8, 8, 8);
+        // Row 1: URL
+        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.insets = JBUI.insets(4, 0, 4, 4);
         panel.add(new JLabel("URL:"), gbc);
 
         gbc.gridx = 1; gbc.gridwidth = 3;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        gbc.insets = JBUI.insets(8, 15, 8, 8);
         panel.add(urlField, gbc);
     }
 
     @Override
     public void loadConfiguration() {
-        // CRITICAL: Only load if components are initialized
         if (!isInitialized || browserComboBox == null) {
             return;
         }
 
         try {
-            // Safe removal of items
             browserComboBox.removeAllItems();
             browserComboBox.addItem("System Default");
 
-            // Load browser configurations safely
             List<WebBrowsersDialog.BrowserInfo> browsers = WebBrowsersDialog.getBrowserConfigurations();
             for (WebBrowsersDialog.BrowserInfo browser : browsers) {
                 if (browser.isActive()) {
@@ -124,8 +129,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
             updateBrowserControls();
 
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error loading browsers: " + e.getMessage());
-            // Add fallback if browser loading fails
+            LOG.error("Error loading browsers", e);
             if (browserComboBox.getItemCount() == 0) {
                 browserComboBox.addItem("System Default");
             }
@@ -134,18 +138,16 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
-        // Ensure components are initialized
         if (!isInitialized) {
             return;
         }
 
         try {
-            afterLaunchCheckBox.setSelected(false);
+            afterLaunchCheckBox.setSelected(true);
             withJavaScriptDebuggerCheckBox.setSelected(false);
 
-            // Set URL if available
             String contextPath = configuration.getContextPath();
-            Integer port = configuration.getPort();
+            Integer port = configuration.getHttpPort();
 
             if (contextPath != null && port != null) {
                 urlField.setText("http://localhost:" + port + contextPath);
@@ -158,14 +160,13 @@ public class BrowserLaunchSection implements ConfigurationSection {
             updateBrowserControls();
 
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error resetting browser configuration: " + e.getMessage());
+            LOG.error("Error resetting browser configuration", e);
         }
     }
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
         try {
-            // Store browser launch settings in configuration
             if (isInitialized && afterLaunchCheckBox != null) {
                 configuration.setAfterLaunchEnabled(afterLaunchCheckBox.isSelected());
 
@@ -184,7 +185,48 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
     @Override
     public boolean isValid() {
-        return true; // Browser configuration is always valid
+        return true;
+    }
+
+    @Override
+    public boolean isModified(@NotNull TomcatRunConfiguration config) {
+        if (!isInitialized) {
+            return false;
+        }
+
+        try {
+            // Check if "After launch" checkbox state changed
+            if (!Objects.equals(afterLaunchCheckBox.isSelected(), config.isAfterLaunchEnabled())) {
+                return true;
+            }
+
+            // Check if URL changed
+            String configUrl = config.getBrowserUrl();
+            String currentUrl = urlField != null ? urlField.getText().trim() : "";
+            if (!Objects.equals(currentUrl, configUrl != null ? configUrl : "")) {
+                return true;
+            }
+
+            // Check if browser name changed
+            String configBrowser = config.getBrowserName();
+            String currentBrowser = getSelectedBrowser();
+            if (!Objects.equals(currentBrowser, configBrowser != null ? configBrowser : "System Default")) {
+                return true;
+            }
+
+        } catch (Exception e) {
+            LOG.warn("Error checking browser configuration modifications", e);
+        }
+
+        return false;
+    }
+
+    @Override
+    @NotNull
+    public List<ValidationInfo> validateSettings() {
+        // Browser launch section has no validation requirements
+        // URL and browser selection are optional
+        return Collections.emptyList();
     }
 
     private void updateBrowserControls() {
@@ -195,20 +237,12 @@ public class BrowserLaunchSection implements ConfigurationSection {
         try {
             boolean enabled = afterLaunchCheckBox.isSelected();
 
-            if (browserComboBox != null) {
-                browserComboBox.setEnabled(enabled);
-            }
-            if (browserConfigButton != null) {
-                browserConfigButton.setEnabled(enabled);
-            }
-            if (withJavaScriptDebuggerCheckBox != null) {
-                withJavaScriptDebuggerCheckBox.setEnabled(enabled);
-            }
-            if (urlField != null) {
-                urlField.setEnabled(enabled);
-            }
+            browserComboBox.setEnabled(enabled);
+            browserConfigButton.setEnabled(enabled);
+            withJavaScriptDebuggerCheckBox.setEnabled(enabled);
+            urlField.setEnabled(enabled);
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error updating browser controls: " + e.getMessage());
+            LOG.error("Error updating browser controls", e);
         }
     }
 
@@ -223,17 +257,15 @@ public class BrowserLaunchSection implements ConfigurationSection {
                 } else {
                     browserComboBox.setSelectedItem("System Default");
                 }
-                System.out.println("DevTomcat: Browser configuration updated");
+                LOG.info("Browser configuration updated");
             }
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error opening browser configuration: " + e.getMessage());
+            LOG.error("Error opening browser configuration", e);
             Messages.showErrorDialog(project,
                     "Failed to open browser configuration: " + e.getMessage(),
                     "Browser Configuration Error");
         }
     }
-
-    // === PUBLIC GETTERS ===
 
     public boolean isAfterLaunchEnabled() {
         return isInitialized && afterLaunchCheckBox != null && afterLaunchCheckBox.isSelected();
@@ -255,13 +287,10 @@ public class BrowserLaunchSection implements ConfigurationSection {
                 withJavaScriptDebuggerCheckBox.isSelected();
     }
 
-    // === PORT UPDATE METHOD ===
-
     public void updateUrlPort(Integer newPort) {
         if (isInitialized && urlField != null && newPort != null) {
             String currentUrl = urlField.getText();
             if (currentUrl.startsWith("http://localhost:")) {
-                // Extract path part
                 int portStart = "http://localhost:".length();
                 int pathStart = currentUrl.indexOf('/', portStart);
                 String path = (pathStart != -1) ? currentUrl.substring(pathStart) : "/";
