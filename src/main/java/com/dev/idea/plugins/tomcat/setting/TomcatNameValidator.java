@@ -7,5 +7,5 @@
 
 package com.dev.idea.plugins.tomcat.setting;
 
-public class TomcatServersConfigurable {
+public class TomcatNameValidator {
 }
