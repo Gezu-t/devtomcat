@@ -20,7 +20,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 /**
@@ -65,7 +68,6 @@ public class TomcatJavaParametersBuilder {
         try {
             Path catalinaBase = getCatalinaBase();
             Path catalinaHome = getCatalinaHome();
-            ensureDirectoriesExist(catalinaBase);
 
             int httpPort = PortUtils.DEFAULT_HTTP;
             int shutdownPort = PortUtils.DEFAULT_SHUTDOWN;
@@ -108,6 +110,9 @@ public class TomcatJavaParametersBuilder {
                 throw new ExecutionException("Unable to find available ports for Tomcat run configuration");
             }
 
+            // Prepare catalina.base with directories and config files (after ports are resolved)
+            prepareCatalinaBase(catalinaBase, catalinaHome, httpPort, shutdownPort);
+
             JavaParameters params = new JavaParameters();
             setupBasicParameters(params, catalinaBase);
             setupClasspath(params, catalinaHome);
@@ -139,35 +144,142 @@ public class TomcatJavaParametersBuilder {
         return Paths.get(configuration.getConfigData().getTomcatInfo().getPath());
     }
 
-    private void ensureDirectoriesExist(@NotNull Path catalinaBase) throws IOException {
+    private void prepareCatalinaBase(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
+                                     int httpPort, int shutdownPort) throws IOException {
         Files.createDirectories(catalinaBase.resolve("temp"));
         Files.createDirectories(catalinaBase.resolve("logs"));
         Files.createDirectories(catalinaBase.resolve("webapps"));
         Files.createDirectories(catalinaBase.resolve("work"));
         Files.createDirectories(catalinaBase.resolve("conf"));
 
+        // Always regenerate server.xml to reflect current port configuration
+        copyAndCustomizeServerXml(catalinaHome, catalinaBase, httpPort, shutdownPort);
+
+        // Copy config files from CATALINA_HOME if not already present
+        copyIfAbsent(catalinaHome.resolve("conf/web.xml"), catalinaBase.resolve("conf/web.xml"));
+        copyIfAbsent(catalinaHome.resolve("conf/context.xml"), catalinaBase.resolve("conf/context.xml"));
+        copyIfAbsent(catalinaHome.resolve("conf/tomcat-users.xml"), catalinaBase.resolve("conf/tomcat-users.xml"));
+
+        // Prefer CATALINA_HOME's logging.properties (has proper file handlers for this Tomcat version)
         Path loggingPropertiesPath = catalinaBase.resolve("conf/logging.properties");
+        copyIfAbsent(catalinaHome.resolve("conf/logging.properties"), loggingPropertiesPath);
+        // Fall back to our default with standard file handlers if CATALINA_HOME didn't have one
         if (!Files.exists(loggingPropertiesPath)) {
             createDefaultLoggingProperties(loggingPropertiesPath);
         }
     }
 
+    private void copyAndCustomizeServerXml(@NotNull Path catalinaHome, @NotNull Path catalinaBase,
+                                           int httpPort, int shutdownPort) throws IOException {
+        Path sourceServerXml = catalinaHome.resolve("conf/server.xml");
+        Path targetServerXml = catalinaBase.resolve("conf/server.xml");
+
+        if (!Files.exists(sourceServerXml)) {
+            LOG.warn("server.xml not found at " + sourceServerXml + ", generating minimal config");
+            Files.writeString(targetServerXml, generateMinimalServerXml(httpPort, shutdownPort));
+            return;
+        }
+
+        String xml = Files.readString(sourceServerXml);
+
+        // Update <Server port="..." shutdown="SHUTDOWN"> shutdown port
+        xml = Pattern.compile("(<Server\\s[^>]*port\\s*=\\s*\")[^\"]*\"")
+                .matcher(xml)
+                .replaceFirst("$1" + Matcher.quoteReplacement(String.valueOf(shutdownPort)) + "\"");
+
+        // Update the first HTTP/1.1 Connector port
+        xml = Pattern.compile("(<Connector\\s[^>]*port\\s*=\\s*\")[^\"]*\"([^>]*protocol\\s*=\\s*\"HTTP/1\\.1\")")
+                .matcher(xml)
+                .replaceFirst("$1" + Matcher.quoteReplacement(String.valueOf(httpPort)) + "\"$2");
+
+        // Also handle the case where protocol comes before port
+        if (!xml.contains("port=\"" + httpPort + "\"")) {
+            xml = Pattern.compile("(<Connector\\s[^>]*protocol\\s*=\\s*\"HTTP/1\\.1\"[^>]*port\\s*=\\s*\")[^\"]*\"")
+                    .matcher(xml)
+                    .replaceFirst("$1" + Matcher.quoteReplacement(String.valueOf(httpPort)) + "\"");
+        }
+
+        Files.writeString(targetServerXml, xml);
+        LOG.info("Created server.xml at " + targetServerXml + " (HTTP=" + httpPort + ", shutdown=" + shutdownPort + ")");
+    }
+
+    private String generateMinimalServerXml(int httpPort, int shutdownPort) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                "<Server port=\"" + shutdownPort + "\" shutdown=\"SHUTDOWN\">\n" +
+                "  <Listener className=\"org.apache.catalina.startup.VersionLoggerListener\" />\n" +
+                "  <Listener className=\"org.apache.catalina.core.JreMemoryLeakPreventionListener\" />\n" +
+                "  <Listener className=\"org.apache.catalina.core.ThreadLocalLeakPreventionListener\" />\n" +
+                "  <Service name=\"Catalina\">\n" +
+                "    <Connector port=\"" + httpPort + "\" protocol=\"HTTP/1.1\"\n" +
+                "               connectionTimeout=\"20000\" redirectPort=\"8443\" />\n" +
+                "    <Engine name=\"Catalina\" defaultHost=\"localhost\">\n" +
+                "      <Host name=\"localhost\" appBase=\"webapps\"\n" +
+                "            unpackWARs=\"true\" autoDeploy=\"true\" />\n" +
+                "    </Engine>\n" +
+                "  </Service>\n" +
+                "</Server>\n";
+    }
+
+    private void copyIfAbsent(@NotNull Path source, @NotNull Path target) throws IOException {
+        if (!Files.exists(target) && Files.exists(source)) {
+            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+            LOG.info("Copied " + source.getFileName() + " to " + target);
+        }
+    }
+
     private void createDefaultLoggingProperties(@NotNull Path loggingPropertiesPath) throws IOException {
         String loggingConfig =
-            "handlers = java.util.logging.ConsoleHandler\n" +
-            ".handlers = java.util.logging.ConsoleHandler\n" +
+            "# Standard Tomcat logging configuration with file handlers\n" +
+            "handlers = 1catalina.org.apache.juli.AsyncFileHandler, " +
+                "2localhost.org.apache.juli.AsyncFileHandler, " +
+                "3manager.org.apache.juli.AsyncFileHandler, " +
+                "4host-manager.org.apache.juli.AsyncFileHandler, " +
+                "java.util.logging.ConsoleHandler\n" +
             "\n" +
+            ".handlers = 1catalina.org.apache.juli.AsyncFileHandler, java.util.logging.ConsoleHandler\n" +
+            "\n" +
+            "# Catalina log\n" +
+            "1catalina.org.apache.juli.AsyncFileHandler.level = FINE\n" +
+            "1catalina.org.apache.juli.AsyncFileHandler.directory = ${catalina.base}/logs\n" +
+            "1catalina.org.apache.juli.AsyncFileHandler.prefix = catalina.\n" +
+            "1catalina.org.apache.juli.AsyncFileHandler.maxDays = 90\n" +
+            "1catalina.org.apache.juli.AsyncFileHandler.encoding = UTF-8\n" +
+            "\n" +
+            "# Localhost log\n" +
+            "2localhost.org.apache.juli.AsyncFileHandler.level = FINE\n" +
+            "2localhost.org.apache.juli.AsyncFileHandler.directory = ${catalina.base}/logs\n" +
+            "2localhost.org.apache.juli.AsyncFileHandler.prefix = localhost.\n" +
+            "2localhost.org.apache.juli.AsyncFileHandler.maxDays = 90\n" +
+            "2localhost.org.apache.juli.AsyncFileHandler.encoding = UTF-8\n" +
+            "\n" +
+            "# Manager log\n" +
+            "3manager.org.apache.juli.AsyncFileHandler.level = FINE\n" +
+            "3manager.org.apache.juli.AsyncFileHandler.directory = ${catalina.base}/logs\n" +
+            "3manager.org.apache.juli.AsyncFileHandler.prefix = manager.\n" +
+            "3manager.org.apache.juli.AsyncFileHandler.maxDays = 90\n" +
+            "3manager.org.apache.juli.AsyncFileHandler.encoding = UTF-8\n" +
+            "\n" +
+            "# Host-Manager log\n" +
+            "4host-manager.org.apache.juli.AsyncFileHandler.level = FINE\n" +
+            "4host-manager.org.apache.juli.AsyncFileHandler.directory = ${catalina.base}/logs\n" +
+            "4host-manager.org.apache.juli.AsyncFileHandler.prefix = host-manager.\n" +
+            "4host-manager.org.apache.juli.AsyncFileHandler.maxDays = 90\n" +
+            "4host-manager.org.apache.juli.AsyncFileHandler.encoding = UTF-8\n" +
+            "\n" +
+            "# Console handler\n" +
             "java.util.logging.ConsoleHandler.level = FINE\n" +
-            "java.util.logging.ConsoleHandler.formatter = java.util.logging.SimpleFormatter\n" +
+            "java.util.logging.ConsoleHandler.formatter = org.apache.juli.OneLineFormatter\n" +
+            "java.util.logging.ConsoleHandler.encoding = UTF-8\n" +
             "\n" +
+            "# Webapp-specific log routing\n" +
             "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].level = INFO\n" +
-            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].handlers = java.util.logging.ConsoleHandler\n" +
+            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].handlers = 2localhost.org.apache.juli.AsyncFileHandler\n" +
             "\n" +
             "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/manager].level = INFO\n" +
-            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/manager].handlers = java.util.logging.ConsoleHandler\n" +
+            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/manager].handlers = 3manager.org.apache.juli.AsyncFileHandler\n" +
             "\n" +
             "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/host-manager].level = INFO\n" +
-            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/host-manager].handlers = java.util.logging.ConsoleHandler\n";
+            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/host-manager].handlers = 4host-manager.org.apache.juli.AsyncFileHandler\n";
 
         Files.writeString(loggingPropertiesPath, loggingConfig);
         LOG.debug("DevTomcat: Created logging.properties at " + loggingPropertiesPath);

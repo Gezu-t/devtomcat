@@ -115,7 +115,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void validateAllTabs() throws ConfigurationException {
         if (serverTab != null) serverTab.validateSettings();
-        if (deploymentTab != null && !deploymentTab.isValid()) {
+        if (deploymentTab != null && !deploymentTab.isConfigurationValid()) {
             throw new ConfigurationException("Invalid deployment configuration");
         }
         // Add validation for other tabs as needed
@@ -160,6 +160,12 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             tabbedPane = new JTabbedPane();
             createAllTabs();
 
+            // IntelliJ can call resetEditorFrom() before createEditor() depending on lifecycle/test harness.
+            // Re-apply the current configuration after tabs exist so Deployment/Logs are not left at defaults.
+            if (currentConfiguration != null) {
+                resetAllTabs(currentConfiguration);
+            }
+
             // Revalidate tab content on switch to ensure proper layout
             tabbedPane.addChangeListener(e -> {
                 if (tabbedPane == null || isDisposing.get()) return;
@@ -186,8 +192,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private void createAllTabs() {
         createServerTab();
         createDeploymentTab();
-        createStartupConnectionTab();
         createLogsTab();
+        createStartupConnectionTab();
         createCodeCoverageTab();
     }
 
@@ -221,6 +227,13 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     tableManager
             );
             LOG.info("DevTomcat: ArtifactSelectionHandler created");
+
+            // Wire deployment changes to update browser URL on Server tab
+            tableManager.setDeploymentChangeListener(contextPath -> {
+                if (serverTab != null) {
+                    serverTab.updateBrowserUrlContext(contextPath);
+                }
+            });
 
             deploymentTab = new DeploymentConfigurationPanel(
                     project,

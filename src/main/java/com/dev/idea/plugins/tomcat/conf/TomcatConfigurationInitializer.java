@@ -3,8 +3,8 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.PortUtils;
-import com.dev.idea.plugins.tomcat.utils.StringUtils;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
@@ -32,7 +32,7 @@ public class TomcatConfigurationInitializer {
         TomcatConfigurationData data = config.getConfigData();
         if (data == null) return;
 
-        if (StringUtils.isEmpty(data.getContextPath())) {
+        if (StringUtil.isEmpty(data.getContextPath())) {
             data.setContextPath("/");
         }
 

@@ -14,6 +14,7 @@ import javax.swing.table.TableColumn;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import com.intellij.openapi.diagnostic.Logger;
 
 /**
@@ -36,9 +37,24 @@ public class DeploymentTableManager {
 
     private static final int ROW_HEIGHT = 26;
 
+    private Consumer<String> deploymentChangeListener;
+
     public DeploymentTableManager() {
         initializeTable();
         LOG.debug("DeploymentTableManager initialized with 4 columns");
+    }
+
+    public void setDeploymentChangeListener(Consumer<String> listener) {
+        this.deploymentChangeListener = listener;
+    }
+
+    private void fireDeploymentChanged() {
+        if (deploymentChangeListener != null) {
+            String contextPath = !deployments.isEmpty()
+                    ? deployments.get(0).getApplicationContext()
+                    : "/";
+            deploymentChangeListener.accept(contextPath);
+        }
     }
 
     private void initializeTable() {
@@ -73,12 +89,7 @@ public class DeploymentTableManager {
         deploymentTable.setShowGrid(false);
         deploymentTable.setIntercellSpacing(new Dimension(0, 0));
         deploymentTable.getEmptyText().setText("No artifacts configured for deployment");
-
-        // Hide header but keep it non-null for ToolbarDecorator compatibility
-        if (deploymentTable.getTableHeader() != null) {
-            deploymentTable.getTableHeader().setVisible(false);
-            deploymentTable.getTableHeader().setPreferredSize(new Dimension(0, 0));
-        }
+        deploymentTable.setTableHeader(null);
 
         configureColumns();
     }
@@ -143,6 +154,7 @@ public class DeploymentTableManager {
             deployment.setServerPath(newContext);
         }
 
+        fireDeploymentChanged();
         return true;
     }
 
@@ -174,6 +186,7 @@ public class DeploymentTableManager {
 
             LOG.debug("Added deployment: " + deployment.getDisplayName() +
                     " with context: " + deployment.getApplicationContext());
+            fireDeploymentChanged();
 
         } catch (Exception e) {
             LOG.warn("Error adding deployment: " + e.getMessage());
@@ -191,6 +204,7 @@ public class DeploymentTableManager {
             updateSelectionAfterRemoval(selectedRow);
 
             LOG.debug("Removed deployment: " + deployment.getDisplayName());
+            fireDeploymentChanged();
         }
     }
 
@@ -204,6 +218,7 @@ public class DeploymentTableManager {
             swapTableRows(selectedRow, selectedRow - 1);
 
             deploymentTable.setRowSelectionInterval(selectedRow - 1, selectedRow - 1);
+            fireDeploymentChanged();
         }
     }
 
@@ -217,6 +232,7 @@ public class DeploymentTableManager {
             swapTableRows(selectedRow, selectedRow + 1);
 
             deploymentTable.setRowSelectionInterval(selectedRow + 1, selectedRow + 1);
+            fireDeploymentChanged();
         }
     }
 

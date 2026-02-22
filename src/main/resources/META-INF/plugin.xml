@@ -36,7 +36,7 @@
                     </ul>
                     ]]></change-notes>
 
-                    <idea-version since-build="241" until-build="252.*"/>
+                    <idea-version since-build="241" until-build="253.*"/>
 
                     <depends>com.intellij.modules.java</depends>
                     <depends>com.intellij.modules.platform</depends>

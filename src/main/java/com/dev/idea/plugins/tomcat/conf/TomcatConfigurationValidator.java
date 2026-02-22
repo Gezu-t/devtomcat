@@ -5,9 +5,9 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.dev.idea.plugins.tomcat.model.ValidationResult;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
-        import com.dev.idea.plugins.tomcat.utils.StringUtils;
         import com.intellij.execution.configurations.RuntimeConfigurationException;
         import com.intellij.openapi.diagnostic.Logger;
+        import com.intellij.openapi.util.text.StringUtil;
         import org.jetbrains.annotations.NotNull;
 
         import java.util.Objects;
@@ -18,19 +18,21 @@ package com.dev.idea.plugins.tomcat.conf;
 
             private TomcatConfigurationValidator() {}
 
+            /**
+             * Validates a full run configuration (handles name defaulting + data validation).
+             * Called by {@link TomcatRunConfiguration#checkConfiguration()}.
+             */
             public static void validate(@NotNull TomcatRunConfiguration config) throws RuntimeConfigurationException {
                 Objects.requireNonNull(config, "Configuration cannot be null");
 
                 try {
-                    LOG.debug("Validating configuration: %s", config.getName());
+                    LOG.debug("Validating configuration: " + config.getName());
 
                     validateConfigurationName(config);
-                    TomcatConfigurationData data = validateConfigurationData(config);
-                    validateTomcatServer(data, config.getName());
-                    validatePortConfiguration(data);
-                    validateContextPath(data);
+                    TomcatConfigurationData data = config.getConfigData();
+                    validate(data);
 
-                    LOG.debug("Configuration validation passed: %s", config.getName());
+                    LOG.debug("Configuration validation passed: " + config.getName());
                 } catch (RuntimeConfigurationException e) {
                     LOG.debug("Validation failed for: " + config.getName() + " - " + e.getLocalizedMessage());
                     throw e;
@@ -40,34 +42,36 @@ package com.dev.idea.plugins.tomcat.conf;
                 }
             }
 
-            private static void validateConfigurationName(@NotNull TomcatRunConfiguration config) throws RuntimeConfigurationException {
-                if (StringUtils.isEmpty(config.getName())) {
+            /**
+             * Validates configuration data without requiring a TomcatRunConfiguration.
+             * Testable without IntelliJ Project.
+             */
+            public static void validate(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
+                Objects.requireNonNull(data, "Configuration data cannot be null");
+                validateTomcatServer(data);
+                validatePortConfiguration(data);
+                validateContextPath(data);
+            }
+
+            private static void validateConfigurationName(@NotNull TomcatRunConfiguration config) {
+                if (StringUtil.isEmpty(config.getName())) {
                     config.setName("Tomcat");
                     LOG.debug("Configuration name was empty; defaulted to 'Tomcat'");
                 }
             }
 
-            @NotNull
-            private static TomcatConfigurationData validateConfigurationData(@NotNull TomcatRunConfiguration config) throws RuntimeConfigurationException {
-                TomcatConfigurationData data = config.getConfigData();
-                if (data == null) {
-                    throw new RuntimeConfigurationException("Configuration data is missing for: " + config.getName());
-                }
-                return data;
-            }
-
-            private static void validateTomcatServer(@NotNull TomcatConfigurationData data, @NotNull String configName) throws RuntimeConfigurationException {
+            private static void validateTomcatServer(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
                 TomcatInfo tomcatInfo = data.getTomcatInfo();
                 if (tomcatInfo == null) {
                     throw new RuntimeConfigurationException("No Tomcat server selected. Please configure a Tomcat instance.");
                 }
-                if (StringUtils.isEmpty(tomcatInfo.getName())) {
+                if (StringUtil.isEmpty(tomcatInfo.getName())) {
                     throw new RuntimeConfigurationException("Tomcat server name is empty");
                 }
-                if (StringUtils.isEmpty(tomcatInfo.getPath())) {
+                if (StringUtil.isEmpty(tomcatInfo.getPath())) {
                     throw new RuntimeConfigurationException("Tomcat server path is not configured for: " + tomcatInfo.getName());
                 }
-                if (StringUtils.isEmpty(tomcatInfo.getVersion())) {
+                if (StringUtil.isEmpty(tomcatInfo.getVersion())) {
                     LOG.warn(String.format("Tomcat server version not set for: %s", tomcatInfo.getName()));
                 }
             }
@@ -95,7 +99,7 @@ package com.dev.idea.plugins.tomcat.conf;
 
             private static void validateContextPath(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
                 String contextPath = data.getContextPath();
-                if (StringUtils.isEmpty(contextPath)) {
+                if (StringUtil.isEmpty(contextPath)) {
                     data.setContextPath("/");
                     return;
                 }

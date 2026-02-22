@@ -13,7 +13,7 @@ package com.dev.idea.plugins.tomcat.utils;
      private ValidationUtils() {}
 
      public static boolean isValidFile(@Nullable String filePath) {
-         if (StringUtils.isEmpty(filePath)) return false;
+         if (com.intellij.openapi.util.text.StringUtil.isEmpty(filePath)) return false;
          try {
              Path path = Paths.get(filePath);
              return Files.isRegularFile(path) && Files.isReadable(path);
@@ -24,7 +24,7 @@ package com.dev.idea.plugins.tomcat.utils;
      }
 
      public static boolean isValidDirectory(@Nullable String dirPath) {
-         if (StringUtils.isEmpty(dirPath)) return false;
+         if (com.intellij.openapi.util.text.StringUtil.isEmpty(dirPath)) return false;
          try {
              Path path = Paths.get(dirPath);
              return Files.isDirectory(path) && Files.isReadable(path);

@@ -10,6 +10,8 @@ import com.intellij.util.ui.JBUI;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import org.jetbrains.annotations.NotNull;
 
+import com.intellij.ui.components.JBPanel;
+
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
@@ -17,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import com.intellij.openapi.diagnostic.Logger;
 
-public class CodeCoverageTab extends JPanel {
+public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
 
     private static final Logger LOG = Logger.getInstance(CodeCoverageTab.class);
 

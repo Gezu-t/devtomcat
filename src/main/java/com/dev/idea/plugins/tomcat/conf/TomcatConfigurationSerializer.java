@@ -43,6 +43,7 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_AFTER_LAUNCH_ENABLED = "afterLaunchEnabled";
     private static final String ATTR_WITH_JS_DEBUGGER = "withJsDebugger";
     private static final String ATTR_WITH_JS_DEBUGGER_OLD = "withJavaScriptDebugger";
+    private static final String ATTR_BROWSER_NAME = "browser";
     private static final String ATTR_BROWSER_NAME_OLD = "browserName";
 
     private static final String ATTR_HOT_DEPLOYMENT_ENABLED = "hotDeploymentEnabled";
@@ -84,10 +85,14 @@ public class TomcatConfigurationSerializer {
     private static final String TAG_COVERAGE_EXCLUDE = "exclude";
     public static void write(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
+        write(config.getConfigData(), element);
+    }
+
+    public static void write(@NotNull TomcatConfigurationData data, @NotNull Element element) {
+        Objects.requireNonNull(data, "Configuration data cannot be null");
         Objects.requireNonNull(element, "Element cannot be null");
 
         try {
-            TomcatConfigurationData data = config.getConfigData();
             PortConfig pc = data.getPortConfig();
             writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
             writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
@@ -109,6 +114,7 @@ public class TomcatConfigurationSerializer {
             element.setAttribute(ATTR_BROWSER_URL, StringUtil.notNullize(browserConfig.getBrowserUrl()));
             element.setAttribute(ATTR_AFTER_LAUNCH_ENABLED, String.valueOf(browserConfig.isAfterLaunchEnabled()));
             element.setAttribute(ATTR_WITH_JS_DEBUGGER, String.valueOf(browserConfig.isWithJsDebugger()));
+            element.setAttribute(ATTR_BROWSER_NAME, StringUtil.notNullize(browserConfig.getBrowserName(), "System Default"));
 
             var deploymentConfig = data.getDeploymentConfig();
             element.setAttribute(ATTR_HOT_DEPLOYMENT_ENABLED, String.valueOf(deploymentConfig.isHotDeploymentEnabled()));
@@ -123,7 +129,7 @@ public class TomcatConfigurationSerializer {
             element.setAttribute(ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, String.valueOf(updateConfig.isShowFrameDeactivationDialog()));
             var uiConfig = data.getUiConfig();
             element.setAttribute(ATTR_ACTIVATE_TOOL_WINDOW, String.valueOf(uiConfig.isActivateToolWindow()));
-            element.setAttribute(ATTR_FOCUS_TOOL_WINDOW, String.valueOf(uiConfig.isFocusToolWindow()));
+            element.setAttribute(ATTR_FOCUS_TOOL_WINDOW, String.valueOf(uiConfig.isShowLogsPage()));
 
             element.setAttribute(ATTR_JRE_SELECTION, StringUtil.notNullize(data.getJreSelection()));
             element.setAttribute(ATTR_ALLOW_MULTIPLE_INSTANCES, String.valueOf(data.isAllowMultipleInstances()));
@@ -141,9 +147,9 @@ public class TomcatConfigurationSerializer {
             writeTomcatInfo(element, data.getTomcatInfo());
             writeCoverageConfig(element, data.getCoverageConfig());
 
-            LOG.debug("Wrote configuration: " + config.getName());
+            LOG.debug("Wrote configuration data");
         } catch (Exception e) {
-            LOG.error("Failed to write configuration: " + config.getName(), e);
+            LOG.error("Failed to write configuration data", e);
         }
     }
 
@@ -169,6 +175,11 @@ public class TomcatConfigurationSerializer {
     private static void writeLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {
         Element logElem = new Element("logFileConfig");
 
+        logElem.setAttribute("showStdout", String.valueOf(config.isShowStdoutConsole()));
+        logElem.setAttribute("showStderr", String.valueOf(config.isShowStderrConsole()));
+        logElem.setAttribute("saveToFile", String.valueOf(config.isSaveConsoleToFile()));
+        logElem.setAttribute("saveFilePath", config.getSaveConsoleFilePath());
+
         for (String path : config.getLogFiles()) {
             if (path == null) continue;
 
@@ -180,9 +191,7 @@ public class TomcatConfigurationSerializer {
             logElem.addContent(file);
         }
 
-        if (!logElem.getChildren("file").isEmpty()) {
-            element.addContent(logElem);
-        }
+        element.addContent(logElem);
     }
 
     private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull java.util.List<DeploymentArtifact> artifacts) {
@@ -214,10 +223,14 @@ public class TomcatConfigurationSerializer {
     }
     public static void read(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
+        read(config.getConfigData(), element);
+    }
+
+    public static void read(@NotNull TomcatConfigurationData data, @NotNull Element element) {
+        Objects.requireNonNull(data, "Configuration data cannot be null");
         Objects.requireNonNull(element, "Element cannot be null");
 
         try {
-            TomcatConfigurationData data = config.getConfigData();
             PortConfig pc = data.getPortConfig();
             readInt(element, ATTR_HTTP_PORT, pc::setHttp);
             readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);
@@ -243,6 +256,15 @@ public class TomcatConfigurationSerializer {
                 readBool(element, ATTR_WITH_JS_DEBUGGER, browserConfig::setWithJsDebugger);
             } else {
                 readBool(element, ATTR_WITH_JS_DEBUGGER_OLD, browserConfig::setWithJsDebugger);
+            }
+
+            // Read browser name (new attr first, fall back to old)
+            String browserName = element.getAttributeValue(ATTR_BROWSER_NAME);
+            if (browserName == null) {
+                browserName = element.getAttributeValue(ATTR_BROWSER_NAME_OLD);
+            }
+            if (browserName != null && !browserName.isEmpty()) {
+                browserConfig.setBrowserName(browserName);
             }
 
             var deploymentConfig = data.getDeploymentConfig();
@@ -275,7 +297,7 @@ public class TomcatConfigurationSerializer {
             readBool(element, ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, updateConfig::setShowFrameDeactivationDialog);
             var uiConfig = data.getUiConfig();
             readBool(element, ATTR_ACTIVATE_TOOL_WINDOW, uiConfig::setActivateToolWindow);
-            readBool(element, ATTR_FOCUS_TOOL_WINDOW, uiConfig::setFocusToolWindow);
+            readBool(element, ATTR_FOCUS_TOOL_WINDOW, uiConfig::setShowLogsPage);
 
             data.setJreSelection(element.getAttributeValue(ATTR_JRE_SELECTION));
             readBool(element, ATTR_ALLOW_MULTIPLE_INSTANCES, data::setAllowMultipleInstances);
@@ -285,17 +307,19 @@ public class TomcatConfigurationSerializer {
             dc.setTransport(StringUtil.notNullize(element.getAttributeValue(ATTR_DEBUG_TRANSPORT), "Socket"));
             readBool(element, ATTR_USE_MODULE_CLASSPATH, dc::setUseModuleClasspath);
             RemoteConfig rc = data.getRemoteConfig();
-            rc.setManagerUrl(element.getAttributeValue(ATTR_MANAGER_URL));
-            rc.setUsername(element.getAttributeValue(ATTR_REMOTE_USERNAME));
+            String managerUrl = element.getAttributeValue(ATTR_MANAGER_URL);
+            if (managerUrl != null) rc.setManagerUrl(managerUrl);
+            String remoteUsername = element.getAttributeValue(ATTR_REMOTE_USERNAME);
+            if (remoteUsername != null) rc.setUsername(remoteUsername);
             rc.setPassword(element.getAttributeValue(ATTR_REMOTE_PASSWORD));
             readBool(element, ATTR_USE_REMOTE_CREDENTIALS, rc::setUseCredentials);
             readLogFileConfig(element, data.getLogFileConfig());
             readTomcatInfo(element, data::setTomcatInfo);
             readCoverageConfig(element, data.getCoverageConfig());
 
-            LOG.debug("Read configuration: " + config.getName());
+            LOG.debug("Read configuration data");
         } catch (Exception e) {
-            LOG.error("Failed to read configuration: " + config.getName(), e);
+            LOG.error("Failed to read configuration data", e);
         }
     }
 
@@ -338,6 +362,18 @@ public class TomcatConfigurationSerializer {
         Element logElem = element.getChild("logFileConfig");
         if (logElem == null) return;
 
+        String showStdout = logElem.getAttributeValue("showStdout");
+        if (showStdout != null) config.setShowStdoutConsole(Boolean.parseBoolean(showStdout));
+
+        String showStderr = logElem.getAttributeValue("showStderr");
+        if (showStderr != null) config.setShowStderrConsole(Boolean.parseBoolean(showStderr));
+
+        String saveToFile = logElem.getAttributeValue("saveToFile");
+        if (saveToFile != null) config.setSaveConsoleToFile(Boolean.parseBoolean(saveToFile));
+
+        String saveFilePath = logElem.getAttributeValue("saveFilePath");
+        if (saveFilePath != null) config.setSaveConsoleFilePath(saveFilePath);
+
         java.util.List<String> files = new java.util.ArrayList<>();
         for (Element file : logElem.getChildren("file")) {
             String path = file.getAttributeValue("path");
@@ -351,7 +387,6 @@ public class TomcatConfigurationSerializer {
 
         if (!files.isEmpty()) {
             config.setLogFiles(files);
-            return;
         }
     }
 

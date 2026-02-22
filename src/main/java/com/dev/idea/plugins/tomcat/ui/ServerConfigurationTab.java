@@ -39,8 +39,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private final List<ConfigurationSection> sharedSections = new ArrayList<>();
     private JPanel localContent;
     private JPanel remoteContent;
-    private JRadioButton localRadio;
-    private JRadioButton remoteRadio;
 
     private RemoteStagingSection remoteStagingSection;
     private RemoteConnectionSection remoteConnectionSection;
@@ -83,10 +81,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(JBUI.Borders.empty(0, 12, 0, 12));
 
-        JPanel modePanel = createModeSelector();
-        modePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, modePanel.getPreferredSize().height));
-        panel.add(modePanel);
-
         JPanel appServerPanel = applicationServerSection.createPanel();
         appServerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, appServerPanel.getPreferredSize().height));
         panel.add(appServerPanel);
@@ -96,36 +90,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         panel.add(browserPanel);
 
         return panel;
-    }
-
-    private JPanel createModeSelector() {
-        JPanel modePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        modePanel.setBorder(JBUI.Borders.empty(4, 0, 4, 0));
-
-        localRadio = new JRadioButton("Local");
-        remoteRadio = new JRadioButton("Remote");
-
-        ButtonGroup modeGroup = new ButtonGroup();
-        modeGroup.add(localRadio);
-        modeGroup.add(remoteRadio);
-
-        localRadio.setSelected(true);
-
-        localRadio.addActionListener(e -> switchMode(TomcatConstants.MODE_LOCAL));
-        remoteRadio.addActionListener(e -> switchMode(TomcatConstants.MODE_REMOTE));
-
-        modePanel.add(localRadio);
-        modePanel.add(Box.createHorizontalStrut(JBUI.scale(8)));
-        modePanel.add(remoteRadio);
-
-        return modePanel;
-    }
-
-    private void switchMode(String mode) {
-        cardLayout.show(cards, mode);
-        if (config != null) {
-            config.getConfigData().setServerMode(mode);
-        }
     }
 
     private void createSharedSections() {
@@ -193,13 +157,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
         String mode = config.getConfigData().getServerMode();
         if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
-            remoteRadio.setSelected(true);
             cardLayout.show(cards, TomcatConstants.MODE_REMOTE);
             if (remoteConnectionSection != null) {
                 remoteConnectionSection.resetFrom(config);
             }
         } else {
-            localRadio.setSelected(true);
             cardLayout.show(cards, TomcatConstants.MODE_LOCAL);
         }
 
@@ -210,8 +172,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     public void applyTo(TomcatRunConfiguration config) {
-        String mode = remoteRadio.isSelected() ? TomcatConstants.MODE_REMOTE : TomcatConstants.MODE_LOCAL;
-        config.getConfigData().setServerMode(mode);
+        String mode = config.getConfigData().getServerMode();
 
         if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             if (remoteConnectionSection != null) {
@@ -282,6 +243,12 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                     throw new ConfigurationException(errors.get(0).message);
                 }
             }
+        }
+    }
+
+    public void updateBrowserUrlContext(String contextPath) {
+        if (browserLaunchSection != null) {
+            browserLaunchSection.updateUrlContext(contextPath);
         }
     }
 

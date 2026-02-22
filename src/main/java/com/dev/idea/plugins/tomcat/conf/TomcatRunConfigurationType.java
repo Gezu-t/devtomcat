@@ -124,15 +124,18 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
             Objects.requireNonNull(project, "Project cannot be null");
 
+            TomcatRunConfiguration config = new TomcatRunConfiguration(project, this, "Tomcat");
             try {
-                LOG.debug("Creating Dev Tomcat template configuration for project: " + project.getName());
-                TomcatRunConfiguration config = new TomcatRunConfiguration(project, this, "Tomcat");
                 applyDynamicDefaults(config);
-                return config;
             } catch (Exception e) {
-                LOG.error("Failed to create template configuration for project: " + project.getName(), e);
-                throw new RuntimeException("Cannot create Tomcat configuration template", e);
+                LOG.error("Failed to apply defaults for project: " + project.getName(), e);
             }
+            return config;
+        }
+
+        @Override
+        public boolean isApplicable(@NotNull Project project) {
+            return true;
         }
 
         protected void applyDynamicDefaults(@NotNull TomcatRunConfiguration config) {
@@ -318,32 +321,26 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         public RunConfiguration createConfiguration(@Nullable String name, @NotNull RunConfiguration template) {
             Objects.requireNonNull(template, "Template configuration cannot be null");
 
+            String configName = StringUtil.notNullize(name, "Tomcat");
+            LOG.debug("Creating new configuration: " + configName);
+
+            TomcatRunConfiguration newConfig = (TomcatRunConfiguration) super.createConfiguration(configName, template);
+
             try {
-                String configName = StringUtil.notNullize(name, "Tomcat");
-                LOG.debug("Creating new configuration: " + configName);
-
-                TomcatRunConfiguration newConfig = (TomcatRunConfiguration) super.createConfiguration(configName, template);
-                Objects.requireNonNull(newConfig, "Created configuration cannot be null");
-
-                try {
-                    applyDynamicDefaults(newConfig);
-                } catch (Exception e) {
-                    LOG.warn("Error re-applying dynamic defaults", e);
-                }
-
-                try {
-                    newConfig.checkConfiguration();
-                    LOG.debug("Configuration validated successfully: " + configName);
-                } catch (RuntimeConfigurationException e) {
-                    LOG.warn("Configuration validation failed, attempting auto-fix: " + configName);
-                    autoFixConfiguration(newConfig);
-                }
-
-                return newConfig;
+                applyDynamicDefaults(newConfig);
             } catch (Exception e) {
-                LOG.error("Failed to create configuration: " + name, e);
-                throw new RuntimeException("Cannot create Tomcat configuration", e);
+                LOG.warn("Error re-applying dynamic defaults", e);
             }
+
+            try {
+                newConfig.checkConfiguration();
+                LOG.debug("Configuration validated successfully: " + configName);
+            } catch (RuntimeConfigurationException e) {
+                LOG.warn("Configuration validation failed, attempting auto-fix: " + configName);
+                autoFixConfiguration(newConfig);
+            }
+
+            return newConfig;
         }
 
         private void autoFixConfiguration(@NotNull TomcatRunConfiguration config) {
@@ -446,8 +443,12 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
         @Override
         public Icon getIcon() {
-            Icon icon = IconLoader.getIcon(ICON_PATH_SVG, TomcatRunConfigurationType.class);
-            return icon != null ? icon : DEFAULT_ICON;
+            try {
+                Icon icon = IconLoader.getIcon(ICON_PATH_SVG, TomcatRunConfigurationType.class);
+                return icon != null ? icon : DEFAULT_ICON;
+            } catch (Exception e) {
+                return DEFAULT_ICON;
+            }
         }
 
         @Override

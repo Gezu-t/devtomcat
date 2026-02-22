@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
+import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.JavaCommandLineState;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.executors.DefaultDebugExecutor;
@@ -13,6 +14,8 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.nio.charset.StandardCharsets;
 
 /**
  * Builds the Tomcat process command line and manages process lifecycle.
@@ -42,7 +45,16 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     @NotNull
     @Override
     protected OSProcessHandler startProcess() throws ExecutionException {
-        OSProcessHandler handler = super.startProcess();
+        GeneralCommandLine commandLine = createJavaParameters().toCommandLine();
+        Process process = commandLine.createProcess();
+
+        TomcatProcessHandler handler = new TomcatProcessHandler(
+                process,
+                commandLine.getCommandLineString(),
+                StandardCharsets.UTF_8,
+                deploymentLogger,
+                configuration
+        );
         ProcessTerminatedListener.attach(handler);
         return handler;
     }

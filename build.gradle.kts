@@ -1,8 +1,10 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+
 fun prop(key: String) = project.findProperty(key).toString()
 
 plugins {
     id("java")
-    id("org.jetbrains.intellij") version "1.17.4"
+    id("org.jetbrains.intellij.platform") version "2.11.0"
 }
 
 group = prop("pluginGroup")
@@ -10,18 +12,27 @@ version = prop("pluginVersion")
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
-intellij {
-    pluginName.set(prop("pluginName"))
-    version.set(prop("platformVersion"))
-    type.set(prop("platformType"))
-    plugins.set(
-        prop("platformPlugins")
-            .split(',')
-            .map(String::trim)
-            .filter(String::isNotEmpty)
-    )
+dependencies {
+    intellijPlatform {
+        create(prop("platformType"), prop("platformVersion"))
+        bundledPlugins(
+            prop("platformPlugins")
+                .split(',')
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+        )
+        testFramework(TestFrameworkType.Platform)
+    }
+
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("junit:junit:4.13.2")
 }
 
 java {
@@ -30,9 +41,25 @@ java {
     }
 }
 
+intellijPlatform {
+    pluginConfiguration {
+        name = prop("pluginName")
+        id = prop("pluginGroup")
+        version = prop("pluginVersion")
+        ideaVersion {
+            sinceBuild = prop("pluginSinceBuild")
+            untilBuild = prop("pluginUntilBuild")
+        }
+    }
+}
+
 tasks {
     compileJava {
         options.release.set(prop("compatibleJdkVersion").toInt())
+    }
+
+    test {
+        useJUnitPlatform()
     }
 
     buildSearchableOptions {
@@ -41,13 +68,6 @@ tasks {
 
     wrapper {
         gradleVersion = prop("gradleVersion")
-    }
-
-    patchPluginXml {
-        pluginId.set(prop("pluginGroup"))
-        version.set(prop("pluginVersion"))
-        sinceBuild.set(prop("pluginSinceBuild"))
-        untilBuild.set(prop("pluginUntilBuild"))
     }
 
     publishPlugin {

@@ -47,9 +47,6 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         initializeComponents();
         setupLayout();
 
-        revalidate();
-        repaint();
-
         LOG.info("DeploymentConfigurationPanel initialized with " + getComponentCount() + " components");
     }
 
@@ -123,9 +120,9 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             decorator.setMoveDownAction(button -> tableManager.moveSelectedDown());
 
             JPanel decoratedPanel = decorator.createPanel();
-            decoratedPanel.setMinimumSize(new Dimension(200, 100));
-            decoratedPanel.setPreferredSize(new Dimension(400, 200));
-
+            // Keep the table area visible even when it has 0 rows (otherwise only the toolbar can show).
+            decoratedPanel.setMinimumSize(new Dimension(320, 180));
+            decoratedPanel.setPreferredSize(new Dimension(600, 220));
             LOG.info("Toolbar created successfully with table");
             return decoratedPanel;
 
@@ -190,17 +187,14 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         }
 
         updateEmptyState();
-
-        config.getConfigData().getUiConfig().setActivateToolWindow(true);
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
         List<DeploymentArtifact> artifacts = tableManager.getDeployments();
         config.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
-        config.getConfigData().getUiConfig().setActivateToolWindow(true);
     }
 
-    public boolean isValid() {
+    public boolean isConfigurationValid() {
         // Deployment configuration is always valid (artifacts are optional)
         return true;
     }

@@ -22,7 +22,9 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-public class LogsConfigurationTab extends JPanel {
+import com.intellij.ui.components.JBPanel;
+
+public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
 
     private static final com.intellij.openapi.diagnostic.Logger LOG =
             com.intellij.openapi.diagnostic.Logger.getInstance(LogsConfigurationTab.class);
@@ -42,11 +44,10 @@ public class LogsConfigurationTab extends JPanel {
     private final JTextField saveToFileField = new JTextField();
     private final JButton saveToFileBrowse = new JButton("...");
 
-    private boolean firstPaint = true;
-
     public LogsConfigurationTab(@NotNull Project project, @Nullable TomcatRunConfiguration configuration) {
         this.project = project;
         initializeUI();
+        wireCheckboxConstraints();
         initializeDefaultLogs();
 
         if (configuration != null) {
@@ -54,36 +55,34 @@ public class LogsConfigurationTab extends JPanel {
         }
     }
 
-    @Override
-    protected void paintComponent(java.awt.Graphics g) {
-        super.paintComponent(g);
-        if (firstPaint) {
-            firstPaint = false;
-            LOG.info("LogsConfigurationTab FIRST PAINT - bounds=" + getBounds() +
-                    ", componentCount=" + getComponentCount() +
-                    ", visible=" + isVisible() + ", showing=" + isShowing());
-            for (int i = 0; i < getComponentCount(); i++) {
-                java.awt.Component c = getComponent(i);
-                LOG.info("  child[" + i + "]: " + c.getClass().getSimpleName() +
-                        " bounds=" + c.getBounds() + " visible=" + c.isVisible() +
-                        " prefSize=" + c.getPreferredSize());
+    /**
+     * Enforces the constraint: "Show this page" requires "Activate tool window".
+     * Unchecking activateToolWindow disables and unchecks showPage.
+     * Checking showPage auto-checks activateToolWindow.
+     */
+    private void wireCheckboxConstraints() {
+        activateToolWindowCheck.addActionListener(e -> {
+            if (!activateToolWindowCheck.isSelected()) {
+                showPageCheck.setSelected(false);
+                showPageCheck.setEnabled(false);
+            } else {
+                showPageCheck.setEnabled(true);
             }
-        }
-    }
+        });
 
-    @Override
-    public void addNotify() {
-        super.addNotify();
-        LOG.info("LogsConfigurationTab addNotify - parent=" +
-                (getParent() != null ? getParent().getClass().getSimpleName() : "null"));
+        showPageCheck.addActionListener(e -> {
+            if (showPageCheck.isSelected() && !activateToolWindowCheck.isSelected()) {
+                activateToolWindowCheck.setSelected(true);
+            }
+        });
     }
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBorder(JBUI.Borders.empty(10, 12));
 
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(JBUI.Borders.empty(10, 12));
 
         content.add(createLogsSection());
         content.add(Box.createVerticalStrut(12));
@@ -128,6 +127,7 @@ public class LogsConfigurationTab extends JPanel {
                 .disableUpDownActions();
 
         JComponent tableComponent = decorator.createPanel();
+        tableComponent.setMinimumSize(new Dimension(320, 180));
         tableComponent.setPreferredSize(new Dimension(600, 220));
         panel.add(tableComponent, BorderLayout.CENTER);
         return panel;
@@ -243,8 +243,23 @@ public class LogsConfigurationTab extends JPanel {
             refreshTable();
         }
 
-        activateToolWindowCheck.setSelected(configuration.getConfigData().getUiConfig().isActivateToolWindow());
-        showPageCheck.setSelected(false);
+        // Restore console output checkboxes
+        var logFileConfig = configuration.getConfigData().getLogFileConfig();
+        stdoutCheck.setSelected(logFileConfig.isShowStdoutConsole());
+        stderrCheck.setSelected(logFileConfig.isShowStderrConsole());
+
+        // Restore save-to-file state
+        saveToFileCheck.setSelected(logFileConfig.isSaveConsoleToFile());
+        saveToFileField.setText(logFileConfig.getSaveConsoleFilePath());
+        saveToFileField.setEnabled(logFileConfig.isSaveConsoleToFile());
+        saveToFileBrowse.setEnabled(logFileConfig.isSaveConsoleToFile());
+
+        // Restore UI config checkboxes and enforce constraint
+        boolean activateTW = configuration.getConfigData().getUiConfig().isActivateToolWindow();
+        boolean showLogs = configuration.getConfigData().getUiConfig().isShowLogsPage();
+        activateToolWindowCheck.setSelected(activateTW);
+        showPageCheck.setSelected(showLogs);
+        showPageCheck.setEnabled(activateTW);
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
@@ -255,9 +270,18 @@ public class LogsConfigurationTab extends JPanel {
             }
         }
 
-        configuration.getConfigData().getLogFileConfig().setLogFiles(activeLogs);
-        configuration.getConfigData().getUiConfig().setActivateToolWindow(activateToolWindowCheck.isSelected());
-        configuration.getConfigData().getUiConfig().setFocusToolWindow(activateToolWindowCheck.isSelected());
+        var logFileConfig = configuration.getConfigData().getLogFileConfig();
+        logFileConfig.setLogFiles(activeLogs);
+        logFileConfig.setShowStdoutConsole(stdoutCheck.isSelected());
+        logFileConfig.setShowStderrConsole(stderrCheck.isSelected());
+        logFileConfig.setSaveConsoleToFile(saveToFileCheck.isSelected());
+        logFileConfig.setSaveConsoleFilePath(saveToFileField.getText().trim());
+
+        // UI checkbox constraints guarantee showLogsPage=true implies activateToolWindow=true.
+        // UiConfig setters enforce the same invariant as a model-level safety net.
+        var uiConfig = configuration.getConfigData().getUiConfig();
+        uiConfig.setActivateToolWindow(activateToolWindowCheck.isSelected());
+        uiConfig.setShowLogsPage(showPageCheck.isSelected());
     }
 
     public void validateSettings() throws ConfigurationException {
@@ -275,7 +299,7 @@ public class LogsConfigurationTab extends JPanel {
         }
     }
 
-    public boolean isValid() {
+    public boolean isConfigurationValid() {
         try {
             validateSettings();
             return true;

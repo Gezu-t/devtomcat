@@ -2,18 +2,24 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.ui.server.dialogs.WebBrowsersDialog;
 import com.intellij.execution.process.KillableColoredProcessHandler;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessListener;
+import com.intellij.util.io.BaseOutputReader;
+import com.intellij.ide.BrowserUtil;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
+import java.io.File;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -65,6 +71,12 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         this.jmxEnabled = configuration.isJmxEnabled();
         this.shutdownPort = configuration.getConfigData().getPortConfig().getShutdown();
         addProcessListener(this);
+    }
+
+    @Override
+    protected @NotNull BaseOutputReader.Options readerOptions() {
+        // Tomcat is a long-running server and can be idle for extended periods.
+        return BaseOutputReader.Options.forMostlySilentProcess();
     }
 
     @Override
@@ -135,6 +147,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             serverStartupDetected = true;
             long duration = Long.parseLong(startupMatcher.group(1));
             deploymentLogger.logServerStartup(duration);
+            launchBrowserIfEnabled();
         }
 
         Matcher deploymentMatcher = DEPLOYMENT_PATTERN.matcher(text);
@@ -182,6 +195,62 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (lower.contains("permission"))
             return "Check file permissions and Tomcat directory access rights";
         return "";
+    }
+
+    private void launchBrowserIfEnabled() {
+        try {
+            if (!configuration.isAfterLaunchEnabled()) {
+                return;
+            }
+
+            String url = configuration.getBrowserUrl();
+            if (url == null || url.isEmpty()) {
+                Integer port = configuration.getHttpPort();
+                String context = configuration.getContextPath();
+                url = "http://localhost:" + (port != null ? port : 8080) + (context != null ? context : "/");
+            }
+
+            String browserName = configuration.getBrowserName();
+            final String targetUrl = url;
+
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    if (browserName == null || browserName.isEmpty()
+                            || "System Default".equals(browserName)
+                            || "System default".equals(browserName)) {
+                        BrowserUtil.browse(targetUrl);
+                    } else {
+                        launchSpecificBrowser(browserName, targetUrl);
+                    }
+                    deploymentLogger.logServerInfo("Browser opened: " + targetUrl);
+                } catch (Exception e) {
+                    LOG.warn("Failed to open browser: " + e.getMessage());
+                    deploymentLogger.logServerWarning("Could not open browser: " + e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            LOG.warn("Error launching browser: " + e.getMessage());
+        }
+    }
+
+    private void launchSpecificBrowser(@NotNull String browserName, @NotNull String url) {
+        List<WebBrowsersDialog.BrowserInfo> browsers = WebBrowsersDialog.getBrowserConfigurations();
+        for (WebBrowsersDialog.BrowserInfo browser : browsers) {
+            if (browserName.equals(browser.getName()) && browser.isActive()) {
+                String path = browser.getPath();
+                if (path != null && new File(path).exists()) {
+                    try {
+                        new ProcessBuilder(path, url).start();
+                        return;
+                    } catch (Exception e) {
+                        LOG.warn("Failed to launch " + browserName + ": " + e.getMessage());
+                    }
+                }
+                break;
+            }
+        }
+        // Fall back to system default
+        BrowserUtil.browse(url);
     }
 
     private void generateSessionSummary(long duration, int exitCode) {

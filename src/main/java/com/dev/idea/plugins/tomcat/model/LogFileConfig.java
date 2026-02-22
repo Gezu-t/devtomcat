@@ -27,6 +27,12 @@ public class LogFileConfig implements Serializable, Cloneable {
     @NotNull
     private List<String> logFiles = new ArrayList<>();
 
+    private boolean showStdoutConsole = true;
+    private boolean showStderrConsole = true;
+    private boolean saveConsoleToFile = false;
+    @NotNull
+    private String saveConsoleFilePath = "";
+
     public LogFileConfig() {
         this.id = generateId();
     }
@@ -37,6 +43,10 @@ public class LogFileConfig implements Serializable, Cloneable {
             if (other.logFiles != null) {
                 this.logFiles.addAll(other.logFiles);
             }
+            this.showStdoutConsole = other.showStdoutConsole;
+            this.showStderrConsole = other.showStderrConsole;
+            this.saveConsoleToFile = other.saveConsoleToFile;
+            this.saveConsoleFilePath = other.saveConsoleFilePath;
         } else {
             this.id = generateId();
         }
@@ -116,6 +126,19 @@ public class LogFileConfig implements Serializable, Cloneable {
                 .allMatch(f -> f != null && !f.trim().isEmpty() && f.length() <= MAX_PATH_LENGTH);
     }
 
+    public boolean isShowStdoutConsole() { return showStdoutConsole; }
+    public void setShowStdoutConsole(boolean show) { this.showStdoutConsole = show; }
+
+    public boolean isShowStderrConsole() { return showStderrConsole; }
+    public void setShowStderrConsole(boolean show) { this.showStderrConsole = show; }
+
+    public boolean isSaveConsoleToFile() { return saveConsoleToFile; }
+    public void setSaveConsoleToFile(boolean save) { this.saveConsoleToFile = save; }
+
+    @NotNull
+    public String getSaveConsoleFilePath() { return saveConsoleFilePath; }
+    public void setSaveConsoleFilePath(@NotNull String path) { this.saveConsoleFilePath = Objects.requireNonNull(path); }
+
     public boolean filesExist() {
         return logFiles.stream()
                 .filter(p -> p != null && !p.trim().isEmpty())
@@ -130,6 +153,10 @@ public class LogFileConfig implements Serializable, Cloneable {
             LogFileConfig clone = (LogFileConfig) super.clone();
             clone.id = this.id;
             clone.logFiles = new ArrayList<>(this.logFiles);
+            clone.showStdoutConsole = this.showStdoutConsole;
+            clone.showStderrConsole = this.showStderrConsole;
+            clone.saveConsoleToFile = this.saveConsoleToFile;
+            clone.saveConsoleFilePath = this.saveConsoleFilePath;
             return clone;
         } catch (CloneNotSupportedException e) {
             return new LogFileConfig(this);
@@ -140,12 +167,16 @@ public class LogFileConfig implements Serializable, Cloneable {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof LogFileConfig that)) return false;
-        return logFiles.equals(that.logFiles);
+        return showStdoutConsole == that.showStdoutConsole &&
+                showStderrConsole == that.showStderrConsole &&
+                saveConsoleToFile == that.saveConsoleToFile &&
+                logFiles.equals(that.logFiles) &&
+                saveConsoleFilePath.equals(that.saveConsoleFilePath);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(logFiles);
+        return Objects.hash(logFiles, showStdoutConsole, showStderrConsole, saveConsoleToFile, saveConsoleFilePath);
     }
 
     @NotNull

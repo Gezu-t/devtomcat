@@ -173,7 +173,7 @@ public final class TomcatServerUtils {
     }
 
     public static boolean isValidTomcatInstallation(@Nullable String installPath) {
-        if (StringUtils.isEmpty(installPath)) {
+        if (com.intellij.openapi.util.text.StringUtil.isEmpty(installPath)) {
             return false;
         }
         return TomcatServerValidator.isValidInstallation(installPath);

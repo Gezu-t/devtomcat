@@ -3,15 +3,18 @@ package com.dev.idea.plugins.tomcat.ui;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.*;
+import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -20,105 +23,120 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.DataFlavor;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class StartupConnectionTab extends JPanel {
+public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     private static final Logger LOG = Logger.getInstance(StartupConnectionTab.class);
 
     private final Project project;
     private final TomcatRunConfiguration configuration;
 
-    private JTabbedPane modeTabs;
-    private static final String RUN_MODE = "Run", DEBUG_MODE = "Debug", COVERAGE_MODE = "Coverage";
+    private static final String RUN_MODE = "Run";
+    private static final String DEBUG_MODE = "Debug";
+    private static final String COVERAGE_MODE = "Coverage";
 
-    private TextFieldWithBrowseButton startupScriptField, shutdownScriptField;
-    private JCheckBox useDefaultStartupCB, useDefaultShutdownCB;
-    private JButton editStartupParamsBtn, editShutdownParamsBtn;
+    private JBList<String> modeList;
+    private String selectedMode = RUN_MODE;
+
+    private TextFieldWithBrowseButton startupScriptField;
+    private TextFieldWithBrowseButton shutdownScriptField;
+    private JCheckBox useDefaultStartupCB;
+    private JCheckBox useDefaultShutdownCB;
 
     private JBTable envTable;
     private DefaultTableModel envModel;
     private JCheckBox passParentEnvsCB;
 
-    private TextFieldWithBrowseButton debugPortField;
-    private ComboBox<String> transportCombo;
-    private JCheckBox useModuleClasspathCB;
-
-
     public StartupConnectionTab(@NotNull Project project, @NotNull TomcatRunConfiguration configuration) {
         this.project = project;
         this.configuration = configuration;
         initUI();
-        updateModeVisibility(RUN_MODE);
     }
 
     private void initUI() {
         setLayout(new BorderLayout());
-        setBorder(JBUI.Borders.empty(15));
 
-        modeTabs = new JTabbedPane();
-        modeTabs.addTab(RUN_MODE,     createModePanel("Run configuration for local Tomcat server"));
-        modeTabs.addTab(DEBUG_MODE,   createDebugPanel());
-        modeTabs.addTab(COVERAGE_MODE,createModePanel("Coverage configuration (JaCoCo)"));
-        modeTabs.addChangeListener(e -> updateModeVisibility(modeTabs.getTitleAt(modeTabs.getSelectedIndex())));
-        add(modeTabs, BorderLayout.NORTH);
-
-        JPanel shared = new JPanel(new GridBagLayout());
+        JPanel mainPanel = new JPanel(new GridBagLayout());
+        mainPanel.setBorder(JBUI.Borders.empty(8, 12, 8, 12));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.NORTHWEST;
-        gbc.insets = JBUI.insets(10, 0);
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
-        gbc.gridy = 0; shared.add(createStartupSection(), gbc);
-        gbc.gridy = 1; shared.add(createShutdownSection(), gbc);
-        gbc.gridy = 2; gbc.fill = GridBagConstraints.BOTH; gbc.weighty = 1.0;
-        shared.add(createEnvSection(), gbc);
+        // Mode selector list (Run / Debug / Coverage)
+        gbc.gridy = 0;
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = JBUI.insets(0, 0, 10, 0);
+        mainPanel.add(createModeSelector(), gbc);
 
-        add(shared, BorderLayout.CENTER);
+        // Startup script row
+        gbc.gridy = 1;
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = JBUI.insets(4, 0);
+        mainPanel.add(createStartupSection(), gbc);
+
+        // Shutdown script row
+        gbc.gridy = 2;
+        mainPanel.add(createShutdownSection(), gbc);
+
+        // Environment Variables section (fills remaining space)
+        gbc.gridy = 3;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = JBUI.insets(10, 0, 0, 0);
+        mainPanel.add(createEnvSection(), gbc);
+
+        JBScrollPane scrollPane = new JBScrollPane(mainPanel);
+        scrollPane.setBorder(JBUI.Borders.empty());
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        add(scrollPane, BorderLayout.CENTER);
     }
 
-    private JPanel createModePanel(String description) {
-        JPanel p = new JPanel(new BorderLayout());
-        p.add(new JBLabel(description).withBorder(JBUI.Borders.emptyBottom(10)), BorderLayout.NORTH);
-        return p;
-    }
+    private JComponent createModeSelector() {
+        String[] modes = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE};
+        modeList = new JBList<>(modes);
+        modeList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        modeList.setSelectedIndex(0);
+        modeList.setVisibleRowCount(3);
 
-    private JPanel createDebugPanel() {
-        JPanel base = createModePanel("Debug configuration for local Tomcat server");
-        JPanel debug = new JPanel(new GridBagLayout());
-        GridBagConstraints g = new GridBagConstraints();
-        g.insets = JBUI.insets(5);
-        g.anchor = GridBagConstraints.WEST;
+        modeList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value,
+                                                          int index, boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                label.setBorder(JBUI.Borders.empty(4, 8));
+                String mode = (String) value;
+                switch (mode) {
+                    case RUN_MODE -> label.setIcon(AllIcons.Actions.Execute);
+                    case DEBUG_MODE -> label.setIcon(AllIcons.Actions.StartDebugger);
+                    case COVERAGE_MODE -> label.setIcon(AllIcons.General.RunWithCoverage);
+                }
+                return label;
+            }
+        });
 
-        g.gridx = 0; g.gridy = 0; debug.add(new JBLabel("Port:"), g);
-        g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
-        debugPortField = new TextFieldWithBrowseButton();
-        debugPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
-        debug.add(debugPortField, g);
+        modeList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                String mode = modeList.getSelectedValue();
+                if (mode != null) {
+                    selectedMode = mode;
+                    LOG.debug("Mode switched to: " + mode);
+                }
+            }
+        });
 
-        g.gridx = 0; g.gridy = 1; debug.add(new JBLabel("Transport:"), g);
-        g.gridx = 1;
-        transportCombo = new ComboBox<>(new String[]{"Socket", "Shared Memory"});
-        transportCombo.setSelectedItem("Socket");
-        debug.add(transportCombo, g);
-
-        g.gridx = 0; g.gridy = 2; g.gridwidth = 2;
-        useModuleClasspathCB = new JCheckBox("Use module classpath");
-        debug.add(useModuleClasspathCB, g);
-
-        base.add(debug, BorderLayout.SOUTH);
-        return base;
-    }
-
-    private void updateModeVisibility(String mode) {
-        boolean debug = DEBUG_MODE.equals(mode);
-        debugPortField.setVisible(debug);
-        transportCombo.setVisible(debug);
-        useModuleClasspathCB.setVisible(debug);
-        revalidate(); repaint();
+        JBScrollPane scrollPane = new JBScrollPane(modeList);
+        scrollPane.setPreferredSize(new Dimension(0, 90));
+        scrollPane.setMinimumSize(new Dimension(0, 90));
+        return scrollPane;
     }
 
     private JPanel createStartupSection() {
@@ -127,22 +145,23 @@ public class StartupConnectionTab extends JPanel {
         g.anchor = GridBagConstraints.WEST;
         g.insets = JBUI.insets(2);
 
-        g.gridx = 0; g.gridy = 0; p.add(new JLabel("Startup script:"), g);
+        g.gridx = 0;
+        g.gridy = 0;
+        p.add(new JLabel("Startup script:"), g);
 
-        g.gridx = 1; g.weightx = 1.0; g.fill = GridBagConstraints.HORIZONTAL;
+        g.gridx = 1;
+        g.weightx = 1.0;
+        g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
         startupScriptField = new TextFieldWithBrowseButton();
-        startupScriptField.addBrowseFolderListener("Select Startup Script", "Choose a custom startup script for Tomcat",
-                project, scriptFileDescriptor());
+        startupScriptField.addBrowseFolderListener("Select Startup Script",
+                "Choose a custom startup script for Tomcat", project, scriptFileDescriptor());
         p.add(startupScriptField, g);
 
-        g.gridx = 2; g.weightx = 0; g.fill = GridBagConstraints.NONE;
-        g.insets = JBUI.insets(2, 0, 2, 10);
-        editStartupParamsBtn = new JButton("Edit...");
-        editStartupParamsBtn.addActionListener(e -> editScriptParams("Startup"));
-        p.add(editStartupParamsBtn, g);
-
-        g.gridx = 3; g.insets = JBUI.insets(2);
+        g.gridx = 2;
+        g.weightx = 0;
+        g.fill = GridBagConstraints.NONE;
+        g.insets = JBUI.insets(2);
         useDefaultStartupCB = new JCheckBox("Use default", true);
         useDefaultStartupCB.addActionListener(e -> updateStartupState());
         p.add(useDefaultStartupCB, g);
@@ -156,22 +175,23 @@ public class StartupConnectionTab extends JPanel {
         g.anchor = GridBagConstraints.WEST;
         g.insets = JBUI.insets(2);
 
-        g.gridx = 0; g.gridy = 0; p.add(new JLabel("Shutdown script:"), g);
+        g.gridx = 0;
+        g.gridy = 0;
+        p.add(new JLabel("Shutdown script:"), g);
 
-        g.gridx = 1; g.weightx = 1.0; g.fill = GridBagConstraints.HORIZONTAL;
+        g.gridx = 1;
+        g.weightx = 1.0;
+        g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
         shutdownScriptField = new TextFieldWithBrowseButton();
-        shutdownScriptField.addBrowseFolderListener("Select Shutdown Script", "Choose a custom shutdown script for Tomcat",
-                project, scriptFileDescriptor());
+        shutdownScriptField.addBrowseFolderListener("Select Shutdown Script",
+                "Choose a custom shutdown script for Tomcat", project, scriptFileDescriptor());
         p.add(shutdownScriptField, g);
 
-        g.gridx = 2; g.weightx = 0; g.fill = GridBagConstraints.NONE;
-        g.insets = JBUI.insets(2, 0, 2, 10);
-        editShutdownParamsBtn = new JButton("Edit...");
-        editShutdownParamsBtn.addActionListener(e -> editScriptParams("Shutdown"));
-        p.add(editShutdownParamsBtn, g);
-
-        g.gridx = 3; g.insets = JBUI.insets(2);
+        g.gridx = 2;
+        g.weightx = 0;
+        g.fill = GridBagConstraints.NONE;
+        g.insets = JBUI.insets(2);
         useDefaultShutdownCB = new JCheckBox("Use default", true);
         useDefaultShutdownCB.addActionListener(e -> updateShutdownState());
         p.add(useDefaultShutdownCB, g);
@@ -192,7 +212,8 @@ public class StartupConnectionTab extends JPanel {
 
         String[] cols = {"Name", "Value"};
         envModel = new DefaultTableModel(cols, 0) {
-            @Override public boolean isCellEditable(int r, int c) { return false; }
+            @Override
+            public boolean isCellEditable(int r, int c) { return false; }
         };
         envTable = new JBTable(envModel);
         envTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -203,11 +224,39 @@ public class StartupConnectionTab extends JPanel {
         ToolbarDecorator decorator = ToolbarDecorator.createDecorator(envTable)
                 .setAddAction(button -> addEnvVar())
                 .setRemoveAction(button -> removeEnvVar())
-                .setEditAction(button -> editEnvVar())
                 .disableUpDownActions();
 
+        decorator.addExtraAction(new com.intellij.ui.AnActionButton("Copy", AllIcons.Actions.Copy) {
+            @Override
+            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+                copyEnvVar();
+            }
+
+            @Override
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
+            }
+
+            @Override
+            public boolean isEnabled() {
+                return envTable.getSelectedRow() >= 0;
+            }
+        });
+
+        decorator.addExtraAction(new com.intellij.ui.AnActionButton("Paste", AllIcons.Actions.MenuPaste) {
+            @Override
+            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+                pasteEnvVar();
+            }
+
+            @Override
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
+            }
+        });
+
         JComponent envTablePanel = decorator.createPanel();
-        envTablePanel.setPreferredSize(new Dimension(0, 120));
+        envTablePanel.setPreferredSize(new Dimension(0, 150));
         center.add(envTablePanel, BorderLayout.CENTER);
         p.add(center, BorderLayout.CENTER);
 
@@ -254,13 +303,6 @@ public class StartupConnectionTab extends JPanel {
         if (useDef) shutdownScriptField.setText(defaultShutdownScript());
     }
 
-    private void editScriptParams(String type) {
-        ScriptParamsDialog dlg = new ScriptParamsDialog(project, type);
-        if (dlg.showAndGet()) {
-            LOG.info(type + " params updated: " + dlg.getParams());
-        }
-    }
-
     private void addEnvVar() {
         EnvVarDialog dlg = new EnvVarDialog(project, null, null);
         if (dlg.showAndGet()) {
@@ -273,32 +315,44 @@ public class StartupConnectionTab extends JPanel {
         }
     }
 
-    private void editEnvVar() {
+    private void removeEnvVar() {
+        int row = envTable.getSelectedRow();
+        if (row >= 0) {
+            envModel.removeRow(row);
+            if (envModel.getRowCount() > 0) {
+                int newSel = Math.min(row, envModel.getRowCount() - 1);
+                envTable.setRowSelectionInterval(newSel, newSel);
+            }
+        }
+    }
+
+    private void copyEnvVar() {
         int row = envTable.getSelectedRow();
         if (row < 0) return;
         String name = (String) envModel.getValueAt(row, 0);
         String value = (String) envModel.getValueAt(row, 1);
-        EnvVarDialog dlg = new EnvVarDialog(project, name, value);
-        if (dlg.showAndGet()) {
-            String[] v = dlg.getVar();
-            if (!v[0].equals(name) && hasDuplicate(v[0])) {
-                Messages.showErrorDialog(project, "Duplicate variable name", "Error");
-                return;
-            }
-            envModel.setValueAt(v[0], row, 0);
-            envModel.setValueAt(v[1], row, 1);
-        }
+        String text = name + "=" + value;
+        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+        clipboard.setContents(new StringSelection(text), null);
     }
 
-    private void removeEnvVar() {
-        int row = envTable.getSelectedRow();
-        if (row >= 0) {
-            int rc = Messages.showYesNoDialog(project,
-                    "Remove variable '" + envModel.getValueAt(row, 0) + "'?",
-                    "Confirm", Messages.getQuestionIcon());
-            if (rc == Messages.YES) {
-                envModel.removeRow(row);
+    private void pasteEnvVar() {
+        try {
+            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            String text = (String) clipboard.getData(DataFlavor.stringFlavor);
+            if (text == null || text.isEmpty()) return;
+
+            // Parse "NAME=VALUE" format
+            int eq = text.indexOf('=');
+            if (eq > 0) {
+                String name = text.substring(0, eq).trim();
+                String value = text.substring(eq + 1).trim();
+                if (!name.isEmpty() && !hasDuplicate(name)) {
+                    envModel.addRow(new String[]{name, value});
+                }
             }
+        } catch (Exception ex) {
+            LOG.debug("Paste failed: " + ex.getMessage());
         }
     }
 
@@ -322,11 +376,9 @@ public class StartupConnectionTab extends JPanel {
         }
         passParentEnvsCB.setSelected(cfg.isPassParentEnvs());
 
-        debugPortField.setText(String.valueOf(cfg.getDebugPort()));
-        transportCombo.setSelectedItem(cfg.getDebugTransport());
-        useModuleClasspathCB.setSelected(cfg.isUseModuleClasspath());
+        modeList.setSelectedIndex(0);
 
-        LOG.debug("StartupConnectionTab reset – env size: {}", env == null ? 0 : env.size());
+        LOG.debug("StartupConnectionTab reset – env size: " + (env == null ? 0 : env.size()));
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
@@ -351,7 +403,7 @@ public class StartupConnectionTab extends JPanel {
             cfg.setShutdownScript(null);
         }
 
-        Map<String, String> env = new HashMap<>();
+        Map<String, String> env = new LinkedHashMap<>();
         Set<String> seen = new HashSet<>();
         for (int i = 0; i < envModel.getRowCount(); i++) {
             String name = ((String) envModel.getValueAt(i, 0)).trim();
@@ -364,31 +416,11 @@ public class StartupConnectionTab extends JPanel {
         cfg.setEnvironmentVariables(env);
         cfg.setPassParentEnvs(passParentEnvsCB.isSelected());
 
-        if (DEBUG_MODE.equals(modeTabs.getTitleAt(modeTabs.getSelectedIndex()))) {
-            try {
-                int port = Integer.parseInt(debugPortField.getText().trim());
-                cfg.setDebugPort(port);
-            } catch (NumberFormatException ex) {
-                throw new ConfigurationException("Invalid debug port");
-            }
-            cfg.setDebugTransport((String) transportCombo.getSelectedItem());
-            cfg.setUseModuleClasspath(useModuleClasspathCB.isSelected());
-        }
+        cfg.setDebugPort(cfg.getDebugPort());
+        cfg.setDebugTransport(cfg.getDebugTransport());
+        cfg.setUseModuleClasspath(cfg.isUseModuleClasspath());
 
-        LOG.info("StartupConnectionTab applied – env: " + env.size() + ", debug: " + DEBUG_MODE.equals(modeTabs.getTitleAt(modeTabs.getSelectedIndex())));
-    }
-
-    private static class ScriptParamsDialog extends DialogWrapper {
-        private final JTextArea area;
-        ScriptParamsDialog(@NotNull Project p, String type) {
-            super(p);
-            setTitle("Edit " + type + " Parameters");
-            area = new JTextArea(8, 50);
-            area.setText("-Dfile.encoding=UTF-8");
-            init();
-        }
-        @Override protected JComponent createCenterPanel() { return new JBScrollPane(area); }
-        String getParams() { return area.getText().trim(); }
+        LOG.info("StartupConnectionTab applied – env: " + env.size());
     }
 
     private static class EnvVarDialog extends DialogWrapper {
@@ -413,8 +445,8 @@ public class StartupConnectionTab extends JPanel {
                 String varValue = switch (sel) {
                     case "JAVA_OPTS"      -> DynamicTomcatEnvironment.buildJavaOpts();
                     case "CATALINA_OPTS"  -> DynamicTomcatEnvironment.buildCatalinaOpts();
-                    case "CATALINA_HOME"  -> "";  // Would need TomcatInfo access
-                    case "CATALINA_BASE"  -> "";  // Would need TomcatInfo access
+                    case "CATALINA_HOME"  -> "";
+                    case "CATALINA_BASE"  -> "";
                     case "JAVA_HOME"      -> System.getenv("JAVA_HOME");
                     case "CLASSPATH"      -> System.getenv("CLASSPATH");
                     case "PATH"           -> System.getenv("PATH");
@@ -426,13 +458,16 @@ public class StartupConnectionTab extends JPanel {
             init();
         }
 
-        @Override protected JComponent createCenterPanel() {
+        @Override
+        protected JComponent createCenterPanel() {
             JPanel panel = new JPanel(new GridBagLayout());
             panel.setBorder(JBUI.Borders.empty(15));
             GridBagConstraints g = new GridBagConstraints();
-            g.insets = JBUI.insets(5); g.anchor = GridBagConstraints.WEST;
+            g.insets = JBUI.insets(5);
+            g.anchor = GridBagConstraints.WEST;
 
-            g.gridx = 0; g.gridy = 0; panel.add(new JLabel("Common:"), g);
+            g.gridx = 0; g.gridy = 0;
+            panel.add(new JLabel("Common:"), g);
             g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
             panel.add(commonCombo, g);
 
@@ -449,15 +484,16 @@ public class StartupConnectionTab extends JPanel {
             return panel;
         }
 
-        @Override protected void doOKAction() {
+        @Override
+        protected void doOKAction() {
             if (StringUtil.isEmpty(nameF.getText().trim())) {
                 Messages.showErrorDialog(getContentPane(), "Variable name is required", "Validation");
-                nameF.requestFocus(); return;
+                nameF.requestFocus();
+                return;
             }
             super.doOKAction();
         }
 
         String[] getVar() { return new String[]{nameF.getText().trim(), valueF.getText().trim()}; }
-
     }
 }

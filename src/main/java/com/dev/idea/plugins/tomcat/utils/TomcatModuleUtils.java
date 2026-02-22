@@ -183,42 +183,58 @@ public final class TomcatModuleUtils {
     }
 
     private static boolean hasWebBuildConfiguration(@NotNull Module module) {
-        Project project = module.getProject();
-        VirtualFile baseDir = module.getProject().getBaseDir();
+        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
-        if (baseDir == null) {
-            return false;
-        }
-
-        // Check for Maven pom.xml
-        VirtualFile pomFile = baseDir.findFileByRelativePath("pom.xml");
-        if (pomFile != null && pomFile.exists()) {
-            try {
-                String content = com.intellij.openapi.vfs.VfsUtil.loadText(pomFile);
-                if (content.contains("<packaging>war</packaging>") ||
-                        content.contains("maven-war-plugin") ||
-                        content.contains("spring-boot-starter-web")) {
-                    return true;
-                }
-            } catch (IOException e) {
-                // Ignore file read errors
+        for (VirtualFile root : contentRoots) {
+            if (checkMavenWebConfig(root) || checkGradleWebConfig(root)) {
+                return true;
             }
         }
 
-        // Check for Gradle build.gradle
-        VirtualFile gradleFile = baseDir.findFileByRelativePath("build.gradle");
-        if (gradleFile != null && gradleFile.exists()) {
-            try {
-                String content = com.intellij.openapi.vfs.VfsUtil.loadText(gradleFile);
-                if (content.contains("apply plugin: 'war'") ||
-                        content.contains("org.springframework.boot")) {
-                    return true;
-                }
-            } catch (IOException e) {
-                // Ignore file read errors
+        // Also check the project base dir (for single-module projects where the module root differs)
+        VirtualFile baseDir = module.getProject().getBaseDir();
+        if (baseDir != null) {
+            if (checkMavenWebConfig(baseDir) || checkGradleWebConfig(baseDir)) {
+                return true;
             }
         }
 
         return false;
+    }
+
+    private static boolean checkMavenWebConfig(@NotNull VirtualFile dir) {
+        VirtualFile pomFile = dir.findChild("pom.xml");
+        if (pomFile == null || !pomFile.exists()) return false;
+
+        try {
+            String content = com.intellij.openapi.vfs.VfsUtil.loadText(pomFile);
+            return content.contains("<packaging>war</packaging>") ||
+                    content.contains("maven-war-plugin") ||
+                    content.contains("spring-boot-starter-web");
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean checkGradleWebConfig(@NotNull VirtualFile dir) {
+        // Check both Groovy DSL and Kotlin DSL
+        VirtualFile gradleFile = dir.findChild("build.gradle");
+        if (gradleFile == null) {
+            gradleFile = dir.findChild("build.gradle.kts");
+        }
+        if (gradleFile == null || !gradleFile.exists()) return false;
+
+        try {
+            String content = com.intellij.openapi.vfs.VfsUtil.loadText(gradleFile);
+            return content.contains("apply plugin: 'war'") ||
+                    content.contains("id(\"war\")") ||
+                    content.contains("id 'war'") ||
+                    content.contains("id \"war\"") ||
+                    content.contains("plugin 'war'") ||
+                    content.contains("org.springframework.boot") ||
+                    content.contains("spring-boot-starter-web");
+        } catch (IOException e) {
+            return false;
+        }
     }
 }

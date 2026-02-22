@@ -357,7 +357,9 @@ package com.dev.idea.plugins.tomcat.logging;
              public void logError(@NotNull String message) {
                  Objects.requireNonNull(message, "Message cannot be null");
                  logPrefixed(message, ERROR_PREFIX, ConsoleViewContentType.ERROR_OUTPUT);
-                 LOG.error("Error: " + message);
+                 // Use LOG.warn() — these are Tomcat output messages, not plugin errors.
+                 // LOG.error() causes IntelliJ to report SEVERE and blame the plugin.
+                 LOG.warn("Tomcat error: " + message);
              }
 
              /**
@@ -384,7 +386,7 @@ package com.dev.idea.plugins.tomcat.logging;
                      LOG.debug("Full stack trace:\n" + stackTrace);
                  }
 
-                 LOG.error("Exception occurred", throwable);
+                 LOG.warn("Tomcat exception: " + throwable.getMessage());
              }
 
              /**

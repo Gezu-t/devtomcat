@@ -5,6 +5,7 @@ package com.dev.idea.plugins.tomcat.utils;
     import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
     import com.intellij.openapi.diagnostic.Logger;
     import com.intellij.openapi.project.Project;
+    import com.intellij.openapi.util.text.StringUtil;
     import org.jetbrains.annotations.NotNull;
     import org.jetbrains.annotations.Nullable;
 
@@ -44,7 +45,7 @@ package com.dev.idea.plugins.tomcat.utils;
 
             // First check if there's an explicit CATALINA_BASE set
             String catalinaBase = data.getCatalinaBase();
-            if (StringUtils.isNotEmpty(catalinaBase)) {
+            if (StringUtil.isNotEmpty(catalinaBase)) {
                 Path path = Paths.get(catalinaBase);
                 if (Files.isDirectory(path)) {
                     return path;
@@ -59,7 +60,7 @@ package com.dev.idea.plugins.tomcat.utils;
             }
 
             // Create a project-specific CATALINA_BASE
-            String configName = StringUtils.sanitizeFileName(config.getName());
+            String configName = sanitizeFileName(config.getName());
             Path projectCatalinaBase = Paths.get(project.getBasePath(), ".idea", "tomcat", configName);
 
             LOG.debug("Using project CATALINA_BASE: " + projectCatalinaBase);
@@ -76,7 +77,7 @@ package com.dev.idea.plugins.tomcat.utils;
             }
 
             TomcatInfo tomcatInfo = data.getTomcatInfo();
-            if (tomcatInfo == null || StringUtils.isEmpty(tomcatInfo.getPath())) {
+            if (tomcatInfo == null || StringUtil.isEmpty(tomcatInfo.getPath())) {
                 return null;
             }
 
@@ -117,5 +118,14 @@ package com.dev.idea.plugins.tomcat.utils;
                 return null;
             }
             return catalinaBase.resolve("webapps");
+        }
+
+        @NotNull
+        private static String sanitizeFileName(@Nullable String name) {
+            if (StringUtil.isEmpty(name)) return "unnamed";
+            return name.trim()
+                .replaceAll("[^a-zA-Z0-9._-]", "_")
+                .replaceAll("_{2,}", "_")
+                .replaceAll("^_|_$", "");
         }
     }

@@ -8,7 +8,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.TitledSeparator;
-import com.intellij.ui.components.JBCheckBox;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -140,18 +139,31 @@ public class BrowserLaunchSection implements ConfigurationSection {
         }
 
         try {
-            afterLaunchCheckBox.setSelected(true);
-            withJavaScriptDebuggerCheckBox.setSelected(false);
+            afterLaunchCheckBox.setSelected(configuration.isAfterLaunchEnabled());
+            withJavaScriptDebuggerCheckBox.setSelected(configuration.isWithJsDebugger());
 
-            String contextPath = configuration.getContextPath();
-            Integer port = configuration.getHttpPort();
-
-            if (contextPath != null && port != null) {
-                urlField.setText("http://localhost:" + port + contextPath);
-            } else if (port != null) {
-                urlField.setText("http://localhost:" + port + "/");
+            // Use saved URL if available, otherwise generate from port/context
+            String savedUrl = configuration.getBrowserUrl();
+            if (savedUrl != null && !savedUrl.isEmpty()) {
+                urlField.setText(savedUrl);
             } else {
-                urlField.setText("http://localhost:8080/");
+                String contextPath = configuration.getContextPath();
+                Integer port = configuration.getHttpPort();
+                if (contextPath != null && port != null) {
+                    urlField.setText("http://localhost:" + port + contextPath);
+                } else if (port != null) {
+                    urlField.setText("http://localhost:" + port + "/");
+                } else {
+                    urlField.setText("http://localhost:8080/");
+                }
+            }
+
+            // Restore saved browser selection
+            String savedBrowser = configuration.getBrowserName();
+            if (savedBrowser != null && !savedBrowser.isEmpty()) {
+                browserComboBox.setSelectedItem(savedBrowser);
+            } else {
+                browserComboBox.setSelectedItem(TomcatConstants.BROWSER_SYSTEM_DEFAULT);
             }
 
             updateBrowserControls();
@@ -173,6 +185,10 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
                 if (browserComboBox != null && browserComboBox.getSelectedItem() != null) {
                     configuration.setBrowserName(browserComboBox.getSelectedItem().toString());
+                }
+
+                if (withJavaScriptDebuggerCheckBox != null) {
+                    configuration.setWithJsDebugger(withJavaScriptDebuggerCheckBox.isSelected());
                 }
             }
         } catch (Exception e) {
@@ -205,6 +221,11 @@ public class BrowserLaunchSection implements ConfigurationSection {
             String configBrowser = config.getBrowserName();
             String currentBrowser = getSelectedBrowser();
             if (!Objects.equals(currentBrowser, configBrowser != null ? configBrowser : TomcatConstants.BROWSER_SYSTEM_DEFAULT)) {
+                return true;
+            }
+
+            if (withJavaScriptDebuggerCheckBox != null &&
+                    withJavaScriptDebuggerCheckBox.isSelected() != config.isWithJsDebugger()) {
                 return true;
             }
 
@@ -290,6 +311,18 @@ public class BrowserLaunchSection implements ConfigurationSection {
                 String newUrl = "http://localhost:" + newPort + path;
                 urlField.setText(newUrl);
             }
+        }
+    }
+
+    public void updateUrlContext(String contextPath) {
+        if (!isInitialized || urlField == null || contextPath == null) return;
+
+        String currentUrl = urlField.getText();
+        if (currentUrl.startsWith("http://localhost:")) {
+            int portStart = "http://localhost:".length();
+            int pathStart = currentUrl.indexOf('/', portStart);
+            String portPart = (pathStart != -1) ? currentUrl.substring(0, pathStart) : currentUrl;
+            urlField.setText(portPart + contextPath);
         }
     }
 }

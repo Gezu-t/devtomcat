@@ -1,14 +1,11 @@
 package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
-import com.intellij.openapi.fileChooser.FileChooser;
-import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
@@ -384,13 +381,17 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
 
         private void browseJdkHome() {
-            FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false);
-            descriptor.setTitle("Select JDK Installation Directory");
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Select JDK Installation Directory");
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            chooser.setMultiSelectionEnabled(false);
 
-            VirtualFile file = FileChooser.chooseFile(descriptor, project, null);
-            if (file != null) {
-                pathField.setText(file.getPath());
-                detectVersion(file.getPath());
+            if (chooser.showOpenDialog(getContentPane()) == JFileChooser.APPROVE_OPTION) {
+                File file = chooser.getSelectedFile();
+                if (file != null) {
+                    pathField.setText(file.getAbsolutePath());
+                    detectVersion(file.getAbsolutePath());
+                }
             }
         }
 
@@ -504,13 +505,17 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
 
         private void browseJdkHome() {
-            FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false);
-            descriptor.setTitle("Select JDK Installation Directory");
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Select JDK Installation Directory");
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            chooser.setMultiSelectionEnabled(false);
 
-            VirtualFile file = FileChooser.chooseFile(descriptor, project, null);
-            if (file != null) {
-                pathField.setText(file.getPath());
-                detectVersion(file.getPath());
+            if (chooser.showOpenDialog(getContentPane()) == JFileChooser.APPROVE_OPTION) {
+                File file = chooser.getSelectedFile();
+                if (file != null) {
+                    pathField.setText(file.getAbsolutePath());
+                    detectVersion(file.getAbsolutePath());
+                }
             }
         }
 
