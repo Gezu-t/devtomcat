@@ -9,6 +9,8 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.*;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.ToolbarDecorator;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.*;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
@@ -21,18 +23,7 @@ import java.awt.*;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.List;
 
-/**
- * Startup / Connection tab – **matches IntelliJ Ultimate 2025.2** exactly.
- * <p>
- *   • Mode tabs (Run / Debug / Coverage) <br>
- *   • Dynamic default scripts (catalina.sh / catalina.bat) <br>
- *   • Full environment‑variable table with import / duplicate guard <br>
- *   • Debug panel (port, transport, module‑classpath) <br>
- *   • Remote‑debug CLI generator + Transport GUI button
- * </p>
- */
 public class StartupConnectionTab extends JPanel {
 
     private static final Logger LOG = Logger.getInstance(StartupConnectionTab.class);
@@ -40,29 +31,21 @@ public class StartupConnectionTab extends JPanel {
     private final Project project;
     private final TomcatRunConfiguration configuration;
 
-    // ---------- Mode tabs ----------
     private JTabbedPane modeTabs;
     private static final String RUN_MODE = "Run", DEBUG_MODE = "Debug", COVERAGE_MODE = "Coverage";
 
-    // ---------- Startup / Shutdown ----------
     private TextFieldWithBrowseButton startupScriptField, shutdownScriptField;
     private JCheckBox useDefaultStartupCB, useDefaultShutdownCB;
     private JButton editStartupParamsBtn, editShutdownParamsBtn;
 
-    // ---------- Environment ----------
     private JBTable envTable;
     private DefaultTableModel envModel;
-    private JButton removeEnvBtn, editEnvBtn;
     private JCheckBox passParentEnvsCB;
 
-    // ---------- Debug ----------
     private TextFieldWithBrowseButton debugPortField;
     private ComboBox<String> transportCombo;
     private JCheckBox useModuleClasspathCB;
 
-    // ---------- Remote CLI ----------
-    private JTextArea remoteCliArea;
-    private JButton generateCliBtn, transportGuiBtn;
 
     public StartupConnectionTab(@NotNull Project project, @NotNull TomcatRunConfiguration configuration) {
         this.project = project;
@@ -71,14 +54,10 @@ public class StartupConnectionTab extends JPanel {
         updateModeVisibility(RUN_MODE);
     }
 
-    // ------------------------------------------------------------------------
-    // UI CONSTRUCTION
-    // ------------------------------------------------------------------------
     private void initUI() {
         setLayout(new BorderLayout());
         setBorder(JBUI.Borders.empty(15));
 
-        // ---- Mode tabs (top) ------------------------------------------------
         modeTabs = new JTabbedPane();
         modeTabs.addTab(RUN_MODE,     createModePanel("Run configuration for local Tomcat server"));
         modeTabs.addTab(DEBUG_MODE,   createDebugPanel());
@@ -86,7 +65,6 @@ public class StartupConnectionTab extends JPanel {
         modeTabs.addChangeListener(e -> updateModeVisibility(modeTabs.getTitleAt(modeTabs.getSelectedIndex())));
         add(modeTabs, BorderLayout.NORTH);
 
-        // ---- Shared sections (center) ---------------------------------------
         JPanel shared = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.NORTHWEST;
@@ -102,9 +80,6 @@ public class StartupConnectionTab extends JPanel {
         add(shared, BorderLayout.CENTER);
     }
 
-    // ------------------------------------------------------------------------
-    // MODE PANELS
-    // ------------------------------------------------------------------------
     private JPanel createModePanel(String description) {
         JPanel p = new JPanel(new BorderLayout());
         p.add(new JBLabel(description).withBorder(JBUI.Borders.emptyBottom(10)), BorderLayout.NORTH);
@@ -118,21 +93,18 @@ public class StartupConnectionTab extends JPanel {
         g.insets = JBUI.insets(5);
         g.anchor = GridBagConstraints.WEST;
 
-        // Port
         g.gridx = 0; g.gridy = 0; debug.add(new JBLabel("Port:"), g);
         g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
         debugPortField = new TextFieldWithBrowseButton();
         debugPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
         debug.add(debugPortField, g);
 
-        // Transport
         g.gridx = 0; g.gridy = 1; debug.add(new JBLabel("Transport:"), g);
         g.gridx = 1;
         transportCombo = new ComboBox<>(new String[]{"Socket", "Shared Memory"});
         transportCombo.setSelectedItem("Socket");
         debug.add(transportCombo, g);
 
-        // Module classpath
         g.gridx = 0; g.gridy = 2; g.gridwidth = 2;
         useModuleClasspathCB = new JCheckBox("Use module classpath");
         debug.add(useModuleClasspathCB, g);
@@ -149,19 +121,14 @@ public class StartupConnectionTab extends JPanel {
         revalidate(); repaint();
     }
 
-    // ------------------------------------------------------------------------
-    // STARTUP SCRIPT SECTION
-    // ------------------------------------------------------------------------
     private JPanel createStartupSection() {
         JPanel p = new JPanel(new GridBagLayout());
         GridBagConstraints g = new GridBagConstraints();
         g.anchor = GridBagConstraints.WEST;
         g.insets = JBUI.insets(2);
 
-        // Label
         g.gridx = 0; g.gridy = 0; p.add(new JLabel("Startup script:"), g);
 
-        // Text field + browse
         g.gridx = 1; g.weightx = 1.0; g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
         startupScriptField = new TextFieldWithBrowseButton();
@@ -169,14 +136,12 @@ public class StartupConnectionTab extends JPanel {
                 project, scriptFileDescriptor());
         p.add(startupScriptField, g);
 
-        // Edit params
         g.gridx = 2; g.weightx = 0; g.fill = GridBagConstraints.NONE;
         g.insets = JBUI.insets(2, 0, 2, 10);
         editStartupParamsBtn = new JButton("Edit...");
         editStartupParamsBtn.addActionListener(e -> editScriptParams("Startup"));
         p.add(editStartupParamsBtn, g);
 
-        // Use default
         g.gridx = 3; g.insets = JBUI.insets(2);
         useDefaultStartupCB = new JCheckBox("Use default", true);
         useDefaultStartupCB.addActionListener(e -> updateStartupState());
@@ -185,9 +150,6 @@ public class StartupConnectionTab extends JPanel {
         return p;
     }
 
-    // ------------------------------------------------------------------------
-    // SHUTDOWN SCRIPT SECTION
-    // ------------------------------------------------------------------------
     private JPanel createShutdownSection() {
         JPanel p = new JPanel(new GridBagLayout());
         GridBagConstraints g = new GridBagConstraints();
@@ -217,27 +179,17 @@ public class StartupConnectionTab extends JPanel {
         return p;
     }
 
-    // ------------------------------------------------------------------------
-    // ENVIRONMENT SECTION + REMOTE CLI
-    // ------------------------------------------------------------------------
     private JPanel createEnvSection() {
         JPanel p = new JPanel(new BorderLayout());
 
-        // Title
-        JLabel title = new JLabel("Environment Variables");
-        title.setFont(title.getFont().deriveFont(Font.BOLD));
-        title.setBorder(JBUI.Borders.emptyBottom(10));
-        p.add(title, BorderLayout.NORTH);
+        p.add(new TitledSeparator("Environment Variables"), BorderLayout.NORTH);
 
-        // Center panel (checkbox + table + buttons)
         JPanel center = new JPanel(new BorderLayout());
 
-        // Pass parent envs
         passParentEnvsCB = new JCheckBox("Pass environment variables", true);
-        passParentEnvsCB.setBorder(JBUI.Borders.emptyBottom(10));
+        passParentEnvsCB.setBorder(JBUI.Borders.emptyBottom(6));
         center.add(passParentEnvsCB, BorderLayout.NORTH);
 
-        // Table
         String[] cols = {"Name", "Value"};
         envModel = new DefaultTableModel(cols, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
@@ -247,64 +199,21 @@ public class StartupConnectionTab extends JPanel {
         envTable.setRowHeight(25);
         envTable.getColumnModel().getColumn(0).setPreferredWidth(200);
         envTable.getColumnModel().getColumn(1).setPreferredWidth(400);
-        envTable.getSelectionModel().addListSelectionListener(e -> updateEnvButtons());
 
-        JBScrollPane tableScroll = new JBScrollPane(envTable);
-        tableScroll.setPreferredSize(new Dimension(0, 200));
-        tableScroll.setBorder(BorderFactory.createLoweredBevelBorder());
+        ToolbarDecorator decorator = ToolbarDecorator.createDecorator(envTable)
+                .setAddAction(button -> addEnvVar())
+                .setRemoveAction(button -> removeEnvVar())
+                .setEditAction(button -> editEnvVar())
+                .disableUpDownActions();
 
-        // Buttons
-        JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 5));
-        JButton addBtn = new JButton("+");   addBtn.setToolTipText("Add");
-        removeEnvBtn = new JButton("-");     removeEnvBtn.setToolTipText("Remove");
-        editEnvBtn   = new JButton("Edit");  editEnvBtn.setToolTipText("Edit");
-        JButton importBtn = new JButton("Import"); importBtn.setToolTipText("Import system variables");
-
-        Dimension sz = new Dimension(30, 25);
-        addBtn.setPreferredSize(sz); removeEnvBtn.setPreferredSize(sz);
-        editEnvBtn.setPreferredSize(new Dimension(50, 25));
-        importBtn.setPreferredSize(new Dimension(60, 25));
-
-        addBtn.addActionListener(e -> addEnvVar());
-        removeEnvBtn.addActionListener(e -> removeEnvVar());
-        editEnvBtn.addActionListener(e -> editEnvVar());
-        importBtn.addActionListener(e -> importSystemEnv());
-
-        btns.add(addBtn); btns.add(removeEnvBtn); btns.add(editEnvBtn); btns.add(importBtn);
-
-        JPanel tablePanel = new JPanel(new BorderLayout());
-        tablePanel.add(tableScroll, BorderLayout.CENTER);
-        tablePanel.add(btns, BorderLayout.SOUTH);
-        center.add(tablePanel, BorderLayout.CENTER);
+        JComponent envTablePanel = decorator.createPanel();
+        envTablePanel.setPreferredSize(new Dimension(0, 120));
+        center.add(envTablePanel, BorderLayout.CENTER);
         p.add(center, BorderLayout.CENTER);
 
-        // ---- Remote CLI (bottom) ----
-        JPanel remote = new JPanel(new BorderLayout());
-        remote.add(new JBLabel("Remote command line:").withBorder(JBUI.Borders.emptyBottom(5)), BorderLayout.NORTH);
-
-        remoteCliArea = new JTextArea();
-        remoteCliArea.setEditable(false);
-        remoteCliArea.setText(generateRemoteCli());
-        JBScrollPane cliScroll = new JBScrollPane(remoteCliArea);
-        cliScroll.setPreferredSize(new Dimension(0, 100));
-        remote.add(cliScroll, BorderLayout.CENTER);
-
-        generateCliBtn = new JButton("Generate");
-        generateCliBtn.addActionListener(e -> remoteCliArea.setText(generateRemoteCli()));
-        remote.add(generateCliBtn, BorderLayout.SOUTH);
-
-        transportGuiBtn = new JButton("Transport GUI...");
-        transportGuiBtn.addActionListener(e -> openTransportGui());
-        remote.add(transportGuiBtn, BorderLayout.EAST);
-
-        p.add(remote, BorderLayout.SOUTH);
-        updateEnvButtons();
         return p;
     }
 
-    // ------------------------------------------------------------------------
-    // SCRIPT HELPERS
-    // ------------------------------------------------------------------------
     private FileChooserDescriptor scriptFileDescriptor() {
         FileChooserDescriptor d = new FileChooserDescriptor(true, false, false, false, false, false);
         d.setTitle("Select Script File");
@@ -348,13 +257,10 @@ public class StartupConnectionTab extends JPanel {
     private void editScriptParams(String type) {
         ScriptParamsDialog dlg = new ScriptParamsDialog(project, type);
         if (dlg.showAndGet()) {
-            LOG.info("{} params updated: {}");
+            LOG.info(type + " params updated: " + dlg.getParams());
         }
     }
 
-    // ------------------------------------------------------------------------
-    // ENV VAR HELPERS
-    // ------------------------------------------------------------------------
     private void addEnvVar() {
         EnvVarDialog dlg = new EnvVarDialog(project, null, null);
         if (dlg.showAndGet()) {
@@ -364,7 +270,6 @@ public class StartupConnectionTab extends JPanel {
                 return;
             }
             envModel.addRow(v);
-            updateEnvButtons();
         }
     }
 
@@ -393,34 +298,7 @@ public class StartupConnectionTab extends JPanel {
                     "Confirm", Messages.getQuestionIcon());
             if (rc == Messages.YES) {
                 envModel.removeRow(row);
-                updateEnvButtons();
             }
-        }
-    }
-
-    private void importSystemEnv() {
-        Map<String, String> sys = System.getenv();
-        String[] keys = sys.keySet().toArray(new String[0]);
-        JBList<String> list = new JBList<>(keys);
-        list.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-
-        // Pre‑select common vars
-        List<Integer> pre = new ArrayList<>();
-        String[] common = {"JAVA_OPTS", "CATALINA_OPTS", "JAVA_HOME", "PATH", "CLASSPATH"};
-        for (int i = 0; i < keys.length; i++) {
-            for (String c : common) if (keys[i].equalsIgnoreCase(c)) { pre.add(i); break; }
-        }
-        list.setSelectedIndices(pre.stream().mapToInt(Integer::intValue).toArray());
-
-        JScrollPane sp = new JBScrollPane(list);
-        sp.setPreferredSize(new Dimension(400, 300));
-        int rc = JOptionPane.showConfirmDialog(this, sp,
-                "Select variables to import", JOptionPane.OK_CANCEL_OPTION);
-        if (rc == JOptionPane.OK_OPTION) {
-            for (String k : list.getSelectedValuesList()) {
-                if (!hasDuplicate(k)) envModel.addRow(new Object[]{k, sys.get(k)});
-            }
-            updateEnvButtons();
         }
     }
 
@@ -431,43 +309,12 @@ public class StartupConnectionTab extends JPanel {
         return false;
     }
 
-    private void updateEnvButtons() {
-        int sel = envTable.getSelectedRow();
-        boolean has = sel >= 0;
-        removeEnvBtn.setEnabled(has);
-        editEnvBtn.setEnabled(has);
-    }
-
-    // ------------------------------------------------------------------------
-    // REMOTE CLI & TRANSPORT GUI
-    // ------------------------------------------------------------------------
-    private String generateRemoteCli() {
-        String transport = (String) transportCombo.getSelectedItem();
-        String debugOpts = transport.equals("Socket")
-                ? "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
-                : "-agentlib:jdwp=transport=dt_shmem,server=y,suspend=n,address=jbwp";
-
-        return "java " +
-                configuration.getVmOptions() + " " +
-                debugOpts + " " +
-                "-jar your-app.jar";
-    }
-
-    private void openTransportGui() {
-        new TransportDialog(project).show();
-    }
-
-    // ------------------------------------------------------------------------
-    // RESET / APPLY
-    // ------------------------------------------------------------------------
     public void resetFrom(@NotNull TomcatRunConfiguration cfg) {
-        // Scripts
         useDefaultStartupCB.setSelected(true);
         useDefaultShutdownCB.setSelected(true);
         updateStartupState();
         updateShutdownState();
 
-        // Env vars
         envModel.setRowCount(0);
         Map<String, String> env = cfg.getEnvironmentVariables();
         if (env != null) {
@@ -475,25 +322,20 @@ public class StartupConnectionTab extends JPanel {
         }
         passParentEnvsCB.setSelected(cfg.isPassParentEnvs());
 
-        // Debug
         debugPortField.setText(String.valueOf(cfg.getDebugPort()));
         transportCombo.setSelectedItem(cfg.getDebugTransport());
         useModuleClasspathCB.setSelected(cfg.isUseModuleClasspath());
-
-        // Remote CLI
-        remoteCliArea.setText(generateRemoteCli());
 
         LOG.debug("StartupConnectionTab reset – env size: {}", env == null ? 0 : env.size());
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
-        // ---- Startup / Shutdown ----
         if (!useDefaultStartupCB.isSelected()) {
             String path = startupScriptField.getText().trim();
             if (StringUtil.isEmpty(path)) throw new ConfigurationException("Startup script path is required");
             File f = new File(path);
             if (!f.exists()) throw new ConfigurationException("Startup script does not exist: " + path);
-            if (!f.canExecute()) LOG.warn("Startup script may not be executable: {}");
+            if (!f.canExecute()) LOG.warn("Startup script may not be executable: " + path);
             cfg.setStartupScript(path);
         } else {
             cfg.setStartupScript(null);
@@ -509,7 +351,6 @@ public class StartupConnectionTab extends JPanel {
             cfg.setShutdownScript(null);
         }
 
-        // ---- Environment ----
         Map<String, String> env = new HashMap<>();
         Set<String> seen = new HashSet<>();
         for (int i = 0; i < envModel.getRowCount(); i++) {
@@ -523,7 +364,6 @@ public class StartupConnectionTab extends JPanel {
         cfg.setEnvironmentVariables(env);
         cfg.setPassParentEnvs(passParentEnvsCB.isSelected());
 
-        // ---- Debug (only when Debug tab selected) ----
         if (DEBUG_MODE.equals(modeTabs.getTitleAt(modeTabs.getSelectedIndex()))) {
             try {
                 int port = Integer.parseInt(debugPortField.getText().trim());
@@ -535,14 +375,9 @@ public class StartupConnectionTab extends JPanel {
             cfg.setUseModuleClasspath(useModuleClasspathCB.isSelected());
         }
 
-        LOG.info(
-                "StartupConnectionTab applied – env: {}, debug: {}"
-        );
+        LOG.info("StartupConnectionTab applied – env: " + env.size() + ", debug: " + DEBUG_MODE.equals(modeTabs.getTitleAt(modeTabs.getSelectedIndex())));
     }
 
-    // ------------------------------------------------------------------------
-    // INNER DIALOGS
-    // ------------------------------------------------------------------------
     private static class ScriptParamsDialog extends DialogWrapper {
         private final JTextArea area;
         ScriptParamsDialog(@NotNull Project p, String type) {
@@ -554,13 +389,6 @@ public class StartupConnectionTab extends JPanel {
         }
         @Override protected JComponent createCenterPanel() { return new JBScrollPane(area); }
         String getParams() { return area.getText().trim(); }
-    }
-
-    private static class TransportDialog extends DialogWrapper {
-        TransportDialog(@NotNull Project p) { super(p); setTitle("Transport GUI"); init(); }
-        @Override protected JComponent createCenterPanel() {
-            return new JLabel("<html><b>Advanced transport settings</b><br>(socket address, suspend, etc.)</html>");
-        }
     }
 
     private static class EnvVarDialog extends DialogWrapper {
@@ -582,8 +410,6 @@ public class StartupConnectionTab extends JPanel {
 
                 nameF.setText(sel);
 
-                // Note: TomcatInfo cannot be accessed from static inner class
-                // Use default values for now
                 String varValue = switch (sel) {
                     case "JAVA_OPTS"      -> DynamicTomcatEnvironment.buildJavaOpts();
                     case "CATALINA_OPTS"  -> DynamicTomcatEnvironment.buildCatalinaOpts();
@@ -632,7 +458,6 @@ public class StartupConnectionTab extends JPanel {
         }
 
         String[] getVar() { return new String[]{nameF.getText().trim(), valueF.getText().trim()}; }
-
 
     }
 }

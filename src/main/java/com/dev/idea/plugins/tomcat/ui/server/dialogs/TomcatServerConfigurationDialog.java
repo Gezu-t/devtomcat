@@ -22,10 +22,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-/**
- * Comprehensive Tomcat Server Configuration Dialog
- * Manages all Tomcat server configurations with add/edit/remove functionality
- */
 public class TomcatServerConfigurationDialog extends DialogWrapper {
 
     private final Project project;
@@ -50,10 +46,8 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         JPanel mainPanel = new JPanel(new BorderLayout());
         mainPanel.setPreferredSize(new Dimension(580, 350));
 
-        // Create server list
         createServerList();
 
-        // Create buttons panel
         JPanel buttonsPanel = createButtonsPanel();
 
         // Layout
@@ -213,9 +207,6 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Custom renderer for Tomcat servers
-     */
     private static class TomcatServerRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -232,9 +223,6 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Add new Tomcat server dialog
-     */
     private static class AddTomcatServerDialog extends DialogWrapper {
         private final Project project;
         private JTextField nameField;
@@ -358,9 +346,6 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Edit existing Tomcat server dialog
-     */
     private static class EditTomcatServerDialog extends DialogWrapper {
         private final Project project;
         private final TomcatInfo originalServer;
@@ -473,9 +458,6 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Auto-detect Tomcat installations dialog
-     */
     private static class AutoDetectDialog extends DialogWrapper {
         private JBList<TomcatInfo> detectedList;
         private DefaultListModel<TomcatInfo> detectedModel;

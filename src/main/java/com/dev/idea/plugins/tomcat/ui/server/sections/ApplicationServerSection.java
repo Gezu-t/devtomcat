@@ -39,11 +39,8 @@ public class ApplicationServerSection implements ConfigurationSection {
     @NotNull
     public JPanel createPanel() {
         if (panel == null) {
-            panel = new JPanel(new GridBagLayout());
-            panel.setBorder(BorderFactory.createCompoundBorder(
-                    JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1),
-                    JBUI.Borders.empty(4, 4, 4, 4)
-            ));
+            panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
+            panel.setBorder(JBUI.Borders.empty(4, 0, 4, 0));
 
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.anchor = GridBagConstraints.WEST;
@@ -53,10 +50,9 @@ public class ApplicationServerSection implements ConfigurationSection {
             panel.add(new JLabel("Application server:"), gbc);
 
             gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(4, 8, 4, 8);
+            gbc.insets = JBUI.insets(4, 4, 4, 8);
             serverComboBox = new ComboBox<>();
             serverComboBox.setRenderer(new TomcatInfoRenderer());
-            serverComboBox.setPreferredSize(new Dimension(220, 25));
             panel.add(serverComboBox, gbc);
 
             gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
@@ -79,7 +75,7 @@ public class ApplicationServerSection implements ConfigurationSection {
             serverComboBox.addItem(tomcatInfo);
         }
 
-        LOG.info("Loaded " + tomcatServers.size() + " Tomcat servers");
+        LOG.debug("Loaded " + tomcatServers.size() + " Tomcat servers");
     }
 
     @Override
@@ -141,7 +137,7 @@ public class ApplicationServerSection implements ConfigurationSection {
             TomcatServerConfigurationDialog dialog = new TomcatServerConfigurationDialog(project);
             if (dialog.showAndGet()) {
                 loadConfiguration();
-                LOG.info("Tomcat server configuration updated");
+                LOG.debug("Tomcat server configuration updated");
             }
         } catch (Exception e) {
             LOG.error("Error opening server configuration", e);

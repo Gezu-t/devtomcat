@@ -1,12 +1,6 @@
-/**
- * Author: Gezahegn Lemma (Gezu)
- * Project: Dev Tomcat Plugin
- * Created: 6/9/25
- * Phase 2: Logs configuration tab - Simple log file management
- */
-
 package com.dev.idea.plugins.tomcat.ui;
 
+import com.dev.idea.plugins.tomcat.conf.TomcatLogFile;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
@@ -15,8 +9,8 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ToolbarDecorator;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
-import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -28,11 +22,10 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-
-/**
- * Logs configuration tab - manages log file paths for Tomcat
- */
 public class LogsConfigurationTab extends JPanel {
+
+    private static final com.intellij.openapi.diagnostic.Logger LOG =
+            com.intellij.openapi.diagnostic.Logger.getInstance(LogsConfigurationTab.class);
 
     private final Project project;
 
@@ -49,6 +42,8 @@ public class LogsConfigurationTab extends JPanel {
     private final JTextField saveToFileField = new JTextField();
     private final JButton saveToFileBrowse = new JButton("...");
 
+    private boolean firstPaint = true;
+
     public LogsConfigurationTab(@NotNull Project project, @Nullable TomcatRunConfiguration configuration) {
         this.project = project;
         initializeUI();
@@ -57,6 +52,30 @@ public class LogsConfigurationTab extends JPanel {
         if (configuration != null) {
             resetFrom(configuration);
         }
+    }
+
+    @Override
+    protected void paintComponent(java.awt.Graphics g) {
+        super.paintComponent(g);
+        if (firstPaint) {
+            firstPaint = false;
+            LOG.info("LogsConfigurationTab FIRST PAINT - bounds=" + getBounds() +
+                    ", componentCount=" + getComponentCount() +
+                    ", visible=" + isVisible() + ", showing=" + isShowing());
+            for (int i = 0; i < getComponentCount(); i++) {
+                java.awt.Component c = getComponent(i);
+                LOG.info("  child[" + i + "]: " + c.getClass().getSimpleName() +
+                        " bounds=" + c.getBounds() + " visible=" + c.isVisible() +
+                        " prefSize=" + c.getPreferredSize());
+            }
+        }
+    }
+
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        LOG.info("LogsConfigurationTab addNotify - parent=" +
+                (getParent() != null ? getParent().getClass().getSimpleName() : "null"));
     }
 
     private void initializeUI() {
@@ -79,29 +98,20 @@ public class LogsConfigurationTab extends JPanel {
         add(content, BorderLayout.CENTER);
     }
 
-    /**
-     * Initialize with default Tomcat logs (matching official IntelliJ Tomcat plugin)
-     */
     private void initializeDefaultLogs() {
         logRows.clear();
-        // Match exact order and activation from official plugin
-        logRows.add(new LogRow(true, "Tomcat Localhost Access Log", false));
-        logRows.add(new LogRow(true, "Tomcat Localhost Log", false));
-        logRows.add(new LogRow(true, "Tomcat Catalina Log", false));
-        logRows.add(new LogRow(false, "Tomcat Manager Log", false));
-        logRows.add(new LogRow(false, "Tomcat Host Manager Log", false));
+        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_ACCESS_LOG_ID, false));
+        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_LOCALHOST_LOG_ID, false));
+        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_CATALINA_LOG_ID, false));
+        logRows.add(new LogRow(false, TomcatLogFile.TOMCAT_MANAGER_LOG_ID, false));
+        logRows.add(new LogRow(false, TomcatLogFile.TOMCAT_HOST_MANAGER_LOG_ID, false));
         refreshTable();
     }
 
-    /**
-     * Create logs section with table and buttons
-     */
     private JPanel createLogsSection() {
         JPanel panel = new JPanel(new BorderLayout());
 
-        JBLabel title = new JBLabel("Log files to be shown in console");
-        title.setBorder(JBUI.Borders.emptyBottom(6));
-        panel.add(title, BorderLayout.NORTH);
+        panel.add(new TitledSeparator("Log files to be shown in console"), BorderLayout.NORTH);
 
         tableModel = new LogTableModel();
         logsTable = new JBTable(tableModel);
@@ -171,9 +181,6 @@ public class LogsConfigurationTab extends JPanel {
         }
     }
 
-    /**
-     * Add a new log file path
-     */
     private void addLogFile() {
         String path = promptForLogPath("Add Log File", null);
 
@@ -218,9 +225,6 @@ public class LogsConfigurationTab extends JPanel {
         refreshTable();
     }
 
-    /**
-     * Reset UI from configuration
-     */
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
         logRows.clear();
 
@@ -243,9 +247,6 @@ public class LogsConfigurationTab extends JPanel {
         showPageCheck.setSelected(false);
     }
 
-    /**
-     * Apply UI settings to configuration
-     */
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
         List<String> activeLogs = new ArrayList<>();
         for (LogRow row : logRows) {
@@ -259,9 +260,6 @@ public class LogsConfigurationTab extends JPanel {
         configuration.getConfigData().getUiConfig().setFocusToolWindow(activateToolWindowCheck.isSelected());
     }
 
-    /**
-     * Validate settings
-     */
     public void validateSettings() throws ConfigurationException {
         if (logRows == null) {
             return;
@@ -277,9 +275,6 @@ public class LogsConfigurationTab extends JPanel {
         }
     }
 
-    /**
-     * Check if settings are valid
-     */
     public boolean isValid() {
         try {
             validateSettings();
@@ -289,9 +284,6 @@ public class LogsConfigurationTab extends JPanel {
         }
     }
 
-    /**
-     * Get current log files
-     */
     @NotNull
     public List<String> getLogFiles() {
         List<String> files = new ArrayList<>();
@@ -303,9 +295,6 @@ public class LogsConfigurationTab extends JPanel {
         return files;
     }
 
-    /**
-     * Set log files
-     */
     public void setLogFiles(@NotNull List<String> logFiles) {
         this.logRows.clear();
         for (String path : logFiles) {

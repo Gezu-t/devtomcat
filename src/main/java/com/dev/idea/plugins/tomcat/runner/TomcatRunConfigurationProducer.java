@@ -25,6 +25,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.MissingResourceException;
+import com.intellij.openapi.diagnostic.Logger;
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 /**
  * Professional Enterprise DevTomcat Run Configuration Producer
@@ -44,6 +46,9 @@ import java.util.MissingResourceException;
  */
 public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer<TomcatRunConfiguration> {
 
+    private static final Logger LOG = Logger.getInstance(TomcatRunConfigurationProducer.class);
+
+
     private static final String DEVTOMCAT_REGISTRY_KEY = "devTomcat.disableRunConfigurationProducer";
     private static final String CONFIGURATION_PREFIX = "DevTomcat: ";
 
@@ -53,7 +58,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         TomcatRunConfigurationType configurationType = ConfigurationTypeUtil.findConfigurationType(TomcatRunConfigurationType.class);
         ConfigurationFactory[] factories = configurationType.getConfigurationFactories();
         for (ConfigurationFactory factory : factories) {
-            if ("Local".equals(factory.getName())) {
+            if (TomcatConstants.MODE_LOCAL.equals(factory.getName())) {
                 return factory;
             }
         }
@@ -93,7 +98,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         // Professional configuration setup with enterprise features
         setupEnterpriseConfiguration(configuration, module, webRoots);
 
-        System.out.println("DevTomcat: Professional run configuration created for module: " + module.getName());
+        LOG.debug("DevTomcat: Professional run configuration created for module: " + module.getName());
         return true;
     }
 
@@ -142,7 +147,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         // Professional test file exclusion
         boolean isTestFile = TomcatModuleUtils.isTestSource(location);
         if (isTestFile) {
-            System.out.println("DevTomcat: Skipping test file location for web root discovery");
+            LOG.debug("DevTomcat: Skipping test file location for web root discovery");
             return ContainerUtil.emptyList();
         }
 
@@ -169,7 +174,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
 
         if (!webRoots.isEmpty()) {
-            System.out.println("DevTomcat: Professional web root discovery found " + webRoots.size() + " locations");
+            LOG.debug("DevTomcat: Professional web root discovery found " + webRoots.size() + " locations");
         }
 
         return webRoots;
@@ -182,7 +187,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         List<TomcatInfo> tomcatInfos = TomcatServerManagerState.getInstance().getTomcatInfos();
 
         if (tomcatInfos.isEmpty()) {
-            System.out.println("Tomcat: No Tomcat servers configured - professional configuration creation requires server setup");
+            LOG.debug("Tomcat: No Tomcat servers configured - professional configuration creation requires server setup");
             return false;
         }
 
@@ -190,7 +195,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         TomcatInfo selectedServer = selectOptimalTomcatServer(tomcatInfos);
         configuration.setTomcatInfo(selectedServer);
 
-        System.out.println("Tomcat: Professional server selected - " + selectedServer.getName() +
+        LOG.debug("Tomcat: Professional server selected - " + selectedServer.getName() +
                 " " + selectedServer.getVersion());
         return true;
     }
@@ -217,7 +222,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         configuration.setContextPath(normalizedContextPath);
 
 
-        System.out.println("Tomcat: Professional configuration setup complete - " + configName +
+        LOG.debug("Tomcat: Professional configuration setup complete - " + configName +
                 " at " + normalizedContextPath);
     }
 
@@ -278,9 +283,9 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         contextPath = contextPath.replaceAll("[^a-zA-Z0-9/_-]", "");
 
         if (contextPath.equals("/")) {
-            System.out.println("Tomcat: Using root context path for deployment");
+            LOG.debug("Tomcat: Using root context path for deployment");
         } else {
-            System.out.println("Tomcat: Professional context path configured: " + contextPath);
+            LOG.debug("Tomcat: Professional context path configured: " + contextPath);
         }
 
         return contextPath;
@@ -325,7 +330,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
 
         if (!webRoots.isEmpty()) {
-            System.out.println("Tomcat: Spring Boot web roots discovered");
+            LOG.debug("Tomcat: Spring Boot web roots discovered");
         }
 
         return webRoots;
@@ -348,7 +353,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
 
         if (!webRoots.isEmpty()) {
-            System.out.println("Tomcat: Maven/Gradle web roots discovered");
+            LOG.debug("Tomcat: Maven/Gradle web roots discovered");
         }
 
         return webRoots;

@@ -42,26 +42,17 @@ public class LogFileConfig implements Serializable, Cloneable {
         }
     }
 
-    /**
-     * Get the unique identifier for this log file configuration.
-     */
     @NotNull
     public String getId() {
         return id;
     }
 
-    /**
-     * Set the unique identifier for this log file configuration.
-     */
     public void setId(@NotNull String id) {
         this.id = Objects.requireNonNull(id, "ID cannot be null");
     }
 
-    /**
-     * Generate a unique ID for this configuration.
-     */
     private String generateId() {
-        return "logfile-" + System.currentTimeMillis() + "-" + hashCode();
+        return "logfile-" + java.util.UUID.randomUUID();
     }
 
     @NotNull

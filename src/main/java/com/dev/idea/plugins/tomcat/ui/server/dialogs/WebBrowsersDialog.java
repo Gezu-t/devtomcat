@@ -1,10 +1,3 @@
-/**
- * Author: Gezahegn Lemma (Gezu)
- * Project: Dev Tomcat Plugin
- * Created: 6/9/25
- * Phase 2: Web Browsers and Preview configuration dialog - Complete implementation
- */
-
 package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.intellij.openapi.project.Project;
@@ -24,15 +17,10 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Professional Web Browsers and Preview configuration dialog
- * Manages browser configurations for web application preview
- */
 public class WebBrowsersDialog extends DialogWrapper {
 
     private final Project project;
 
-    // Browser table components
     private JBTable browserTable;
     private DefaultTableModel browserTableModel;
     private JButton addBrowserButton;
@@ -41,10 +29,8 @@ public class WebBrowsersDialog extends DialogWrapper {
     private JButton moveUpButton;
     private JButton moveDownButton;
 
-    // Default browser settings
     private JComboBox<String> defaultBrowserComboBox;
 
-    // Preview settings
     private JCheckBox showBrowserPopupForHtmlCheckBox;
     private JCheckBox showBrowserPopupForXmlCheckBox;
     private JRadioButton reloadOnSaveRadio;
@@ -52,11 +38,9 @@ public class WebBrowsersDialog extends DialogWrapper {
     private JRadioButton reloadManuallyRadio;
     private ButtonGroup reloadButtonGroup;
 
-    // Instance data storage
     private List<BrowserInfo> browsers;
     private String defaultBrowser;
 
-    // Static global storage for cross-component access
     private static List<BrowserInfo> globalBrowsers = new ArrayList<>();
     private static String globalDefaultBrowser = "System default";
     private static boolean initialized = false;
@@ -90,14 +74,10 @@ public class WebBrowsersDialog extends DialogWrapper {
         return mainPanel;
     }
 
-    /**
-     * Create browser table panel with management buttons
-     */
     private JPanel createBrowserTablePanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Browsers"));
 
-        // Create browser table
         String[] columnNames = {"Active", "Name", "Family", "Path"};
         browserTableModel = new DefaultTableModel(columnNames, 0) {
             @Override
@@ -119,13 +99,11 @@ public class WebBrowsersDialog extends DialogWrapper {
             }
         });
 
-        // Set column widths
         browserTable.getColumnModel().getColumn(0).setPreferredWidth(60);  // Active
         browserTable.getColumnModel().getColumn(1).setPreferredWidth(120); // Name
         browserTable.getColumnModel().getColumn(2).setPreferredWidth(80);  // Family
         browserTable.getColumnModel().getColumn(3).setPreferredWidth(300); // Path
 
-        // Custom renderer for Family column to show icons
         browserTable.getColumnModel().getColumn(2).setCellRenderer(new BrowserFamilyRenderer());
 
         JScrollPane tableScrollPane = new JScrollPane(browserTable);
@@ -170,9 +148,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return panel;
     }
 
-    /**
-     * Create settings panel for default browser and preview options
-     */
     private JPanel createSettingsPanel() {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -190,12 +165,10 @@ public class WebBrowsersDialog extends DialogWrapper {
 
         panel.add(defaultBrowserPanel);
 
-        // Preview settings section
         JPanel previewPanel = new JPanel();
         previewPanel.setLayout(new BoxLayout(previewPanel, BoxLayout.Y_AXIS));
         previewPanel.setBorder(BorderFactory.createTitledBorder("Preview Settings"));
 
-        // Show browser popup options
         JPanel popupPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         showBrowserPopupForHtmlCheckBox = new JCheckBox("Show browser popup in the editor for HTML files", false);
         showBrowserPopupForXmlCheckBox = new JCheckBox("Show browser popup in the editor for XML files", false);
@@ -230,9 +203,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return panel;
     }
 
-    /**
-     * Initialize default browser configurations
-     */
     private void initializeDefaultBrowsers() {
         // Detect and add common browsers
         detectAndAddBrowser("Chrome", "Chrome", findChromeExecutable());
@@ -242,18 +212,13 @@ public class WebBrowsersDialog extends DialogWrapper {
         detectAndAddBrowser("Opera", "Opera", findOperaExecutable());
         detectAndAddBrowser("Internet Explorer", "Internet Explorer", findIEExecutable());
 
-        // Set default browser
         defaultBrowser = "System default";
     }
 
-    /**
-     * Static method to initialize global browsers if needed
-     */
     private static void initializeGlobalBrowsersIfNeeded() {
         if (!initialized) {
             globalBrowsers.clear();
 
-            // Auto-detect browsers and add to global list
             detectAndAddGlobalBrowser("Chrome", "Chrome", findChromeExecutableStatic());
             detectAndAddGlobalBrowser("Firefox", "Firefox", findFirefoxExecutableStatic());
             detectAndAddGlobalBrowser("Edge", "Edge", findEdgeExecutableStatic());
@@ -265,48 +230,31 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Static method to get configured browsers (called by ServerConfigurationTab)
-     */
     public static List<BrowserInfo> getBrowserConfigurations() {
         initializeGlobalBrowsersIfNeeded();
         return new ArrayList<>(globalBrowsers);
     }
 
-    /**
-     * Static method to get global default browser
-     */
     public static String getGlobalDefaultBrowser() {
         return globalDefaultBrowser;
     }
 
-    /**
-     * Detect and add browser if found
-     */
     private void detectAndAddBrowser(String name, String family, String path) {
         if (path != null && new File(path).exists()) {
             browsers.add(new BrowserInfo(name, family, path, true));
         } else {
-            // Add as inactive if not found
             browsers.add(new BrowserInfo(name, family, path != null ? path : "Not found", false));
         }
     }
 
-    /**
-     * Static helper method to detect and add global browsers
-     */
     private static void detectAndAddGlobalBrowser(String name, String family, String path) {
         if (path != null && new File(path).exists()) {
             globalBrowsers.add(new BrowserInfo(name, family, path, true));
         } else {
-            // Add as inactive if not found
             globalBrowsers.add(new BrowserInfo(name, family, path != null ? path : "Not found", false));
         }
     }
 
-    /**
-     * Find Chrome executable path
-     */
     private String findChromeExecutable() {
         return findChromeExecutableStatic();
     }
@@ -329,9 +277,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return null;
     }
 
-    /**
-     * Find Firefox executable path
-     */
     private String findFirefoxExecutable() {
         return findFirefoxExecutableStatic();
     }
@@ -354,9 +299,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return null;
     }
 
-    /**
-     * Find Edge executable path
-     */
     private String findEdgeExecutable() {
         return findEdgeExecutableStatic();
     }
@@ -377,9 +319,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return null;
     }
 
-    /**
-     * Find Safari executable path
-     */
     private String findSafariExecutable() {
         return findSafariExecutableStatic();
     }
@@ -392,9 +331,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return null;
     }
 
-    /**
-     * Find Opera executable path
-     */
     private String findOperaExecutable() {
         return findOperaExecutableStatic();
     }
@@ -417,9 +353,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return null;
     }
 
-    /**
-     * Find Internet Explorer executable path
-     */
     private String findIEExecutable() {
         return findIEExecutableStatic();
     }
@@ -438,9 +371,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         return null;
     }
 
-    /**
-     * Update browser table with current browser list
-     */
     private void updateBrowserTable() {
         browserTableModel.setRowCount(0);
         for (BrowserInfo browser : browsers) {
@@ -454,9 +384,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         updateDefaultBrowserComboBox();
     }
 
-    /**
-     * Update default browser combo box
-     */
     private void updateDefaultBrowserComboBox() {
         defaultBrowserComboBox.removeAllItems();
         defaultBrowserComboBox.addItem("System default");
@@ -473,9 +400,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Update button states based on selection
-     */
     private void updateButtonStates() {
         int selectedRow = browserTable.getSelectedRow();
         boolean hasSelection = selectedRow >= 0;
@@ -486,9 +410,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         moveDownButton.setEnabled(hasSelection && selectedRow < browsers.size() - 1);
     }
 
-    /**
-     * Add new browser
-     */
     private void addBrowser() {
         BrowserConfigDialog dialog = new BrowserConfigDialog(project, null);
         if (dialog.showAndGet()) {
@@ -502,9 +423,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Remove selected browser
-     */
     private void removeBrowser() {
         int selectedRow = browserTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < browsers.size()) {
@@ -524,9 +442,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Edit selected browser
-     */
     private void editBrowser() {
         int selectedRow = browserTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < browsers.size()) {
@@ -540,9 +455,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Move selected browser up
-     */
     private void moveBrowserUp() {
         int selectedRow = browserTable.getSelectedRow();
         if (selectedRow > 0) {
@@ -553,9 +465,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Move selected browser down
-     */
     private void moveBrowserDown() {
         int selectedRow = browserTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < browsers.size() - 1) {
@@ -566,17 +475,10 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-
-    /**
-     * Get default browser (instance method)
-     */
     public String getDefaultBrowser() {
         return (String) defaultBrowserComboBox.getSelectedItem();
     }
 
-    /**
-     * Get preview settings
-     */
     public PreviewSettings getPreviewSettings() {
         String reloadBehavior = "on_save";
         if (reloadOnFrameDeactivationRadio.isSelected()) {
@@ -599,7 +501,6 @@ public class WebBrowsersDialog extends DialogWrapper {
 
     @Override
     protected void doOKAction() {
-        // Save current dialog configuration to global state
         globalBrowsers.clear();
         globalBrowsers.addAll(browsers);
         globalDefaultBrowser = (String) defaultBrowserComboBox.getSelectedItem();
@@ -607,9 +508,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         super.doOKAction();
     }
 
-    /**
-     * Browser information class
-     */
     public static class BrowserInfo {
         private String name;
         private String family;
@@ -642,9 +540,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Preview settings class
-     */
     public static class PreviewSettings {
         private final boolean showHtmlPopup;
         private final boolean showXmlPopup;
@@ -661,9 +556,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         public String getReloadBehavior() { return reloadBehavior; }
     }
 
-    /**
-     * Custom renderer for browser family column
-     */
     private static class BrowserFamilyRenderer implements TableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
@@ -710,9 +602,6 @@ public class WebBrowsersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Individual browser configuration dialog
-     */
     private static class BrowserConfigDialog extends DialogWrapper {
         private final Project project;
         private JTextField nameField;

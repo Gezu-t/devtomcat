@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.options.ConfigurationException;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -53,5 +54,16 @@ public final class PortUtils {
     public static int findNextAvailable(int preferredPort) {
         if (isAvailable(preferredPort)) return preferredPort;
         return findAvailable(preferredPort + 1, MAX_PORT);
+    }
+
+    @Nullable
+    public static Integer parsePort(String text, String portName) throws ConfigurationException {
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) return null;
+        try {
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException e) {
+            throw new ConfigurationException(portName + " port must be a valid number");
+        }
     }
 }

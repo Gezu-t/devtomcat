@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.dev.idea.plugins.tomcat.model.ValidationResult;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -11,16 +12,35 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Validates Tomcat server installations by checking required directories,
+ * scripts, and configuration files.
+ */
 public final class TomcatServerValidator {
+
     private static final Logger LOG = Logger.getInstance(TomcatServerValidator.class);
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+\\.\\d+\\.\\d+)");
+
+    // Tomcat directory structure
+    private static final String DIR_BIN = "bin";
+    private static final String DIR_CONF = "conf";
+    private static final String DIR_WEBAPPS = "webapps";
+    private static final String DIR_LOGS = "logs";
+
+    // Required files
+    private static final String CATALINA_SH = "catalina.sh";
+    private static final String CATALINA_BAT = "catalina.bat";
+    private static final String SERVER_XML = "server.xml";
+    private static final String RELEASE_NOTES = "RELEASE-NOTES";
+
+    private static final String VERSION_UNKNOWN = "Unknown";
 
     private TomcatServerValidator() {}
 
     @NotNull
-    public static ValidationUtils.Result validateInstallation(@NotNull String installPath) {
+    public static ValidationResult validateInstallation(@NotNull String installPath) {
         Objects.requireNonNull(installPath);
-        ValidationUtils.Result result = new ValidationUtils.Result();
+        ValidationResult result = new ValidationResult();
 
         if (!ValidationUtils.isValidDirectory(installPath)) {
             result.addError("Directory does not exist: " + installPath);
@@ -35,35 +55,35 @@ public final class TomcatServerValidator {
         return result;
     }
 
-    private static void validateBinDirectory(Path root, ValidationUtils.Result result) {
-        Path bin = root.resolve("bin");
+    private static void validateBinDirectory(Path root, ValidationResult result) {
+        Path bin = root.resolve(DIR_BIN);
         if (!ValidationUtils.isValidDirectory(bin.toString())) {
-            result.addError("Missing 'bin' directory");
+            result.addError("Missing '" + DIR_BIN + "' directory");
         } else if (!hasCatalinaScript(bin)) {
-            result.addError("Missing catalina.sh or catalina.bat");
+            result.addError("Missing " + CATALINA_SH + " or " + CATALINA_BAT);
         }
     }
 
     private static boolean hasCatalinaScript(Path bin) {
-        return ValidationUtils.isValidFile(bin.resolve("catalina.sh").toString())
-            || ValidationUtils.isValidFile(bin.resolve("catalina.bat").toString());
+        return ValidationUtils.isValidFile(bin.resolve(CATALINA_SH).toString())
+            || ValidationUtils.isValidFile(bin.resolve(CATALINA_BAT).toString());
     }
 
-    private static void validateConfDirectory(Path root, ValidationUtils.Result result) {
-        Path conf = root.resolve("conf");
+    private static void validateConfDirectory(Path root, ValidationResult result) {
+        Path conf = root.resolve(DIR_CONF);
         if (!ValidationUtils.isValidDirectory(conf.toString())) {
-            result.addError("Missing 'conf' directory");
-        } else if (!ValidationUtils.isValidFile(conf.resolve("server.xml").toString())) {
-            result.addError("Missing server.xml");
+            result.addError("Missing '" + DIR_CONF + "' directory");
+        } else if (!ValidationUtils.isValidFile(conf.resolve(SERVER_XML).toString())) {
+            result.addError("Missing " + SERVER_XML);
         }
     }
 
-    private static void validateOptionalDirectories(Path root, ValidationUtils.Result result) {
-        if (!ValidationUtils.isValidDirectory(root.resolve("webapps").toString())) {
-            result.addWarning("Missing 'webapps' directory");
+    private static void validateOptionalDirectories(Path root, ValidationResult result) {
+        if (!ValidationUtils.isValidDirectory(root.resolve(DIR_WEBAPPS).toString())) {
+            result.addWarning("Missing '" + DIR_WEBAPPS + "' directory");
         }
-        if (!ValidationUtils.isValidDirectory(root.resolve("logs").toString())) {
-            result.addWarning("Missing 'logs' directory");
+        if (!ValidationUtils.isValidDirectory(root.resolve(DIR_LOGS).toString())) {
+            result.addWarning("Missing '" + DIR_LOGS + "' directory");
         }
     }
 
@@ -73,13 +93,13 @@ public final class TomcatServerValidator {
 
     @NotNull
     public static String detectVersion(@NotNull String installPath) {
-        Path bin = Paths.get(installPath, "bin");
-        for (String script : new String[]{"catalina.sh", "catalina.bat"}) {
+        Path bin = Paths.get(installPath, DIR_BIN);
+        for (String script : new String[]{CATALINA_SH, CATALINA_BAT}) {
             String version = extractVersion(bin.resolve(script));
             if (version != null) return version;
         }
-        String version = extractVersion(Paths.get(installPath, "RELEASE-NOTES"));
-        return version != null ? version : "Unknown";
+        String version = extractVersion(Paths.get(installPath, RELEASE_NOTES));
+        return version != null ? version : VERSION_UNKNOWN;
     }
 
     @Nullable

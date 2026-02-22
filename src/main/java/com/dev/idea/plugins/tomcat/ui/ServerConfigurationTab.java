@@ -13,12 +13,14 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.components.JBPanel;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
@@ -37,8 +39,9 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private final List<ConfigurationSection> sharedSections = new ArrayList<>();
     private JPanel localContent;
     private JPanel remoteContent;
+    private JRadioButton localRadio;
+    private JRadioButton remoteRadio;
 
-    // Remote-specific sections
     private RemoteStagingSection remoteStagingSection;
     private RemoteConnectionSection remoteConnectionSection;
 
@@ -52,22 +55,23 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private void buildUI() {
         createSharedSections();
 
-        // Create main layout with common sections at top
-        JPanel mainPanel = new JPanel(new BorderLayout());
+        JPanel mainPanel = new JPanel();
+        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
 
-        // Common sections (Application server + Open browser) always visible
         JPanel commonPanel = createCommonSections();
-        mainPanel.add(commonPanel, BorderLayout.NORTH);
+        mainPanel.add(commonPanel);
 
-        // Mode-specific content (Local vs Remote) in card layout
         localContent = createLocalContent();
         remoteContent = createRemoteContent();
 
-        cards.add(wrapScroll(localContent), "Local");
-        cards.add(wrapScroll(remoteContent), "Remote");
-        mainPanel.add(cards, BorderLayout.CENTER);
+        cards.add(localContent, TomcatConstants.MODE_LOCAL);
+        cards.add(remoteContent, TomcatConstants.MODE_REMOTE);
+        mainPanel.add(cards);
 
-        add(mainPanel, BorderLayout.CENTER);
+        JBScrollPane scrollPane = new JBScrollPane(mainPanel);
+        scrollPane.setBorder(JBUI.Borders.empty());
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        add(scrollPane, BorderLayout.CENTER);
 
         if (config != null) {
             resetFrom(config);
@@ -79,30 +83,59 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(JBUI.Borders.empty(0, 12, 0, 12));
 
+        JPanel modePanel = createModeSelector();
+        modePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, modePanel.getPreferredSize().height));
+        panel.add(modePanel);
+
         JPanel appServerPanel = applicationServerSection.createPanel();
         appServerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, appServerPanel.getPreferredSize().height));
         panel.add(appServerPanel);
-
-        panel.add(Box.createVerticalStrut(4));
 
         JPanel browserPanel = browserLaunchSection.createPanel();
         browserPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, browserPanel.getPreferredSize().height));
         panel.add(browserPanel);
 
-        panel.add(Box.createVerticalStrut(4));
-
         return panel;
+    }
+
+    private JPanel createModeSelector() {
+        JPanel modePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        modePanel.setBorder(JBUI.Borders.empty(4, 0, 4, 0));
+
+        localRadio = new JRadioButton("Local");
+        remoteRadio = new JRadioButton("Remote");
+
+        ButtonGroup modeGroup = new ButtonGroup();
+        modeGroup.add(localRadio);
+        modeGroup.add(remoteRadio);
+
+        localRadio.setSelected(true);
+
+        localRadio.addActionListener(e -> switchMode(TomcatConstants.MODE_LOCAL));
+        remoteRadio.addActionListener(e -> switchMode(TomcatConstants.MODE_REMOTE));
+
+        modePanel.add(localRadio);
+        modePanel.add(Box.createHorizontalStrut(JBUI.scale(8)));
+        modePanel.add(remoteRadio);
+
+        return modePanel;
+    }
+
+    private void switchMode(String mode) {
+        cardLayout.show(cards, mode);
+        if (config != null) {
+            config.getConfigData().setServerMode(mode);
+        }
     }
 
     private void createSharedSections() {
         applicationServerSection = new ApplicationServerSection(project);
-        tomcatSettingsSection = new TomcatSettingsSection();
         browserLaunchSection = new BrowserLaunchSection(project);
         vmOptionsSection = new VmOptionsSection();
-        jreConfigurationSection = new JreConfigurationSection(project);
         updateActionsSection = new UpdateActionsSection();
+        jreConfigurationSection = new JreConfigurationSection(project);
+        tomcatSettingsSection = new TomcatSettingsSection();
 
-        // Shared sections for ALL modes (these get loaded/reset/applied in both Local and Remote)
         sharedSections.clear();
         sharedSections.add(applicationServerSection);
         sharedSections.add(browserLaunchSection);
@@ -112,19 +145,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         sharedSections.add(tomcatSettingsSection);
     }
 
-    private JScrollPane wrapScroll(JPanel content) {
-        JScrollPane scrollPane = new JScrollPane(content);
-        scrollPane.setBorder(null);
-        return scrollPane;
-    }
-
     private JPanel createLocalContent() {
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(JBUI.Borders.empty(4, 12, 4, 12));
+        content.setBorder(JBUI.Borders.empty(0, 12, 0, 12));
 
-        // Add Local-specific sections (VM options, Update actions, JRE, Tomcat settings)
-        // Skip Application server (index 0) and Browser launch (index 1) as they're in common panel
         addSection(content, vmOptionsSection);
         addSection(content, updateActionsSection);
         addSection(content, jreConfigurationSection);
@@ -145,16 +170,13 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setBorder(JBUI.Borders.empty(4, 12, 4, 12));
 
-        // Initialize remote-specific sections
         remoteStagingSection = new RemoteStagingSection();
         remoteConnectionSection = new RemoteConnectionSection();
 
-        // Add remote-specific panels
         JPanel stagingPanel = remoteStagingSection.getPanel();
         stagingPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, stagingPanel.getPreferredSize().height));
         content.add(stagingPanel);
 
-        // Add separator
         JSeparator separator = new JSeparator(JSeparator.HORIZONTAL);
         separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
         content.add(separator);
@@ -166,19 +188,19 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         return content;
     }
 
-    // === RESET FROM CONFIG ===
     public void resetFrom(TomcatRunConfiguration config) {
         this.config = config;
 
         String mode = config.getConfigData().getServerMode();
-        if ("Remote".equalsIgnoreCase(mode)) {
-            cardLayout.show(cards, "Remote");
-            // Reset remote-specific sections
+        if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
+            remoteRadio.setSelected(true);
+            cardLayout.show(cards, TomcatConstants.MODE_REMOTE);
             if (remoteConnectionSection != null) {
                 remoteConnectionSection.resetFrom(config);
             }
         } else {
-            cardLayout.show(cards, "Local");
+            localRadio.setSelected(true);
+            cardLayout.show(cards, TomcatConstants.MODE_LOCAL);
         }
 
         for (ConfigurationSection section : sharedSections) {
@@ -187,12 +209,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         }
     }
 
-    // === APPLY TO CONFIG ===
     public void applyTo(TomcatRunConfiguration config) {
-        String mode = config.getConfigData().getServerMode();
+        String mode = remoteRadio.isSelected() ? TomcatConstants.MODE_REMOTE : TomcatConstants.MODE_LOCAL;
+        config.getConfigData().setServerMode(mode);
 
-        // Apply remote-specific sections if in Remote mode
-        if ("Remote".equalsIgnoreCase(mode)) {
+        if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             if (remoteConnectionSection != null) {
                 remoteConnectionSection.applyTo(config);
             }
@@ -207,12 +228,10 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         }
     }
 
-    // === IS MODIFIED ===
     public boolean isModified(TomcatRunConfiguration config) {
         String mode = config.getConfigData().getServerMode();
 
-        // Check remote-specific sections if in Remote mode
-        if ("Remote".equalsIgnoreCase(mode)) {
+        if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             if (remoteConnectionSection != null && remoteConnectionSection.isModified(config)) {
                 return true;
             }
@@ -226,7 +245,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         return false;
     }
 
-    // === VALIDATION ===
     public void validateSettings() throws ConfigurationException {
         if (config == null) {
             throw new ConfigurationException("Configuration is not initialized");
@@ -234,8 +252,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
         String mode = config.getConfigData().getServerMode();
 
-        if ("Local".equals(mode)) {
-            // Validate shared sections first (includes ApplicationServerSection)
+        if (TomcatConstants.MODE_LOCAL.equals(mode)) {
             for (ConfigurationSection section : sharedSections) {
                 List<com.intellij.openapi.ui.ValidationInfo> errors = section.validateSettings();
                 if (!errors.isEmpty()) {
@@ -252,7 +269,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 throw new ConfigurationException("Invalid Manager URL. Must be: http(s)://host:port/manager");
             }
 
-            // Validate remote connection settings
             if (remoteConnectionSection != null) {
                 List<com.intellij.openapi.ui.ValidationInfo> remoteErrors = remoteConnectionSection.validateSettings();
                 if (!remoteErrors.isEmpty()) {
@@ -260,7 +276,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 }
             }
 
-            // Validate shared sections
             for (ConfigurationSection section : sharedSections) {
                 List<com.intellij.openapi.ui.ValidationInfo> errors = section.validateSettings();
                 if (!errors.isEmpty()) {
@@ -270,14 +285,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         }
     }
 
-    // === DISPOSE ===
     public void dispose() {
-        // Prevent memory leaks
         remoteStagingSection = null;
         remoteConnectionSection = null;
     }
 
-    // === REMOTE SECTIONS (lightweight panels matching screenshot) ===
     private static class RemoteStagingSection {
         private final JPanel panel;
         RemoteStagingSection() {
@@ -293,7 +305,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             panel.add(new JLabel("Tomcat Server Settings"), gbc);
             gbc.gridwidth = 1;
 
-            // Remote staging rows
             addRow(panel, gbc, y++, "Remote staging", null, 4, true);
             addRow(panel, gbc, y++, "Type:", new JTextField(), 1, true);
             addRow(panel, gbc, y++, "Host:", new JTextField(), 1, true);
@@ -349,7 +360,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         void resetFrom(TomcatRunConfiguration config) {
             RemoteConfig rc = config.getConfigData().getRemoteConfig();
             if (rc != null) {
-                // Parse host and port from manager URL if available
                 String managerUrl = rc.getManagerUrl();
                 if (managerUrl != null && !managerUrl.isEmpty()) {
                     try {
@@ -369,7 +379,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             if (rc != null) {
                 String host = hostField.getText().trim();
                 String port = portField.getText().trim();
-                // Build manager URL from host and port
                 String managerUrl = "http://" + host + ":" + port + "/manager";
                 rc.setManagerUrl(managerUrl);
             }

@@ -1,11 +1,10 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.IOException;
 import java.io.Serial;
 import java.io.Serializable;
-import java.net.ServerSocket;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -102,7 +101,7 @@ public class PortConfig implements Serializable, Cloneable {
         if (port < MIN_PORT || port > MAX_PORT) {
             result.addError(name + " port must be between " + MIN_PORT + "-" + MAX_PORT);
         }
-        if (!isPortAvailable(port)) {
+        if (!PortUtils.isAvailable(port)) {
             result.addWarning(name + " port " + port + " is in use");
         }
         if (port < PRIVILEGED_PORT_THRESHOLD) {
@@ -125,21 +124,6 @@ public class PortConfig implements Serializable, Cloneable {
         }
     }
 
-    public static boolean isPortAvailable(int port) {
-        try (ServerSocket socket = new ServerSocket(port)) {
-            socket.setReuseAddress(true);
-            return true;
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    public static int findNextAvailablePort(int startPort) {
-        for (int port = startPort; port <= MAX_PORT; port++) {
-            if (isPortAvailable(port)) return port;
-        }
-        return -1;
-    }
 
     @NotNull
     @Override

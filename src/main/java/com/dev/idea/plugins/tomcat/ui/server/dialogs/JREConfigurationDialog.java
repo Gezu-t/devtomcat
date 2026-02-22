@@ -21,12 +21,11 @@ import java.awt.event.ActionEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import com.intellij.openapi.diagnostic.Logger;
 
-/**
- * JRE/JDK Configuration Dialog
- * Manages Java runtime environments for Tomcat execution
- */
 public class JREConfigurationDialog extends DialogWrapper {
+
+    private static final Logger LOG = Logger.getInstance(JREConfigurationDialog.class);
 
     private final Project project;
     private JBList<JdkInfo> jdkList;
@@ -51,10 +50,8 @@ public class JREConfigurationDialog extends DialogWrapper {
         JPanel mainPanel = new JPanel(new BorderLayout());
         mainPanel.setPreferredSize(new Dimension(580, 350));
 
-        // Create JDK list
         createJdkList();
 
-        // Create buttons panel
         JPanel buttonsPanel = createButtonsPanel();
 
         // Layout
@@ -246,18 +243,18 @@ public class JREConfigurationDialog extends DialogWrapper {
         try {
             // This would integrate with IntelliJ's SDK management
             // For now, we'll just track it internally
-            System.out.println("DevTomcat: Would add JDK to IntelliJ: " + jdkInfo.getName());
+            LOG.debug("DevTomcat: Would add JDK to IntelliJ: " + jdkInfo.getName());
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error adding JDK to IntelliJ: " + e.getMessage());
+            LOG.warn("DevTomcat: Error adding JDK to IntelliJ: " + e.getMessage());
         }
     }
 
     private void removeFromIntellijSdkTable(JdkInfo jdkInfo) {
         try {
             // This would integrate with IntelliJ's SDK management
-            System.out.println("DevTomcat: Would remove JDK from IntelliJ: " + jdkInfo.getName());
+            LOG.debug("DevTomcat: Would remove JDK from IntelliJ: " + jdkInfo.getName());
         } catch (Exception e) {
-            System.err.println("DevTomcat: Error removing JDK from IntelliJ: " + e.getMessage());
+            LOG.warn("DevTomcat: Error removing JDK from IntelliJ: " + e.getMessage());
         }
     }
 
@@ -271,9 +268,6 @@ public class JREConfigurationDialog extends DialogWrapper {
         return selectedJdk;
     }
 
-    /**
-     * JDK Information class
-     */
     public static class JdkInfo {
         private String name;
         private String version;
@@ -306,9 +300,6 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Custom renderer for JDK items
-     */
     private static class JdkRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -339,9 +330,6 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Add new JDK dialog
-     */
     private static class AddJdkDialog extends DialogWrapper {
         private final Project project;
         private JTextField nameField;
@@ -460,9 +448,6 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Edit existing JDK dialog
-     */
     private static class EditJdkDialog extends DialogWrapper {
         private final Project project;
         private final JdkInfo originalJdk;
@@ -575,9 +560,6 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Auto-detect JDK installations dialog
-     */
     private static class AutoDetectJdkDialog extends DialogWrapper {
         private final Project project;
         private JBList<JdkInfo> detectedList;

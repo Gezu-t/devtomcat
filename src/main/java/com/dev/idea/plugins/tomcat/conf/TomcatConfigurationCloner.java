@@ -38,6 +38,7 @@ package com.dev.idea.plugins.tomcat.conf;
                      dst.setTomcatInfo(src.getTomcatInfo() != null ? src.getTomcatInfo().clone() : null);
                      dst.setContextPath(src.getContextPath());
                      dst.setServerMode(src.getServerMode());
+                     dst.setCatalinaBase(src.getCatalinaBase());
                      dst.setJreSelection(src.getJreSelection());
                      dst.setStoreAsProjectFile(src.isStoreAsProjectFile());
 

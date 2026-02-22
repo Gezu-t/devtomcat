@@ -15,6 +15,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Collections;
 import java.util.List;
+import com.intellij.openapi.diagnostic.Logger;
 
 /**
  * Module Selection Section – UI only.
@@ -23,6 +24,8 @@ import java.util.List;
  */
 public class ModuleSelectionSection implements ConfigurationSection {
 
+    private static final Logger LOG = Logger.getInstance(ModuleSelectionSection.class);
+
     private final Project project;
     private ComboBox<Module> moduleCombo;
     private JPanel panel;
@@ -30,8 +33,6 @@ public class ModuleSelectionSection implements ConfigurationSection {
     public ModuleSelectionSection(Project project) {
         this.project = project;
     }
-
-    // ------------------------------------------------------------------ UI
 
     @Override
     @NotNull
@@ -45,10 +46,8 @@ public class ModuleSelectionSection implements ConfigurationSection {
         g.anchor = GridBagConstraints.WEST;
         g.insets = JBUI.insets(8);
 
-        // label
         panel.add(new JLabel("Module:"), g);
 
-        // combo box
         g.gridx = 1;
         g.weightx = 1;
         g.fill = GridBagConstraints.HORIZONTAL;
@@ -58,7 +57,6 @@ public class ModuleSelectionSection implements ConfigurationSection {
         moduleCombo.setRenderer(new ModuleRenderer());
         panel.add(moduleCombo, g);
 
-        // hint
         g.gridx = 0;
         g.gridy = 1;
         g.gridwidth = 2;
@@ -71,8 +69,6 @@ public class ModuleSelectionSection implements ConfigurationSection {
         return panel;
     }
 
-    // ------------------------------------------------------------------ data-binding
-
     @Override
     public void loadConfiguration() {
         moduleCombo.removeAllItems();
@@ -83,52 +79,42 @@ public class ModuleSelectionSection implements ConfigurationSection {
         for (Module m : ModuleManager.getInstance(project).getModules()) {
             moduleCombo.addItem(m);
 
-            // Check if this module is a web module
             if (selectedModule == null && TomcatModuleUtils.isWebModule(m)) {
                 selectedModule = m;
             }
         }
 
-        // Pre-select the first web module found, or leave as null
         if (selectedModule != null) {
             moduleCombo.setSelectedItem(selectedModule);
-            System.out.println("DevTomcat: Auto-selected web module: " + selectedModule.getName());
+            LOG.debug("DevTomcat: Auto-selected web module: " + selectedModule.getName());
         } else {
-            System.out.println("DevTomcat: No web module found for auto-selection");
+            LOG.debug("DevTomcat: No web module found for auto-selection");
         }
     }
 
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
-        // configuration no longer stores a module, so keep whatever is already chosen
     }
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        // nothing to persist – this section is UI-only now
     }
 
     @Override
     public boolean isValid() {
-        return true; // module selection optional
+        return true;
     }
 
     @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
-        // Module selection is UI-only and not persisted to configuration
-        // Therefore, there are no modifications to track
         return false;
     }
 
     @Override
     @NotNull
     public List<ValidationInfo> validateSettings() {
-        // Module selection is optional and UI-only
-        // No validation required
         return Collections.emptyList();
     }
-
-    // ------------------------------------------------------------------ helpers
 
     public Module getSelectedModule() {
         return (Module) moduleCombo.getSelectedItem();

@@ -16,31 +16,14 @@ import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.icons.AllIcons;
 import javax.swing.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 
-/**
- * Dev Tomcat Run Configuration Type
- *
- * <p>Implements the IntelliJ ConfigurationType interface for Tomcat configurations.
- *
- * <p>Responsibilities:
- * <ul>
- *   <li>Register Tomcat as a run configuration type in the IDE</li>
- *   <li>Provide configuration factory for creating new configurations</li>
- *   <li>Apply dynamic defaults from environment and settings</li>
- *   <li>Auto-select best available Tomcat server</li>
- * </ul>
- *
- * <p>100% MODERN MODEL — NO LEGACY — USES TomcatConfigurationValidator
- * <p>100% NULL-SAFE — All null checks with comprehensive error handling
- *
- * @see TomcatRunConfiguration
- * @see TomcatConfigurationValidator
- * @see DynamicTomcatEnvironment
- */
+/** Registers Tomcat as a run configuration type, provides Local/Remote factories. */
 public class TomcatRunConfigurationType implements ConfigurationType {
 
     private static final Logger LOG = Logger.getInstance(TomcatRunConfigurationType.class);
@@ -49,23 +32,9 @@ public class TomcatRunConfigurationType implements ConfigurationType {
     public static final String DISPLAY_NAME = "Dev Tomcat";
     public static final String DESCRIPTION = "Apache Tomcat server integration for web application development";
 
-    private static final String ICON_PATH_SVG = "/icons/tomcat.svg";
-    private static final String ICON_PATH_PNG = "/icons/tomcat.png";
-    private static final Icon DEFAULT_ICON = new Icon() {
-        @Override
-        public int getIconWidth() {
-            return 16;
-        }
-
-        @Override
-        public int getIconHeight() {
-            return 16;
-        }
-
-        @Override
-        public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y) {
-        }
-    };
+    private static final String ICON_PATH_SVG = "/icon/tomcat.svg";
+    private static final String ICON_PATH_PNG = "/icon/tomcat.png";
+    private static final Icon DEFAULT_ICON = AllIcons.RunConfigurations.Application;
 
     private volatile ConfigurationFactory[] factories;
 
@@ -81,12 +50,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         return DESCRIPTION;
     }
 
-    /**
-     * Get the Tomcat icon with fallback chain.
-     *
-     * @return icon or default if all sources fail
-     */
-    @Override
+        @Override
     @Nullable
     public Icon getIcon() {
         Icon icon = loadIcon(ICON_PATH_SVG);
@@ -103,13 +67,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         return DEFAULT_ICON;
     }
 
-    /**
-     * Load icon from classpath resource path.
-     *
-     * @param path the resource path
-     * @return icon or null if not found
-     */
-    @Nullable
+        @Nullable
     private Icon loadIcon(@NotNull String path) {
         Objects.requireNonNull(path, "Icon path cannot be null");
 
@@ -129,13 +87,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         return ID;
     }
 
-    /**
-     * Get or create the configuration factory.
-     *
-     * <p>Uses double-checked locking for thread-safe lazy initialization.
-     *
-     * @return array containing the factory
-     */
     @Override
     @NotNull
     public ConfigurationFactory[] getConfigurationFactories() {
@@ -153,28 +104,11 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         return factories;
     }
 
-    // === CONFIGURATION FACTORY ===
-
-    /**
-     * Factory for creating Tomcat run configurations.
-     *
-     * <p>Handles:
-     * <ul>
-     *   <li>Template configuration creation with dynamic defaults</li>
-     *   <li>New configuration creation with cloning and validation</li>
-     *   <li>Dynamic environment defaults application</li>
-     * </ul>
-     */
     public static class TomcatConfigurationFactory extends ConfigurationFactory {
 
         private final String factoryName;
 
-        /**
-         * Create a new Tomcat configuration factory.
-         *
-         * @param type the configuration type
-         */
-        protected TomcatConfigurationFactory(@NotNull ConfigurationType type, @NotNull String name) {
+                protected TomcatConfigurationFactory(@NotNull ConfigurationType type, @NotNull String name) {
             super(type);
             this.factoryName = name;
         }
@@ -185,15 +119,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             return factoryName;
         }
 
-        /**
-         * Create a template configuration for the project.
-         *
-         * <p>Template is used as a basis for new configurations and typically
-         * displayed in the "New Run Configuration" dialog.
-         *
-         * @param project the IDE project
-         * @return configured TomcatRunConfiguration
-         */
         @Override
         @NotNull
         public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
@@ -202,9 +127,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             try {
                 LOG.debug("Creating Dev Tomcat template configuration for project: " + project.getName());
                 TomcatRunConfiguration config = new TomcatRunConfiguration(project, this, "Tomcat");
-                // Default mode can be overridden in specialized factories
                 applyDynamicDefaults(config);
-                LOG.debug("Template configuration created successfully");
                 return config;
             } catch (Exception e) {
                 LOG.error("Failed to create template configuration for project: " + project.getName(), e);
@@ -212,14 +135,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             }
         }
 
-        /**
-         * Apply dynamic defaults from environment and settings.
-         *
-         * <p>Sets ports, JMX, HTTPS, hot deployment, browser, VM options, and
-         * environment variables based on dynamic configuration.
-         *
-         * @param config the configuration to update
-         */
         protected void applyDynamicDefaults(@NotNull TomcatRunConfiguration config) {
             Objects.requireNonNull(config, "Configuration cannot be null");
 
@@ -227,7 +142,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 TomcatConfigurationData data = config.getConfigData();
                 Objects.requireNonNull(data, "Configuration data cannot be null");
 
-                // === PORT CONFIGURATION ===
                 PortConfig portConfig = data.getPortConfig();
                 if (portConfig == null) {
                     LOG.warn("Port configuration is null, creating new one");
@@ -253,7 +167,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     portConfig.setShutdown(PortConfig.DEFAULT_SHUTDOWN_PORT);
                 }
 
-                // === JMX CONFIGURATION ===
                 try {
                     if (DynamicTomcatEnvironment.isJmxEnabled()) {
                         int jmxPort = DynamicTomcatEnvironment.getJmxPort();
@@ -269,7 +182,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     portConfig.setJmxEnabled(false);
                 }
 
-                // === HTTPS CONFIGURATION ===
                 try {
                     if (DynamicTomcatEnvironment.isHttpsEnabled()) {
                         int httpsPort = DynamicTomcatEnvironment.getHttpsPort();
@@ -285,7 +197,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     portConfig.setHttpsEnabled(false);
                 }
 
-                // === DEPLOYMENT CONFIGURATION ===
                 try {
                     DeploymentConfig deploymentConfig = data.getDeploymentConfig();
                     if (deploymentConfig == null) {
@@ -302,7 +213,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     LOG.warn("Error configuring deployment settings", e);
                 }
 
-                // === BROWSER CONFIGURATION ===
                 try {
                     BrowserConfig browserConfig = data.getBrowserConfig();
                     if (browserConfig == null) {
@@ -318,7 +228,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     LOG.warn("Error configuring browser settings", e);
                 }
 
-                // === CONTEXT PATH ===
                 try {
                     data.setContextPath("/");
                     LOG.debug("Context path set to: /");
@@ -326,7 +235,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     LOG.warn("Error setting context path", e);
                 }
 
-                // === VM OPTIONS ===
                 try {
                     VmConfig vmConfig = data.getVmConfig();
                     if (vmConfig == null) {
@@ -334,17 +242,10 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                         vmConfig = new VmConfig();
                         data.setVmConfig(vmConfig);
                     }
-
-                    String javaOpts = DynamicTomcatEnvironment.buildJavaOpts();
-                    if (javaOpts != null && !javaOpts.trim().isEmpty()) {
-                        vmConfig.setVmOptions(javaOpts);
-                        LOG.debug("VM options set from DynamicTomcatEnvironment");
-                    }
                 } catch (Exception e) {
                     LOG.warn("Error configuring VM options", e);
                 }
 
-                // === ENVIRONMENT VARIABLES ===
                 try {
                     VmConfig vmConfig = data.getVmConfig();
                     if (vmConfig == null) {
@@ -364,7 +265,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 } catch (Exception e) {
                     LOG.warn("Error configuring environment variables", e);
                 }
-                // === AUTO-SELECT TOMCAT SERVER ===
                 try {
                     autoSelectTomcatServer(config);
                 } catch (Exception e) {
@@ -377,15 +277,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             }
         }
 
-        /**
-         * Auto-select the best available Tomcat server.
-         *
-         * <p>Selects the highest version Tomcat server from registered servers.
-         * If only one server is available, selects that one. If none are available,
-         * no server is selected and manual configuration is required.
-         *
-         * @param config the configuration to update
-         */
         private void autoSelectTomcatServer(@NotNull TomcatRunConfiguration config) {
             Objects.requireNonNull(config, "Configuration cannot be null");
 
@@ -402,13 +293,12 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     return;
                 }
 
-                // === SELECT HIGHEST VERSION ===
                 TomcatInfo selected = servers.stream()
                         .filter(Objects::nonNull)
                         .max((s1, s2) -> {
                             String v1 = s1.getVersion() != null ? s1.getVersion() : "0";
                             String v2 = s2.getVersion() != null ? s2.getVersion() : "0";
-                            return v1.compareTo(v2);
+                            return compareSemanticVersions(v1, v2);
                         })
                         .orElse(null);
 
@@ -423,22 +313,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             }
         }
 
-        /**
-         * Create a new configuration by cloning the template.
-         *
-         * <p>Process:
-         * <ul>
-         *   <li>Clone the template configuration</li>
-         *   <li>Set the new configuration name</li>
-         *   <li>Re-apply dynamic defaults</li>
-         *   <li>Validate the configuration</li>
-         *   <li>Auto-fix any port conflicts or invalid values</li>
-         * </ul>
-         *
-         * @param name     the name for the new configuration
-         * @param template the template configuration to clone from
-         * @return new TomcatRunConfiguration with applied defaults
-         */
         @Override
         @NotNull
         public RunConfiguration createConfiguration(@Nullable String name, @NotNull RunConfiguration template) {
@@ -451,14 +325,12 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 TomcatRunConfiguration newConfig = (TomcatRunConfiguration) super.createConfiguration(configName, template);
                 Objects.requireNonNull(newConfig, "Created configuration cannot be null");
 
-                // === RE-APPLY DYNAMIC DEFAULTS ===
                 try {
                     applyDynamicDefaults(newConfig);
                 } catch (Exception e) {
                     LOG.warn("Error re-applying dynamic defaults", e);
                 }
 
-                // === VALIDATE CONFIGURATION ===
                 try {
                     newConfig.checkConfiguration();
                     LOG.debug("Configuration validated successfully: " + configName);
@@ -474,18 +346,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             }
         }
 
-        /**
-         * Auto-fix invalid configuration values.
-         *
-         * <p>Attempts to fix common issues:
-         * <ul>
-         *   <li>Invalid HTTP port → use default 8080</li>
-         *   <li>Invalid shutdown port → use default 8005</li>
-         *   <li>Port conflicts → auto-adjust ports</li>
-         * </ul>
-         *
-         * @param config the configuration to fix
-         */
         private void autoFixConfiguration(@NotNull TomcatRunConfiguration config) {
             Objects.requireNonNull(config, "Configuration cannot be null");
 
@@ -504,7 +364,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
                 boolean fixed = false;
 
-                // === FIX HTTP PORT ===
                 int httpPort = pc.getHttp();
                 if (httpPort < 1 || httpPort > 65535) {
                     LOG.debug("Fixing invalid HTTP port: " + httpPort);
@@ -512,7 +371,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     fixed = true;
                 }
 
-                // === FIX SHUTDOWN PORT ===
                 int shutdownPort = pc.getShutdown();
                 if (shutdownPort < 1 || shutdownPort > 65535) {
                     LOG.debug("Fixing invalid shutdown port: " + shutdownPort);
@@ -520,7 +378,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     fixed = true;
                 }
 
-                // === FIX HTTPS PORT (IF ENABLED) ===
                 if (pc.isHttpsEnabled()) {
                     int httpsPort = pc.getHttps();
                     if (httpsPort < 1 || httpsPort > 65535) {
@@ -530,7 +387,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     }
                 }
 
-                // === FIX JMX PORT (IF ENABLED) ===
                 if (pc.isJmxEnabled()) {
                     int jmxPort = pc.getJmx();
                     if (jmxPort < 1 || jmxPort > 65535) {
@@ -544,8 +400,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     LOG.debug("Auto-fixed configuration, new ports: HTTP=" + pc.getHttp() +
                             ", Shutdown=" + pc.getShutdown());
 
-                    // === RE-VALIDATE AFTER FIX ===
-                    try {
+                        try {
                         config.checkConfiguration();
                         LOG.debug("Configuration re-validated successfully after auto-fix");
                     } catch (RuntimeConfigurationException e) {
@@ -556,11 +411,28 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 LOG.warn("Error during auto-fix", e);
             }
         }
+
+        private static int compareSemanticVersions(@NotNull String v1, @NotNull String v2) {
+            String[] parts1 = v1.split("\\.");
+            String[] parts2 = v2.split("\\.");
+            int maxLen = Math.max(parts1.length, parts2.length);
+            for (int i = 0; i < maxLen; i++) {
+                int num1 = i < parts1.length ? parseVersionPart(parts1[i]) : 0;
+                int num2 = i < parts2.length ? parseVersionPart(parts2[i]) : 0;
+                if (num1 != num2) return Integer.compare(num1, num2);
+            }
+            return 0;
+        }
+
+        private static int parseVersionPart(@NotNull String part) {
+            try {
+                return Integer.parseInt(part.replaceAll("[^0-9]", ""));
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
     }
 
-    /**
-     * Factory for Local Dev Tomcat configurations.
-     */
     public static class LocalTomcatConfigurationFactory extends TomcatConfigurationFactory {
         protected LocalTomcatConfigurationFactory(@NotNull ConfigurationType type) {
             super(type, "Local");
@@ -573,10 +445,16 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         }
 
         @Override
+        public Icon getIcon() {
+            Icon icon = IconLoader.getIcon(ICON_PATH_SVG, TomcatRunConfigurationType.class);
+            return icon != null ? icon : DEFAULT_ICON;
+        }
+
+        @Override
         @NotNull
         public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
             TomcatRunConfiguration config = (TomcatRunConfiguration) super.createTemplateConfiguration(project);
-            config.getConfigData().setServerMode("Local");
+            config.getConfigData().setServerMode(TomcatConstants.MODE_LOCAL);
             return config;
         }
 
@@ -585,15 +463,12 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         public RunConfiguration createConfiguration(@Nullable String name, @NotNull RunConfiguration template) {
             RunConfiguration created = super.createConfiguration(name, template);
             if (created instanceof TomcatRunConfiguration tomcatConfig) {
-                tomcatConfig.getConfigData().setServerMode("Local");
+                tomcatConfig.getConfigData().setServerMode(TomcatConstants.MODE_LOCAL);
             }
             return created;
         }
     }
 
-    /**
-     * Factory for Remote Dev Tomcat configurations.
-     */
     public static class RemoteTomcatConfigurationFactory extends TomcatConfigurationFactory {
         protected RemoteTomcatConfigurationFactory(@NotNull ConfigurationType type) {
             super(type, "Remote");
@@ -606,10 +481,15 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         }
 
         @Override
+        public Icon getIcon() {
+            return AllIcons.Nodes.Deploy;
+        }
+
+        @Override
         @NotNull
         public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
             TomcatRunConfiguration config = (TomcatRunConfiguration) super.createTemplateConfiguration(project);
-            config.getConfigData().setServerMode("Remote");
+            config.getConfigData().setServerMode(TomcatConstants.MODE_REMOTE);
             return config;
         }
 
@@ -618,7 +498,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         public RunConfiguration createConfiguration(@Nullable String name, @NotNull RunConfiguration template) {
             RunConfiguration created = super.createConfiguration(name, template);
             if (created instanceof TomcatRunConfiguration tomcatConfig) {
-                tomcatConfig.getConfigData().setServerMode("Remote");
+                tomcatConfig.getConfigData().setServerMode(TomcatConstants.MODE_REMOTE);
             }
             return created;
         }

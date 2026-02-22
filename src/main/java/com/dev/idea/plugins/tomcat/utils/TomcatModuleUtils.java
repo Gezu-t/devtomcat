@@ -60,12 +60,6 @@ public final class TomcatModuleUtils {
         // Utility class
     }
 
-    /**
-     * Checks if a module is a web module by looking for web roots or build tool configurations.
-     *
-     * @param module Module to check
-     * @return true if the module contains web resources or is configured as a web module
-     */
     public static boolean isWebModule(@NotNull Module module) {
         // Skip test modules
         if (isTestModule(module)) {
@@ -82,12 +76,6 @@ public final class TomcatModuleUtils {
         return hasWebBuildConfiguration(module);
     }
 
-    /**
-     * Finds all web root directories in a module.
-     *
-     * @param module Module to search
-     * @return List of web root directories (never null)
-     */
     @NotNull
     public static List<VirtualFile> findWebRoots(@NotNull Module module) {
         List<VirtualFile> webRoots = new ArrayList<>();
@@ -115,12 +103,6 @@ public final class TomcatModuleUtils {
         return webRoots;
     }
 
-    /**
-     * Extracts a suggested context path from a module name.
-     *
-     * @param module Module to extract context from
-     * @return Suggested context path (e.g., "/myapp")
-     */
     @NotNull
     public static String extractContextPath(@NotNull Module module) {
         String moduleName = module.getName();
@@ -151,12 +133,6 @@ public final class TomcatModuleUtils {
         return "/" + moduleName;
     }
 
-    /**
-     * Checks if a location is within test sources.
-     *
-     * @param location Location to check
-     * @return true if the location is in test sources
-     */
     public static boolean isTestSource(@Nullable com.intellij.execution.Location<? extends PsiElement> location) {
         if (location == null) {
             return false;
@@ -174,12 +150,6 @@ public final class TomcatModuleUtils {
 
     // ===================== Private Helper Methods =====================
 
-    /**
-     * Validates a directory as a web root by checking for WEB-INF or common web files.
-     *
-     * @param dir Directory to validate
-     * @return true if the directory is a valid web root
-     */
     private static boolean isValidWebRoot(@Nullable VirtualFile dir) {
         if (dir == null || !dir.isDirectory()) {
             return false;
@@ -204,12 +174,6 @@ public final class TomcatModuleUtils {
         return false;
     }
 
-    /**
-     * Checks if a module is a test module based on its name.
-     *
-     * @param module Module to check
-     * @return true if the module is likely a test module
-     */
     private static boolean isTestModule(@NotNull Module module) {
         String name = module.getName().toLowerCase();
         return name.contains("test") ||
@@ -218,12 +182,6 @@ public final class TomcatModuleUtils {
                 name.endsWith("_test");
     }
 
-    /**
-     * Checks if a module has a web build configuration (e.g., Maven war plugin or Gradle war plugin).
-     *
-     * @param module Module to check
-     * @return true if a web build configuration is detected
-     */
     private static boolean hasWebBuildConfiguration(@NotNull Module module) {
         Project project = module.getProject();
         VirtualFile baseDir = module.getProject().getBaseDir();

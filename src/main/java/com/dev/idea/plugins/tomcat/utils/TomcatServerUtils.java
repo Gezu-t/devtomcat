@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.dev.idea.plugins.tomcat.model.ValidationResult;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooser;
@@ -34,13 +35,6 @@ public final class TomcatServerUtils {
         // Utility class - prevent instantiation
     }
 
-    /**
-     * Opens a file chooser dialog to select a Tomcat installation directory.
-     * Validates the selected directory and creates a TomcatInfo object.
-     *
-     * @param nameGenerator function to generate a unique name based on a preferred name
-     * @param onSuccess callback invoked with the created TomcatInfo if selection succeeds
-     */
     public static void selectTomcatInstallation(
             @NotNull Function<String, String> nameGenerator,
             @NotNull Consumer<TomcatInfo> onSuccess) {
@@ -67,7 +61,7 @@ public final class TomcatServerUtils {
         LOG.info("User selected Tomcat installation path: " + installPath);
 
         // Validate the selected directory
-        ValidationUtils.Result validationResult = TomcatServerValidator.validateInstallation(installPath);
+        ValidationResult validationResult = TomcatServerValidator.validateInstallation(installPath);
 
         if (!validationResult.isValid()) {
             LOG.warn("Invalid Tomcat installation selected: " + installPath);
@@ -114,13 +108,6 @@ public final class TomcatServerUtils {
         onSuccess.accept(tomcatInfo);
     }
 
-    /**
-     * Generates a unique name by appending a numeric suffix if needed.
-     *
-     * @param existingNames collection of existing names to check against
-     * @param preferredName the preferred base name
-     * @return a unique name that doesn't exist in the collection
-     */
     @NotNull
     public static String generateUniqueName(
             @NotNull Collection<String> existingNames,
@@ -153,14 +140,6 @@ public final class TomcatServerUtils {
         return candidateName;
     }
 
-    /**
-     * Generates a unique name with a custom format function.
-     *
-     * @param existingNames collection of existing names to check against
-     * @param baseName the base name to use
-     * @param formatter function to format the name with a counter (e.g., "Name %d" or "Name-%d")
-     * @return a unique name that doesn't exist in the collection
-     */
     @NotNull
     public static String generateUniqueName(
             @NotNull Collection<String> existingNames,
@@ -193,12 +172,6 @@ public final class TomcatServerUtils {
         return candidateName;
     }
 
-    /**
-     * Validates a Tomcat installation path.
-     *
-     * @param installPath the path to validate
-     * @return true if valid, false otherwise
-     */
     public static boolean isValidTomcatInstallation(@Nullable String installPath) {
         if (StringUtils.isEmpty(installPath)) {
             return false;
@@ -206,17 +179,11 @@ public final class TomcatServerUtils {
         return TomcatServerValidator.isValidInstallation(installPath);
     }
 
-    /**
-     * Gets a human-readable summary of validation errors for an installation path.
-     *
-     * @param installPath the path to validate
-     * @return summary of validation issues, or null if valid
-     */
     @Nullable
     public static String getValidationErrorSummary(@NotNull String installPath) {
         Objects.requireNonNull(installPath, "Install path cannot be null");
 
-        ValidationUtils.Result result = TomcatServerValidator.validateInstallation(installPath);
+        ValidationResult result = TomcatServerValidator.validateInstallation(installPath);
 
         if (result.isValid()) {
             return null;
@@ -240,12 +207,6 @@ public final class TomcatServerUtils {
         return summary.toString();
     }
 
-    /**
-     * Detects and returns the Tomcat version from an installation path.
-     *
-     * @param installPath the Tomcat installation directory
-     * @return the detected version, or "Unknown" if not detected
-     */
     @NotNull
     public static String detectVersion(@NotNull String installPath) {
         Objects.requireNonNull(installPath, "Install path cannot be null");

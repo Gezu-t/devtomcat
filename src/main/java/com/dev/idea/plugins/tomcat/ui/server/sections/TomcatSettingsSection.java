@@ -2,10 +2,13 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
+import com.dev.idea.plugins.tomcat.model.ValidationResult;
+import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import com.dev.idea.plugins.tomcat.utils.PortValidator;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
@@ -34,60 +37,72 @@ public class TomcatSettingsSection implements ConfigurationSection {
     public JPanel createPanel() {
         if (panel == null) {
             panel = new JPanel();
-            panel.setBorder(BorderFactory.createCompoundBorder(
-                    JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1),
-                    JBUI.Borders.empty(4, 4, 4, 4)
-            ));
-            panel.setLayout(new GridBagLayout());
+            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+            panel.setBorder(JBUI.Borders.empty(2, 0, 2, 0));
+
+            TitledSeparator separator = new TitledSeparator("Tomcat Server Settings");
+            separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, separator.getPreferredSize().height));
+            panel.add(separator);
+
+            JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(4, 0, 4, 4);
-            gbc.fill = GridBagConstraints.HORIZONTAL;
 
             int row = 0;
-            gbc.gridx = 0; gbc.gridy = row++; gbc.gridwidth = 3;
-            JBLabel heading = new JBLabel("Tomcat Server Settings");
-            heading.setFont(heading.getFont().deriveFont(Font.BOLD));
-            panel.add(heading, gbc);
-            gbc.gridwidth = 1;
-            // HTTP
-            gbc.gridx = 0; gbc.gridy = row;
-            panel.add(new JBLabel("HTTP port:"), gbc);
-            gbc.gridx = 1; gbc.weightx = 1.0;
+
+            // Row 0: HTTP port + Deploy checkbox
+            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            formPanel.add(new JBLabel("HTTP port:"), gbc);
+
+            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             httpPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpPort()), 8);
-            panel.add(httpPortField, gbc);
-            gbc.gridx = 2; gbc.weightx = 0;
+            formPanel.add(httpPortField, gbc);
+
+            gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, JBUI.scale(20), 4, 4);
             deployAppsCheckBox = new JBCheckBox("Deploy applications configured in Tomcat instance");
             deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
-            panel.add(deployAppsCheckBox, gbc);
+            formPanel.add(deployAppsCheckBox, gbc);
 
-            // HTTPS port
+            // Row 1: HTTPS port + Preserve sessions checkbox
             row++;
-            gbc.gridx = 0; gbc.gridy = row;
-            panel.add(new JBLabel("HTTPS port:"), gbc);
-            gbc.gridx = 1;
+            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            formPanel.add(new JBLabel("HTTPs port:"), gbc);
+
+            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             httpsPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()), 8);
-            panel.add(httpsPortField, gbc);
-            gbc.gridx = 2;
+            formPanel.add(httpsPortField, gbc);
+
+            gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, JBUI.scale(20), 4, 4);
             preserveSessionsCheckBox = new JBCheckBox("Preserve sessions across restarts and redeploys");
             preserveSessionsCheckBox.setSelected(false);
-            panel.add(preserveSessionsCheckBox, gbc);
+            formPanel.add(preserveSessionsCheckBox, gbc);
 
-            // JMX port
+            // Row 2: JMX port
             row++;
-            gbc.gridx = 0; gbc.gridy = row;
-            panel.add(new JBLabel("JMX port:"), gbc);
-            gbc.gridx = 1;
+            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            formPanel.add(new JBLabel("JMX port:"), gbc);
+
+            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             jmxPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getJmxPort()), 8);
-            panel.add(jmxPortField, gbc);
+            formPanel.add(jmxPortField, gbc);
 
-            // AJP port
+            // Row 3: AJP port
             row++;
-            gbc.gridx = 0; gbc.gridy = row;
-            panel.add(new JBLabel("AJP port:"), gbc);
-            gbc.gridx = 1;
+            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            formPanel.add(new JBLabel("AJP port:"), gbc);
+
+            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             ajpPortField = new JBTextField("", 8);
-            panel.add(ajpPortField, gbc);
+            formPanel.add(ajpPortField, gbc);
+
+            formPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, formPanel.getPreferredSize().height));
+            panel.add(formPanel);
         }
         return panel;
     }
@@ -97,7 +112,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
         httpPortField.setText(String.valueOf(DynamicTomcatEnvironment.getHttpPort()));
         httpsPortField.setText(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()));
         jmxPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
-        ajpPortField.setText(""); // AJP port is optional, leave empty by default
+        ajpPortField.setText("");
         deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(false);
         shutdownPortCached = DynamicTomcatEnvironment.getShutdownPort();
@@ -114,7 +129,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
         Integer jmxPort = configuration.getJmxPort();
         jmxPortField.setText(jmxPort != null ? jmxPort.toString() : DynamicTomcatEnvironment.getJmxPort() + "");
 
-        // Get AJP port from configuration
         Integer ajpPort = configuration.getConfigData().getPortConfig().isAjpEnabled()
                 ? configuration.getConfigData().getPortConfig().getAjp()
                 : null;
@@ -135,27 +149,25 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        Integer ajpPort = parsePort(ajpPortField.getText(), "AJP");
+        Integer ajpPort = PortUtils.parsePort(ajpPortField.getText(), "AJP");
 
         PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
-                .httpPort(parsePort(httpPortField.getText(), "HTTP"))
+                .httpPort(PortUtils.parsePort(httpPortField.getText(), "HTTP"))
                 .shutdownPort(shutdownPortCached)
-                .httpsPort(parsePort(httpsPortField.getText(), "HTTPS"))
-                .httpsEnabled(parsePort(httpsPortField.getText(), "HTTPS") != null)
-                .jmxPort(parsePort(jmxPortField.getText(), "JMX"))
-                .jmxEnabled(parsePort(jmxPortField.getText(), "JMX") != null)
+                .httpsPort(PortUtils.parsePort(httpsPortField.getText(), "HTTPS"))
+                .httpsEnabled(PortUtils.parsePort(httpsPortField.getText(), "HTTPS") != null)
+                .jmxPort(PortUtils.parsePort(jmxPortField.getText(), "JMX"))
+                .jmxEnabled(PortUtils.parsePort(jmxPortField.getText(), "JMX") != null)
                 .ajpPort(ajpPort)
                 .ajpEnabled(ajpPort != null)
                 .build();
 
         PortValidator.validateOrThrow(portConfig);
 
-        // Set port values
         configuration.setHttpPort(portConfig.httpPort);
         configuration.setHttpsPort(portConfig.httpsPort);
         configuration.setJmxPort(portConfig.jmxPort);
 
-        // Set enabled flags and AJP port directly on PortConfig
         configuration.getConfigData().getPortConfig().setHttpsEnabled(portConfig.httpsEnabled);
         configuration.getConfigData().getPortConfig().setJmxEnabled(portConfig.jmxEnabled);
         configuration.getConfigData().getPortConfig().setAjpEnabled(portConfig.ajpEnabled);
@@ -163,11 +175,10 @@ public class TomcatSettingsSection implements ConfigurationSection {
             configuration.getConfigData().getPortConfig().setAjp(portConfig.ajpPort);
         }
 
-        // Set deployment settings
         configuration.setHotDeploymentEnabled(deployAppsCheckBox.isSelected());
         configuration.setPreserveSessions(preserveSessionsCheckBox.isSelected());
 
-        LOG.info("Applied Tomcat settings - HTTP: " + portConfig.httpPort +
+        LOG.debug("Applied Tomcat settings - HTTP: " + portConfig.httpPort +
                 ", Shutdown: " + portConfig.shutdownPort +
                 ", HTTPS: " + (portConfig.httpsEnabled ? portConfig.httpsPort : "disabled") +
                 ", JMX: " + (portConfig.jmxEnabled ? portConfig.jmxPort : "disabled") +
@@ -179,10 +190,10 @@ public class TomcatSettingsSection implements ConfigurationSection {
     @Override
     public boolean isValid() {
         try {
-            Integer httpP = parsePort(httpPortField.getText(), "HTTP");
-            Integer httpsP = parsePort(httpsPortField.getText(), "HTTPS");
-            Integer jmxP = parsePort(jmxPortField.getText(), "JMX");
-            Integer ajpP = parsePort(ajpPortField.getText(), "AJP");
+            Integer httpP = PortUtils.parsePort(httpPortField.getText(), "HTTP");
+            Integer httpsP = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
+            Integer jmxP = PortUtils.parsePort(jmxPortField.getText(), "JMX");
+            Integer ajpP = PortUtils.parsePort(ajpPortField.getText(), "AJP");
             PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
                     .httpPort(httpP)
                     .shutdownPort(shutdownPortCached)
@@ -207,9 +218,8 @@ public class TomcatSettingsSection implements ConfigurationSection {
     @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         try {
-            // Check if any port values changed
             Integer configHttpPort = config.getHttpPort();
-            Integer currentHttpPort = parsePort(httpPortField.getText(), "HTTP");
+            Integer currentHttpPort = PortUtils.parsePort(httpPortField.getText(), "HTTP");
             if (!Objects.equals(configHttpPort, currentHttpPort)) {
                 return true;
             }
@@ -220,27 +230,25 @@ public class TomcatSettingsSection implements ConfigurationSection {
             }
 
             Integer configHttpsPort = config.getHttpsPort();
-            Integer currentHttpsPort = parsePort(httpsPortField.getText(), "HTTPS");
+            Integer currentHttpsPort = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
             if (!Objects.equals(configHttpsPort, currentHttpsPort)) {
                 return true;
             }
 
             Integer configJmxPort = config.getJmxPort();
-            Integer currentJmxPort = parsePort(jmxPortField.getText(), "JMX");
+            Integer currentJmxPort = PortUtils.parsePort(jmxPortField.getText(), "JMX");
             if (!Objects.equals(configJmxPort, currentJmxPort)) {
                 return true;
             }
 
-            // Check AJP port
             Integer configAjpPort = config.getConfigData().getPortConfig().isAjpEnabled()
                     ? config.getConfigData().getPortConfig().getAjp()
                     : null;
-            Integer currentAjpPort = parsePort(ajpPortField.getText(), "AJP");
+            Integer currentAjpPort = PortUtils.parsePort(ajpPortField.getText(), "AJP");
             if (!Objects.equals(configAjpPort, currentAjpPort)) {
                 return true;
             }
 
-            // Check deployment settings
             if (config.isHotDeploymentEnabled() != deployAppsCheckBox.isSelected()) {
                 return true;
             }
@@ -262,10 +270,10 @@ public class TomcatSettingsSection implements ConfigurationSection {
         List<ValidationInfo> errors = new ArrayList<>();
 
         try {
-            Integer httpP = parsePort(httpPortField.getText(), "HTTP");
-            Integer httpsP = parsePort(httpsPortField.getText(), "HTTPS");
-            Integer jmxP = parsePort(jmxPortField.getText(), "JMX");
-            Integer ajpP = parsePort(ajpPortField.getText(), "AJP");
+            Integer httpP = PortUtils.parsePort(httpPortField.getText(), "HTTP");
+            Integer httpsP = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
+            Integer jmxP = PortUtils.parsePort(jmxPortField.getText(), "JMX");
+            Integer ajpP = PortUtils.parsePort(ajpPortField.getText(), "AJP");
             PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
                     .httpPort(httpP)
                     .shutdownPort(shutdownPortCached)
@@ -277,7 +285,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
                     .ajpEnabled(ajpP != null)
                     .build();
 
-            PortValidator.ValidationResult result = PortValidator.validate(portConfig);
+            ValidationResult result = PortValidator.validate(portConfig);
 
             if (!result.isValid()) {
                 for (String error : result.getErrors()) {
@@ -293,7 +301,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
     }
 
     public Integer getHttpPort() throws ConfigurationException {
-        return parsePort(httpPortField.getText(), "HTTP");
+        return PortUtils.parsePort(httpPortField.getText(), "HTTP");
     }
 
     public Integer getShutdownPort() throws ConfigurationException {
@@ -302,26 +310,26 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
     public boolean isHttpsEnabled() {
         try {
-            return parsePort(httpsPortField.getText(), "HTTPS") != null;
+            return PortUtils.parsePort(httpsPortField.getText(), "HTTPS") != null;
         } catch (ConfigurationException e) {
             return false;
         }
     }
 
     public Integer getHttpsPort() throws ConfigurationException {
-        return parsePort(httpsPortField.getText(), "HTTPS");
+        return PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
     }
 
     public boolean isJmxEnabled() {
         try {
-            return parsePort(jmxPortField.getText(), "JMX") != null;
+            return PortUtils.parsePort(jmxPortField.getText(), "JMX") != null;
         } catch (ConfigurationException e) {
             return false;
         }
     }
 
     public Integer getJmxPort() throws ConfigurationException {
-        return parsePort(jmxPortField.getText(), "JMX");
+        return PortUtils.parsePort(jmxPortField.getText(), "JMX");
     }
 
     public boolean isDeployAppsEnabled() {
@@ -332,12 +340,4 @@ public class TomcatSettingsSection implements ConfigurationSection {
         return preserveSessionsCheckBox.isSelected();
     }
 
-    private Integer parsePort(String text, String portName) throws ConfigurationException {
-        try {
-            String trimmed = text.trim();
-            return trimmed.isEmpty() ? null : Integer.parseInt(trimmed);
-        } catch (NumberFormatException e) {
-            throw new ConfigurationException(portName + " port must be a valid number");
-        }
-    }
 }

@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
                     import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
                     import com.dev.idea.plugins.tomcat.model.PortConfig;
                     import com.dev.idea.plugins.tomcat.model.ValidationResult;
+                    import com.dev.idea.plugins.tomcat.utils.PortUtils;
                     import com.intellij.openapi.ui.Messages;
                     import com.intellij.openapi.ui.ValidationInfo;
                     import com.intellij.ui.JBIntSpinner;
@@ -211,10 +212,10 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
                             ValidationResult result = current.validate();
                             if (result.hasWarnings()) {
                                 // Auto-fix by finding next available ports
-                                int http = PortConfig.findNextAvailablePort((int) httpPortField.getValue());
-                                int shutdown = PortConfig.findNextAvailablePort((int) shutdownPortField.getValue());
-                                int https = httpsEnabled.isSelected() ? PortConfig.findNextAvailablePort((int) httpsPortField.getValue()) : PortConfig.DEFAULT_HTTPS_PORT;
-                                int jmx = jmxEnabled.isSelected() ? PortConfig.findNextAvailablePort((int) jmxPortField.getValue()) : PortConfig.DEFAULT_JMX_PORT;
+                                int http = PortUtils.findNextAvailable((int) httpPortField.getValue());
+                                int shutdown = PortUtils.findNextAvailable((int) shutdownPortField.getValue());
+                                int https = httpsEnabled.isSelected() ? PortUtils.findNextAvailable((int) httpsPortField.getValue()) : PortConfig.DEFAULT_HTTPS_PORT;
+                                int jmx = jmxEnabled.isSelected() ? PortUtils.findNextAvailable((int) jmxPortField.getValue()) : PortConfig.DEFAULT_JMX_PORT;
 
                                 httpPortField.setValue(http);
                                 shutdownPortField.setValue(shutdown);

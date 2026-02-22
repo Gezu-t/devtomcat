@@ -7,8 +7,8 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
-import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -17,11 +17,8 @@ import java.awt.*;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 
-/**
- * Browser Launch Section
- * Handles browser launch configuration
- */
 public class BrowserLaunchSection implements ConfigurationSection {
 
     private static final Logger LOG = Logger.getInstance(BrowserLaunchSection.class);
@@ -67,46 +64,46 @@ public class BrowserLaunchSection implements ConfigurationSection {
     }
 
     private void createLayout() {
-        panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1),
-                JBUI.Borders.empty(4, 4, 4, 4)
-        ));
+        panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(JBUI.Borders.empty(2, 0, 2, 0));
 
+        TitledSeparator separator = new TitledSeparator("Open browser");
+        separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, separator.getPreferredSize().height));
+        panel.add(separator);
+
+        JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.WEST;
         gbc.insets = JBUI.insets(4, 0, 4, 6);
-
-        // Heading
-        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 4;
-        panel.add(new JBLabel("Open browser"), gbc);
         gbc.gridwidth = 1;
 
-        // Row 0: After launch, browser, configure, JS debugger
-        gbc.gridx = 0; gbc.gridy = 1;
-        panel.add(afterLaunchCheckBox, gbc);
+        gbc.gridx = 0; gbc.gridy = 0;
+        formPanel.add(afterLaunchCheckBox, gbc);
 
         gbc.gridx = 1; gbc.weightx = 0;
         gbc.fill = GridBagConstraints.NONE;
-        panel.add(browserComboBox, gbc);
+        formPanel.add(browserComboBox, gbc);
 
         gbc.gridx = 2;
         gbc.weightx = 0;
         gbc.fill = GridBagConstraints.NONE;
-        panel.add(browserConfigButton, gbc);
+        formPanel.add(browserConfigButton, gbc);
 
         gbc.gridx = 3;
-        panel.add(withJavaScriptDebuggerCheckBox, gbc);
+        formPanel.add(withJavaScriptDebuggerCheckBox, gbc);
 
-        // Row 1: URL
-        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.gridx = 0; gbc.gridy = 1;
         gbc.insets = JBUI.insets(4, 0, 4, 4);
-        panel.add(new JLabel("URL:"), gbc);
+        formPanel.add(new JLabel("URL:"), gbc);
 
         gbc.gridx = 1; gbc.gridwidth = 3;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        panel.add(urlField, gbc);
+        formPanel.add(urlField, gbc);
+
+        formPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, formPanel.getPreferredSize().height));
+        panel.add(formPanel);
     }
 
     @Override
@@ -117,7 +114,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
         try {
             browserComboBox.removeAllItems();
-            browserComboBox.addItem("System Default");
+            browserComboBox.addItem(TomcatConstants.BROWSER_SYSTEM_DEFAULT);
 
             List<WebBrowsersDialog.BrowserInfo> browsers = WebBrowsersDialog.getBrowserConfigurations();
             for (WebBrowsersDialog.BrowserInfo browser : browsers) {
@@ -131,7 +128,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
         } catch (Exception e) {
             LOG.error("Error loading browsers", e);
             if (browserComboBox.getItemCount() == 0) {
-                browserComboBox.addItem("System Default");
+                browserComboBox.addItem(TomcatConstants.BROWSER_SYSTEM_DEFAULT);
             }
         }
     }
@@ -195,22 +192,19 @@ public class BrowserLaunchSection implements ConfigurationSection {
         }
 
         try {
-            // Check if "After launch" checkbox state changed
             if (!Objects.equals(afterLaunchCheckBox.isSelected(), config.isAfterLaunchEnabled())) {
                 return true;
             }
 
-            // Check if URL changed
             String configUrl = config.getBrowserUrl();
             String currentUrl = urlField != null ? urlField.getText().trim() : "";
             if (!Objects.equals(currentUrl, configUrl != null ? configUrl : "")) {
                 return true;
             }
 
-            // Check if browser name changed
             String configBrowser = config.getBrowserName();
             String currentBrowser = getSelectedBrowser();
-            if (!Objects.equals(currentBrowser, configBrowser != null ? configBrowser : "System Default")) {
+            if (!Objects.equals(currentBrowser, configBrowser != null ? configBrowser : TomcatConstants.BROWSER_SYSTEM_DEFAULT)) {
                 return true;
             }
 
@@ -224,8 +218,6 @@ public class BrowserLaunchSection implements ConfigurationSection {
     @Override
     @NotNull
     public List<ValidationInfo> validateSettings() {
-        // Browser launch section has no validation requirements
-        // URL and browser selection are optional
         return Collections.emptyList();
     }
 
@@ -252,12 +244,12 @@ public class BrowserLaunchSection implements ConfigurationSection {
             if (dialog.showAndGet()) {
                 loadConfiguration();
                 String defaultBrowser = dialog.getDefaultBrowser();
-                if (defaultBrowser != null && !defaultBrowser.equals("System default")) {
+                if (defaultBrowser != null && !defaultBrowser.equals(TomcatConstants.BROWSER_SYSTEM_DEFAULT)) {
                     browserComboBox.setSelectedItem(defaultBrowser);
                 } else {
-                    browserComboBox.setSelectedItem("System Default");
+                    browserComboBox.setSelectedItem(TomcatConstants.BROWSER_SYSTEM_DEFAULT);
                 }
-                LOG.info("Browser configuration updated");
+                LOG.debug("Browser configuration updated");
             }
         } catch (Exception e) {
             LOG.error("Error opening browser configuration", e);
@@ -279,7 +271,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
         if (isInitialized && browserComboBox != null && browserComboBox.getSelectedItem() != null) {
             return browserComboBox.getSelectedItem().toString();
         }
-        return "System Default";
+        return TomcatConstants.BROWSER_SYSTEM_DEFAULT;
     }
 
     public boolean isJavaScriptDebuggerEnabled() {

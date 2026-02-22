@@ -1,7 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ValidationInfo;
@@ -30,21 +29,22 @@ public class VmOptionsSection implements ConfigurationSection {
     @NotNull
     public JPanel createPanel() {
         if (panel == null) {
-            panel = new JPanel(new GridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(4, 0, 0, 0));
+            panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
+            panel.setBorder(JBUI.Borders.empty(2, 0, 2, 0));
 
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = JBUI.insets(4, 0, 2, 4);
+            gbc.insets = JBUI.insets(4, 0, 4, 4);
             gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.WEST;
             panel.add(new JLabel("VM options:"), gbc);
 
             gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
+            gbc.insets = JBUI.insets(4, 4, 4, 4);
             vmOptionsField = new JTextField();
             vmOptionsField.setToolTipText("e.g., -Xmx512m -Xms256m -XX:+UseG1GC");
-            vmOptionsField.setPreferredSize(new Dimension(400, 26));
             panel.add(vmOptionsField, gbc);
 
             gbc.gridx = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(4, 0, 4, 0);
             expandButton = new JButton("...");
             expandButton.setPreferredSize(new Dimension(28, 26));
             expandButton.addActionListener(e -> showExpandedEditor());
@@ -60,7 +60,7 @@ public class VmOptionsSection implements ConfigurationSection {
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
         String vmOptions = configuration.getVmOptions();
-        vmOptionsField.setText(vmOptions != null ? vmOptions : DynamicTomcatEnvironment.buildJavaOpts());
+        vmOptionsField.setText(vmOptions != null ? vmOptions : "");
     }
 
     @Override

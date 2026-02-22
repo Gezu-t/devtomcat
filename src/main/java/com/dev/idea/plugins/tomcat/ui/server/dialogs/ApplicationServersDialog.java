@@ -1,10 +1,3 @@
-/**
- * Author: Gezahegn Lemma (Gezu)
- * Project: Dev Tomcat Plugin
- * Created: 6/9/25
- * Phase 2: Application Servers configuration dialog - Complete implementation
- */
-
 package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.intellij.openapi.fileChooser.FileChooser;
@@ -27,22 +20,16 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Professional Application Servers configuration dialog
- * Manages Tomcat server installations and configurations
- */
 public class ApplicationServersDialog extends DialogWrapper {
 
     private final Project project;
 
-    // Server list components
     private JBTable serverTable;
     private DefaultTableModel serverTableModel;
     private JButton addServerButton;
     private JButton removeServerButton;
     private JButton editServerButton;
 
-    // Server details components
     private JTextField serverNameField;
     private JTextField tomcatHomeField;
     private JButton browseTomcatHomeButton;
@@ -50,11 +37,9 @@ public class ApplicationServersDialog extends DialogWrapper {
     private JTextField tomcatBaseField;
     private JButton browseTomcatBaseButton;
 
-    // Libraries tree
     private JTree librariesTree;
     private DefaultTreeModel librariesTreeModel;
 
-    // Data storage
     private List<TomcatServerInfo> servers;
     private TomcatServerInfo selectedServer;
 
@@ -88,14 +73,10 @@ public class ApplicationServersDialog extends DialogWrapper {
         return mainPanel;
     }
 
-    /**
-     * Create server list panel with table and management buttons
-     */
     private JPanel createServerListPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Application Servers"));
 
-        // Server table
         String[] columnNames = {"Name", "Version", "Status"};
         serverTableModel = new DefaultTableModel(columnNames, 0) {
             @Override
@@ -116,7 +97,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         tableScrollPane.setPreferredSize(new Dimension(280, 300));
         panel.add(tableScrollPane, BorderLayout.CENTER);
 
-        // Management buttons
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
 
         addServerButton = new JButton("+");
@@ -143,9 +123,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         return panel;
     }
 
-    /**
-     * Create server details panel with configuration fields
-     */
     private JPanel createServerDetailsPanel() {
         JPanel panel = new JPanel(new BorderLayout());
 
@@ -166,9 +143,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         return panel;
     }
 
-    /**
-     * Create server configuration panel
-     */
     private JPanel createServerConfigPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Server Configuration"));
@@ -200,7 +174,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         homePanel.add(browseTomcatHomeButton, BorderLayout.EAST);
         panel.add(homePanel, gbc);
 
-        // Tomcat version (auto-detected)
         gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
         panel.add(new JLabel("Tomcat Version:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
@@ -210,7 +183,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         tomcatVersionField.setBackground(UIManager.getColor("Panel.background"));
         panel.add(tomcatVersionField, gbc);
 
-        // Tomcat base directory
         gbc.gridx = 0; gbc.gridy = 3; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
         panel.add(new JLabel("Tomcat Base:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 0.8;
@@ -228,14 +200,10 @@ public class ApplicationServersDialog extends DialogWrapper {
         return panel;
     }
 
-    /**
-     * Create libraries panel with JAR tree view
-     */
     private JPanel createLibrariesPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Libraries"));
 
-        // Create libraries tree
         DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("Classes");
         librariesTreeModel = new DefaultTreeModel(rootNode);
         librariesTree = new JTree(librariesTreeModel);
@@ -249,22 +217,14 @@ public class ApplicationServersDialog extends DialogWrapper {
         return panel;
     }
 
-    /**
-     * Initialize default Tomcat servers
-     */
     private void initializeDefaultServers() {
-        // Add some common Tomcat installations
         servers.add(new TomcatServerInfo("Tomcat 10.1.15", "C:\\apache-tomcat-10.1.15", "10.1.15"));
         servers.add(new TomcatServerInfo("Tomcat 10.0.27", "C:\\apache-tomcat-10.0.27", "10.0.27"));
         servers.add(new TomcatServerInfo("Tomcat 9.0.82", "C:\\apache-tomcat-9.0.82", "9.0.82"));
 
-        // Populate table
         updateServerTable();
     }
 
-    /**
-     * Update server table with current server list
-     */
     private void updateServerTable() {
         serverTableModel.setRowCount(0);
         for (TomcatServerInfo server : servers) {
@@ -274,9 +234,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         updateButtonStates();
     }
 
-    /**
-     * Update button states based on selection
-     */
     private void updateButtonStates() {
         int selectedRow = serverTable.getSelectedRow();
         boolean hasSelection = selectedRow >= 0;
@@ -285,9 +242,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         editServerButton.setEnabled(hasSelection);
     }
 
-    /**
-     * Update selected server details
-     */
     private void updateSelectedServer() {
         int selectedRow = serverTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < servers.size()) {
@@ -300,42 +254,30 @@ public class ApplicationServersDialog extends DialogWrapper {
         updateButtonStates();
     }
 
-    /**
-     * Populate server details fields
-     */
     private void populateServerDetails(TomcatServerInfo server) {
         serverNameField.setText(server.getName());
         tomcatHomeField.setText(server.getHomePath());
         tomcatVersionField.setText(server.getVersion());
         tomcatBaseField.setText(server.getBasePath());
 
-        // Update libraries tree
         updateLibrariesTree(server);
     }
 
-    /**
-     * Clear server details fields
-     */
     private void clearServerDetails() {
         serverNameField.setText("");
         tomcatHomeField.setText("");
         tomcatVersionField.setText("");
         tomcatBaseField.setText("");
 
-        // Clear libraries tree
         DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("Classes");
         librariesTreeModel.setRoot(rootNode);
         librariesTreeModel.reload();
     }
 
-    /**
-     * Update libraries tree for selected server
-     */
     private void updateLibrariesTree(TomcatServerInfo server) {
         DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("Classes");
 
         if (server != null && validateServer(server)) {
-            // Add Tomcat libraries
             File libDir = new File(server.getHomePath(), "lib");
             if (libDir.exists() && libDir.isDirectory()) {
                 File[] jarFiles = libDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".jar"));
@@ -351,13 +293,9 @@ public class ApplicationServersDialog extends DialogWrapper {
         librariesTreeModel.setRoot(rootNode);
         librariesTreeModel.reload();
 
-        // Expand the root node
         librariesTree.expandRow(0);
     }
 
-    /**
-     * Add new server
-     */
     private void addNewServer() {
         TomcatServerDialog dialog = new TomcatServerDialog(project, null);
         if (dialog.showAndGet()) {
@@ -365,15 +303,11 @@ public class ApplicationServersDialog extends DialogWrapper {
             servers.add(newServer);
             updateServerTable();
 
-            // Select the new server
             int lastRow = servers.size() - 1;
             serverTable.setRowSelectionInterval(lastRow, lastRow);
         }
     }
 
-    /**
-     * Remove selected server
-     */
     private void removeSelectedServer() {
         int selectedRow = serverTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < servers.size()) {
@@ -394,9 +328,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Edit selected server
-     */
     private void editSelectedServer() {
         int selectedRow = serverTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < servers.size()) {
@@ -411,9 +342,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Browse for Tomcat home directory
-     */
     private void browseTomcatHome() {
         FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false);
         descriptor.setTitle("Select Tomcat Home Directory");
@@ -435,7 +363,6 @@ public class ApplicationServersDialog extends DialogWrapper {
                 tomcatBaseField.setText(path);
             }
 
-            // Update current server if one is selected
             if (selectedServer != null) {
                 selectedServer.setHomePath(path);
                 selectedServer.setVersion(version);
@@ -444,9 +371,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Browse for Tomcat base directory
-     */
     private void browseTomcatBase() {
         FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false);
         descriptor.setTitle("Select Tomcat Base Directory");
@@ -456,29 +380,22 @@ public class ApplicationServersDialog extends DialogWrapper {
         if (file != null) {
             tomcatBaseField.setText(file.getPath());
 
-            // Update current server if one is selected
             if (selectedServer != null) {
                 selectedServer.setBasePath(file.getPath());
             }
         }
     }
 
-    /**
-     * Detect Tomcat version from installation directory
-     */
     private String detectTomcatVersion(String homePath) {
         try {
-            // Check version from lib/catalina.jar manifest
             File libDir = new File(homePath, "lib");
             File catalinaJar = new File(libDir, "catalina.jar");
 
             if (catalinaJar.exists()) {
-                // Extract version from directory name as fallback
                 String dirName = new File(homePath).getName();
                 if (dirName.startsWith("apache-tomcat-")) {
                     return dirName.substring("apache-tomcat-".length());
                 } else if (dirName.contains("tomcat")) {
-                    // Try to extract version pattern
                     String[] parts = dirName.split("-");
                     for (String part : parts) {
                         if (part.matches("\\d+\\.\\d+.*")) {
@@ -494,9 +411,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Validate server configuration
-     */
     private boolean validateServer(TomcatServerInfo server) {
         if (server == null || server.getHomePath() == null) {
             return false;
@@ -507,7 +421,6 @@ public class ApplicationServersDialog extends DialogWrapper {
             return false;
         }
 
-        // Check for essential Tomcat files
         File binDir = new File(homeDir, "bin");
         File libDir = new File(homeDir, "lib");
         File catalinaJar = new File(libDir, "catalina.jar");
@@ -515,16 +428,10 @@ public class ApplicationServersDialog extends DialogWrapper {
         return binDir.exists() && libDir.exists() && catalinaJar.exists();
     }
 
-    /**
-     * Get selected server configurations
-     */
     public List<TomcatServerInfo> getServerConfigurations() {
         return new ArrayList<>(servers);
     }
 
-    /**
-     * Get selected server name
-     */
     public String getSelectedServerName() {
         return selectedServer != null ? selectedServer.getName() : null;
     }
@@ -534,9 +441,6 @@ public class ApplicationServersDialog extends DialogWrapper {
         return new Action[]{getOKAction(), getCancelAction()};
     }
 
-    /**
-     * Tomcat Server Information class
-     */
     public static class TomcatServerInfo {
         private String name;
         private String homePath;
@@ -547,10 +451,9 @@ public class ApplicationServersDialog extends DialogWrapper {
             this.name = name;
             this.homePath = homePath;
             this.version = version;
-            this.basePath = homePath; // Default base to home
+            this.basePath = homePath;
         }
 
-        // Getters and setters
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
 
@@ -569,11 +472,7 @@ public class ApplicationServersDialog extends DialogWrapper {
         }
     }
 
-    /**
-     * Individual server configuration dialog
-     */
     private static class TomcatServerDialog extends DialogWrapper {
-        private final Project project;
         private JTextField nameField;
         private JTextField homePathField;
         private JTextField versionField;
@@ -582,7 +481,6 @@ public class ApplicationServersDialog extends DialogWrapper {
 
         public TomcatServerDialog(Project project, TomcatServerInfo existingServer) {
             super(project);
-            this.project = project;
             this.serverInfo = existingServer;
             setTitle(existingServer == null ? "Add Tomcat Server" : "Edit Tomcat Server");
             init();
@@ -594,7 +492,6 @@ public class ApplicationServersDialog extends DialogWrapper {
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.insets = JBUI.insets(5);
 
-            // Name field
             gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.WEST;
             panel.add(new JLabel("Name:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;

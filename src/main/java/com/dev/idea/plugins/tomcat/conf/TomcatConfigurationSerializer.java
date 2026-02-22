@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+import com.dev.idea.plugins.tomcat.model.CoverageConfig;
 import com.dev.idea.plugins.tomcat.model.LogFileConfig;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
@@ -24,65 +25,52 @@ public class TomcatConfigurationSerializer {
 
     private static final Logger LOG = Logger.getInstance(TomcatConfigurationSerializer.class);
 
-    // ---- Attribute names (keep stable) ----
     private static final String ATTR_HTTP_PORT = "httpPort";
     private static final String ATTR_SHUTDOWN_PORT = "shutdownPort";
     private static final String ATTR_HTTPS_PORT = "httpsPort";
     private static final String ATTR_HTTPS_ENABLED = "httpsEnabled";
     private static final String ATTR_JMX_PORT = "jmxPort";
     private static final String ATTR_JMX_ENABLED = "jmxEnabled";
-
+    private static final String ATTR_AJP_PORT = "ajpPort";
+    private static final String ATTR_AJP_ENABLED = "ajpEnabled";
+    private static final String ATTR_CATALINA_BASE = "catalinaBase";
     private static final String ATTR_CONTEXT_PATH = "contextPath";
     private static final String ATTR_SERVER_MODE = "serverMode";
-
     private static final String ATTR_VM_OPTIONS = "vmOptions";
     private static final String ATTR_PASS_PARENT_ENVS = "passParentEnvs";
 
-    // BrowserConfig (new)
     private static final String ATTR_BROWSER_URL = "browserUrl";
     private static final String ATTR_AFTER_LAUNCH_ENABLED = "afterLaunchEnabled";
     private static final String ATTR_WITH_JS_DEBUGGER = "withJsDebugger";
-
-    // Backward compatibility (old)
     private static final String ATTR_WITH_JS_DEBUGGER_OLD = "withJavaScriptDebugger";
     private static final String ATTR_BROWSER_NAME_OLD = "browserName";
 
-    // Deployment config (unchanged here)
     private static final String ATTR_HOT_DEPLOYMENT_ENABLED = "hotDeploymentEnabled";
     private static final String ATTR_UPDATE_CLASSES_AND_RESOURCES = "updateClassesAndResources";
     private static final String ATTR_PRESERVE_SESSIONS = "preserveSessions";
 
-    // UpdateConfig (new)
     private static final String ATTR_ON_UPDATE = "onUpdate";
     private static final String ATTR_ON_FRAME_DEACTIVATION = "onFrameDeactivation";
     private static final String ATTR_SHOW_UPDATE_DIALOG = "showUpdateDialog";
     private static final String ATTR_SHOW_FRAME_DEACTIVATION_DIALOG = "showFrameDeactivationDialog";
-
-    // Backward compatibility (old)
     private static final String ATTR_UPDATE_ACTION_OLD = "updateAction";
     private static final String ATTR_SHOW_DIALOG_OLD = "showDialog";
 
-    // UI config (unchanged here)
     private static final String ATTR_ACTIVATE_TOOL_WINDOW = "activateToolWindow";
     private static final String ATTR_FOCUS_TOOL_WINDOW = "focusToolWindow";
-
-    // Instance settings
     private static final String ATTR_JRE_SELECTION = "jreSelection";
     private static final String ATTR_ALLOW_MULTIPLE_INSTANCES = "allowMultipleInstances";
     private static final String ATTR_STORE_AS_PROJECT_FILE = "storeAsProjectFile";
 
-    // Debug config
     private static final String ATTR_DEBUG_PORT = "debugPort";
     private static final String ATTR_DEBUG_TRANSPORT = "debugTransport";
     private static final String ATTR_USE_MODULE_CLASSPATH = "useModuleClasspath";
 
-    // Remote config
     private static final String ATTR_MANAGER_URL = "managerUrl";
     private static final String ATTR_REMOTE_USERNAME = "remoteUsername";
     private static final String ATTR_REMOTE_PASSWORD = "remotePassword";
     private static final String ATTR_USE_REMOTE_CREDENTIALS = "useRemoteCredentials";
 
-    // Deployment artifacts
     private static final String TAG_DEPLOYMENTS = "deployments";
     private static final String TAG_ARTIFACT = "artifact";
     private static final String ATTR_ARTIFACT_NAME = "name";
@@ -91,15 +79,15 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_ARTIFACT_CONTEXT = "contextPath";
     private static final String ATTR_ARTIFACT_DEPLOYED = "deployed";
 
-    // === WRITE ===
+    private static final String TAG_COVERAGE = "coverageConfig";
+    private static final String TAG_COVERAGE_INCLUDE = "include";
+    private static final String TAG_COVERAGE_EXCLUDE = "exclude";
     public static void write(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
         Objects.requireNonNull(element, "Element cannot be null");
 
         try {
             TomcatConfigurationData data = config.getConfigData();
-
-            // === PORT CONFIGURATION ===
             PortConfig pc = data.getPortConfig();
             writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
             writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
@@ -107,70 +95,51 @@ public class TomcatConfigurationSerializer {
             element.setAttribute(ATTR_HTTPS_ENABLED, String.valueOf(pc.isHttpsEnabled()));
             writeInt(element, ATTR_JMX_PORT, pc.getJmx());
             element.setAttribute(ATTR_JMX_ENABLED, String.valueOf(pc.isJmxEnabled()));
-
-            // === PATHS ===
+            writeInt(element, ATTR_AJP_PORT, pc.getAjp());
+            element.setAttribute(ATTR_AJP_ENABLED, String.valueOf(pc.isAjpEnabled()));
             element.setAttribute(ATTR_CONTEXT_PATH, StringUtil.notNullize(data.getContextPath()));
             element.setAttribute(ATTR_SERVER_MODE, StringUtil.notNullize(data.getServerMode()));
-
-            // === VM CONFIG ===
+            element.setAttribute(ATTR_CATALINA_BASE, StringUtil.notNullize(data.getCatalinaBase()));
             var vmConfig = data.getVmConfig();
             element.setAttribute(ATTR_VM_OPTIONS, StringUtil.notNullize(vmConfig.getVmOptions()));
             element.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(vmConfig.isPassParentEnvs()));
             writeEnvironmentVariables(element, vmConfig.getEnvironmentVariables());
 
-            // === BROWSER CONFIG (FIXED) ===
             var browserConfig = data.getBrowserConfig();
             element.setAttribute(ATTR_BROWSER_URL, StringUtil.notNullize(browserConfig.getBrowserUrl()));
             element.setAttribute(ATTR_AFTER_LAUNCH_ENABLED, String.valueOf(browserConfig.isAfterLaunchEnabled()));
             element.setAttribute(ATTR_WITH_JS_DEBUGGER, String.valueOf(browserConfig.isWithJsDebugger()));
 
-            // NOTE: Do NOT write unsupported attributes like browserName / withJavaScriptDebugger
-
-            // === DEPLOYMENT CONFIG ===
             var deploymentConfig = data.getDeploymentConfig();
             element.setAttribute(ATTR_HOT_DEPLOYMENT_ENABLED, String.valueOf(deploymentConfig.isHotDeploymentEnabled()));
             element.setAttribute(ATTR_UPDATE_CLASSES_AND_RESOURCES, String.valueOf(deploymentConfig.isUpdateClassesAndResources()));
             element.setAttribute(ATTR_PRESERVE_SESSIONS, String.valueOf(deploymentConfig.isPreserveSessions()));
             writeDeploymentArtifacts(element, deploymentConfig.getArtifacts());
 
-            // === UPDATE CONFIG (FIXED) ===
             var updateConfig = data.getUpdateConfig();
             element.setAttribute(ATTR_ON_UPDATE, StringUtil.notNullize(updateConfig.getOnUpdate()));
             element.setAttribute(ATTR_ON_FRAME_DEACTIVATION, StringUtil.notNullize(updateConfig.getOnFrameDeactivation()));
             element.setAttribute(ATTR_SHOW_UPDATE_DIALOG, String.valueOf(updateConfig.isShowUpdateDialog()));
             element.setAttribute(ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, String.valueOf(updateConfig.isShowFrameDeactivationDialog()));
-
-            // === UI CONFIG ===
             var uiConfig = data.getUiConfig();
             element.setAttribute(ATTR_ACTIVATE_TOOL_WINDOW, String.valueOf(uiConfig.isActivateToolWindow()));
             element.setAttribute(ATTR_FOCUS_TOOL_WINDOW, String.valueOf(uiConfig.isFocusToolWindow()));
 
-            // === JRE & INSTANCE SETTINGS ===
             element.setAttribute(ATTR_JRE_SELECTION, StringUtil.notNullize(data.getJreSelection()));
             element.setAttribute(ATTR_ALLOW_MULTIPLE_INSTANCES, String.valueOf(data.isAllowMultipleInstances()));
             element.setAttribute(ATTR_STORE_AS_PROJECT_FILE, String.valueOf(data.isStoreAsProjectFile()));
-
-            // === DEBUG CONFIG ===
             DebugConfig dc = data.getDebugConfig();
             writeInt(element, ATTR_DEBUG_PORT, dc.getPort());
             element.setAttribute(ATTR_DEBUG_TRANSPORT, StringUtil.notNullize(dc.getTransport(), "Socket"));
             element.setAttribute(ATTR_USE_MODULE_CLASSPATH, String.valueOf(dc.isUseModuleClasspath()));
-
-            // === REMOTE CONFIG ===
             RemoteConfig rc = data.getRemoteConfig();
             element.setAttribute(ATTR_MANAGER_URL, StringUtil.notNullize(rc.getManagerUrl()));
             element.setAttribute(ATTR_REMOTE_USERNAME, StringUtil.notNullize(rc.getUsername()));
             element.setAttribute(ATTR_REMOTE_PASSWORD, StringUtil.notNullize(rc.getPassword()));
             element.setAttribute(ATTR_USE_REMOTE_CREDENTIALS, String.valueOf(rc.isUseCredentials()));
-
-            // === LOG FILE CONFIG ===
             writeLogFileConfig(element, data.getLogFileConfig());
-
-            // === DEPLOYMENT ARTIFACTS ===
-            writeDeploymentArtifacts(element, data.getDeploymentConfig().getArtifacts());
-
-            // === TOMCAT INFO ===
             writeTomcatInfo(element, data.getTomcatInfo());
+            writeCoverageConfig(element, data.getCoverageConfig());
 
             LOG.debug("Wrote configuration: " + config.getName());
         } catch (Exception e) {
@@ -200,7 +169,6 @@ public class TomcatConfigurationSerializer {
     private static void writeLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {
         Element logElem = new Element("logFileConfig");
 
-        // New format: list of log file paths
         for (String path : config.getLogFiles()) {
             if (path == null) continue;
 
@@ -212,7 +180,6 @@ public class TomcatConfigurationSerializer {
             logElem.addContent(file);
         }
 
-        // Only add if we have something meaningful (optional, but keeps XML clean)
         if (!logElem.getChildren("file").isEmpty()) {
             element.addContent(logElem);
         }
@@ -245,16 +212,12 @@ public class TomcatConfigurationSerializer {
         tomcat.setAttribute("id", StringUtil.notNullize(info.getId()));
         element.addContent(tomcat);
     }
-
-    // === READ ===
     public static void read(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
         Objects.requireNonNull(element, "Element cannot be null");
 
         try {
             TomcatConfigurationData data = config.getConfigData();
-
-            // === PORT CONFIGURATION ===
             PortConfig pc = data.getPortConfig();
             readInt(element, ATTR_HTTP_PORT, pc::setHttp);
             readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);
@@ -262,46 +225,36 @@ public class TomcatConfigurationSerializer {
             readBool(element, ATTR_HTTPS_ENABLED, pc::setHttpsEnabled);
             readInt(element, ATTR_JMX_PORT, pc::setJmx);
             readBool(element, ATTR_JMX_ENABLED, pc::setJmxEnabled);
-
-            // === PATHS ===
+            readInt(element, ATTR_AJP_PORT, pc::setAjp);
+            readBool(element, ATTR_AJP_ENABLED, pc::setAjpEnabled);
             data.setContextPath(element.getAttributeValue(ATTR_CONTEXT_PATH));
             data.setServerMode(element.getAttributeValue(ATTR_SERVER_MODE));
-
-            // === VM CONFIGURATION ===
+            data.setCatalinaBase(element.getAttributeValue(ATTR_CATALINA_BASE));
             var vmConfig = data.getVmConfig();
             vmConfig.setVmOptions(element.getAttributeValue(ATTR_VM_OPTIONS));
             readBool(element, ATTR_PASS_PARENT_ENVS, vmConfig::setPassParentEnvs);
             readEnvironmentVariables(element, vmConfig::setEnvironmentVariables);
 
-            // === BROWSER CONFIGURATION (FIXED + backward compatible) ===
             var browserConfig = data.getBrowserConfig();
             browserConfig.setBrowserUrl(StringUtil.notNullize(element.getAttributeValue(ATTR_BROWSER_URL)));
             readBool(element, ATTR_AFTER_LAUNCH_ENABLED, browserConfig::setAfterLaunchEnabled);
 
-            // new attribute
             if (element.getAttributeValue(ATTR_WITH_JS_DEBUGGER) != null) {
                 readBool(element, ATTR_WITH_JS_DEBUGGER, browserConfig::setWithJsDebugger);
             } else {
-                // backward compatibility: old "withJavaScriptDebugger"
                 readBool(element, ATTR_WITH_JS_DEBUGGER_OLD, browserConfig::setWithJsDebugger);
             }
 
-            // ignore old browserName if present
-            // element.getAttributeValue(ATTR_BROWSER_NAME_OLD);
-
-            // === DEPLOYMENT CONFIGURATION ===
             var deploymentConfig = data.getDeploymentConfig();
             readBool(element, ATTR_HOT_DEPLOYMENT_ENABLED, deploymentConfig::setHotDeploymentEnabled);
             readBool(element, ATTR_UPDATE_CLASSES_AND_RESOURCES, deploymentConfig::setUpdateClassesAndResources);
             readBool(element, ATTR_PRESERVE_SESSIONS, deploymentConfig::setPreserveSessions);
             readDeploymentArtifacts(element, deploymentConfig);
 
-            // === UPDATE CONFIGURATION (FIXED + backward compatible) ===
             var updateConfig = data.getUpdateConfig();
 
             String onUpdate = element.getAttributeValue(ATTR_ON_UPDATE);
             if (StringUtil.isEmpty(onUpdate)) {
-                // backward compatibility: old attribute name
                 onUpdate = element.getAttributeValue(ATTR_UPDATE_ACTION_OLD);
             }
             if (!StringUtil.isEmpty(onUpdate)) {
@@ -313,44 +266,32 @@ public class TomcatConfigurationSerializer {
                 updateConfig.setOnFrameDeactivation(onFrame);
             }
 
-            // new flags
             if (element.getAttributeValue(ATTR_SHOW_UPDATE_DIALOG) != null) {
                 readBool(element, ATTR_SHOW_UPDATE_DIALOG, updateConfig::setShowUpdateDialog);
             } else {
-                // backward compatibility: old "showDialog" mapped to showUpdateDialog
                 readBool(element, ATTR_SHOW_DIALOG_OLD, updateConfig::setShowUpdateDialog);
             }
 
             readBool(element, ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, updateConfig::setShowFrameDeactivationDialog);
-
-            // === UI CONFIGURATION ===
             var uiConfig = data.getUiConfig();
             readBool(element, ATTR_ACTIVATE_TOOL_WINDOW, uiConfig::setActivateToolWindow);
             readBool(element, ATTR_FOCUS_TOOL_WINDOW, uiConfig::setFocusToolWindow);
 
-            // === JRE & INSTANCE SETTINGS ===
             data.setJreSelection(element.getAttributeValue(ATTR_JRE_SELECTION));
             readBool(element, ATTR_ALLOW_MULTIPLE_INSTANCES, data::setAllowMultipleInstances);
             readBool(element, ATTR_STORE_AS_PROJECT_FILE, data::setStoreAsProjectFile);
-
-            // === DEBUG CONFIG ===
             DebugConfig dc = data.getDebugConfig();
             readInt(element, ATTR_DEBUG_PORT, dc::setPort);
             dc.setTransport(StringUtil.notNullize(element.getAttributeValue(ATTR_DEBUG_TRANSPORT), "Socket"));
             readBool(element, ATTR_USE_MODULE_CLASSPATH, dc::setUseModuleClasspath);
-
-            // === REMOTE CONFIG ===
             RemoteConfig rc = data.getRemoteConfig();
             rc.setManagerUrl(element.getAttributeValue(ATTR_MANAGER_URL));
             rc.setUsername(element.getAttributeValue(ATTR_REMOTE_USERNAME));
             rc.setPassword(element.getAttributeValue(ATTR_REMOTE_PASSWORD));
             readBool(element, ATTR_USE_REMOTE_CREDENTIALS, rc::setUseCredentials);
-
-            // === LOG FILE CONFIG ===
             readLogFileConfig(element, data.getLogFileConfig());
-
-            // === TOMCAT INFO ===
             readTomcatInfo(element, data::setTomcatInfo);
+            readCoverageConfig(element, data.getCoverageConfig());
 
             LOG.debug("Read configuration: " + config.getName());
         } catch (Exception e) {
@@ -449,5 +390,47 @@ public class TomcatConfigurationSerializer {
             info.setId(StringUtil.notNullize(tomcat.getAttributeValue("id")));
             setter.accept(info);
         }
+    }
+
+    private static void writeCoverageConfig(@NotNull Element element, @NotNull CoverageConfig config) {
+        java.util.List<String> includes = config.getIncludePatterns();
+        java.util.List<String> excludes = config.getExcludePatterns();
+        if (includes.isEmpty() && excludes.isEmpty()) return;
+
+        Element coverageElem = new Element(TAG_COVERAGE);
+        for (String pattern : includes) {
+            Element inc = new Element(TAG_COVERAGE_INCLUDE);
+            inc.setAttribute("pattern", pattern);
+            coverageElem.addContent(inc);
+        }
+        for (String pattern : excludes) {
+            Element exc = new Element(TAG_COVERAGE_EXCLUDE);
+            exc.setAttribute("pattern", pattern);
+            coverageElem.addContent(exc);
+        }
+        element.addContent(coverageElem);
+    }
+
+    private static void readCoverageConfig(@NotNull Element element, @NotNull CoverageConfig config) {
+        Element coverageElem = element.getChild(TAG_COVERAGE);
+        if (coverageElem == null) return;
+
+        java.util.List<String> includes = new java.util.ArrayList<>();
+        for (Element inc : coverageElem.getChildren(TAG_COVERAGE_INCLUDE)) {
+            String pattern = inc.getAttributeValue("pattern");
+            if (pattern != null && !pattern.trim().isEmpty()) {
+                includes.add(pattern.trim());
+            }
+        }
+        config.setIncludePatterns(includes);
+
+        java.util.List<String> excludes = new java.util.ArrayList<>();
+        for (Element exc : coverageElem.getChildren(TAG_COVERAGE_EXCLUDE)) {
+            String pattern = exc.getAttributeValue("pattern");
+            if (pattern != null && !pattern.trim().isEmpty()) {
+                excludes.add(pattern.trim());
+            }
+        }
+        config.setExcludePatterns(excludes);
     }
 }

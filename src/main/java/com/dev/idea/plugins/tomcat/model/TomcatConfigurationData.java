@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.model;
 
+        import com.dev.idea.plugins.tomcat.TomcatConstants;
         import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
         import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
@@ -15,11 +16,11 @@ package com.dev.idea.plugins.tomcat.model;
          * Consolidates all configuration into dedicated config objects.
          * No field duplication - delegates to sub-configs.
          */
-        public class TomcatConfigurationData {
+        public class TomcatConfigurationData implements Cloneable {
 
-            public static final String DEFAULT_CONTEXT_PATH = "/";
-            public static final String DEFAULT_JRE_SELECTION = "Project default";
-            public static final String DEFAULT_SERVER_MODE = "Local";
+            public static final String DEFAULT_CONTEXT_PATH = TomcatConstants.DEFAULT_CONTEXT_PATH;
+            public static final String DEFAULT_JRE_SELECTION = TomcatConstants.JRE_PROJECT_DEFAULT;
+            public static final String DEFAULT_SERVER_MODE = TomcatConstants.MODE_LOCAL;
 
             @Nullable private TomcatInfo tomcatInfo;
             @NotNull private String contextPath = DEFAULT_CONTEXT_PATH;
@@ -32,9 +33,14 @@ package com.dev.idea.plugins.tomcat.model;
             @NotNull private UiConfig uiConfig = new UiConfig();
             @NotNull private DebugConfig debugConfig = new DebugConfig();
             @NotNull private RemoteConfig remoteConfig = new RemoteConfig();
+            @NotNull private CoverageConfig coverageConfig = new CoverageConfig();
             @NotNull private String jreSelection = DEFAULT_JRE_SELECTION;
             private boolean storeAsProjectFile;
             @NotNull private String serverMode = DEFAULT_SERVER_MODE;
+            @Nullable private String catalinaBase;
+
+            @Nullable public String getCatalinaBase() { return catalinaBase; }
+            public void setCatalinaBase(@Nullable String catalinaBase) { this.catalinaBase = catalinaBase; }
 
             @Nullable public TomcatInfo getTomcatInfo() { return tomcatInfo; }
             public void setTomcatInfo(@Nullable TomcatInfo info) { this.tomcatInfo = info; }
@@ -69,6 +75,9 @@ package com.dev.idea.plugins.tomcat.model;
             @NotNull public RemoteConfig getRemoteConfig() { return remoteConfig; }
             public void setRemoteConfig(@NotNull RemoteConfig config) { this.remoteConfig = Objects.requireNonNull(config); }
 
+            @NotNull public CoverageConfig getCoverageConfig() { return coverageConfig; }
+            public void setCoverageConfig(@NotNull CoverageConfig config) { this.coverageConfig = Objects.requireNonNull(config); }
+
             @NotNull public String getJreSelection() { return StringUtil.notNullize(jreSelection, DEFAULT_JRE_SELECTION); }
             public void setJreSelection(@Nullable String jre) { this.jreSelection = StringUtil.notNullize(jre, DEFAULT_JRE_SELECTION); }
 
@@ -95,9 +104,11 @@ package com.dev.idea.plugins.tomcat.model;
                 c.uiConfig = this.uiConfig.clone();
                 c.debugConfig = this.debugConfig.clone();
                 c.remoteConfig = this.remoteConfig.clone();
+                c.coverageConfig = this.coverageConfig.clone();
                 c.jreSelection = this.jreSelection;
                 c.storeAsProjectFile = this.storeAsProjectFile;
                 c.serverMode = this.serverMode;
+                c.catalinaBase = this.catalinaBase;
                 return c;
             }
 
@@ -107,13 +118,4 @@ package com.dev.idea.plugins.tomcat.model;
                         ", contextPath='" + getContextPath() + "', serverMode='" + getServerMode() + "'}";
             }
 
-            private String catalinaBase;
-
-            public String getCatalinaBase() {
-                return catalinaBase;
-            }
-
-            public void setCatalinaBase(String catalinaBase) {
-                this.catalinaBase = catalinaBase;
-            }
         }

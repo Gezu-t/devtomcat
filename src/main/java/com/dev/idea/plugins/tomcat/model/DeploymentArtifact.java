@@ -115,25 +115,15 @@ package com.dev.idea.plugins.tomcat.model;
                 setContextPath(serverPath);
             }
 
-            /**
-             * Checks if this deployment is using the default context path.
-             * Returns true if contextPath is "/" or empty.
-             */
-            public boolean isUsingDefaultContext() {
+                    public boolean isUsingDefaultContext() {
                 return contextPath.isEmpty() || contextPath.equals("/");
             }
 
-            /**
-             * Checks if this artifact is marked for deployment.
-             */
-            public boolean isDeployed() {
+                    public boolean isDeployed() {
                 return deployed;
             }
 
-            /**
-             * Sets whether this artifact should be deployed.
-             */
-            public void setDeployed(boolean deployed) {
+                    public void setDeployed(boolean deployed) {
                 this.deployed = deployed;
             }
 

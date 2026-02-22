@@ -66,13 +66,7 @@ package com.dev.idea.plugins.tomcat.utils;
             return projectCatalinaBase;
         }
 
-        /**
-         * Get the Tomcat installation directory from a run configuration.
-         *
-         * @param config the run configuration
-         * @return the Tomcat home path, or null if not configured
-         */
-        @Nullable
+            @Nullable
         public static Path getTomcatHome(@NotNull TomcatRunConfiguration config) {
             Objects.requireNonNull(config, "Configuration cannot be null");
 
@@ -89,13 +83,7 @@ package com.dev.idea.plugins.tomcat.utils;
             return Paths.get(tomcatInfo.getPath());
         }
 
-        /**
-         * Get the logs directory for a run configuration.
-         *
-         * @param config the run configuration
-         * @return the logs directory path, or null if not available
-         */
-        @Nullable
+            @Nullable
         public static Path getLogsDirectory(@NotNull TomcatRunConfiguration config) {
             Path catalinaBase = getCatalinaBase(config);
             if (catalinaBase == null) {
@@ -104,13 +92,7 @@ package com.dev.idea.plugins.tomcat.utils;
             return catalinaBase.resolve("logs");
         }
 
-        /**
-         * Get the work directory for a run configuration.
-         *
-         * @param config the run configuration
-         * @return the work directory path, or null if not available
-         */
-        @Nullable
+            @Nullable
         public static Path getWorkDirectory(@NotNull TomcatRunConfiguration config) {
             Path catalinaBase = getCatalinaBase(config);
             if (catalinaBase == null) {
@@ -119,13 +101,7 @@ package com.dev.idea.plugins.tomcat.utils;
             return catalinaBase.resolve("work");
         }
 
-        /**
-         * Get the conf directory for a run configuration.
-         *
-         * @param config the run configuration
-         * @return the conf directory path, or null if not available
-         */
-        @Nullable
+            @Nullable
         public static Path getConfDirectory(@NotNull TomcatRunConfiguration config) {
             Path catalinaBase = getCatalinaBase(config);
             if (catalinaBase == null) {
@@ -134,13 +110,7 @@ package com.dev.idea.plugins.tomcat.utils;
             return catalinaBase.resolve("conf");
         }
 
-        /**
-         * Get the webapps directory for a run configuration.
-         *
-         * @param config the run configuration
-         * @return the webapps directory path, or null if not available
-         */
-        @Nullable
+            @Nullable
         public static Path getWebappsDirectory(@NotNull TomcatRunConfiguration config) {
             Path catalinaBase = getCatalinaBase(config);
             if (catalinaBase == null) {

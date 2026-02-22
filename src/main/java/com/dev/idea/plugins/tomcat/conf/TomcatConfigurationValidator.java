@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.conf;
 
         import com.dev.idea.plugins.tomcat.model.PortConfig;
         import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
+        import com.dev.idea.plugins.tomcat.model.ValidationResult;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
         import com.dev.idea.plugins.tomcat.utils.StringUtils;
@@ -31,7 +32,7 @@ package com.dev.idea.plugins.tomcat.conf;
 
                     LOG.debug("Configuration validation passed: %s", config.getName());
                 } catch (RuntimeConfigurationException e) {
-                    LOG.warn("Validation failed for: " + config.getName() + " - " + e.getLocalizedMessage());
+                    LOG.debug("Validation failed for: " + config.getName() + " - " + e.getLocalizedMessage());
                     throw e;
                 } catch (Exception e) {
                     LOG.error("Unexpected error during validation: " + config.getName(), e);
@@ -42,7 +43,7 @@ package com.dev.idea.plugins.tomcat.conf;
             private static void validateConfigurationName(@NotNull TomcatRunConfiguration config) throws RuntimeConfigurationException {
                 if (StringUtils.isEmpty(config.getName())) {
                     config.setName("Tomcat");
-                    LOG.warn("Configuration name was empty; defaulted to 'Tomcat'");
+                    LOG.debug("Configuration name was empty; defaulted to 'Tomcat'");
                 }
             }
 
@@ -86,7 +87,7 @@ package com.dev.idea.plugins.tomcat.conf;
                         .jmxEnabled(ports.isJmxEnabled())
                         .build();
 
-                PortValidator.ValidationResult result = PortValidator.validate(portConfig);
+                ValidationResult result = PortValidator.validate(portConfig);
                 if (result.hasErrors()) {
                     throw new RuntimeConfigurationException(result.getErrorMessage());
                 }

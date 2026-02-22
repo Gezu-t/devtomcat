@@ -21,19 +21,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 /**
- * Reusable builder for Tomcat Java parameters
- * Encapsulates the complex logic of building Java parameters for Tomcat
+ * Builds Java parameters for Tomcat execution.
  *
  * @author Gezahegn Lemma (Gezu)
- * @version 1.6
  */
 public class TomcatJavaParametersBuilder {
 
     private static final Logger LOG = Logger.getInstance(TomcatJavaParametersBuilder.class);
 
-    // Constants
     private static final String TOMCAT_MAIN_CLASS = "org.apache.catalina.startup.Bootstrap";
     private static final String PARAM_CATALINA_HOME = "catalina.home";
     private static final String PARAM_CATALINA_BASE = "catalina.base";
@@ -42,7 +40,6 @@ public class TomcatJavaParametersBuilder {
     private static final String PARAM_LOGGING_MANAGER = "java.util.logging.manager";
     private static final String PARAM_LOGGING_MANAGER_VALUE = "org.apache.juli.ClassLoaderLogManager";
 
-    // JMX default settings
     private static final String JMX_REMOTE_PROP = "com.sun.management.jmxremote";
     private static final String JMX_PORT_PROP = "com.sun.management.jmxremote.port";
     private static final String JMX_SSL_PROP = "com.sun.management.jmxremote.ssl";
@@ -51,36 +48,30 @@ public class TomcatJavaParametersBuilder {
 
     private final TomcatRunConfiguration configuration;
     private final Project project;
+    private boolean debugMode = false;
 
     public TomcatJavaParametersBuilder(@NotNull TomcatRunConfiguration configuration) {
         this.configuration = configuration;
         this.project = configuration.getProject();
     }
 
-    /**
-     * Builds JavaParameters for Tomcat execution
-     *
-     * @return Configured JavaParameters
-     * @throws ExecutionException if configuration is invalid
-     */
+    public TomcatJavaParametersBuilder setDebugMode(boolean debugMode) {
+        this.debugMode = debugMode;
+        return this;
+    }
+
     @NotNull
     public JavaParameters build() throws ExecutionException {
         try {
-            // Get paths
             Path catalinaBase = getCatalinaBase();
             Path catalinaHome = getCatalinaHome();
-
-            // Ensure required directories exist
             ensureDirectoriesExist(catalinaBase);
 
-            // Prefer ConfigData (new model) but keep backward compatibility with legacy getters
-            // Defaults from PortUtils
             int httpPort = PortUtils.DEFAULT_HTTP;
             int shutdownPort = PortUtils.DEFAULT_SHUTDOWN;
             int jmxPort = PortUtils.DEFAULT_JMX;
             int httpsPort = PortUtils.DEFAULT_HTTPS;
 
-            // Get ports from PortConfig through TomcatRunConfiguration convenience methods
             Integer configHttpPort = configuration.getHttpPort();
             Integer configShutdownPort = configuration.getShutdownPort();
             Integer configJmxPort = configuration.getJmxPort();
@@ -99,20 +90,15 @@ public class TomcatJavaParametersBuilder {
                 httpsPort = configHttpsPort;
             }
 
-            // If JMX/HTTPS are disabled, keep the port values computed above but they won't be applied unless enabled
-
-            // Validate and normalize ports using PortUtils (this project does not provide validatePorts/PortValidationResult APIs)
             if (!PortUtils.isValid(httpPort)) httpPort = PortUtils.DEFAULT_HTTP;
             if (!PortUtils.isValid(shutdownPort)) shutdownPort = PortUtils.DEFAULT_SHUTDOWN;
             if (!PortUtils.isValid(jmxPort)) jmxPort = PortUtils.DEFAULT_JMX;
             if (!PortUtils.isValid(httpsPort)) httpsPort = PortUtils.DEFAULT_HTTPS;
 
-            // Ensure ports are unique
             if (shutdownPort == httpPort) shutdownPort = PortUtils.findNextAvailable(shutdownPort);
             if (jmxPort == httpPort || jmxPort == shutdownPort) jmxPort = PortUtils.findNextAvailable(jmxPort);
             if (httpsPort == httpPort || httpsPort == shutdownPort || httpsPort == jmxPort) httpsPort = PortUtils.findNextAvailable(httpsPort);
 
-            // Ensure ports are available (best-effort auto-fix)
             if (!PortUtils.isAvailable(httpPort)) httpPort = PortUtils.findNextAvailable(httpPort);
             if (!PortUtils.isAvailable(shutdownPort)) shutdownPort = PortUtils.findNextAvailable(shutdownPort);
             if (configuration.isJmxEnabled() && !PortUtils.isAvailable(jmxPort)) jmxPort = PortUtils.findNextAvailable(jmxPort);
@@ -122,22 +108,11 @@ public class TomcatJavaParametersBuilder {
                 throw new ExecutionException("Unable to find available ports for Tomcat run configuration");
             }
 
-            // Create JavaParameters
             JavaParameters params = new JavaParameters();
-
-            // Basic setup
             setupBasicParameters(params, catalinaBase);
-
-            // Classpath
             setupClasspath(params, catalinaHome);
-
-            // Environment
             setupEnvironment(params);
-
-            // VM options
             setupVmOptions(params, catalinaBase, catalinaHome, httpPort, shutdownPort, jmxPort, httpsPort);
-
-            // Deployment artifacts
             setupDeploymentArtifacts(params, catalinaBase);
 
             return params;
@@ -147,9 +122,6 @@ public class TomcatJavaParametersBuilder {
         }
     }
 
-    /**
-     * Get Catalina base directory
-     */
     @NotNull
     private Path getCatalinaBase() throws ExecutionException {
         Path base = TomcatProjectUtils.getCatalinaBase(configuration);
@@ -159,9 +131,6 @@ public class TomcatJavaParametersBuilder {
         return base;
     }
 
-    /**
-     * Get Catalina home directory
-     */
     @NotNull
     private Path getCatalinaHome() throws ExecutionException {
         if (configuration.getConfigData().getTomcatInfo() == null) {
@@ -170,9 +139,6 @@ public class TomcatJavaParametersBuilder {
         return Paths.get(configuration.getConfigData().getTomcatInfo().getPath());
     }
 
-    /**
-     * Ensure required directories exist
-     */
     private void ensureDirectoriesExist(@NotNull Path catalinaBase) throws IOException {
         Files.createDirectories(catalinaBase.resolve("temp"));
         Files.createDirectories(catalinaBase.resolve("logs"));
@@ -180,16 +146,12 @@ public class TomcatJavaParametersBuilder {
         Files.createDirectories(catalinaBase.resolve("work"));
         Files.createDirectories(catalinaBase.resolve("conf"));
 
-        // Create logging.properties if it doesn't exist
         Path loggingPropertiesPath = catalinaBase.resolve("conf/logging.properties");
         if (!Files.exists(loggingPropertiesPath)) {
             createDefaultLoggingProperties(loggingPropertiesPath);
         }
     }
 
-    /**
-     * Create default logging.properties file
-     */
     private void createDefaultLoggingProperties(@NotNull Path loggingPropertiesPath) throws IOException {
         String loggingConfig =
             "handlers = java.util.logging.ConsoleHandler\n" +
@@ -208,12 +170,9 @@ public class TomcatJavaParametersBuilder {
             "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/host-manager].handlers = java.util.logging.ConsoleHandler\n";
 
         Files.writeString(loggingPropertiesPath, loggingConfig);
-        System.out.println("DevTomcat: Created logging.properties at " + loggingPropertiesPath);
+        LOG.debug("DevTomcat: Created logging.properties at " + loggingPropertiesPath);
     }
 
-    /**
-     * Setup basic parameters
-     */
     private void setupBasicParameters(@NotNull JavaParameters params, @NotNull Path catalinaBase) {
         params.setDefaultCharset(project);
         params.setWorkingDirectory(catalinaBase.toFile());
@@ -222,17 +181,11 @@ public class TomcatJavaParametersBuilder {
         params.getProgramParametersList().add("start");
     }
 
-    /**
-     * Setup classpath
-     */
     private void setupClasspath(@NotNull JavaParameters params, @NotNull Path catalinaHome) {
         params.getClassPath().add(catalinaHome.resolve("bin/bootstrap.jar").toFile());
         params.getClassPath().add(catalinaHome.resolve("bin/tomcat-juli.jar").toFile());
     }
 
-    /**
-     * Setup environment
-     */
     private void setupEnvironment(@NotNull JavaParameters params) {
         boolean passParent = false;
         Map<String, String> env = null;
@@ -248,9 +201,6 @@ public class TomcatJavaParametersBuilder {
         }
     }
 
-    /**
-     * Setup VM options
-     */
     private void setupVmOptions(@NotNull JavaParameters params,
                                 @NotNull Path catalinaBase,
                                 @NotNull Path catalinaHome,
@@ -260,7 +210,6 @@ public class TomcatJavaParametersBuilder {
                                 int httpsPort) {
         ParametersList vmParams = params.getVMParametersList();
 
-        // User-defined VM options
         String vmOptions = null;
         if (configuration.getConfigData() != null && configuration.getConfigData().getVmConfig() != null) {
             vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
@@ -269,28 +218,30 @@ public class TomcatJavaParametersBuilder {
             vmParams.addParametersString(vmOptions);
         }
 
-        // JMX configuration
         if (configuration.isJmxEnabled()) {
             configureJmx(vmParams, jmxPort);
         }
 
-        // HTTPS configuration
         if (configuration.isHttpsEnabled()) {
             configureHttps(vmParams, httpsPort);
         }
 
-        // Hot deployment
-        if (configuration.getConfigData().getDeploymentConfig().isHotDeploymentEnabled()) {
-            configureHotDeployment(vmParams);
+        if (debugMode) {
+            String existingVmOptions = configuration.getConfigData().getVmConfig() != null
+                    ? configuration.getConfigData().getVmConfig().getVmOptions() : "";
+            if (existingVmOptions == null || !existingVmOptions.contains("-agentlib:jdwp")) {
+                var debugConfig = configuration.getConfigData().getDebugConfig();
+                if (debugConfig != null && debugConfig.isValid()) {
+                    String jdwpArg = debugConfig.getDebugVmArgument();
+                    vmParams.add(jdwpArg);
+                    LOG.info("Debug mode enabled: " + jdwpArg);
+                }
+            }
         }
 
-        // Catalina system properties
         configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, httpPort, shutdownPort);
     }
 
-    /**
-     * Configure JMX settings
-     */
     private void configureJmx(@NotNull ParametersList vmParams, int jmxPort) {
         vmParams.addProperty(JMX_REMOTE_PROP, "");
         vmParams.addProperty(JMX_PORT_PROP, String.valueOf(jmxPort));
@@ -299,27 +250,11 @@ public class TomcatJavaParametersBuilder {
         vmParams.addProperty(JMX_LOCAL_PROP, "false");
     }
 
-    /**
-     * Configure HTTPS settings
-     */
     private void configureHttps(@NotNull ParametersList vmParams, int httpsPort) {
         vmParams.addProperty("server.ssl.enabled", "true");
         vmParams.addProperty("server.port.https", String.valueOf(httpsPort));
     }
 
-    /**
-     * Configure hot deployment settings
-     */
-    private void configureHotDeployment(@NotNull ParametersList vmParams) {
-        vmParams.addProperty("tomcat.autoreload.enabled", "true");
-        vmParams.addProperty("tomcat.reloadable", "true");
-        vmParams.addProperty("tomcat.antiResourceLocking", "false");
-        vmParams.addProperty("tomcat.antiJARLocking", "false");
-    }
-
-    /**
-     * Configure Catalina system properties
-     */
     private void configureCatalinaProperties(@NotNull ParametersList vmParams,
                                              @NotNull Path catalinaBase,
                                              @NotNull Path catalinaHome,
@@ -334,13 +269,10 @@ public class TomcatJavaParametersBuilder {
         vmParams.defineProperty("server.shutdown.port", String.valueOf(shutdownPort));
     }
 
-    /**
-     * Setup deployment artifacts
-     */
     private void setupDeploymentArtifacts(@NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {
         String serverMode = configuration.getConfigData().getServerMode();
 
-        if ("Remote".equals(serverMode)) {
+        if (TomcatConstants.MODE_REMOTE.equals(serverMode)) {
             configureRemoteDeployment(params);
         } else {
             configureLocalDeployment(params, catalinaBase);
@@ -348,20 +280,50 @@ public class TomcatJavaParametersBuilder {
     }
 
     private void configureLocalDeployment(@NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {
-        ParametersList vmParams = params.getVMParametersList();
-        for (DeploymentArtifact artifact : configuration.getConfigData().getDeploymentConfig().getArtifacts()) {
-            if (artifact != null && artifact.isValid()) {
-                VirtualFile artifactFile = VfsUtil.findFileByIoFile(new java.io.File(artifact.getPath()), true);
+        Path webappsDir = catalinaBase.resolve("webapps");
+        Path confCatalinaLocalhost = catalinaBase.resolve("conf/Catalina/localhost");
 
-                if (artifactFile != null) {
-                    String contextPath = artifact.getContextPath();
-                    vmParams.addProperty("tomcat.webapp.path", artifactFile.getPath());
-                    vmParams.addProperty("tomcat.webapp.context", contextPath);
-                    LOG.info("Deploying artifact: " + artifactFile.getPath() + " with context: " + contextPath);
+        try {
+            Files.createDirectories(webappsDir);
+            Files.createDirectories(confCatalinaLocalhost);
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to create deployment directories", e);
+        }
+
+        boolean hotDeploy = configuration.getConfigData().getDeploymentConfig().isHotDeploymentEnabled();
+
+        for (DeploymentArtifact artifact : configuration.getConfigData().getDeploymentConfig().getArtifacts()) {
+            if (artifact == null || !artifact.isValid()) continue;
+
+            String contextPath = artifact.getContextPath();
+            String contextName;
+            if ("/".equals(contextPath) || contextPath == null || contextPath.isEmpty()) {
+                contextName = "ROOT";
+            } else {
+                contextName = contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
+            }
+
+            Path artifactPath = Paths.get(artifact.getPath());
+            if (!Files.exists(artifactPath)) {
+                throw new ExecutionException("Deployment artifact not found: " + artifact.getPath());
+            }
+
+            try {
+                if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
+                        || Files.isDirectory(artifactPath)) {
+                    String contextXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                            + "<Context docBase=\"" + artifactPath.toString().replace("\"", "&quot;")
+                            + "\" reloadable=\"" + hotDeploy + "\" />\n";
+                    Path contextFile = confCatalinaLocalhost.resolve(contextName + ".xml");
+                    Files.writeString(contextFile, contextXml);
+                    LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
                 } else {
-                    LOG.warn("Deployment artifact not found: " + artifact.getPath());
-                    throw new ExecutionException("Deployment artifact not found: " + artifact.getPath());
+                    Path targetWar = webappsDir.resolve(contextName + ".war");
+                    Files.copy(artifactPath, targetWar, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    LOG.info("Deployed WAR artifact: " + targetWar);
                 }
+            } catch (IOException e) {
+                throw new ExecutionException("Failed to deploy artifact: " + artifact.getPath(), e);
             }
         }
     }
@@ -403,9 +365,6 @@ public class TomcatJavaParametersBuilder {
         }
     }
 
-    /**
-     * Create builder for a configuration
-     */
     public static TomcatJavaParametersBuilder create(@NotNull TomcatRunConfiguration configuration) {
         return new TomcatJavaParametersBuilder(configuration);
     }

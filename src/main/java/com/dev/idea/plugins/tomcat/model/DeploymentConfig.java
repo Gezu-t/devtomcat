@@ -146,12 +146,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return new ArrayList<>(artifacts);
     }
 
-    /**
-     * Get artifact at specific index.
-     *
-     * @param index the artifact index (0-based)
-     * @return the artifact or null if index out of bounds
-     */
     @Nullable
     public DeploymentArtifact getArtifact(int index) {
         if (index < 0 || index >= artifacts.size()) {
@@ -161,12 +155,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return artifacts.get(index);
     }
 
-    /**
-     * Get artifact by name.
-     *
-     * @param name the artifact name to search for (cannot be null)
-     * @return the first matching artifact or null if not found
-     */
     @Nullable
     public DeploymentArtifact getArtifactByName(@NotNull String name) {
         Objects.requireNonNull(name, "Artifact name cannot be null");
@@ -177,38 +165,18 @@ public class DeploymentConfig implements Serializable, Cloneable {
                 .orElse(null);
     }
 
-    /**
-     * Get number of deployment artifacts.
-     *
-     * @return artifact count (0 or greater)
-     */
     public int getArtifactCount() {
         return artifacts.size();
     }
 
-    /**
-     * Check if deployment artifacts are configured.
-     *
-     * @return true if at least one artifact is configured
-     */
     public boolean hasArtifacts() {
         return !artifacts.isEmpty();
     }
 
-    /**
-     * Check if hot deployment is enabled.
-     *
-     * @return true if hot deployment is enabled
-     */
     public boolean isHotDeploymentEnabled() {
         return hotDeploymentEnabled;
     }
 
-    /**
-     * Check if update classes and resources is enabled.
-     *
-     * @return true if class/resource updates are enabled
-     */
     public boolean isUpdateClassesAndResources() {
         return updateClassesAndResources;
     }
@@ -280,12 +248,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return true;
     }
 
-    /**
-     * Remove a deployment artifact.
-     *
-     * @param artifact the artifact to remove (cannot be null)
-     * @return true if removed, false if not found
-     */
     public boolean removeArtifact(@NotNull DeploymentArtifact artifact) {
         Objects.requireNonNull(artifact, "Artifact cannot be null");
 
@@ -298,12 +260,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return removed;
     }
 
-    /**
-     * Remove artifact by index.
-     *
-     * @param index the artifact index to remove
-     * @return the removed artifact or null if index out of bounds
-     */
     @Nullable
     public DeploymentArtifact removeArtifactAt(int index) {
         if (index < 0 || index >= artifacts.size()) {
@@ -316,22 +272,12 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return removed;
     }
 
-    /**
-     * Clear all deployment artifacts.
-     *
-     * <p>Removes all artifacts from the configuration.
-     */
     public void clearArtifacts() {
         int count = artifacts.size();
         artifacts.clear();
         LOG.debug("Cleared " + count + " artifacts");
     }
 
-    /**
-     * Set hot deployment enabled state.
-     *
-     * @param enabled true to enable hot deployment
-     */
     public void setHotDeploymentEnabled(boolean enabled) {
         if (this.hotDeploymentEnabled != enabled) {
             this.hotDeploymentEnabled = enabled;
@@ -339,11 +285,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         }
     }
 
-    /**
-     * Set update classes and resources enabled state.
-     *
-     * @param enabled true to enable class/resource updates
-     */
     public void setUpdateClassesAndResources(boolean enabled) {
         if (this.updateClassesAndResources != enabled) {
             this.updateClassesAndResources = enabled;
@@ -351,11 +292,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         }
     }
 
-    /**
-     * Set the deployment path.
-     *
-     * @param path the deployment path (can be null or empty)
-     */
     public void setDeploymentPath(@Nullable String path) {
         this.deploymentPath = path != null ? path : DEFAULT_DEPLOYMENT_PATH;
         LOG.debug("Set deployment path: " + this.deploymentPath);
@@ -392,11 +328,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return true;
     }
 
-    /**
-     * Get count of invalid artifacts.
-     *
-     * @return number of invalid artifacts
-     */
     public int getInvalidArtifactCount() {
         int count = 0;
         for (DeploymentArtifact artifact : artifacts) {
@@ -415,7 +346,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
     public void setPreserveSessions(boolean preserve) {
         this.preserveSessions = preserve;
     }
-
 
     // =====================================================================
     // CLONING & OBJECT METHODS
@@ -478,11 +408,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
                 deploymentPath.equals(that.deploymentPath);
     }
 
-    /**
-     * Generate hash code for deployment configuration.
-     *
-     * @return hash code based on all fields
-     */
     @Override
     public int hashCode() {
         return Objects.hash(artifacts, hotDeploymentEnabled,

@@ -12,11 +12,11 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.ArtifactManager;
-import com.intellij.ui.components.JBTabbedPane;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfiguration> {
@@ -32,7 +32,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private LogsConfigurationTab logsTab;
     private StartupConnectionTab startupConnectionTab;
     private CodeCoverageTab codeCoverageTab;
-    private JBTabbedPane tabbedPane;
+    private JTabbedPane tabbedPane;
 
     public TomcatConfigurationEditor(@NotNull Project project) {
         this.project = project;
@@ -101,9 +101,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             LOG.debug("DevTomcat: Applying editor settings to configuration");
             validateAllTabs();
             applyAllTabs(configuration);
-            LOG.info("DevTomcat: Configuration applied successfully - " + getConfigurationSummary(configuration));
+            LOG.debug("DevTomcat: Configuration applied successfully - " + getConfigurationSummary(configuration));
         } catch (ConfigurationException e) {
-            LOG.warn("DevTomcat: Configuration validation failed: " + e.getMessage());
+            LOG.debug("DevTomcat: Configuration validation failed: " + e.getMessage());
             throw e;
         } catch (Exception e) {
             LOG.error("DevTomcat: Unexpected error applying configuration", e);
@@ -153,80 +153,100 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (isDisposing.get()) return createErrorPanel("Editor is being disposed");
 
         try {
-            LOG.info("DevTomcat: Creating Ultimate-style 5-tab configuration interface");
+            LOG.info("DevTomcat: Creating 5-tab configuration interface");
             if (currentConfiguration == null) {
                 currentConfiguration = createTemplateConfiguration();
             }
-            tabbedPane = new JBTabbedPane();
+            tabbedPane = new JTabbedPane();
             createAllTabs();
+
+            // Revalidate tab content on switch to ensure proper layout
+            tabbedPane.addChangeListener(e -> {
+                if (tabbedPane == null || isDisposing.get()) return;
+                int idx = tabbedPane.getSelectedIndex();
+                if (idx >= 0) {
+                    Component comp = tabbedPane.getComponentAt(idx);
+                    if (comp instanceof JComponent jc) {
+                        jc.revalidate();
+                        jc.repaint();
+                    }
+                    LOG.info("DevTomcat: Tab switched to [" + tabbedPane.getTitleAt(idx) + "] index=" + idx);
+                }
+            });
+
             editorInitialized.set(true);
-            if (currentConfiguration != null) {
-                LOG.debug("DevTomcat: Applying delayed configuration");
-                SwingUtilities.invokeLater(() -> {
-                    if (!isDisposing.get()) resetEditorFrom(currentConfiguration);
-                });
-            }
-            LOG.info("DevTomcat: Configuration interface created successfully");
+            LOG.info("DevTomcat: Configuration interface created successfully with " + tabbedPane.getTabCount() + " tabs");
             return tabbedPane;
-        } catch (Exception e) {
-            LOG.error("DevTomcat: Critical error creating editor", e);
-            return createErrorPanel("Failed to create configuration interface: " + e.getMessage());
+        } catch (Throwable t) {
+            LOG.error("DevTomcat: Critical error creating editor", t);
+            return createErrorPanel("Failed to create configuration interface: " + t.getMessage());
         }
     }
 
     private void createAllTabs() {
         createServerTab();
         createDeploymentTab();
-        createLogsTab();
         createStartupConnectionTab();
+        createLogsTab();
         createCodeCoverageTab();
     }
 
     private void createServerTab() {
         try {
-            // PASS CONFIG HERE
             serverTab = new ServerConfigurationTab(project, currentConfiguration);
             tabbedPane.addTab("Server", serverTab);
             LOG.debug("DevTomcat: Server tab created with dynamic Local/Remote");
-        } catch (Exception e) {
-            LOG.error("DevTomcat: Failed to create Server tab", e);
-            tabbedPane.addTab("Server", createErrorPanel("Server tab error: " + e.getMessage()));
+        } catch (Throwable t) {
+            LOG.error("DevTomcat: Failed to create Server tab", t);
+            tabbedPane.addTab("Server", createErrorPanel("Server tab error: " + t.getMessage()));
         }
     }
 
     private void createDeploymentTab() {
         try {
-            // Create shared table manager for both panel and handler
             DeploymentTableManager tableManager = new DeploymentTableManager();
+            LOG.info("DevTomcat: DeploymentTableManager created");
+
+            ArtifactManager artifactMgr = null;
+            try {
+                artifactMgr = ArtifactManager.getInstance(project);
+                LOG.info("DevTomcat: ArtifactManager obtained: " + (artifactMgr != null));
+            } catch (Throwable t) {
+                LOG.warn("DevTomcat: ArtifactManager not available: " + t.getMessage());
+            }
+
             ArtifactSelectionHandler selectionHandler = new ArtifactSelectionHandler(
                     project,
-                    ArtifactManager.getInstance(project),
+                    artifactMgr,
                     tableManager
             );
+            LOG.info("DevTomcat: ArtifactSelectionHandler created");
 
             deploymentTab = new DeploymentConfigurationPanel(
                     project,
                     tableManager,
                     selectionHandler
             );
-            deploymentTab.setParentEditor(this);
+            LOG.info("DevTomcat: DeploymentConfigurationPanel created");
 
             tabbedPane.addTab("Deployment", deploymentTab);
-            LOG.debug("DevTomcat: Deployment tab created");
-        } catch (Exception e) {
-            LOG.error("DevTomcat: Failed to create Deployment tab", e);
-            tabbedPane.addTab("Deployment", createErrorPanel("Deployment tab error: " + e.getMessage()));
+            LOG.info("DevTomcat: Deployment tab added to pane");
+        } catch (Throwable t) {
+            LOG.error("DevTomcat: Failed to create Deployment tab", t);
+            tabbedPane.addTab("Deployment", createErrorPanel("Deployment tab error: " + t.getMessage()));
         }
     }
 
     private void createLogsTab() {
         try {
+            LOG.info("DevTomcat: Creating Logs tab...");
             logsTab = new LogsConfigurationTab(project, null);
+            LOG.info("DevTomcat: LogsConfigurationTab created");
             tabbedPane.addTab("Logs", logsTab);
-            LOG.debug("DevTomcat: Logs tab created");
-        } catch (Exception e) {
-            LOG.error("DevTomcat: Failed to create Logs tab", e);
-            tabbedPane.addTab("Logs", createErrorPanel("Logs tab error: " + e.getMessage()));
+            LOG.info("DevTomcat: Logs tab added to pane");
+        } catch (Throwable t) {
+            LOG.error("DevTomcat: Failed to create Logs tab", t);
+            tabbedPane.addTab("Logs", createErrorPanel("Logs tab error: " + t.getMessage()));
         }
     }
 
@@ -240,9 +260,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             startupConnectionTab = new StartupConnectionTab(project, tempConfig);
             tabbedPane.addTab("Startup/Connection", startupConnectionTab);
             LOG.debug("DevTomcat: Startup/Connection tab created");
-        } catch (Exception e) {
-            LOG.error("DevTomcat: Failed to create Startup/Connection tab", e);
-            tabbedPane.addTab("Startup/Connection", createErrorPanel("Startup/Connection tab error: " + e.getMessage()));
+        } catch (Throwable t) {
+            LOG.error("DevTomcat: Failed to create Startup/Connection tab", t);
+            tabbedPane.addTab("Startup/Connection", createErrorPanel("Startup/Connection tab error: " + t.getMessage()));
         }
     }
 
@@ -251,15 +271,17 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             codeCoverageTab = new CodeCoverageTab(project);
             tabbedPane.addTab("Code Coverage", codeCoverageTab);
             LOG.debug("DevTomcat: Code Coverage tab created");
-        } catch (Exception e) {
-            LOG.error("DevTomcat: Failed to create Code Coverage tab", e);
-            tabbedPane.addTab("Code Coverage", createErrorPanel("Code Coverage tab error: " + e.getMessage()));
+        } catch (Throwable t) {
+            LOG.error("DevTomcat: Failed to create Code Coverage tab", t);
+            tabbedPane.addTab("Code Coverage", createErrorPanel("Code Coverage tab error: " + t.getMessage()));
         }
     }
 
     private JPanel createErrorPanel(String errorMessage) {
-        JPanel panel = new JPanel();
-        panel.add(new JLabel("⚠ " + errorMessage));
+        JPanel panel = new JPanel(new BorderLayout());
+        JLabel label = new JLabel("<html><b>Error:</b> " + errorMessage + "</html>");
+        label.setHorizontalAlignment(SwingConstants.CENTER);
+        panel.add(label, BorderLayout.CENTER);
         return panel;
     }
 
@@ -268,12 +290,16 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     }
 
     private String getConfigurationSummary(@NotNull TomcatRunConfiguration configuration) {
-        return String.format("Server: %s, HTTP: %d, JMX: %s, Artifacts: %d, Logs: %d",
-                configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "None",
-                configuration.getHttpPort(),
-                configuration.isJmxEnabled() ? configuration.getJmxPort() : "disabled",
-                configuration.getConfigData().getDeploymentConfig().getArtifacts().size(),
-                configuration.getLogFileConfigurations().size());
+        try {
+            return String.format("Server: %s, HTTP: %s, JMX: %s, Artifacts: %d, Logs: %d",
+                    configuration.getTomcatInfo() != null ? configuration.getTomcatInfo().getName() : "None",
+                    configuration.getHttpPort() != null ? configuration.getHttpPort() : "N/A",
+                    configuration.isJmxEnabled() ? String.valueOf(configuration.getJmxPort()) : "disabled",
+                    configuration.getConfigData().getDeploymentConfig().getArtifacts().size(),
+                    configuration.getLogFileConfigurations().size());
+        } catch (Exception e) {
+            return "summary unavailable";
+        }
     }
 
     @Nullable
