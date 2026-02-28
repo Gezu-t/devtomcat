@@ -23,6 +23,9 @@ import java.net.Socket;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -56,12 +59,12 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final int shutdownPort;
     private final RunnerSettings runnerSettings;
 
-    private boolean serverStartupDetected = false;
-    private boolean deploymentCompleted = false;
+    private final AtomicBoolean serverStartupDetected = new AtomicBoolean(false);
+    private final AtomicBoolean deploymentCompleted = new AtomicBoolean(false);
     private final boolean jmxEnabled;
-    private long startupTime = System.currentTimeMillis();
-    private int errorCount = 0;
-    private int warningCount = 0;
+    private volatile long startupTime = System.currentTimeMillis();
+    private final AtomicInteger errorCount = new AtomicInteger(0);
+    private final AtomicInteger warningCount = new AtomicInteger(0);
 
     public TomcatProcessHandler(@NotNull Process process,
                                 @NotNull String commandLine,
@@ -117,14 +120,10 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     out.write(SHUTDOWN_COMMAND.getBytes(StandardCharsets.UTF_8));
                     out.flush();
                 }
-                long deadline = System.currentTimeMillis() + SHUTDOWN_TIMEOUT_MS;
-                while (System.currentTimeMillis() < deadline && !isProcessTerminated()) {
-                    try {
-                        Thread.sleep(200);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+                try {
+                    getProcess().waitFor(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
                 if (isProcessTerminated()) {
                     LOG.info("Tomcat terminated gracefully");
@@ -171,8 +170,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (text.isEmpty()) return;
 
         Matcher startupMatcher = STARTUP_PATTERN.matcher(text);
-        if (startupMatcher.find() && !serverStartupDetected) {
-            serverStartupDetected = true;
+        if (startupMatcher.find() && serverStartupDetected.compareAndSet(false, true)) {
             long duration = Long.parseLong(startupMatcher.group(1));
             deploymentLogger.logServerStartup(duration);
             trackStartupTime(duration);
@@ -180,8 +178,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
 
         Matcher deploymentMatcher = DEPLOYMENT_PATTERN.matcher(text);
-        if (deploymentMatcher.find() && !deploymentCompleted) {
-            deploymentCompleted = true;
+        if (deploymentMatcher.find() && deploymentCompleted.compareAndSet(false, true)) {
             long totalTime = System.currentTimeMillis() - startupTime;
             deploymentLogger.logDeploymentSuccess(configurationName, totalTime);
         }
@@ -199,7 +196,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
 
         if (ERROR_PATTERN.matcher(text).find()) {
-            errorCount++;
+            errorCount.incrementAndGet();
             deploymentLogger.logServerError(text);
             String suggestion = getErrorSuggestion(text);
             if (!suggestion.isEmpty()) {
@@ -208,7 +205,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
 
         if (WARNING_PATTERN.matcher(text).find()) {
-            warningCount++;
+            warningCount.incrementAndGet();
             deploymentLogger.logServerWarning(text);
         }
     }
@@ -306,24 +303,24 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         String summary = String.format(
                 "Session summary: config=%s, duration=%dms, exit=%d, started=%s, deployed=%s, errors=%d, warnings=%d",
                 configurationName, duration, exitCode,
-                serverStartupDetected, deploymentCompleted, errorCount, warningCount);
+                serverStartupDetected.get(), deploymentCompleted.get(), errorCount.get(), warningCount.get());
         deploymentLogger.logServerInfo(summary);
         LOG.info(summary);
     }
 
     public boolean isServerStartupDetected() {
-        return serverStartupDetected;
+        return serverStartupDetected.get();
     }
 
     public boolean isDeploymentCompleted() {
-        return deploymentCompleted;
+        return deploymentCompleted.get();
     }
 
     public int getErrorCount() {
-        return errorCount;
+        return errorCount.get();
     }
 
     public int getWarningCount() {
-        return warningCount;
+        return warningCount.get();
     }
 }

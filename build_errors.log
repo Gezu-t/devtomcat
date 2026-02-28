@@ -1,0 +1,37 @@
+> Task :clean
+
+> Task :compileJava
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :initializeIntellijPlatformPlugin
+> Task :patchPluginXml
+> Task :processResources
+> Task :classes
+> Task :generateManifest
+> Task :instrumentCode
+> Task :jar
+> Task :assemble
+
+> Task :compileTestJava
+Note: /Users/gezahegn/Documents/IdeaProject/DevTomcat/src/test/java/com/dev/idea/plugins/tomcat/conf/TomcatConfigurationValidatorTest.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :processTestResources
+> Task :testClasses
+> Task :instrumentTestCode
+> Task :instrumentedJar
+> Task :composedJar
+> Task :prepareTestSandbox
+> Task :prepareTest
+
+> Task :test
+CompileCommand: exclude com/intellij/openapi/vfs/impl/FilePartNodeRoot.trieDescend bool exclude = true
+
+> Task :check
+> Task :build
+
+[Incubating] Problems report is available at: file:///Users/gezahegn/Documents/IdeaProject/DevTomcat/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 11s
+15 actionable tasks: 15 executed

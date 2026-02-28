@@ -39,6 +39,7 @@ package com.dev.idea.plugins.tomcat.utils;
          try {
              return Files.isWritable(Paths.get(dirPath));
          } catch (Exception e) {
+             LOG.debug("Cannot check writable directory: " + dirPath, e);
              return false;
          }
      }

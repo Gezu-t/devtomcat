@@ -111,6 +111,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 } finally {
                     isUpdating.set(false);
                 }
+            } else {
+                LOG.warn("Skipped writing configuration '" + getName() + "' — concurrent update in progress");
             }
         } catch (WriteExternalException e) {
             LOG.error("Failed to write configuration: " + getName(), e);
