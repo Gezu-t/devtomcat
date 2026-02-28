@@ -9,6 +9,8 @@ package com.dev.idea.plugins.tomcat.model;
         import org.jetbrains.annotations.Nullable;
 
         import java.util.Objects;
+        import java.util.Map;
+        import java.util.LinkedHashMap;
 
         /**
          * Central configuration model for Dev Tomcat Plugin.
@@ -38,6 +40,31 @@ package com.dev.idea.plugins.tomcat.model;
             private boolean storeAsProjectFile;
             @NotNull private String serverMode = DEFAULT_SERVER_MODE;
             @Nullable private String catalinaBase;
+            @NotNull private Map<String, RunnerSettings> runnerSettingsMap = new LinkedHashMap<>();
+
+            @NotNull public Map<String, RunnerSettings> getRunnerSettingsMap() { return runnerSettingsMap; }
+            public void setRunnerSettingsMap(@Nullable Map<String, RunnerSettings> map) {
+                if (map != null) {
+                    this.runnerSettingsMap = new LinkedHashMap<>(map);
+                } else {
+                    this.runnerSettingsMap.clear();
+                }
+            }
+            
+            @NotNull
+            public RunnerSettings getRunnerSettings(@NotNull String runnerId) {
+                RunnerSettings rs = runnerSettingsMap.get(runnerId);
+                if (rs == null) {
+                    rs = new RunnerSettings();
+                    if ("Run".equals(runnerId) && !runnerSettingsMap.isEmpty()) {
+                        // Fallback logic for backward compatibility if we only had debug/coverage saved
+                        RunnerSettings first = runnerSettingsMap.values().iterator().next();
+                        rs = first.clone();
+                    }
+                    runnerSettingsMap.put(runnerId, rs);
+                }
+                return rs;
+            }
 
             @Nullable public String getCatalinaBase() { return catalinaBase; }
             public void setCatalinaBase(@Nullable String catalinaBase) { this.catalinaBase = catalinaBase; }
@@ -109,6 +136,11 @@ package com.dev.idea.plugins.tomcat.model;
                 c.storeAsProjectFile = this.storeAsProjectFile;
                 c.serverMode = this.serverMode;
                 c.catalinaBase = this.catalinaBase;
+                
+                for (Map.Entry<String, RunnerSettings> entry : this.runnerSettingsMap.entrySet()) {
+                    c.runnerSettingsMap.put(entry.getKey(), entry.getValue().clone());
+                }
+                
                 return c;
             }
 

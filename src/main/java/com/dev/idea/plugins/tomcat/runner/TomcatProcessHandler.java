@@ -2,7 +2,10 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
 import com.dev.idea.plugins.tomcat.ui.server.dialogs.WebBrowsersDialog;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
+import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.process.KillableColoredProcessHandler;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessListener;
@@ -51,6 +54,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final TomcatDeploymentLogger deploymentLogger;
     private final String configurationName;
     private final int shutdownPort;
+    private final RunnerSettings runnerSettings;
 
     private boolean serverStartupDetected = false;
     private boolean deploymentCompleted = false;
@@ -63,10 +67,12 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                                 @NotNull String commandLine,
                                 @NotNull Charset charset,
                                 @NotNull TomcatDeploymentLogger deploymentLogger,
-                                @NotNull TomcatRunConfiguration configuration) {
+                                @NotNull TomcatRunConfiguration configuration,
+                                @NotNull RunnerSettings runnerSettings) {
         super(process, commandLine, charset);
         this.configuration = configuration;
         this.deploymentLogger = deploymentLogger;
+        this.runnerSettings = runnerSettings;
         this.configurationName = configuration.getName();
         this.jmxEnabled = configuration.isJmxEnabled();
         this.shutdownPort = configuration.getConfigData().getPortConfig().getShutdown();
@@ -81,6 +87,28 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
     @Override
     protected void destroyProcessImpl() {
+        if (!runnerSettings.isUseDefaultShutdown() && !StringUtil.isEmptyOrSpaces(runnerSettings.getShutdownScript())) {
+            LOG.info("Executing custom shutdown script: " + runnerSettings.getShutdownScript());
+            try {
+                GeneralCommandLine shutdownCmd = new GeneralCommandLine(runnerSettings.getShutdownScript());
+                shutdownCmd.withEnvironment(runnerSettings.getEnvironmentVariables());
+                shutdownCmd.withParentEnvironmentType(runnerSettings.isPassParentEnvs() ?
+                        GeneralCommandLine.ParentEnvironmentType.CONSOLE : GeneralCommandLine.ParentEnvironmentType.NONE);
+                if (configuration.getTomcatInfo() != null) {
+                    shutdownCmd.withWorkDirectory(configuration.getTomcatInfo().getPath());
+                }
+                
+                Process p = shutdownCmd.createProcess();
+                p.waitFor(SHUTDOWN_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (!isProcessTerminated()) {
+                    super.destroyProcessImpl();
+                }
+                return;
+            } catch (Exception e) {
+                LOG.error("Failed to execute custom shutdown script. Falling back to default behavior.", e);
+            }
+        }
+
         if (shutdownPort > 0) {
             try {
                 LOG.info("Sending SHUTDOWN command to port " + shutdownPort);
@@ -147,6 +175,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             serverStartupDetected = true;
             long duration = Long.parseLong(startupMatcher.group(1));
             deploymentLogger.logServerStartup(duration);
+            trackStartupTime(duration);
             launchBrowserIfEnabled();
         }
 
@@ -195,6 +224,26 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (lower.contains("permission"))
             return "Check file permissions and Tomcat directory access rights";
         return "";
+    }
+
+    /**
+     * Records startup time and logs trend comparison.
+     * DevTomcat exclusive: tracks startup performance across runs.
+     */
+    private void trackStartupTime(long durationMs) {
+        try {
+            StartupTimeTracker tracker = ApplicationManager.getApplication()
+                    .getService(StartupTimeTracker.class);
+            if (tracker != null) {
+                tracker.recordStartupTime(configurationName, durationMs);
+                String comparison = tracker.formatComparison(configurationName, durationMs);
+                if (!comparison.isEmpty()) {
+                    deploymentLogger.logServerInfo("📊 " + comparison);
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Failed to track startup time: " + e.getMessage());
+        }
     }
 
     private void launchBrowserIfEnabled() {

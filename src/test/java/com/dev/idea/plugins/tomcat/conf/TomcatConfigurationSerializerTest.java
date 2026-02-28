@@ -51,8 +51,8 @@ class TomcatConfigurationSerializerTest {
 
         // VM config
         assertEquals(original.getVmConfig().getVmOptions(), restored.getVmConfig().getVmOptions());
-        assertEquals(original.getVmConfig().isPassParentEnvs(), restored.getVmConfig().isPassParentEnvs());
-        assertEquals(original.getVmConfig().getEnvironmentVariables(), restored.getVmConfig().getEnvironmentVariables());
+        assertEquals(original.getRunnerSettings("Run").isPassParentEnvs(), restored.getRunnerSettings("Run").isPassParentEnvs());
+        assertEquals(original.getRunnerSettings("Run").getEnvironmentVariables(), restored.getRunnerSettings("Run").getEnvironmentVariables());
 
         // Browser config
         assertEquals(original.getBrowserConfig().getBrowserUrl(), restored.getBrowserConfig().getBrowserUrl());
@@ -125,7 +125,7 @@ class TomcatConfigurationSerializerTest {
     @DisplayName("round-trip preserves environment variables")
     void roundTripEnvironmentVariables() {
         TomcatConfigurationData original = new TomcatConfigurationData();
-        original.getVmConfig().setEnvironmentVariables(Map.of(
+        original.getRunnerSettings("Run").setEnvironmentVariables(Map.of(
                 "JAVA_HOME", "/usr/lib/jvm/java-17",
                 "CATALINA_OPTS", "-Xmx1024m"
         ));
@@ -136,7 +136,7 @@ class TomcatConfigurationSerializerTest {
         TomcatConfigurationData restored = new TomcatConfigurationData();
         TomcatConfigurationSerializer.read(restored, element);
 
-        Map<String, String> env = restored.getVmConfig().getEnvironmentVariables();
+        Map<String, String> env = restored.getRunnerSettings("Run").getEnvironmentVariables();
         assertEquals("/usr/lib/jvm/java-17", env.get("JAVA_HOME"));
         assertEquals("-Xmx1024m", env.get("CATALINA_OPTS"));
     }
@@ -231,8 +231,8 @@ class TomcatConfigurationSerializerTest {
 
         // VM
         data.getVmConfig().setVmOptions("-Xmx1024m -Xms512m");
-        data.getVmConfig().setPassParentEnvs(false);
-        data.getVmConfig().setEnvironmentVariables(Map.of("JAVA_HOME", "/usr/lib/jvm/java-17"));
+        data.getRunnerSettings("Run").setPassParentEnvs(false);
+        data.getRunnerSettings("Run").setEnvironmentVariables(Map.of("JAVA_HOME", "/usr/lib/jvm/java-17"));
 
         // Browser
         data.getBrowserConfig().setBrowserUrl("http://localhost:9090/myapp");

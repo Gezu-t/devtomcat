@@ -1,8 +1,8 @@
 rootProject.name = "DevTomcat"
 
- pluginManagement {
-     repositories {
-         mavenCentral()
-         gradlePluginPortal()
-     }
- }
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}

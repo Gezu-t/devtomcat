@@ -40,6 +40,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           body_path: release-notes.txt
-          files: build/libs/SmartTomcat-*.jar
+          files: build/distributions/DevTomcat-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

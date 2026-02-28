@@ -259,11 +259,11 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
                     Map<String, String> envVars = DynamicTomcatEnvironment.buildEnvironmentVariables();
                     if (envVars != null && !envVars.isEmpty()) {
-                        vmConfig.setEnvironmentVariables(envVars);
+                        data.getRunnerSettings("Run").setEnvironmentVariables(envVars);
                         LOG.debug("Environment variables set: " + envVars.size() + " variables");
                     }
 
-                    vmConfig.setPassParentEnvs(true);
+                    data.getRunnerSettings("Run").setPassParentEnvs(true);
                     LOG.debug("Pass parent environment variables: true");
                 } catch (Exception e) {
                     LOG.warn("Error configuring environment variables", e);

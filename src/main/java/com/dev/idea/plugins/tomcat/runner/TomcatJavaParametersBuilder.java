@@ -8,6 +8,8 @@ import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.ParametersList;
+import com.intellij.execution.runners.ExecutionEnvironment;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectRootManager;
@@ -51,11 +53,14 @@ public class TomcatJavaParametersBuilder {
 
     private final TomcatRunConfiguration configuration;
     private final Project project;
+    private final ExecutionEnvironment environment;
     private boolean debugMode = false;
 
-    public TomcatJavaParametersBuilder(@NotNull TomcatRunConfiguration configuration) {
+    public TomcatJavaParametersBuilder(@NotNull TomcatRunConfiguration configuration,
+                                       @NotNull ExecutionEnvironment environment) {
         this.configuration = configuration;
         this.project = configuration.getProject();
+        this.environment = environment;
     }
 
     public TomcatJavaParametersBuilder setDebugMode(boolean debugMode) {
@@ -302,9 +307,12 @@ public class TomcatJavaParametersBuilder {
         boolean passParent = false;
         Map<String, String> env = null;
 
-        if (configuration.getConfigData() != null && configuration.getConfigData().getVmConfig() != null) {
-            passParent = configuration.getConfigData().getVmConfig().isPassParentEnvs();
-            env = configuration.getConfigData().getVmConfig().getEnvironmentVariables();
+        if (configuration.getConfigData() != null) {
+            String executorId = environment != null && environment.getExecutor() != null 
+                    ? environment.getExecutor().getId() : "Run";
+            RunnerSettings rs = configuration.getConfigData().getRunnerSettings(executorId);
+            passParent = rs.isPassParentEnvs();
+            env = rs.getEnvironmentVariables();
         }
 
         params.setPassParentEnvs(passParent);
@@ -477,7 +485,8 @@ public class TomcatJavaParametersBuilder {
         }
     }
 
-    public static TomcatJavaParametersBuilder create(@NotNull TomcatRunConfiguration configuration) {
-        return new TomcatJavaParametersBuilder(configuration);
+    public static TomcatJavaParametersBuilder create(@NotNull TomcatRunConfiguration configuration,
+                                                     @NotNull ExecutionEnvironment environment) {
+        return new TomcatJavaParametersBuilder(configuration, environment);
     }
 }

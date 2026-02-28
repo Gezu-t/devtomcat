@@ -28,7 +28,6 @@ import java.util.Set;
  * - Test vs. production source detection
  *
  * @author Gezahegn Lemma (Gezu)
- * @version 1.1
  */
 public final class TomcatModuleUtils {
 

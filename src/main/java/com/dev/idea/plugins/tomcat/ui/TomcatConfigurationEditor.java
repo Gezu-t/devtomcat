@@ -235,6 +235,19 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 }
             });
 
+            // Wire artifact list changes to sync Before Launch tasks
+            tableManager.setArtifactListChangeListener(() -> {
+                if (currentConfiguration != null && !isEventsSuppressed()) {
+                    try {
+                        // Apply current deployment state to config before syncing
+                        deploymentTab.applyTo(currentConfiguration);
+                        currentConfiguration.syncBeforeLaunchWithDeployments();
+                    } catch (Exception e) {
+                        LOG.warn("DevTomcat: Failed to sync Before Launch tasks", e);
+                    }
+                }
+            });
+
             deploymentTab = new DeploymentConfigurationPanel(
                     project,
                     tableManager,

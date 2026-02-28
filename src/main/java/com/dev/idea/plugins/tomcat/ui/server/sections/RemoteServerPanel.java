@@ -101,7 +101,7 @@ public class RemoteServerPanel extends JPanel implements ConfigurationSection {
     public List<ValidationInfo> validateSettings() {
         List<ValidationInfo> errors = new ArrayList<>();
         String url = managerUrlField.getText().trim();
-        if (!url.matches("^https?://[^:]+:\\d+/manager(/.*)?$")) {
+        if (!RemoteConfig.isValidManagerUrl(url)) {
             errors.add(new ValidationInfo("Invalid Manager URL format", managerUrlField));
         }
         if (useCredentials.isSelected() && usernameField.getText().trim().isEmpty()) {

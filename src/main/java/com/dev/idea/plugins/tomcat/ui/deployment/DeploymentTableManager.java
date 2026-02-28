@@ -38,6 +38,7 @@ public class DeploymentTableManager {
     private static final int ROW_HEIGHT = 26;
 
     private Consumer<String> deploymentChangeListener;
+    private Runnable artifactListChangeListener;
 
     public DeploymentTableManager() {
         initializeTable();
@@ -46,6 +47,16 @@ public class DeploymentTableManager {
 
     public void setDeploymentChangeListener(Consumer<String> listener) {
         this.deploymentChangeListener = listener;
+    }
+
+    public void setArtifactListChangeListener(Runnable listener) {
+        this.artifactListChangeListener = listener;
+    }
+
+    private void fireArtifactListChanged() {
+        if (artifactListChangeListener != null) {
+            artifactListChangeListener.run();
+        }
     }
 
     private void fireDeploymentChanged() {
@@ -187,6 +198,7 @@ public class DeploymentTableManager {
             LOG.debug("Added deployment: " + deployment.getDisplayName() +
                     " with context: " + deployment.getApplicationContext());
             fireDeploymentChanged();
+            fireArtifactListChanged();
 
         } catch (Exception e) {
             LOG.warn("Error adding deployment: " + e.getMessage());
@@ -205,6 +217,7 @@ public class DeploymentTableManager {
 
             LOG.debug("Removed deployment: " + deployment.getDisplayName());
             fireDeploymentChanged();
+            fireArtifactListChanged();
         }
     }
 
@@ -270,6 +283,7 @@ public class DeploymentTableManager {
         deployments.clear();
         tableModel.setRowCount(0);
         LOG.debug("Cleared all deployments");
+        fireArtifactListChanged();
     }
 
     public JBTable getTable() {

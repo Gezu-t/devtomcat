@@ -1,6 +1,7 @@
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
-fun prop(key: String) = project.findProperty(key).toString()
+fun prop(key: String): String = project.findProperty(key)?.toString()
+    ?: error("Missing required property: $key")
 
 plugins {
     id("java")
@@ -27,12 +28,14 @@ dependencies {
                 .filter(String::isNotEmpty)
         )
         testFramework(TestFrameworkType.Platform)
+        pluginVerifier()
     }
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation("junit:junit:4.13.2")
+    // JUnit 4 required by IntelliJ Platform's JUnit5TestSessionListener
+    testRuntimeOnly("junit:junit:4.13.2")
 }
 
 java {
@@ -51,10 +54,23 @@ intellijPlatform {
             untilBuild = prop("pluginUntilBuild")
         }
     }
+
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
+
+    signing {
+        certificateChain.set(System.getenv("CERTIFICATE_CHAIN"))
+        privateKey.set(System.getenv("PRIVATE_KEY"))
+        password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
+    }
 }
 
 tasks {
     compileJava {
+        options.encoding = "UTF-8"
         options.release.set(prop("compatibleJdkVersion").toInt())
     }
 
@@ -73,4 +89,8 @@ tasks {
     publishPlugin {
         token.set(System.getenv("intellijPublishToken"))
     }
+}
+
+tasks.withType<org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask>().configureEach {
+    systemProperty("idea.diagnostic.opentelemetry.file", "false")
 }

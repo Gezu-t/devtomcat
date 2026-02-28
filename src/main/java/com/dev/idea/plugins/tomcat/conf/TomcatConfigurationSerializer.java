@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
@@ -57,6 +58,13 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_UPDATE_ACTION_OLD = "updateAction";
     private static final String ATTR_SHOW_DIALOG_OLD = "showDialog";
 
+    private static final String TAG_RUNNER_SETTINGS = "RunnerSettings";
+    private static final String ATTR_RUNNER_ID = "RunnerId";
+    private static final String ATTR_USE_DEFAULT_STARTUP = "useDefaultStartup";
+    private static final String ATTR_STARTUP_SCRIPT = "startupScript";
+    private static final String ATTR_USE_DEFAULT_SHUTDOWN = "useDefaultShutdown";
+    private static final String ATTR_SHUTDOWN_SCRIPT = "shutdownScript";
+
     private static final String ATTR_ACTIVATE_TOOL_WINDOW = "activateToolWindow";
     private static final String ATTR_FOCUS_TOOL_WINDOW = "focusToolWindow";
     private static final String ATTR_JRE_SELECTION = "jreSelection";
@@ -105,10 +113,17 @@ public class TomcatConfigurationSerializer {
             element.setAttribute(ATTR_CONTEXT_PATH, StringUtil.notNullize(data.getContextPath()));
             element.setAttribute(ATTR_SERVER_MODE, StringUtil.notNullize(data.getServerMode()));
             element.setAttribute(ATTR_CATALINA_BASE, StringUtil.notNullize(data.getCatalinaBase()));
+            
+            // Legacy VmConfig backward compatibility block
             var vmConfig = data.getVmConfig();
             element.setAttribute(ATTR_VM_OPTIONS, StringUtil.notNullize(vmConfig.getVmOptions()));
-            element.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(vmConfig.isPassParentEnvs()));
-            writeEnvironmentVariables(element, vmConfig.getEnvironmentVariables());
+            element.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(data.getRunnerSettings("Run").isPassParentEnvs()));
+            writeEnvironmentVariables(element, data.getRunnerSettings("Run").getEnvironmentVariables());
+
+            // Write Map<String, RunnerSettings>
+            for (Map.Entry<String, RunnerSettings> entry : data.getRunnerSettingsMap().entrySet()) {
+                writeRunnerSettings(element, entry.getKey(), entry.getValue());
+            }
 
             var browserConfig = data.getBrowserConfig();
             element.setAttribute(ATTR_BROWSER_URL, StringUtil.notNullize(browserConfig.getBrowserUrl()));
@@ -170,6 +185,18 @@ public class TomcatConfigurationSerializer {
             }
         }
         element.addContent(envElem);
+    }
+
+    private static void writeRunnerSettings(@NotNull Element element, @NotNull String runnerId, @NotNull RunnerSettings rs) {
+        Element rsElem = new Element(TAG_RUNNER_SETTINGS);
+        rsElem.setAttribute(ATTR_RUNNER_ID, runnerId);
+        rsElem.setAttribute(ATTR_USE_DEFAULT_STARTUP, String.valueOf(rs.isUseDefaultStartup()));
+        rsElem.setAttribute(ATTR_STARTUP_SCRIPT, rs.getStartupScript());
+        rsElem.setAttribute(ATTR_USE_DEFAULT_SHUTDOWN, String.valueOf(rs.isUseDefaultShutdown()));
+        rsElem.setAttribute(ATTR_SHUTDOWN_SCRIPT, rs.getShutdownScript());
+        rsElem.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(rs.isPassParentEnvs()));
+        writeEnvironmentVariables(rsElem, rs.getEnvironmentVariables());
+        element.addContent(rsElem);
     }
 
     private static void writeLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {
@@ -243,10 +270,34 @@ public class TomcatConfigurationSerializer {
             data.setContextPath(element.getAttributeValue(ATTR_CONTEXT_PATH));
             data.setServerMode(element.getAttributeValue(ATTR_SERVER_MODE));
             data.setCatalinaBase(element.getAttributeValue(ATTR_CATALINA_BASE));
+            
             var vmConfig = data.getVmConfig();
             vmConfig.setVmOptions(element.getAttributeValue(ATTR_VM_OPTIONS));
-            readBool(element, ATTR_PASS_PARENT_ENVS, vmConfig::setPassParentEnvs);
-            readEnvironmentVariables(element, vmConfig::setEnvironmentVariables);
+            
+            // Backward compatibility fallbacks -> load to Run profile
+            RunnerSettings runProfile = new RunnerSettings();
+            readBool(element, ATTR_PASS_PARENT_ENVS, runProfile::setPassParentEnvs);
+            readEnvironmentVariables(element, runProfile::setEnvironmentVariables);
+
+            // Read the real RunnerSettings elements, overriding backwards compatibility logic if present
+            Map<String, RunnerSettings> map = new HashMap<>();
+            map.put("Run", runProfile); // default 
+            
+            for (Element rsElem : element.getChildren(TAG_RUNNER_SETTINGS)) {
+                String runnerId = rsElem.getAttributeValue(ATTR_RUNNER_ID);
+                if (StringUtil.isEmpty(runnerId)) continue;
+                
+                RunnerSettings rs = new RunnerSettings();
+                readBool(rsElem, ATTR_USE_DEFAULT_STARTUP, rs::setUseDefaultStartup);
+                rs.setStartupScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_STARTUP_SCRIPT)));
+                readBool(rsElem, ATTR_USE_DEFAULT_SHUTDOWN, rs::setUseDefaultShutdown);
+                rs.setShutdownScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT)));
+                readBool(rsElem, ATTR_PASS_PARENT_ENVS, rs::setPassParentEnvs);
+                readEnvironmentVariables(rsElem, rs::setEnvironmentVariables);
+                
+                map.put(runnerId, rs);
+            }
+            data.setRunnerSettingsMap(map);
 
             var browserConfig = data.getBrowserConfig();
             browserConfig.setBrowserUrl(StringUtil.notNullize(element.getAttributeValue(ATTR_BROWSER_URL)));

@@ -44,6 +44,18 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private JBList<String> modeList;
     private String selectedMode = RUN_MODE;
 
+    // We maintain a snapshot of settings per mode in UI
+    private final Map<String, UIState> modeStates = new HashMap<>();
+
+    private static class UIState {
+        boolean useDefaultStartup = true;
+        String startupScript = "";
+        boolean useDefaultShutdown = true;
+        String shutdownScript = "";
+        boolean passParentEnvs = true;
+        Map<String, String> envVars = new LinkedHashMap<>();
+    }
+
     private TextFieldWithBrowseButton startupScriptField;
     private TextFieldWithBrowseButton shutdownScriptField;
     private JCheckBox useDefaultStartupCB;
@@ -125,10 +137,12 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
         modeList.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
-                String mode = modeList.getSelectedValue();
-                if (mode != null) {
-                    selectedMode = mode;
-                    LOG.debug("Mode switched to: " + mode);
+                String newMode = modeList.getSelectedValue();
+                if (newMode != null && !newMode.equals(selectedMode)) {
+                    saveCurrentState(); // Save current UI fields to state
+                    selectedMode = newMode;
+                    restoreCurrentState(); // Restore state to UI fields
+                    LOG.debug("Mode switched to: " + newMode);
                 }
             }
         });
@@ -364,63 +378,111 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     }
 
     public void resetFrom(@NotNull TomcatRunConfiguration cfg) {
-        useDefaultStartupCB.setSelected(true);
-        useDefaultShutdownCB.setSelected(true);
-        updateStartupState();
-        updateShutdownState();
+        modeStates.clear();
+        String[] allModes = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE};
+        
+        for (String mode : allModes) {
+            UIState state = new UIState();
+            var runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
+            
+            String startup = runnerSettings.getStartupScript();
+            state.useDefaultStartup = StringUtil.isEmpty(startup);
+            state.startupScript = state.useDefaultStartup ? defaultStartupScript() : startup;
 
-        envModel.setRowCount(0);
-        Map<String, String> env = cfg.getEnvironmentVariables();
-        if (env != null) {
-            env.forEach((k, v) -> envModel.addRow(new Object[]{k, v}));
+            String shutdown = runnerSettings.getShutdownScript();
+            state.useDefaultShutdown = StringUtil.isEmpty(shutdown);
+            state.shutdownScript = state.useDefaultShutdown ? defaultShutdownScript() : shutdown;
+            
+            state.passParentEnvs = runnerSettings.isPassParentEnvs();
+            
+            Map<String, String> envs = runnerSettings.getEnvironmentVariables();
+            if (envs != null) {
+                state.envVars.putAll(envs);
+            }
+            
+            modeStates.put(mode, state);
         }
-        passParentEnvsCB.setSelected(cfg.isPassParentEnvs());
 
+        selectedMode = RUN_MODE;
         modeList.setSelectedIndex(0);
+        restoreCurrentState();
 
-        LOG.debug("StartupConnectionTab reset – env size: " + (env == null ? 0 : env.size()));
+        LOG.debug("StartupConnectionTab reset completed");
     }
 
-    public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
-        if (!useDefaultStartupCB.isSelected()) {
-            String path = startupScriptField.getText().trim();
-            if (StringUtil.isEmpty(path)) throw new ConfigurationException("Startup script path is required");
-            File f = new File(path);
-            if (!f.exists()) throw new ConfigurationException("Startup script does not exist: " + path);
-            if (!f.canExecute()) LOG.warn("Startup script may not be executable: " + path);
-            cfg.setStartupScript(path);
-        } else {
-            cfg.setStartupScript(null);
-        }
+    private void saveCurrentState() {
+        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
+        state.useDefaultStartup = useDefaultStartupCB.isSelected();
+        state.startupScript = startupScriptField.getText();
+        state.useDefaultShutdown = useDefaultShutdownCB.isSelected();
+        state.shutdownScript = shutdownScriptField.getText();
+        state.passParentEnvs = passParentEnvsCB.isSelected();
 
-        if (!useDefaultShutdownCB.isSelected()) {
-            String path = shutdownScriptField.getText().trim();
-            if (StringUtil.isEmpty(path)) throw new ConfigurationException("Shutdown script path is required");
-            File f = new File(path);
-            if (!f.exists()) throw new ConfigurationException("Shutdown script does not exist: " + path);
-            cfg.setShutdownScript(path);
-        } else {
-            cfg.setShutdownScript(null);
-        }
-
-        Map<String, String> env = new LinkedHashMap<>();
-        Set<String> seen = new HashSet<>();
+        state.envVars.clear();
         for (int i = 0; i < envModel.getRowCount(); i++) {
             String name = ((String) envModel.getValueAt(i, 0)).trim();
             String value = ((String) envModel.getValueAt(i, 1)).trim();
-            if (StringUtil.isEmpty(name)) continue;
-            if (seen.contains(name)) throw new ConfigurationException("Duplicate env var: " + name);
-            seen.add(name);
-            env.put(name, value);
+            if (!StringUtil.isEmpty(name)) {
+                state.envVars.put(name, value);
+            }
         }
-        cfg.setEnvironmentVariables(env);
-        cfg.setPassParentEnvs(passParentEnvsCB.isSelected());
+    }
+
+    private void restoreCurrentState() {
+        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
+
+        useDefaultStartupCB.setSelected(state.useDefaultStartup);
+        startupScriptField.setText(state.startupScript);
+        updateStartupState();
+
+        useDefaultShutdownCB.setSelected(state.useDefaultShutdown);
+        shutdownScriptField.setText(state.shutdownScript);
+        updateShutdownState();
+
+        passParentEnvsCB.setSelected(state.passParentEnvs);
+
+        envModel.setRowCount(0);
+        state.envVars.forEach((k, v) -> envModel.addRow(new Object[]{k, v}));
+    }
+
+    public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
+        // Ensure current active UI fields are pushed to state before applying
+        saveCurrentState();
+
+        for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
+            String mode = entry.getKey();
+            UIState state = entry.getValue();
+            var runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
+
+            if (!state.useDefaultStartup) {
+                String path = state.startupScript.trim();
+                if (StringUtil.isEmpty(path)) throw new ConfigurationException("Startup script path is required for mode " + mode);
+                File f = new File(path);
+                if (!f.exists()) throw new ConfigurationException("Startup script does not exist for mode " + mode + ": " + path);
+                runnerSettings.setStartupScript(path);
+            } else {
+                runnerSettings.setStartupScript(null);
+            }
+
+            if (!state.useDefaultShutdown) {
+                String path = state.shutdownScript.trim();
+                if (StringUtil.isEmpty(path)) throw new ConfigurationException("Shutdown script path is required for mode " + mode);
+                File f = new File(path);
+                if (!f.exists()) throw new ConfigurationException("Shutdown script does not exist for mode " + mode + ": " + path);
+                runnerSettings.setShutdownScript(path);
+            } else {
+                runnerSettings.setShutdownScript(null);
+            }
+
+            runnerSettings.setEnvironmentVariables(new LinkedHashMap<>(state.envVars));
+            runnerSettings.setPassParentEnvs(state.passParentEnvs);
+        }
 
         cfg.setDebugPort(cfg.getDebugPort());
         cfg.setDebugTransport(cfg.getDebugTransport());
         cfg.setUseModuleClasspath(cfg.isUseModuleClasspath());
 
-        LOG.info("StartupConnectionTab applied – env: " + env.size());
+        LOG.info("StartupConnectionTab applied for all modes");
     }
 
     private static class EnvVarDialog extends DialogWrapper {

@@ -19,6 +19,13 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.execution.BeforeRunTask;
+import com.intellij.execution.RunManagerEx;
+import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.packaging.artifacts.ArtifactManager;
+import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
+import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTaskProvider;
+
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +48,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         super(project, factory, name);
         try {
             TomcatConfigurationInitializer.initialize(this);
+            syncTomcatLogFiles();
         } catch (Exception e) {
             LOG.error("Failed to initialize configuration: " + name, e);
         }
@@ -96,6 +104,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             super.writeExternal(element);
             if (!isUpdating.getAndSet(true)) {
                 try {
+                    // Ensure the Before Launch tasks list contains the deployed artifacts right before saving
+                    syncBeforeLaunchWithDeployments();
                     TomcatConfigurationSerializer.write(this, element);
                     LOG.debug("Wrote configuration: " + getName());
                 } finally {
@@ -118,6 +128,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             super.readExternal(element);
             TomcatConfigurationSerializer.read(this, element);
             TomcatConfigurationInitializer.refresh(this);
+            syncTomcatLogFiles();
             LOG.debug("Read configuration: " + getName());
         } catch (InvalidDataException e) {
             LOG.error("Failed to read configuration: " + getName(), e);
@@ -324,7 +335,9 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     @NotNull
     public java.util.Map<String, String> getEnvironmentVariables() {
         try {
-            java.util.Map<String, String> env = configData.getVmConfig().getEnvironmentVariables();
+            // Deprecated global fetch: default to the 'Run' profile for backwards compatibility
+            // if we are simply reading the configuration globally
+            java.util.Map<String, String> env = configData.getRunnerSettings("Run").getEnvironmentVariables();
             return env != null ? env : new java.util.HashMap<>();
         } catch (Exception e) {
             LOG.warn("Error getting environment variables", e);
@@ -334,7 +347,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     public void setEnvironmentVariables(@NotNull java.util.Map<String, String> envVars) {
         try {
-            configData.getVmConfig().setEnvironmentVariables(envVars);
+            configData.getRunnerSettings("Run").setEnvironmentVariables(envVars);
         } catch (Exception e) {
             LOG.warn("Error setting environment variables", e);
         }
@@ -342,7 +355,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     public boolean isPassParentEnvs() {
         try {
-            return configData.getVmConfig().isPassParentEnvs();
+            return configData.getRunnerSettings("Run").isPassParentEnvs();
         } catch (Exception e) {
             LOG.warn("Error checking pass parent envs", e);
             return true;
@@ -351,7 +364,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     public void setPassParentEnvs(boolean passParentEnvs) {
         try {
-            configData.getVmConfig().setPassParentEnvs(passParentEnvs);
+            configData.getRunnerSettings("Run").setPassParentEnvs(passParentEnvs);
         } catch (Exception e) {
             LOG.warn("Error setting pass parent envs", e);
         }
@@ -394,6 +407,77 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             LOG.warn("Error setting preserve sessions", e);
         }
     }
+
+    /**
+     * Synchronizes "Build Artifact" Before Launch tasks with the current deployment artifacts.
+     * When an IntelliJ artifact is added to the Deployment tab, this ensures a corresponding
+     * "Build Artifact" task appears in Before Launch. When removed, the task is cleaned up.
+     */
+    @SuppressWarnings("unchecked")
+    public void syncBeforeLaunchWithDeployments() {
+        try {
+            Project project = getProject();
+            RunManagerEx runManager = RunManagerEx.getInstanceEx(project);
+
+            ArtifactManager artifactManager;
+            try {
+                artifactManager = ArtifactManager.getInstance(project);
+            } catch (Exception e) {
+                LOG.debug("ArtifactManager not available, skipping Before Launch sync");
+                return;
+            }
+
+            // Get the current Before Launch tasks (raw type from IntelliJ API)
+            @SuppressWarnings("rawtypes")
+            List<BeforeRunTask> currentTasks = new ArrayList<>(runManager.getBeforeRunTasks(this));
+
+            // Remove all existing BuildArtifactsBeforeRunTask entries (we'll re-add the needed ones)
+            currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
+
+            // For each deployment artifact, find the matching IntelliJ artifact and add a Build task
+            List<DeploymentArtifact> deploymentArtifacts = configData.getDeploymentConfig().getArtifacts();
+            if (deploymentArtifacts != null) {
+                for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
+                    Artifact matchedArtifact = findMatchingArtifact(artifactManager, deploymentArtifact);
+                    if (matchedArtifact != null) {
+                        BuildArtifactsBeforeRunTaskProvider provider =
+                                new BuildArtifactsBeforeRunTaskProvider(project);
+                        BuildArtifactsBeforeRunTask buildTask = provider.createTask(this);
+                        if (buildTask != null) {
+                            buildTask.addArtifact(matchedArtifact);
+                            buildTask.setEnabled(true);
+                            currentTasks.add(buildTask);
+                            LOG.debug("Added Build Artifact task for: " + matchedArtifact.getName());
+                        }
+                    }
+                }
+            }
+
+            runManager.setBeforeRunTasks(this, currentTasks);
+            LOG.info("Synced Before Launch tasks: " + currentTasks.size() + " total");
+
+        } catch (Exception e) {
+            LOG.warn("Error syncing Before Launch tasks: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Finds an IntelliJ Artifact that matches the given DeploymentArtifact by name.
+     */
+    @Nullable
+    private Artifact findMatchingArtifact(@NotNull ArtifactManager artifactManager,
+                                          @NotNull DeploymentArtifact deploymentArtifact) {
+        String name = deploymentArtifact.getName();
+        if (name.isEmpty()) return null;
+
+        for (Artifact artifact : artifactManager.getArtifacts()) {
+            if (name.equals(artifact.getName())) {
+                return artifact;
+            }
+        }
+        return null;
+    }
+
 
     // =====================================================================
     // Debug accessors
@@ -568,22 +652,61 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // Log file tabs for Run tool window
     // =====================================================================
 
+    /**
+     * Syncs Tomcat log file entries into the parent's internal log file list.
+     * Called after readExternal() and during initialization so that IntelliJ's
+     * framework finds them in myLogFiles and creates the Run tool window tabs.
+     *
+     * Only adds entries that don't already exist (by name) to prevent duplicate
+     * accumulation across repeated calls. The {@link #getAllLogFiles()} override
+     * ensures correct path/enabled state regardless of what's in myLogFiles.
+     */
+    void syncTomcatLogFiles() {
+        Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
+        if (logsDir == null) return;
+
+        // Check which log names are already registered in the internal list
+        java.util.Set<String> alreadyRegistered = new java.util.HashSet<>();
+        for (LogFileOptions opt : super.getAllLogFiles()) {
+            alreadyRegistered.add(opt.getName());
+        }
+
+        // Only add entries that are missing — avoids duplicate accumulation
+        List<String> enabledLogs = getLogFileConfigurations();
+        for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
+            if (alreadyRegistered.contains(logFile.getId())) continue;
+            boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
+            String pathPattern = logsDir.resolve(logFile.getFilenamePattern()).toString();
+            addLogFile(pathPattern, logFile.getId(), enabled);
+        }
+    }
+
     @NotNull
     @Override
     public ArrayList<LogFileOptions> getAllLogFiles() {
-        ArrayList<LogFileOptions> result = new ArrayList<>(super.getAllLogFiles());
-
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
-        if (logsDir == null) return result;
+        if (logsDir == null) {
+            return super.getAllLogFiles();
+        }
+
+        java.util.Set<String> tomcatLogIds = new java.util.HashSet<>();
+        for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
+            tomcatLogIds.add(logFile.getId());
+        }
+
+        ArrayList<LogFileOptions> result = new ArrayList<>();
+        for (LogFileOptions opt : super.getAllLogFiles()) {
+            if (!tomcatLogIds.contains(opt.getName())) {
+                result.add(opt);
+            }
+        }
 
         List<String> enabledLogs = getLogFileConfigurations();
-
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
-            boolean enabled = enabledLogs.contains(logFile.getId());
+            boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
             String pathPattern = logsDir.resolve(logFile.getFilenamePattern()).toString();
             result.add(new LogFileOptions(logFile.getId(), pathPattern, enabled));
         }
-
         return result;
     }
 
@@ -603,10 +726,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     public void setStartupScript(String startupScript) {
-        LOG.debug("Startup script set to: " + startupScript);
+        configData.getRunnerSettings("Run").setStartupScript(startupScript);
     }
 
     public void setShutdownScript(String shutdownScript) {
-        LOG.debug("Shutdown script set to: " + shutdownScript);
+        configData.getRunnerSettings("Run").setShutdownScript(shutdownScript);
     }
 }
