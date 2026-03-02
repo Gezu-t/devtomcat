@@ -3,37 +3,30 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.icons.AllIcons;
-import com.intellij.ui.table.JBTable;
+import com.intellij.ui.CollectionListModel;
+import com.intellij.ui.ColoredListCellRenderer;
+import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.components.JBList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableColumn;
-import java.awt.*;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import com.intellij.openapi.diagnostic.Logger;
 
 /**
- * Handles table operations for deployment artifacts.
+ * Handles list operations for deployment artifacts.
  */
 public class DeploymentTableManager {
 
     private static final Logger LOG = Logger.getInstance(DeploymentTableManager.class);
 
-    private JBTable deploymentTable;
-    private DefaultTableModel tableModel;
+    private final CollectionListModel<DeploymentArtifact> listModel;
+    private final JBList<DeploymentArtifact> deploymentList;
     private final List<DeploymentArtifact> deployments = new ArrayList<>();
-
-    private static final String[] COLUMN_NAMES = {"", "Artifact", "Type", "Application Context"};
-
-    private static final int COL_DEPLOY = 0;
-    private static final int COL_ARTIFACT = 1;
-    private static final int COL_TYPE = 2;
-    private static final int COL_CONTEXT = 3;
 
     private static final int ROW_HEIGHT = 26;
 
@@ -41,8 +34,25 @@ public class DeploymentTableManager {
     private Runnable artifactListChangeListener;
 
     public DeploymentTableManager() {
-        initializeTable();
-        LOG.debug("DeploymentTableManager initialized with 4 columns");
+        listModel = new CollectionListModel<>();
+        deploymentList = new JBList<>(listModel);
+        deploymentList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        deploymentList.setFixedCellHeight(ROW_HEIGHT);
+        deploymentList.getEmptyText().setText("No artifacts configured for deployment");
+        deploymentList.setCellRenderer(new ColoredListCellRenderer<>() {
+            @Override
+            protected void customizeCellRenderer(@NotNull JList<? extends DeploymentArtifact> list,
+                                                 DeploymentArtifact value,
+                                                 int index,
+                                                 boolean selected,
+                                                 boolean hasFocus) {
+                if (value != null) {
+                    setIcon(AllIcons.Nodes.Artifact);
+                    append(value.getDisplayName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                }
+            }
+        });
+        LOG.debug("DeploymentTableManager initialized with JBList");
     }
 
     public void setDeploymentChangeListener(Consumer<String> listener) {
@@ -68,82 +78,9 @@ public class DeploymentTableManager {
         }
     }
 
-    private void initializeTable() {
-        tableModel = new DefaultTableModel(COLUMN_NAMES, 0) {
-            @Override
-            public Class<?> getColumnClass(int columnIndex) {
-                if (columnIndex == COL_DEPLOY) {
-                    return Boolean.class;
-                }
-                return String.class;
-            }
-
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return column == COL_DEPLOY;
-            }
-
-            @Override
-            public void setValueAt(Object value, int row, int column) {
-                if (column == COL_DEPLOY && value instanceof Boolean) {
-                    deployments.get(row).setDeployed((Boolean) value);
-                    super.setValueAt(value, row, column);
-                } else {
-                    super.setValueAt(value, row, column);
-                }
-            }
-        };
-
-        deploymentTable = new JBTable(tableModel);
-        deploymentTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        deploymentTable.setRowHeight(ROW_HEIGHT);
-        deploymentTable.setShowGrid(false);
-        deploymentTable.setIntercellSpacing(new Dimension(0, 0));
-        deploymentTable.getEmptyText().setText("No artifacts configured for deployment");
-        deploymentTable.setTableHeader(null);
-
-        configureColumns();
-    }
-
-    private void configureColumns() {
-        TableColumn deployCol = deploymentTable.getColumnModel().getColumn(COL_DEPLOY);
-        deployCol.setPreferredWidth(0);
-        deployCol.setMaxWidth(0);
-        deployCol.setMinWidth(0);
-        deployCol.setResizable(false);
-
-        TableColumn artifactCol = deploymentTable.getColumnModel().getColumn(COL_ARTIFACT);
-        artifactCol.setPreferredWidth(600);
-        artifactCol.setMinWidth(200);
-
-        TableColumn typeCol = deploymentTable.getColumnModel().getColumn(COL_TYPE);
-        typeCol.setPreferredWidth(0);
-        typeCol.setMaxWidth(0);
-        typeCol.setMinWidth(0);
-        typeCol.setResizable(false);
-
-        TableColumn contextCol = deploymentTable.getColumnModel().getColumn(COL_CONTEXT);
-        contextCol.setPreferredWidth(0);
-        contextCol.setMaxWidth(0);
-        contextCol.setMinWidth(0);
-        contextCol.setResizable(false);
-
-        artifactCol.setCellRenderer(new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(JTable table, Object value,
-                                                           boolean isSelected, boolean hasFocus, int row, int column) {
-                JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
-                label.setIcon(AllIcons.Nodes.Artifact);
-                label.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
-                return label;
-            }
-        });
-    }
-
     public boolean updateSelectedContext(String newContext) {
-        int row = deploymentTable.getSelectedRow();
-        if (!isValidRow(row)) return false;
+        int index = deploymentList.getSelectedIndex();
+        if (!isValidIndex(index)) return false;
 
         newContext = ContextPathUtils.normalizeContextPath(newContext);
 
@@ -152,14 +89,13 @@ public class DeploymentTableManager {
         }
 
         for (int i = 0; i < deployments.size(); i++) {
-            if (i != row && deployments.get(i).getApplicationContext().equals(newContext)) {
+            if (i != index && deployments.get(i).getApplicationContext().equals(newContext)) {
                 return false;
             }
         }
 
-        DeploymentArtifact deployment = deployments.get(row);
+        DeploymentArtifact deployment = deployments.get(index);
         deployment.setApplicationContext(newContext);
-        tableModel.setValueAt(newContext, row, COL_CONTEXT);
 
         if (deployment.isUsingDefaultContext()) {
             deployment.setServerPath(newContext);
@@ -169,7 +105,6 @@ public class DeploymentTableManager {
         return true;
     }
 
-
     public void addDeployment(@NotNull DeploymentArtifact deployment) {
         try {
             if (deployment.getApplicationContext() == null ||
@@ -178,21 +113,12 @@ public class DeploymentTableManager {
             }
 
             deployments.add(deployment);
+            listModel.add(deployment);
 
-            Object[] rowData = {
-                    deployment.isDeployed(),
-                    deployment.getDisplayName(),
-                    deployment.getType(),
-                    deployment.getApplicationContext()
-            };
-            tableModel.addRow(rowData);
-
-            int newRow = tableModel.getRowCount() - 1;
-            if (newRow >= 0) {
-                deploymentTable.setRowSelectionInterval(newRow, newRow);
-                deploymentTable.scrollRectToVisible(
-                        deploymentTable.getCellRect(newRow, 0, true)
-                );
+            int lastIndex = listModel.getSize() - 1;
+            if (lastIndex >= 0) {
+                deploymentList.setSelectedIndex(lastIndex);
+                deploymentList.ensureIndexIsVisible(lastIndex);
             }
 
             LOG.debug("Added deployment: " + deployment.getDisplayName() +
@@ -205,15 +131,14 @@ public class DeploymentTableManager {
         }
     }
 
-
     public void removeSelectedDeployment() {
-        int selectedRow = deploymentTable.getSelectedRow();
-        if (isValidRow(selectedRow)) {
-            DeploymentArtifact deployment = deployments.get(selectedRow);
-            deployments.remove(selectedRow);
-            tableModel.removeRow(selectedRow);
+        int selectedIndex = deploymentList.getSelectedIndex();
+        if (isValidIndex(selectedIndex)) {
+            DeploymentArtifact deployment = deployments.get(selectedIndex);
+            deployments.remove(selectedIndex);
+            listModel.remove(selectedIndex);
 
-            updateSelectionAfterRemoval(selectedRow);
+            updateSelectionAfterRemoval(selectedIndex);
 
             LOG.debug("Removed deployment: " + deployment.getDisplayName());
             fireDeploymentChanged();
@@ -222,79 +147,55 @@ public class DeploymentTableManager {
     }
 
     public void moveSelectedUp() {
-        int selectedRow = deploymentTable.getSelectedRow();
-        if (selectedRow > 0 && isValidRow(selectedRow)) {
-            DeploymentArtifact temp = deployments.get(selectedRow - 1);
-            deployments.set(selectedRow - 1, deployments.get(selectedRow));
-            deployments.set(selectedRow, temp);
+        int selectedIndex = deploymentList.getSelectedIndex();
+        if (selectedIndex > 0 && isValidIndex(selectedIndex)) {
+            Collections.swap(deployments, selectedIndex, selectedIndex - 1);
+            listModel.setElementAt(deployments.get(selectedIndex - 1), selectedIndex - 1);
+            listModel.setElementAt(deployments.get(selectedIndex), selectedIndex);
 
-            swapTableRows(selectedRow, selectedRow - 1);
-
-            deploymentTable.setRowSelectionInterval(selectedRow - 1, selectedRow - 1);
+            deploymentList.setSelectedIndex(selectedIndex - 1);
             fireDeploymentChanged();
         }
     }
 
     public void moveSelectedDown() {
-        int selectedRow = deploymentTable.getSelectedRow();
-        if (selectedRow >= 0 && selectedRow < deployments.size() - 1) {
-            DeploymentArtifact temp = deployments.get(selectedRow + 1);
-            deployments.set(selectedRow + 1, deployments.get(selectedRow));
-            deployments.set(selectedRow, temp);
+        int selectedIndex = deploymentList.getSelectedIndex();
+        if (selectedIndex >= 0 && selectedIndex < deployments.size() - 1) {
+            Collections.swap(deployments, selectedIndex, selectedIndex + 1);
+            listModel.setElementAt(deployments.get(selectedIndex), selectedIndex);
+            listModel.setElementAt(deployments.get(selectedIndex + 1), selectedIndex + 1);
 
-            swapTableRows(selectedRow, selectedRow + 1);
-
-            deploymentTable.setRowSelectionInterval(selectedRow + 1, selectedRow + 1);
+            deploymentList.setSelectedIndex(selectedIndex + 1);
             fireDeploymentChanged();
-        }
-    }
-
-    private void swapTableRows(int row1, int row2) {
-        for (int col = 0; col < tableModel.getColumnCount(); col++) {
-            Object temp = tableModel.getValueAt(row1, col);
-            tableModel.setValueAt(tableModel.getValueAt(row2, col), row1, col);
-            tableModel.setValueAt(temp, row2, col);
         }
     }
 
     @Nullable
     public DeploymentArtifact getSelectedDeployment() {
-        int selectedRow = deploymentTable.getSelectedRow();
-        if (isValidRow(selectedRow)) {
-            return deployments.get(selectedRow);
-        }
-        return null;
+        return deploymentList.getSelectedValue();
     }
 
     public void updateSelectedDeployment(@NotNull DeploymentArtifact deployment) {
-        int selectedRow = deploymentTable.getSelectedRow();
-        if (isValidRow(selectedRow)) {
-            deployments.set(selectedRow, deployment);
-            tableModel.setValueAt(deployment.isDeployed(), selectedRow, COL_DEPLOY);
-            tableModel.setValueAt(deployment.getDisplayName(), selectedRow, COL_ARTIFACT);
-            tableModel.setValueAt(deployment.getType(), selectedRow, COL_TYPE);
-            tableModel.setValueAt(deployment.getApplicationContext(), selectedRow, COL_CONTEXT);
-
+        int selectedIndex = deploymentList.getSelectedIndex();
+        if (isValidIndex(selectedIndex)) {
+            deployments.set(selectedIndex, deployment);
+            listModel.setElementAt(deployment, selectedIndex);
             LOG.debug("Updated deployment: " + deployment.getDisplayName());
         }
     }
 
     public void clearAll() {
         deployments.clear();
-        tableModel.setRowCount(0);
+        listModel.removeAll();
         LOG.debug("Cleared all deployments");
         fireArtifactListChanged();
     }
 
-    public JBTable getTable() {
-        return deploymentTable;
+    public JComponent getComponent() {
+        return deploymentList;
     }
 
     public List<DeploymentArtifact> getDeployments() {
-        if (deploymentTable.isEditing()) {
-            deploymentTable.getCellEditor().stopCellEditing();
-        }
-
         List<DeploymentArtifact> result = new ArrayList<>();
         for (DeploymentArtifact deployment : deployments) {
             result.add(deployment.clone());
@@ -311,51 +212,49 @@ public class DeploymentTableManager {
                 .anyMatch(d -> d.getName().equals(artifactName));
     }
 
-    private boolean isValidRow(int row) {
-        return row >= 0 && row < deployments.size() && row < tableModel.getRowCount();
+    private boolean isValidIndex(int index) {
+        return index >= 0 && index < deployments.size();
     }
 
-    private void updateSelectionAfterRemoval(int removedRow) {
+    private void updateSelectionAfterRemoval(int removedIndex) {
         if (!deployments.isEmpty()) {
-            int newSelection = Math.min(removedRow, deployments.size() - 1);
-            if (newSelection >= 0 && newSelection < tableModel.getRowCount()) {
-                deploymentTable.setRowSelectionInterval(newSelection, newSelection);
+            int newSelection = Math.min(removedIndex, deployments.size() - 1);
+            if (newSelection >= 0) {
+                deploymentList.setSelectedIndex(newSelection);
             }
         }
     }
 
-    public void refreshTable() {
+    public void refreshList() {
         if (SwingUtilities.isEventDispatchThread()) {
-            doRefreshTable();
+            doRefreshList();
         } else {
-            SwingUtilities.invokeLater(this::doRefreshTable);
+            SwingUtilities.invokeLater(this::doRefreshList);
         }
     }
 
-    private void doRefreshTable() {
-        int selectedRow = deploymentTable.getSelectedRow();
-        tableModel.fireTableDataChanged();
-        deploymentTable.revalidate();
-        deploymentTable.repaint();
-        if (selectedRow >= 0 && selectedRow < tableModel.getRowCount()) {
-            deploymentTable.setRowSelectionInterval(selectedRow, selectedRow);
+    private void doRefreshList() {
+        int selectedIndex = deploymentList.getSelectedIndex();
+        deploymentList.revalidate();
+        deploymentList.repaint();
+        if (selectedIndex >= 0 && selectedIndex < listModel.getSize()) {
+            deploymentList.setSelectedIndex(selectedIndex);
         }
     }
 
     public int getSelectedRow() {
-        return deploymentTable.getSelectedRow();
+        return deploymentList.getSelectedIndex();
     }
 
     public boolean hasSelection() {
-        return deploymentTable.getSelectedRow() >= 0;
+        return deploymentList.getSelectedIndex() >= 0;
     }
 
     public void addAndSelectDeployment(DeploymentArtifact deployment) {
         addDeployment(deployment);
-        int lastRowIndex = tableModel.getRowCount() - 1;
-        if (lastRowIndex >= 0) {
-            deploymentTable.setRowSelectionInterval(lastRowIndex, lastRowIndex);
+        int lastIndex = listModel.getSize() - 1;
+        if (lastIndex >= 0) {
+            deploymentList.setSelectedIndex(lastIndex);
         }
     }
-
 }

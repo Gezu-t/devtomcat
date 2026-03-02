@@ -8,12 +8,13 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
-import com.intellij.openapi.ui.ComboBox;
 import com.intellij.ui.AnActionButton;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBPanel;
+import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -34,7 +35,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     private final DeploymentTableManager tableManager;
     private final ArtifactSelectionHandler selectionHandler;
 
-    private ComboBox<String> applicationContextCombo;
+    private JBTextField contextTextField;
     private boolean isUpdatingContextField = false;
 
     public DeploymentConfigurationPanel(@NotNull Project project,
@@ -51,12 +52,10 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     }
 
     private void initializeComponents() {
-        applicationContextCombo = new ComboBox<>(new String[]{"/"});
-        applicationContextCombo.setEditable(true);
-        applicationContextCombo.setEnabled(false);
+        contextTextField = new JBTextField();
+        contextTextField.setEnabled(false);
 
-        JTextField editorField = (JTextField) applicationContextCombo.getEditor().getEditorComponent();
-        editorField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+        contextTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             @Override
             public void insertUpdate(javax.swing.event.DocumentEvent e) { updateContext(); }
             @Override
@@ -66,24 +65,26 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
 
             private void updateContext() {
                 if (isUpdatingContextField) return;
-                String text = editorField.getText();
+                String text = contextTextField.getText();
                 boolean valid = tableManager.updateSelectedContext(text);
-                editorField.setForeground(valid ? JBColor.foreground() : JBColor.RED);
+                contextTextField.setForeground(valid ? JBColor.foreground() : JBColor.RED);
             }
         });
 
-        tableManager.getTable().getSelectionModel().addListSelectionListener(e -> {
+        @SuppressWarnings("unchecked")
+        JList<DeploymentArtifact> list = (JList<DeploymentArtifact>) tableManager.getComponent();
+        list.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 DeploymentArtifact selected = tableManager.getSelectedDeployment();
                 isUpdatingContextField = true;
                 if (selected != null) {
-                    applicationContextCombo.getEditor().setItem(selected.getApplicationContext());
-                    applicationContextCombo.setEnabled(true);
+                    contextTextField.setText(selected.getApplicationContext());
+                    contextTextField.setEnabled(true);
                 } else {
-                    applicationContextCombo.getEditor().setItem("");
-                    applicationContextCombo.setEnabled(false);
+                    contextTextField.setText("");
+                    contextTextField.setEnabled(false);
                 }
-                editorField.setForeground(JBColor.foreground());
+                contextTextField.setForeground(JBColor.foreground());
                 isUpdatingContextField = false;
             }
         });
@@ -96,23 +97,24 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         TitledSeparator title = new TitledSeparator("Deploy at the server startup");
         add(title, BorderLayout.NORTH);
 
-        // Table with toolbar in center
-        JPanel tablePanel = createTableWithToolbar();
-        add(tablePanel, BorderLayout.CENTER);
+        // List with toolbar in center
+        JPanel listPanel = createListWithToolbar();
+        add(listPanel, BorderLayout.CENTER);
 
         // Context path editor at bottom
         JPanel contextPanel = new JPanel(new BorderLayout(8, 0));
         contextPanel.setBorder(JBUI.Borders.emptyTop(6));
         contextPanel.add(new JLabel("Application context:"), BorderLayout.WEST);
-        contextPanel.add(applicationContextCombo, BorderLayout.CENTER);
+        contextPanel.add(contextTextField, BorderLayout.CENTER);
         add(contextPanel, BorderLayout.SOUTH);
 
         LOG.info("DeploymentConfigurationPanel layout setup complete");
     }
 
-    private JPanel createTableWithToolbar() {
+    @SuppressWarnings("unchecked")
+    private JPanel createListWithToolbar() {
         try {
-            ToolbarDecorator decorator = ToolbarDecorator.createDecorator(tableManager.getTable());
+            ToolbarDecorator decorator = ToolbarDecorator.createDecorator((JBList) tableManager.getComponent());
             decorator.setAddAction(button -> showAddArtifactPopup(button));
             decorator.setRemoveAction(button -> tableManager.removeSelectedDeployment());
             decorator.setEditAction(button -> editSelectedArtifact());
@@ -120,17 +122,16 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             decorator.setMoveDownAction(button -> tableManager.moveSelectedDown());
 
             JPanel decoratedPanel = decorator.createPanel();
-            // Keep the table area visible even when it has 0 rows (otherwise only the toolbar can show).
             decoratedPanel.setMinimumSize(new Dimension(320, 180));
             decoratedPanel.setPreferredSize(new Dimension(600, 220));
-            LOG.info("Toolbar created successfully with table");
+            LOG.info("Toolbar created successfully with list");
             return decoratedPanel;
 
         } catch (Throwable e) {
             LOG.error("Error creating toolbar, using fallback", e);
 
             JPanel fallbackPanel = new JPanel(new BorderLayout());
-            JScrollPane scrollPane = new JScrollPane(tableManager.getTable());
+            JScrollPane scrollPane = new JScrollPane(tableManager.getComponent());
             fallbackPanel.add(scrollPane, BorderLayout.CENTER);
             return fallbackPanel;
         }
@@ -171,7 +172,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     }
 
     private void updateEmptyState() {
-        tableManager.refreshTable();
+        tableManager.refreshList();
     }
 
     public void resetFrom(@NotNull TomcatRunConfiguration config) {
