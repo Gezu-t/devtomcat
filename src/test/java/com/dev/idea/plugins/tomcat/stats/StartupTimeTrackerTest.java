@@ -6,6 +6,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -267,6 +272,96 @@ class StartupTimeTrackerTest {
             StartupTimeTracker newTracker = new StartupTimeTracker();
             newTracker.loadState(saved);
             assertEquals(3000, newTracker.getLastStartupTime("MyApp"));
+        }
+    }
+
+    // =========================================================================
+    // Thread safety
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Thread safety")
+    class ThreadSafety {
+
+        @Test
+        @DisplayName("concurrent recordStartupTime does not lose data")
+        void concurrentRecording() throws InterruptedException {
+            int threadCount = 10;
+            int recordsPerThread = 100;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch startLatch = new CountDownLatch(1);
+            CountDownLatch doneLatch = new CountDownLatch(threadCount);
+            AtomicInteger errors = new AtomicInteger(0);
+
+            for (int t = 0; t < threadCount; t++) {
+                final String configName = "Config-" + t;
+                executor.submit(() -> {
+                    try {
+                        startLatch.await();
+                        for (int i = 0; i < recordsPerThread; i++) {
+                            tracker.recordStartupTime(configName, (i + 1) * 100L);
+                        }
+                    } catch (Exception e) {
+                        errors.incrementAndGet();
+                    } finally {
+                        doneLatch.countDown();
+                    }
+                });
+            }
+
+            startLatch.countDown(); // release all threads at once
+            assertTrue(doneLatch.await(10, TimeUnit.SECONDS), "Threads did not finish in time");
+            executor.shutdown();
+
+            assertEquals(0, errors.get(), "No exceptions should occur during concurrent recording");
+            for (int t = 0; t < threadCount; t++) {
+                int count = tracker.getRunCount("Config-" + t);
+                // History is capped at MAX_HISTORY_SIZE (20), so count should be min(records, 20)
+                assertTrue(count > 0 && count <= recordsPerThread,
+                        "Config-" + t + " should have records, got: " + count);
+            }
+        }
+
+        @Test
+        @DisplayName("loadState during concurrent reads does not throw")
+        void loadStateDuringReads() throws InterruptedException {
+            tracker.recordStartupTime("MyApp", 1000);
+            tracker.recordStartupTime("MyApp", 2000);
+
+            int threadCount = 8;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch startLatch = new CountDownLatch(1);
+            CountDownLatch doneLatch = new CountDownLatch(threadCount);
+            AtomicInteger errors = new AtomicInteger(0);
+
+            for (int t = 0; t < threadCount; t++) {
+                final boolean isWriter = (t == 0); // one writer, rest readers
+                executor.submit(() -> {
+                    try {
+                        startLatch.await();
+                        for (int i = 0; i < 200; i++) {
+                            if (isWriter) {
+                                StartupTimeTracker.State newState = new StartupTimeTracker.State();
+                                tracker.loadState(newState);
+                            } else {
+                                tracker.getLastStartupTime("MyApp");
+                                tracker.getAverageStartupTime("MyApp");
+                                tracker.formatComparison("MyApp", 1500);
+                            }
+                        }
+                    } catch (Exception e) {
+                        errors.incrementAndGet();
+                    } finally {
+                        doneLatch.countDown();
+                    }
+                });
+            }
+
+            startLatch.countDown();
+            assertTrue(doneLatch.await(10, TimeUnit.SECONDS), "Threads did not finish in time");
+            executor.shutdown();
+
+            assertEquals(0, errors.get(), "No exceptions during concurrent loadState + reads");
         }
     }
 }

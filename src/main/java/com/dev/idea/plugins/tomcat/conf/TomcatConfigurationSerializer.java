@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.CoverageConfig;
 import com.dev.idea.plugins.tomcat.model.LogFileConfig;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
@@ -9,6 +10,8 @@ import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.utils.RemoteCredentialStore;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jdom.Element;
@@ -100,72 +103,71 @@ public class TomcatConfigurationSerializer {
         Objects.requireNonNull(data, "Configuration data cannot be null");
         Objects.requireNonNull(element, "Element cannot be null");
 
-        try {
-            PortConfig pc = data.getPortConfig();
-            writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
-            writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
-            writeInt(element, ATTR_HTTPS_PORT, pc.getHttps());
-            element.setAttribute(ATTR_HTTPS_ENABLED, String.valueOf(pc.isHttpsEnabled()));
-            writeInt(element, ATTR_JMX_PORT, pc.getJmx());
-            element.setAttribute(ATTR_JMX_ENABLED, String.valueOf(pc.isJmxEnabled()));
-            writeInt(element, ATTR_AJP_PORT, pc.getAjp());
-            element.setAttribute(ATTR_AJP_ENABLED, String.valueOf(pc.isAjpEnabled()));
-            element.setAttribute(ATTR_CONTEXT_PATH, StringUtil.notNullize(data.getContextPath()));
-            element.setAttribute(ATTR_SERVER_MODE, StringUtil.notNullize(data.getServerMode()));
-            element.setAttribute(ATTR_CATALINA_BASE, StringUtil.notNullize(data.getCatalinaBase()));
-            
-            // Legacy VmConfig backward compatibility block
-            var vmConfig = data.getVmConfig();
-            element.setAttribute(ATTR_VM_OPTIONS, StringUtil.notNullize(vmConfig.getVmOptions()));
-            element.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(data.getRunnerSettings("Run").isPassParentEnvs()));
-            writeEnvironmentVariables(element, data.getRunnerSettings("Run").getEnvironmentVariables());
+        PortConfig pc = data.getPortConfig();
+        writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
+        writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
+        writeInt(element, ATTR_HTTPS_PORT, pc.getHttps());
+        element.setAttribute(ATTR_HTTPS_ENABLED, String.valueOf(pc.isHttpsEnabled()));
+        writeInt(element, ATTR_JMX_PORT, pc.getJmx());
+        element.setAttribute(ATTR_JMX_ENABLED, String.valueOf(pc.isJmxEnabled()));
+        writeInt(element, ATTR_AJP_PORT, pc.getAjp());
+        element.setAttribute(ATTR_AJP_ENABLED, String.valueOf(pc.isAjpEnabled()));
+        element.setAttribute(ATTR_CONTEXT_PATH, StringUtil.notNullize(data.getContextPath()));
+        element.setAttribute(ATTR_SERVER_MODE, StringUtil.notNullize(data.getServerMode()));
+        element.setAttribute(ATTR_CATALINA_BASE, StringUtil.notNullize(data.getCatalinaBase()));
 
-            // Write Map<String, RunnerSettings>
-            for (Map.Entry<String, RunnerSettings> entry : data.getRunnerSettingsMap().entrySet()) {
-                writeRunnerSettings(element, entry.getKey(), entry.getValue());
-            }
+        // Legacy VmConfig backward compatibility block
+        var vmConfig = data.getVmConfig();
+        element.setAttribute(ATTR_VM_OPTIONS, StringUtil.notNullize(vmConfig.getVmOptions()));
+        var runProfile = data.getRunnerSettings(TomcatConstants.RUN_MODE);
+        element.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(runProfile.isPassParentEnvs()));
+        writeEnvironmentVariables(element, runProfile.getEnvironmentVariables());
 
-            var browserConfig = data.getBrowserConfig();
-            element.setAttribute(ATTR_BROWSER_URL, StringUtil.notNullize(browserConfig.getBrowserUrl()));
-            element.setAttribute(ATTR_AFTER_LAUNCH_ENABLED, String.valueOf(browserConfig.isAfterLaunchEnabled()));
-            element.setAttribute(ATTR_WITH_JS_DEBUGGER, String.valueOf(browserConfig.isWithJsDebugger()));
-            element.setAttribute(ATTR_BROWSER_NAME, StringUtil.notNullize(browserConfig.getBrowserName(), "System Default"));
-
-            var deploymentConfig = data.getDeploymentConfig();
-            element.setAttribute(ATTR_HOT_DEPLOYMENT_ENABLED, String.valueOf(deploymentConfig.isHotDeploymentEnabled()));
-            element.setAttribute(ATTR_UPDATE_CLASSES_AND_RESOURCES, String.valueOf(deploymentConfig.isUpdateClassesAndResources()));
-            element.setAttribute(ATTR_PRESERVE_SESSIONS, String.valueOf(deploymentConfig.isPreserveSessions()));
-            writeDeploymentArtifacts(element, deploymentConfig.getArtifacts());
-
-            var updateConfig = data.getUpdateConfig();
-            element.setAttribute(ATTR_ON_UPDATE, StringUtil.notNullize(updateConfig.getOnUpdate()));
-            element.setAttribute(ATTR_ON_FRAME_DEACTIVATION, StringUtil.notNullize(updateConfig.getOnFrameDeactivation()));
-            element.setAttribute(ATTR_SHOW_UPDATE_DIALOG, String.valueOf(updateConfig.isShowUpdateDialog()));
-            element.setAttribute(ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, String.valueOf(updateConfig.isShowFrameDeactivationDialog()));
-            var uiConfig = data.getUiConfig();
-            element.setAttribute(ATTR_ACTIVATE_TOOL_WINDOW, String.valueOf(uiConfig.isActivateToolWindow()));
-            element.setAttribute(ATTR_FOCUS_TOOL_WINDOW, String.valueOf(uiConfig.isShowLogsPage()));
-
-            element.setAttribute(ATTR_JRE_SELECTION, StringUtil.notNullize(data.getJreSelection()));
-            element.setAttribute(ATTR_ALLOW_MULTIPLE_INSTANCES, String.valueOf(data.isAllowMultipleInstances()));
-            element.setAttribute(ATTR_STORE_AS_PROJECT_FILE, String.valueOf(data.isStoreAsProjectFile()));
-            DebugConfig dc = data.getDebugConfig();
-            writeInt(element, ATTR_DEBUG_PORT, dc.getPort());
-            element.setAttribute(ATTR_DEBUG_TRANSPORT, StringUtil.notNullize(dc.getTransport(), "Socket"));
-            element.setAttribute(ATTR_USE_MODULE_CLASSPATH, String.valueOf(dc.isUseModuleClasspath()));
-            RemoteConfig rc = data.getRemoteConfig();
-            element.setAttribute(ATTR_MANAGER_URL, StringUtil.notNullize(rc.getManagerUrl()));
-            element.setAttribute(ATTR_REMOTE_USERNAME, StringUtil.notNullize(rc.getUsername()));
-            element.setAttribute(ATTR_REMOTE_PASSWORD, StringUtil.notNullize(rc.getPassword()));
-            element.setAttribute(ATTR_USE_REMOTE_CREDENTIALS, String.valueOf(rc.isUseCredentials()));
-            writeLogFileConfig(element, data.getLogFileConfig());
-            writeTomcatInfo(element, data.getTomcatInfo());
-            writeCoverageConfig(element, data.getCoverageConfig());
-
-            LOG.debug("Wrote configuration data");
-        } catch (Exception e) {
-            LOG.error("Failed to write configuration data", e);
+        // Write Map<String, RunnerSettings>
+        for (Map.Entry<String, RunnerSettings> entry : data.getRunnerSettingsMap().entrySet()) {
+            writeRunnerSettings(element, entry.getKey(), entry.getValue());
         }
+
+        var browserConfig = data.getBrowserConfig();
+        element.setAttribute(ATTR_BROWSER_URL, StringUtil.notNullize(browserConfig.getBrowserUrl()));
+        element.setAttribute(ATTR_AFTER_LAUNCH_ENABLED, String.valueOf(browserConfig.isAfterLaunchEnabled()));
+        element.setAttribute(ATTR_WITH_JS_DEBUGGER, String.valueOf(browserConfig.isWithJsDebugger()));
+        element.setAttribute(ATTR_BROWSER_NAME, StringUtil.notNullize(browserConfig.getBrowserName(), TomcatConstants.BROWSER_SYSTEM_DEFAULT));
+
+        var deploymentConfig = data.getDeploymentConfig();
+        element.setAttribute(ATTR_HOT_DEPLOYMENT_ENABLED, String.valueOf(deploymentConfig.isHotDeploymentEnabled()));
+        element.setAttribute(ATTR_UPDATE_CLASSES_AND_RESOURCES, String.valueOf(deploymentConfig.isUpdateClassesAndResources()));
+        element.setAttribute(ATTR_PRESERVE_SESSIONS, String.valueOf(deploymentConfig.isPreserveSessions()));
+        writeDeploymentArtifacts(element, deploymentConfig.getArtifacts());
+
+        var updateConfig = data.getUpdateConfig();
+        element.setAttribute(ATTR_ON_UPDATE, StringUtil.notNullize(updateConfig.getOnUpdate()));
+        element.setAttribute(ATTR_ON_FRAME_DEACTIVATION, StringUtil.notNullize(updateConfig.getOnFrameDeactivation()));
+        element.setAttribute(ATTR_SHOW_UPDATE_DIALOG, String.valueOf(updateConfig.isShowUpdateDialog()));
+        element.setAttribute(ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, String.valueOf(updateConfig.isShowFrameDeactivationDialog()));
+        var uiConfig = data.getUiConfig();
+        element.setAttribute(ATTR_ACTIVATE_TOOL_WINDOW, String.valueOf(uiConfig.isActivateToolWindow()));
+        element.setAttribute(ATTR_FOCUS_TOOL_WINDOW, String.valueOf(uiConfig.isShowLogsPage()));
+
+        element.setAttribute(ATTR_JRE_SELECTION, StringUtil.notNullize(data.getJreSelection()));
+        element.setAttribute(ATTR_ALLOW_MULTIPLE_INSTANCES, String.valueOf(data.isAllowMultipleInstances()));
+        element.setAttribute(ATTR_STORE_AS_PROJECT_FILE, String.valueOf(data.isStoreAsProjectFile()));
+        DebugConfig dc = data.getDebugConfig();
+        writeInt(element, ATTR_DEBUG_PORT, dc.getPort());
+        element.setAttribute(ATTR_DEBUG_TRANSPORT, StringUtil.notNullize(dc.getTransport(), TomcatConstants.TRANSPORT_SOCKET));
+        element.setAttribute(ATTR_USE_MODULE_CLASSPATH, String.valueOf(dc.isUseModuleClasspath()));
+        RemoteConfig rc = data.getRemoteConfig();
+        element.setAttribute(ATTR_MANAGER_URL, StringUtil.notNullize(rc.getManagerUrl()));
+        element.setAttribute(ATTR_REMOTE_USERNAME, StringUtil.notNullize(rc.getUsername()));
+        // Store password in IntelliJ's PasswordSafe when available; keep XML fallback for environments without it
+        boolean storedInSafe = RemoteCredentialStore.storePassword(rc.getManagerUrl(), rc.getPassword());
+        element.setAttribute(ATTR_REMOTE_PASSWORD, storedInSafe ? "" : StringUtil.notNullize(rc.getPassword()));
+        element.setAttribute(ATTR_USE_REMOTE_CREDENTIALS, String.valueOf(rc.isUseCredentials()));
+        writeLogFileConfig(element, data.getLogFileConfig());
+        writeTomcatInfo(element, data.getTomcatInfo());
+        writeCoverageConfig(element, data.getCoverageConfig());
+
+        LOG.debug("Wrote configuration data");
     }
 
     private static void writeInt(@NotNull Element element, @NotNull String name, int value) {
@@ -215,6 +217,7 @@ public class TomcatConfigurationSerializer {
 
             Element file = new Element("file");
             file.setAttribute("path", normalized);
+            file.setAttribute("skipContent", String.valueOf(config.isSkipContent(normalized)));
             logElem.addContent(file);
         }
 
@@ -229,7 +232,7 @@ public class TomcatConfigurationSerializer {
             art.setAttribute(ATTR_ARTIFACT_NAME, StringUtil.notNullize(artifact.getName()));
             art.setAttribute(ATTR_ARTIFACT_PATH, StringUtil.notNullize(artifact.getPath()));
             art.setAttribute(ATTR_ARTIFACT_TYPE, StringUtil.notNullize(artifact.getType()));
-            art.setAttribute(ATTR_ARTIFACT_CONTEXT, StringUtil.notNullize(artifact.getContextPath(), "/"));
+            art.setAttribute(ATTR_ARTIFACT_CONTEXT, StringUtil.notNullize(artifact.getContextPath(), TomcatConstants.DEFAULT_CONTEXT_PATH));
             art.setAttribute(ATTR_ARTIFACT_DEPLOYED, String.valueOf(artifact.isDeployed()));
             deployments.addContent(art);
         }
@@ -257,121 +260,145 @@ public class TomcatConfigurationSerializer {
         Objects.requireNonNull(data, "Configuration data cannot be null");
         Objects.requireNonNull(element, "Element cannot be null");
 
-        try {
-            PortConfig pc = data.getPortConfig();
-            readInt(element, ATTR_HTTP_PORT, pc::setHttp);
-            readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);
-            readInt(element, ATTR_HTTPS_PORT, pc::setHttps);
-            readBool(element, ATTR_HTTPS_ENABLED, pc::setHttpsEnabled);
-            readInt(element, ATTR_JMX_PORT, pc::setJmx);
-            readBool(element, ATTR_JMX_ENABLED, pc::setJmxEnabled);
-            readInt(element, ATTR_AJP_PORT, pc::setAjp);
-            readBool(element, ATTR_AJP_ENABLED, pc::setAjpEnabled);
-            data.setContextPath(element.getAttributeValue(ATTR_CONTEXT_PATH));
-            data.setServerMode(element.getAttributeValue(ATTR_SERVER_MODE));
-            data.setCatalinaBase(element.getAttributeValue(ATTR_CATALINA_BASE));
-            
-            var vmConfig = data.getVmConfig();
-            vmConfig.setVmOptions(element.getAttributeValue(ATTR_VM_OPTIONS));
-            
-            // Backward compatibility fallbacks -> load to Run profile
-            RunnerSettings runProfile = new RunnerSettings();
-            readBool(element, ATTR_PASS_PARENT_ENVS, runProfile::setPassParentEnvs);
-            readEnvironmentVariables(element, runProfile::setEnvironmentVariables);
+        PortConfig pc = data.getPortConfig();
+        readInt(element, ATTR_HTTP_PORT, pc::setHttp);
+        readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);
+        readInt(element, ATTR_HTTPS_PORT, pc::setHttps);
+        readBool(element, ATTR_HTTPS_ENABLED, pc::setHttpsEnabled);
+        readInt(element, ATTR_JMX_PORT, pc::setJmx);
+        readBool(element, ATTR_JMX_ENABLED, pc::setJmxEnabled);
+        readInt(element, ATTR_AJP_PORT, pc::setAjp);
+        readBool(element, ATTR_AJP_ENABLED, pc::setAjpEnabled);
+        data.setContextPath(element.getAttributeValue(ATTR_CONTEXT_PATH));
+        data.setServerMode(element.getAttributeValue(ATTR_SERVER_MODE));
+        data.setCatalinaBase(element.getAttributeValue(ATTR_CATALINA_BASE));
 
-            // Read the real RunnerSettings elements, overriding backwards compatibility logic if present
-            Map<String, RunnerSettings> map = new HashMap<>();
-            map.put("Run", runProfile); // default 
-            
-            for (Element rsElem : element.getChildren(TAG_RUNNER_SETTINGS)) {
-                String runnerId = rsElem.getAttributeValue(ATTR_RUNNER_ID);
-                if (StringUtil.isEmpty(runnerId)) continue;
-                
-                RunnerSettings rs = new RunnerSettings();
-                readBool(rsElem, ATTR_USE_DEFAULT_STARTUP, rs::setUseDefaultStartup);
-                rs.setStartupScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_STARTUP_SCRIPT)));
-                readBool(rsElem, ATTR_USE_DEFAULT_SHUTDOWN, rs::setUseDefaultShutdown);
-                rs.setShutdownScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT)));
-                readBool(rsElem, ATTR_PASS_PARENT_ENVS, rs::setPassParentEnvs);
-                readEnvironmentVariables(rsElem, rs::setEnvironmentVariables);
-                
-                map.put(runnerId, rs);
-            }
-            data.setRunnerSettingsMap(map);
+        var vmConfig = data.getVmConfig();
+        vmConfig.setVmOptions(element.getAttributeValue(ATTR_VM_OPTIONS));
 
-            var browserConfig = data.getBrowserConfig();
-            browserConfig.setBrowserUrl(StringUtil.notNullize(element.getAttributeValue(ATTR_BROWSER_URL)));
-            readBool(element, ATTR_AFTER_LAUNCH_ENABLED, browserConfig::setAfterLaunchEnabled);
+        // Backward compatibility fallbacks -> load to Run profile
+        RunnerSettings runProfile = new RunnerSettings();
+        readBool(element, ATTR_PASS_PARENT_ENVS, runProfile::setPassParentEnvs);
+        readEnvironmentVariables(element, runProfile::setEnvironmentVariables);
 
-            if (element.getAttributeValue(ATTR_WITH_JS_DEBUGGER) != null) {
-                readBool(element, ATTR_WITH_JS_DEBUGGER, browserConfig::setWithJsDebugger);
-            } else {
-                readBool(element, ATTR_WITH_JS_DEBUGGER_OLD, browserConfig::setWithJsDebugger);
-            }
+        // Read the real RunnerSettings elements, overriding backwards compatibility logic if present
+        Map<String, RunnerSettings> map = new HashMap<>();
+        map.put(TomcatConstants.RUN_MODE, runProfile); // default
 
-            // Read browser name (new attr first, fall back to old)
-            String browserName = element.getAttributeValue(ATTR_BROWSER_NAME);
-            if (browserName == null) {
-                browserName = element.getAttributeValue(ATTR_BROWSER_NAME_OLD);
-            }
-            if (browserName != null && !browserName.isEmpty()) {
-                browserConfig.setBrowserName(browserName);
-            }
+        for (Element rsElem : element.getChildren(TAG_RUNNER_SETTINGS)) {
+            String runnerId = rsElem.getAttributeValue(ATTR_RUNNER_ID);
+            if (StringUtil.isEmpty(runnerId)) continue;
 
-            var deploymentConfig = data.getDeploymentConfig();
-            readBool(element, ATTR_HOT_DEPLOYMENT_ENABLED, deploymentConfig::setHotDeploymentEnabled);
-            readBool(element, ATTR_UPDATE_CLASSES_AND_RESOURCES, deploymentConfig::setUpdateClassesAndResources);
-            readBool(element, ATTR_PRESERVE_SESSIONS, deploymentConfig::setPreserveSessions);
-            readDeploymentArtifacts(element, deploymentConfig);
+            RunnerSettings rs = new RunnerSettings();
+            readBool(rsElem, ATTR_USE_DEFAULT_STARTUP, rs::setUseDefaultStartup);
+            rs.setStartupScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_STARTUP_SCRIPT)));
+            readBool(rsElem, ATTR_USE_DEFAULT_SHUTDOWN, rs::setUseDefaultShutdown);
+            rs.setShutdownScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT)));
+            readBool(rsElem, ATTR_PASS_PARENT_ENVS, rs::setPassParentEnvs);
+            readEnvironmentVariables(rsElem, rs::setEnvironmentVariables);
 
-            var updateConfig = data.getUpdateConfig();
-
-            String onUpdate = element.getAttributeValue(ATTR_ON_UPDATE);
-            if (StringUtil.isEmpty(onUpdate)) {
-                onUpdate = element.getAttributeValue(ATTR_UPDATE_ACTION_OLD);
-            }
-            if (!StringUtil.isEmpty(onUpdate)) {
-                updateConfig.setOnUpdate(onUpdate);
-            }
-
-            String onFrame = element.getAttributeValue(ATTR_ON_FRAME_DEACTIVATION);
-            if (!StringUtil.isEmpty(onFrame)) {
-                updateConfig.setOnFrameDeactivation(onFrame);
-            }
-
-            if (element.getAttributeValue(ATTR_SHOW_UPDATE_DIALOG) != null) {
-                readBool(element, ATTR_SHOW_UPDATE_DIALOG, updateConfig::setShowUpdateDialog);
-            } else {
-                readBool(element, ATTR_SHOW_DIALOG_OLD, updateConfig::setShowUpdateDialog);
-            }
-
-            readBool(element, ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, updateConfig::setShowFrameDeactivationDialog);
-            var uiConfig = data.getUiConfig();
-            readBool(element, ATTR_ACTIVATE_TOOL_WINDOW, uiConfig::setActivateToolWindow);
-            readBool(element, ATTR_FOCUS_TOOL_WINDOW, uiConfig::setShowLogsPage);
-
-            data.setJreSelection(element.getAttributeValue(ATTR_JRE_SELECTION));
-            readBool(element, ATTR_ALLOW_MULTIPLE_INSTANCES, data::setAllowMultipleInstances);
-            readBool(element, ATTR_STORE_AS_PROJECT_FILE, data::setStoreAsProjectFile);
-            DebugConfig dc = data.getDebugConfig();
-            readInt(element, ATTR_DEBUG_PORT, dc::setPort);
-            dc.setTransport(StringUtil.notNullize(element.getAttributeValue(ATTR_DEBUG_TRANSPORT), "Socket"));
-            readBool(element, ATTR_USE_MODULE_CLASSPATH, dc::setUseModuleClasspath);
-            RemoteConfig rc = data.getRemoteConfig();
-            String managerUrl = element.getAttributeValue(ATTR_MANAGER_URL);
-            if (managerUrl != null) rc.setManagerUrl(managerUrl);
-            String remoteUsername = element.getAttributeValue(ATTR_REMOTE_USERNAME);
-            if (remoteUsername != null) rc.setUsername(remoteUsername);
-            rc.setPassword(element.getAttributeValue(ATTR_REMOTE_PASSWORD));
-            readBool(element, ATTR_USE_REMOTE_CREDENTIALS, rc::setUseCredentials);
-            readLogFileConfig(element, data.getLogFileConfig());
-            readTomcatInfo(element, data::setTomcatInfo);
-            readCoverageConfig(element, data.getCoverageConfig());
-
-            LOG.debug("Read configuration data");
-        } catch (Exception e) {
-            LOG.error("Failed to read configuration data", e);
+            map.put(runnerId, rs);
         }
+        data.setRunnerSettingsMap(map);
+
+        var browserConfig = data.getBrowserConfig();
+        browserConfig.setBrowserUrl(StringUtil.notNullize(element.getAttributeValue(ATTR_BROWSER_URL)));
+        readBool(element, ATTR_AFTER_LAUNCH_ENABLED, browserConfig::setAfterLaunchEnabled);
+
+        if (element.getAttributeValue(ATTR_WITH_JS_DEBUGGER) != null) {
+            readBool(element, ATTR_WITH_JS_DEBUGGER, browserConfig::setWithJsDebugger);
+        } else {
+            readBool(element, ATTR_WITH_JS_DEBUGGER_OLD, browserConfig::setWithJsDebugger);
+        }
+
+        // Read browser name (new attr first, fall back to old)
+        String browserName = element.getAttributeValue(ATTR_BROWSER_NAME);
+        if (browserName == null) {
+            browserName = element.getAttributeValue(ATTR_BROWSER_NAME_OLD);
+        }
+        if (browserName != null && !browserName.isEmpty()) {
+            browserConfig.setBrowserName(browserName);
+        }
+
+        var deploymentConfig = data.getDeploymentConfig();
+        readBool(element, ATTR_HOT_DEPLOYMENT_ENABLED, deploymentConfig::setHotDeploymentEnabled);
+        readBool(element, ATTR_UPDATE_CLASSES_AND_RESOURCES, deploymentConfig::setUpdateClassesAndResources);
+        readBool(element, ATTR_PRESERVE_SESSIONS, deploymentConfig::setPreserveSessions);
+        readDeploymentArtifacts(element, deploymentConfig);
+
+        var updateConfig = data.getUpdateConfig();
+
+        String onUpdate = element.getAttributeValue(ATTR_ON_UPDATE);
+        if (StringUtil.isEmpty(onUpdate)) {
+            onUpdate = element.getAttributeValue(ATTR_UPDATE_ACTION_OLD);
+        }
+        if (!StringUtil.isEmpty(onUpdate)) {
+            updateConfig.setOnUpdate(onUpdate);
+        }
+
+        String onFrame = element.getAttributeValue(ATTR_ON_FRAME_DEACTIVATION);
+        if (!StringUtil.isEmpty(onFrame)) {
+            updateConfig.setOnFrameDeactivation(onFrame);
+        }
+
+        if (element.getAttributeValue(ATTR_SHOW_UPDATE_DIALOG) != null) {
+            readBool(element, ATTR_SHOW_UPDATE_DIALOG, updateConfig::setShowUpdateDialog);
+        } else {
+            readBool(element, ATTR_SHOW_DIALOG_OLD, updateConfig::setShowUpdateDialog);
+        }
+
+        readBool(element, ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, updateConfig::setShowFrameDeactivationDialog);
+        var uiConfig = data.getUiConfig();
+        readBool(element, ATTR_ACTIVATE_TOOL_WINDOW, uiConfig::setActivateToolWindow);
+        readBool(element, ATTR_FOCUS_TOOL_WINDOW, uiConfig::setShowLogsPage);
+
+        data.setJreSelection(element.getAttributeValue(ATTR_JRE_SELECTION));
+        readBool(element, ATTR_ALLOW_MULTIPLE_INSTANCES, data::setAllowMultipleInstances);
+        readBool(element, ATTR_STORE_AS_PROJECT_FILE, data::setStoreAsProjectFile);
+        DebugConfig dc = data.getDebugConfig();
+        readInt(element, ATTR_DEBUG_PORT, dc::setPort);
+        dc.setTransport(StringUtil.notNullize(element.getAttributeValue(ATTR_DEBUG_TRANSPORT), TomcatConstants.TRANSPORT_SOCKET));
+        readBool(element, ATTR_USE_MODULE_CLASSPATH, dc::setUseModuleClasspath);
+        RemoteConfig rc = data.getRemoteConfig();
+        String managerUrl = element.getAttributeValue(ATTR_MANAGER_URL);
+        if (managerUrl != null) rc.setManagerUrl(managerUrl);
+        String remoteUsername = element.getAttributeValue(ATTR_REMOTE_USERNAME);
+        if (remoteUsername != null) rc.setUsername(remoteUsername);
+        // Load password: legacy XML first, then PasswordSafe asynchronously.
+        // PasswordSafe.get() is a slow I/O operation prohibited inside read actions,
+        // so we defer it to a pooled thread that updates RemoteConfig after deserialization.
+        String legacyPassword = element.getAttributeValue(ATTR_REMOTE_PASSWORD);
+        if (legacyPassword != null && !legacyPassword.isEmpty()) {
+            rc.setPassword(legacyPassword);
+        }
+        // Deferred PasswordSafe lookup — runs outside the read action.
+        // PasswordSafe.get() is a slow I/O operation prohibited inside read actions.
+        final String credentialKey = rc.getManagerUrl();
+        final boolean hasLegacy = legacyPassword != null && !legacyPassword.isEmpty();
+        try {
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                try {
+                    String safePassword = RemoteCredentialStore.retrievePassword(credentialKey);
+                    if (!safePassword.isEmpty()) {
+                        rc.setPassword(safePassword);
+                    } else if (hasLegacy) {
+                        // Migrate legacy plain-text password to PasswordSafe
+                        RemoteCredentialStore.storePassword(credentialKey, legacyPassword);
+                    }
+                } catch (Exception e) {
+                    LOG.debug("Deferred credential retrieval failed", e);
+                }
+            });
+        } catch (Exception e) {
+            // No Application context (unit tests) — skip PasswordSafe lookup
+            LOG.debug("Cannot schedule deferred credential retrieval", e);
+        }
+        readBool(element, ATTR_USE_REMOTE_CREDENTIALS, rc::setUseCredentials);
+        readLogFileConfig(element, data.getLogFileConfig());
+        readTomcatInfo(element, data::setTomcatInfo);
+        readCoverageConfig(element, data.getCoverageConfig());
+
+        LOG.debug("Read configuration data");
     }
 
     private static void readInt(@NotNull Element element, @NotNull String name, java.util.function.IntConsumer setter) {
@@ -426,12 +453,17 @@ public class TomcatConfigurationSerializer {
         if (saveFilePath != null) config.setSaveConsoleFilePath(saveFilePath);
 
         java.util.List<String> files = new java.util.ArrayList<>();
+        java.util.Map<String, Boolean> skipMap = new java.util.HashMap<>();
         for (Element file : logElem.getChildren("file")) {
             String path = file.getAttributeValue("path");
             if (path != null) {
                 String normalized = path.trim();
                 if (!normalized.isEmpty()) {
                     files.add(normalized);
+                    String skip = file.getAttributeValue("skipContent");
+                    if (skip != null) {
+                        skipMap.put(normalized, Boolean.parseBoolean(skip));
+                    }
                 }
             }
         }
@@ -439,6 +471,7 @@ public class TomcatConfigurationSerializer {
         if (!files.isEmpty()) {
             config.setLogFiles(files);
         }
+        config.setSkipContentEntries(skipMap);
     }
 
     private static void readDeploymentArtifacts(@NotNull Element element, @NotNull com.dev.idea.plugins.tomcat.model.DeploymentConfig deploymentConfig) {
@@ -450,7 +483,7 @@ public class TomcatConfigurationSerializer {
                 artifact.setName(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_NAME)));
                 artifact.setPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_PATH)));
                 artifact.setType(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_TYPE), DeploymentArtifact.TYPE_WAR));
-                artifact.setContextPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), "/"));
+                artifact.setContextPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), TomcatConstants.DEFAULT_CONTEXT_PATH));
                 String deployedAttr = art.getAttributeValue(ATTR_ARTIFACT_DEPLOYED);
                 if (deployedAttr != null) {
                     artifact.setDeployed(Boolean.parseBoolean(deployedAttr));

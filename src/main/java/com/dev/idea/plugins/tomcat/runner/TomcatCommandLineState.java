@@ -1,8 +1,12 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.diagnostics.TomcatCompatibilityChecker;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
-import com.dev.idea.plugins.tomcat.util.PortConflictDetector;
+import com.dev.idea.plugins.tomcat.model.PortConfig;
+import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
@@ -15,6 +19,14 @@ import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.projectRoots.ProjectJdkTable;
+import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,8 +39,11 @@ import java.util.List;
  */
 public class TomcatCommandLineState extends JavaCommandLineState {
 
+    private static final Logger LOG = Logger.getInstance(TomcatCommandLineState.class);
+
     private final TomcatRunConfiguration configuration;
     private final TomcatDeploymentLogger deploymentLogger;
+    private volatile PortConfig resolvedPorts;
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
                                   @NotNull TomcatRunConfiguration configuration) {
@@ -41,49 +56,131 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     protected JavaParameters createJavaParameters() throws ExecutionException {
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
-        return new TomcatJavaParametersBuilder(configuration, getEnvironment())
+        TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
                 .setDebugMode(isDebug)
-                .build();
+                .setDeploymentLogger(deploymentLogger);
+        if (resolvedPorts != null) {
+            builder.setResolvedPorts(resolvedPorts);
+        }
+        return builder.build();
     }
 
     /**
-     * Checks for port conflicts before launching Tomcat.
-     * Logs warnings to the deployment console for any conflicts found.
+     * Detects port conflicts before launch and auto-resolves them.
+     * Logs all resolutions to the deployment console so the user knows
+     * which ports changed and why.
+     *
+     * <p>The resolved ports are stored in {@link #resolvedPorts} and used
+     * by the builder via {@link #createJavaParameters()}.
      */
-    private void checkPortConflicts() {
-        List<PortConflictDetector.PortConflict> conflicts =
-                PortConflictDetector.detectConflicts(configuration.getConfigData().getPortConfig());
+    private void resolvePortConflicts() {
+        PortConfig originalPorts = configuration.getConfigData().getPortConfig();
+        PortConflictDetector.PortResolution resolution =
+                PortConflictDetector.resolveConflicts(originalPorts);
 
-        if (!conflicts.isEmpty()) {
-            for (PortConflictDetector.PortConflict conflict : conflicts) {
-                deploymentLogger.logServerWarning(
-                        "⚠ Port conflict: " + conflict.getServiceName() +
-                                " port " + conflict.getPort() + " is in use. " +
-                                conflict.getSuggestion());
+        this.resolvedPorts = resolution.getResolvedConfig();
+
+        if (resolution.hasChanges()) {
+            deploymentLogger.logServerWarning("Port conflicts detected and auto-resolved:");
+            for (String change : resolution.getChanges()) {
+                deploymentLogger.logServerWarning("  " + change);
             }
+            // Show balloon notification so user sees it even without console focus
+            notifyUser("DevTomcat: Port Auto-Resolved",
+                    String.join("\n", resolution.getChanges()),
+                    NotificationType.WARNING);
+        }
+    }
+
+    /**
+     * Validates Tomcat/JDK compatibility before launch.
+     * Blocks launch on critical mismatches (e.g., Tomcat 11 with Java 11),
+     * warns on non-blocking issues (e.g., Jakarta namespace).
+     */
+    private void checkCompatibility() throws ExecutionException {
+        TomcatInfo tomcatInfo = configuration.getTomcatInfo();
+        Sdk jdk = resolveJdk();
+
+        List<TomcatCompatibilityChecker.CompatibilityIssue> issues =
+                TomcatCompatibilityChecker.check(tomcatInfo, jdk);
+
+        for (TomcatCompatibilityChecker.CompatibilityIssue issue : issues) {
+            if (issue.isBlocking()) {
+                deploymentLogger.logServerError(issue.getMessage());
+            } else {
+                deploymentLogger.logServerWarning(issue.getMessage());
+            }
+        }
+
+        if (TomcatCompatibilityChecker.hasBlockingIssues(issues)) {
+            throw new ExecutionException(
+                    "Compatibility check failed: " + issues.stream()
+                            .filter(TomcatCompatibilityChecker.CompatibilityIssue::isBlocking)
+                            .map(TomcatCompatibilityChecker.CompatibilityIssue::getMessage)
+                            .findFirst().orElse("Unknown issue"));
+        }
+    }
+
+    @Nullable
+    private Sdk resolveJdk() {
+        String jreSelection = configuration.getConfigData().getJreSelection();
+        if (jreSelection != null && !jreSelection.isEmpty()
+                && !TomcatConstants.JRE_PROJECT_DEFAULT.equals(jreSelection)) {
+            Sdk sdk = ProjectJdkTable.getInstance().findJdk(jreSelection);
+            if (sdk != null) return sdk;
+        }
+        return ProjectRootManager.getInstance(configuration.getProject()).getProjectSdk();
+    }
+
+    private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
+        try {
+            NotificationGroupManager.getInstance()
+                    .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                    .createNotification(title, content, type)
+                    .notify(configuration.getProject());
+        } catch (Exception e) {
+            // Notification group may not be registered — fall back silently
+            LOG.debug("Could not show notification: " + e.getMessage());
         }
     }
 
     @NotNull
     @Override
     protected OSProcessHandler startProcess() throws ExecutionException {
-        // Pre-launch port conflict detection (DevTomcat exclusive feature)
-        checkPortConflicts();
+        // Pre-launch compatibility check (DevTomcat exclusive)
+        checkCompatibility();
+
+        // Pre-launch port conflict detection and auto-resolution (DevTomcat exclusive feature)
+        resolvePortConflicts();
         
         String executorId = getEnvironment().getExecutor().getId();
         RunnerSettings runnerSettings = configuration.getConfigData().getRunnerSettings(executorId);
 
         GeneralCommandLine commandLine;
-        if (!runnerSettings.isUseDefaultStartup() && !com.intellij.openapi.util.text.StringUtil.isEmptyOrSpaces(runnerSettings.getStartupScript())) {
-            commandLine = new GeneralCommandLine(runnerSettings.getStartupScript());
+        if (!runnerSettings.isUseDefaultStartup() && !StringUtil.isEmptyOrSpaces(runnerSettings.getStartupScript())) {
+            List<String> tokens = ParametersListUtil.parse(
+                    runnerSettings.getStartupScript());
+            commandLine = new GeneralCommandLine(tokens);
             commandLine.withEnvironment(runnerSettings.getEnvironmentVariables());
             commandLine.withParentEnvironmentType(runnerSettings.isPassParentEnvs() ?
                     GeneralCommandLine.ParentEnvironmentType.CONSOLE : GeneralCommandLine.ParentEnvironmentType.NONE);
-            
+
+            // Propagate resolved ports as environment variables so custom scripts can use them
+            if (resolvedPorts != null) {
+                commandLine.withEnvironment(TomcatConstants.ENV_HTTP_PORT, String.valueOf(resolvedPorts.getHttp()));
+                commandLine.withEnvironment(TomcatConstants.ENV_SHUTDOWN_PORT, String.valueOf(resolvedPorts.getShutdown()));
+                commandLine.withEnvironment(TomcatConstants.ENV_HTTPS_PORT, String.valueOf(resolvedPorts.getHttps()));
+                commandLine.withEnvironment(TomcatConstants.ENV_JMX_PORT, String.valueOf(resolvedPorts.getJmx()));
+                commandLine.withEnvironment(TomcatConstants.ENV_AJP_PORT, String.valueOf(resolvedPorts.getAjp()));
+            }
+
             if (configuration.getTomcatInfo() != null) {
                 commandLine.withWorkDirectory(configuration.getTomcatInfo().getPath());
             }
         } else {
+            if (!runnerSettings.isUseDefaultStartup()) {
+                LOG.warn("Custom startup enabled but no script configured, falling back to default startup");
+            }
             commandLine = createJavaParameters().toCommandLine();
         }
         
@@ -95,7 +192,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 StandardCharsets.UTF_8,
                 deploymentLogger,
                 configuration,
-                runnerSettings
+                runnerSettings,
+                resolvedPorts,
+                executorId
         );
         ProcessTerminatedListener.attach(handler);
         return handler;

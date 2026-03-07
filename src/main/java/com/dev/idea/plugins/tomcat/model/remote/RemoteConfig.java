@@ -16,7 +16,7 @@ public class RemoteConfig {
 
     private static final Logger LOG = Logger.getInstance(RemoteConfig.class);
 
-    private static final String DEFAULT_MANAGER_URL = "http://localhost:8080/manager";
+    private static final String DEFAULT_MANAGER_URL = "http://" + TomcatConstants.DEFAULT_HOST + ":" + TomcatConstants.DEFAULT_PORT + "/manager";
     private static final String DEFAULT_USERNAME = "admin";
     private static final int MAX_PASSWORD_LENGTH = 256;
     private static final int MAX_USERNAME_LENGTH = 128;
@@ -79,8 +79,8 @@ public class RemoteConfig {
         Objects.requireNonNull(username, "Username cannot be null");
         String normalized = username.trim();
 
-        if (normalized.isEmpty() || normalized.length() > MAX_USERNAME_LENGTH) {
-            LOG.warn("Invalid username length, using default: " + DEFAULT_USERNAME);
+        if (normalized.length() > MAX_USERNAME_LENGTH) {
+            LOG.warn("Username too long (max " + MAX_USERNAME_LENGTH + " chars), using default: " + DEFAULT_USERNAME);
             this.username = DEFAULT_USERNAME;
         } else {
             this.username = normalized;

@@ -2,577 +2,452 @@ package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
+import com.intellij.icons.AllIcons;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.ui.ToolbarDecorator;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
-import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.components.JBTextField;
+import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeModel;
 import java.awt.*;
-import java.awt.event.ActionEvent;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 public class TomcatServerConfigurationDialog extends DialogWrapper {
 
+    private static final Logger LOG = Logger.getInstance(TomcatServerConfigurationDialog.class);
+
     private final Project project;
-    private JBList<TomcatInfo> serverList;
-    private DefaultListModel<TomcatInfo> listModel;
-    private JButton addButton;
-    private JButton editButton;
-    private JButton removeButton;
-    private JButton detectButton;
+    private final DefaultListModel<TomcatInfo> listModel = new DefaultListModel<>();
+    private final JBList<TomcatInfo> serverList = new JBList<>(listModel);
+    private final JBTextField nameField = new JBTextField();
+    private final TextFieldWithBrowseButton homeField = new TextFieldWithBrowseButton();
+    private final JBLabel versionLabel = new JBLabel();
+    private final TextFieldWithBrowseButton baseField = new TextFieldWithBrowseButton();
+    private final Tree librariesTree = new Tree(new DefaultMutableTreeNode("Classes"));
+    private boolean updatingDetails;
 
     public TomcatServerConfigurationDialog(@NotNull Project project) {
         super(project);
         this.project = project;
-        setTitle("Tomcat Server Configuration");
-        setSize(600, 400);
+        setTitle("Application Servers");
         init();
         loadServers();
     }
 
     @Override
     protected @Nullable JComponent createCenterPanel() {
-        JPanel mainPanel = new JPanel(new BorderLayout());
-        mainPanel.setPreferredSize(new Dimension(580, 350));
-
-        createServerList();
-
-        JPanel buttonsPanel = createButtonsPanel();
-
-        // Layout
-        mainPanel.add(new JBScrollPane(serverList), BorderLayout.CENTER);
-        mainPanel.add(buttonsPanel, BorderLayout.EAST);
-
-        // Instructions at top
-        JPanel instructionsPanel = createInstructionsPanel();
-        mainPanel.add(instructionsPanel, BorderLayout.NORTH);
-
-        return mainPanel;
-    }
-
-    private void createServerList() {
-        listModel = new DefaultListModel<>();
-        serverList = new JBList<>(listModel);
-        serverList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        serverList.setCellRenderer(new TomcatServerRenderer());
-        serverList.addListSelectionListener(e -> updateButtonStates());
-    }
-
-    private JPanel createButtonsPanel() {
-        JPanel panel = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = JBUI.insets(5);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.gridx = 0;
-
-        addButton = new JButton("Add...");
-        addButton.addActionListener(this::addServer);
-        gbc.gridy = 0;
-        panel.add(addButton, gbc);
-
-        editButton = new JButton("Edit...");
-        editButton.addActionListener(this::editServer);
-        gbc.gridy = 1;
-        panel.add(editButton, gbc);
-
-        removeButton = new JButton("Remove");
-        removeButton.addActionListener(this::removeServer);
-        gbc.gridy = 2;
-        panel.add(removeButton, gbc);
-
-        // Separator
-        gbc.gridy = 3;
-        gbc.insets = JBUI.insets(15, 5, 5, 5);
-        panel.add(new JSeparator(), gbc);
-
-        detectButton = new JButton("Auto-Detect");
-        detectButton.addActionListener(this::autoDetectServers);
-        detectButton.setToolTipText("Automatically detect Tomcat installations");
-        gbc.gridy = 4;
-        gbc.insets = JBUI.insets(5);
-        panel.add(detectButton, gbc);
-
-        return panel;
-    }
-
-    private JPanel createInstructionsPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(JBUI.Borders.empty(10));
-
-        JLabel titleLabel = new JLabel("Configured Tomcat Servers:");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD));
-        panel.add(titleLabel, BorderLayout.WEST);
-
-        JLabel helpLabel = new JLabel("Add Tomcat servers to use in run configurations");
-        helpLabel.setFont(helpLabel.getFont().deriveFont(Font.ITALIC, 11f));
-        helpLabel.setForeground(Color.GRAY);
-        panel.add(helpLabel, BorderLayout.SOUTH);
-
+        panel.setPreferredSize(new Dimension(JBUI.scale(760), JBUI.scale(520)));
+        panel.add(createSplitPanel(), BorderLayout.CENTER);
         return panel;
+    }
+
+    private JComponent createSplitPanel() {
+        serverList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        serverList.setCellRenderer(new ServerListRenderer());
+        serverList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                loadSelectedServerIntoDetails();
+            }
+        });
+
+        ToolbarDecorator decorator = ToolbarDecorator.createDecorator(serverList)
+                .setAddAction(button -> addServer())
+                .setRemoveAction(button -> removeSelectedServer())
+                .disableUpDownActions();
+
+        JPanel listPanel = decorator.createPanel();
+        listPanel.setPreferredSize(new Dimension(JBUI.scale(210), JBUI.scale(460)));
+
+        JPanel detailsPanel = createDetailsPanel();
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, listPanel, detailsPanel);
+        splitPane.setResizeWeight(0.32);
+        splitPane.setDividerLocation(JBUI.scale(220));
+        splitPane.setBorder(JBUI.Borders.empty());
+        return splitPane;
+    }
+
+    private JPanel createDetailsPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(JBUI.Borders.emptyLeft(12));
+
+        JPanel form = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = JBUI.insets(8, 0, 8, 8);
+
+        // Name
+        form.add(new JBLabel("Name:"), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        form.add(nameField, gbc);
+
+        // Tomcat Home
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
+        form.add(new JBLabel("Tomcat Home:"), gbc);
+
+        homeField.addBrowseFolderListener(
+                "Tomcat Home", "Select Tomcat installation directory",
+                project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        form.add(homeField, gbc);
+
+        // Tomcat Version
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
+        form.add(new JBLabel("Tomcat Version:"), gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        form.add(versionLabel, gbc);
+
+        // Tomcat base directory
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
+        form.add(new JBLabel("Tomcat base directory:"), gbc);
+
+        baseField.addBrowseFolderListener(
+                "Tomcat Base Directory", "Select Tomcat base directory (CATALINA_BASE)",
+                project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        form.add(baseField, gbc);
+
+        panel.add(form, BorderLayout.NORTH);
+
+        // Libraries section
+        JPanel librariesPanel = createLibrariesPanel();
+        panel.add(librariesPanel, BorderLayout.CENTER);
+
+        bindDetailEditors();
+        setDetailFieldsEnabled(false);
+        return panel;
+    }
+
+    private JPanel createLibrariesPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(JBUI.Borders.emptyTop(16));
+
+        JBLabel librariesLabel = new JBLabel("Libraries (auto-detected from Tomcat Home)");
+        librariesLabel.setBorder(JBUI.Borders.emptyBottom(6));
+        panel.add(librariesLabel, BorderLayout.NORTH);
+
+        librariesTree.setRootVisible(true);
+        librariesTree.setShowsRootHandles(true);
+        librariesTree.setCellRenderer(new LibraryTreeRenderer());
+
+        JScrollPane scrollPane = new com.intellij.ui.components.JBScrollPane(librariesTree);
+        panel.add(scrollPane, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private void bindDetailEditors() {
+        DocumentListener listener = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                updateSelectedServerFromDetails();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                updateSelectedServerFromDetails();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                updateSelectedServerFromDetails();
+            }
+        };
+
+        nameField.getDocument().addDocumentListener(listener);
+        homeField.getTextField().getDocument().addDocumentListener(listener);
+        baseField.getTextField().getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { updateBaseFromField(); }
+            @Override public void removeUpdate(DocumentEvent e) { updateBaseFromField(); }
+            @Override public void changedUpdate(DocumentEvent e) { updateBaseFromField(); }
+        });
+    }
+
+    private void updateBaseFromField() {
+        if (updatingDetails) return;
+        TomcatInfo selected = serverList.getSelectedValue();
+        if (selected != null) {
+            selected.setCatalinaBase(baseField.getText().trim());
+        }
     }
 
     private void loadServers() {
         listModel.clear();
-        List<TomcatInfo> servers = TomcatServerManagerState.getInstance().getTomcatInfos();
-        for (TomcatInfo server : servers) {
-            listModel.addElement(server);
+        for (TomcatInfo info : TomcatServerManagerState.getInstance().getTomcatInfos()) {
+            listModel.addElement(info);
         }
-        updateButtonStates();
-    }
 
-    private void updateButtonStates() {
-        boolean hasSelection = serverList.getSelectedValue() != null;
-        editButton.setEnabled(hasSelection);
-        removeButton.setEnabled(hasSelection);
-    }
-
-    private void addServer(ActionEvent e) {
-        AddTomcatServerDialog dialog = new AddTomcatServerDialog(project);
-        if (dialog.showAndGet()) {
-            TomcatInfo newServer = dialog.getTomcatInfo();
-            if (newServer != null) {
-                TomcatServerManagerState.getInstance().getTomcatInfos().add(newServer);
-                listModel.addElement(newServer);
-                serverList.setSelectedValue(newServer, true);
-                updateButtonStates();
-            }
+        if (!listModel.isEmpty()) {
+            serverList.setSelectedIndex(0);
+        } else {
+            loadSelectedServerIntoDetails();
         }
     }
 
-    private void editServer(ActionEvent e) {
+    private void addServer() {
+        TomcatInfo info = new TomcatInfo();
+        info.setName(generateServerName());
+        listModel.addElement(info);
+        serverList.setSelectedValue(info, true);
+    }
+
+    private void removeSelectedServer() {
         TomcatInfo selected = serverList.getSelectedValue();
-        if (selected != null) {
-            EditTomcatServerDialog dialog = new EditTomcatServerDialog(project, selected);
-            if (dialog.showAndGet()) {
-                TomcatInfo updated = dialog.getTomcatInfo();
-                if (updated != null) {
-                    // Update the server in place
-                    selected.setName(updated.getName());
-                    selected.setPath(updated.getPath());
-                    selected.setVersion(updated.getVersion());
+        if (selected == null) {
+            return;
+        }
 
-                    // Refresh the list display
-                    int index = listModel.indexOf(selected);
-                    listModel.setElementAt(selected, index);
-                    serverList.repaint();
-                }
-            }
+        int result = Messages.showYesNoDialog(
+                project,
+                "Remove application server '" + selected.getName() + "'?",
+                "Remove Application Server",
+                Messages.getQuestionIcon()
+        );
+        if (result != Messages.YES) {
+            return;
+        }
+
+        int removedIndex = serverList.getSelectedIndex();
+        listModel.removeElement(selected);
+        if (!listModel.isEmpty()) {
+            serverList.setSelectedIndex(Math.min(removedIndex, listModel.size() - 1));
+        } else {
+            loadSelectedServerIntoDetails();
         }
     }
 
-    private void removeServer(ActionEvent e) {
+    private void loadSelectedServerIntoDetails() {
+        updatingDetails = true;
+        try {
+            TomcatInfo selected = serverList.getSelectedValue();
+            boolean enabled = selected != null;
+            setDetailFieldsEnabled(enabled);
+            if (selected == null) {
+                nameField.setText("");
+                homeField.setText("");
+                versionLabel.setText("");
+                baseField.setText("");
+                updateLibrariesTree("");
+                return;
+            }
+
+            nameField.setText(selected.getName());
+            homeField.setText(selected.getPath());
+            versionLabel.setText(selected.getVersion());
+            baseField.setText(selected.getCatalinaBase());
+            updateLibrariesTree(selected.getPath());
+        } finally {
+            updatingDetails = false;
+        }
+    }
+
+    private void updateSelectedServerFromDetails() {
+        if (updatingDetails) {
+            return;
+        }
+
         TomcatInfo selected = serverList.getSelectedValue();
-        if (selected != null) {
-            int result = Messages.showYesNoDialog(
-                    "Remove Tomcat server '" + selected.getName() + "'?",
-                    "Remove Server",
-                    Messages.getQuestionIcon()
-            );
+        if (selected == null) {
+            return;
+        }
 
-            if (result == Messages.YES) {
-                TomcatServerManagerState.getInstance().getTomcatInfos().remove(selected);
-                listModel.removeElement(selected);
-                updateButtonStates();
+        selected.setName(nameField.getText().trim());
+        String home = homeField.getText().trim();
+        selected.setPath(home);
+
+        Optional<TomcatInfo> detected = detectTomcatInfo(home);
+        updatingDetails = true;
+        try {
+            if (detected.isPresent()) {
+                TomcatInfo info = detected.get();
+                selected.setVersion(info.getVersion());
+                if (selected.getName().isEmpty()) {
+                    selected.setName(info.getName());
+                    nameField.setText(selected.getName());
+                }
+                versionLabel.setText(info.getVersion());
+                // Set catalinaBase to home if not already customized
+                if (selected.getCatalinaBase().equals(selected.getPath()) ||
+                        selected.getCatalinaBase().isEmpty()) {
+                    selected.setCatalinaBase(home);
+                    baseField.setText(home);
+                }
+            } else {
+                selected.setVersion("");
+                versionLabel.setText("");
+                if (selected.getCatalinaBase().isEmpty()) {
+                    selected.setCatalinaBase(home);
+                    baseField.setText(home);
+                }
+            }
+        } finally {
+            updatingDetails = false;
+        }
+
+        updateLibrariesTree(home);
+        serverList.repaint();
+    }
+
+    private void setDetailFieldsEnabled(boolean enabled) {
+        nameField.setEnabled(enabled);
+        homeField.setEnabled(enabled);
+        baseField.setEnabled(enabled);
+        librariesTree.setEnabled(enabled);
+    }
+
+    private void updateLibrariesTree(@Nullable String tomcatHome) {
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Classes");
+        if (tomcatHome != null && !tomcatHome.isBlank()) {
+            List<File> allJars = new ArrayList<>();
+            collectJars(new File(tomcatHome, "lib"), allJars);
+            collectJars(new File(tomcatHome, "bin"), allJars);
+            allJars.sort(Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+            for (File jar : allJars) {
+                root.add(new DefaultMutableTreeNode(jar.getAbsolutePath()));
+            }
+        }
+        librariesTree.setModel(new DefaultTreeModel(root));
+        for (int i = 0; i < librariesTree.getRowCount(); i++) {
+            librariesTree.expandRow(i);
+        }
+    }
+
+    private static void collectJars(@NotNull File dir, @NotNull List<File> jars) {
+        File[] files = dir.listFiles(file -> file.isFile() && file.getName().endsWith(".jar"));
+        if (files != null) {
+            java.util.Collections.addAll(jars, files);
+        }
+    }
+
+    @Override
+    protected void doOKAction() {
+        for (int i = 0; i < listModel.size(); i++) {
+            TomcatInfo info = listModel.getElementAt(i);
+            if (info.getName().isBlank()) {
+                Messages.showErrorDialog(project, "Application server name cannot be empty.", "Invalid Configuration");
+                serverList.setSelectedIndex(i);
+                return;
+            }
+            if (info.getPath().isBlank()) {
+                Messages.showErrorDialog(project, "Tomcat Home cannot be empty.", "Invalid Configuration");
+                serverList.setSelectedIndex(i);
+                return;
+            }
+            if (!new File(info.getPath()).exists()) {
+                Messages.showErrorDialog(project, "Tomcat Home does not exist: " + info.getPath(), "Invalid Configuration");
+                serverList.setSelectedIndex(i);
+                return;
+            }
+        }
+
+        // Commit the dialog's local list to persistent state
+        List<TomcatInfo> committed = new ArrayList<>();
+        for (int i = 0; i < listModel.size(); i++) {
+            committed.add(listModel.getElementAt(i));
+        }
+        TomcatServerManagerState.getInstance().setTomcatInfos(committed);
+
+        super.doOKAction();
+    }
+
+    private String generateServerName() {
+        String base = "Tomcat";
+        if (!isNameUsedInList(base)) {
+            return base;
+        }
+
+        int index = 2;
+        while (isNameUsedInList(base + " " + index)) {
+            index++;
+        }
+        return base + " " + index;
+    }
+
+    private boolean isNameUsedInList(@NotNull String name) {
+        for (int i = 0; i < listModel.size(); i++) {
+            if (name.equals(listModel.getElementAt(i).getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Optional<TomcatInfo> detectTomcatInfo(@Nullable String path) {
+        if (path == null || path.isBlank()) {
+            return Optional.empty();
+        }
+
+        return TomcatServerManagerState.tryCreateTomcatInfo(path);
+    }
+
+    // =========================================================================
+    // Custom Renderers
+    // =========================================================================
+
+    private static final class ServerListRenderer extends com.intellij.ui.SimpleListCellRenderer<TomcatInfo> {
+        @Override
+        public void customize(@NotNull JList<? extends TomcatInfo> list, TomcatInfo value, int index,
+                              boolean selected, boolean hasFocus) {
+            if (value != null) {
+                setText(value.getName().isBlank() ? "Unnamed server" : value.getName());
+                setIcon(AllIcons.Nodes.Deploy);
             }
         }
     }
 
-    private void autoDetectServers(ActionEvent e) {
-        AutoDetectDialog dialog = new AutoDetectDialog(project);
-        if (dialog.showAndGet()) {
-            List<TomcatInfo> detected = dialog.getDetectedServers();
-            for (TomcatInfo server : detected) {
-                TomcatServerManagerState.getInstance().getTomcatInfos().add(server);
-                listModel.addElement(server);
-            }
-            updateButtonStates();
-
-            if (!detected.isEmpty()) {
-                Messages.showInfoMessage(
-                        "Detected and added " + detected.size() + " Tomcat server(s)",
-                        "Auto-Detection Complete"
-                );
-            }
-        }
-    }
-
-    private static class TomcatServerRenderer extends DefaultListCellRenderer {
+    private static final class LibraryTreeRenderer extends com.intellij.ui.ColoredTreeCellRenderer {
         @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                      boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-
-            if (value instanceof TomcatInfo) {
-                TomcatInfo server = (TomcatInfo) value;
-                setText("<html><b>" + server.getName() + "</b><br>" +
-                        "<small>" + server.getVersion() + " - " + server.getPath() + "</small></html>");
-            }
-
-            return this;
-        }
-    }
-
-    private static class AddTomcatServerDialog extends DialogWrapper {
-        private final Project project;
-        private JTextField nameField;
-        private JTextField pathField;
-        private JTextField versionField;
-        private TomcatInfo tomcatInfo;
-
-        public AddTomcatServerDialog(@NotNull Project project) {
-            super(project);
-            this.project = project;
-            setTitle("Add Tomcat Server");
-            init();
-        }
-
-        @Override
-        protected @Nullable JComponent createCenterPanel() {
-            JPanel panel = new JPanel(new GridBagLayout());
-            panel.setPreferredSize(new Dimension(450, 200));
-            GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = JBUI.insets(5);
-            gbc.anchor = GridBagConstraints.WEST;
-
-            // Name
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("Name:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            nameField = new JTextField("Tomcat Server");
-            panel.add(nameField, gbc);
-
-            // Path
-            gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("Tomcat Home:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            JPanel pathPanel = new JPanel(new BorderLayout());
-            pathField = new JTextField();
-            JButton browseButton = new JButton("Browse...");
-            browseButton.addActionListener(e -> browseTomcatHome());
-            pathPanel.add(pathField, BorderLayout.CENTER);
-            pathPanel.add(browseButton, BorderLayout.EAST);
-            panel.add(pathPanel, gbc);
-
-            // Version (auto-detected)
-            gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("Version:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            versionField = new JTextField();
-            versionField.setEditable(false);
-            versionField.setBackground(Color.LIGHT_GRAY);
-            panel.add(versionField, gbc);
-
-            return panel;
-        }
-
-        private void browseTomcatHome() {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Select Tomcat Installation Directory");
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            chooser.setMultiSelectionEnabled(false);
-
-            if (chooser.showOpenDialog(getContentPane()) == JFileChooser.APPROVE_OPTION) {
-                File file = chooser.getSelectedFile();
-                if (file != null) {
-                    pathField.setText(file.getAbsolutePath());
-                    detectVersion(file.getAbsolutePath());
-                }
-            }
-        }
-
-        private void detectVersion(String path) {
-            if (versionField == null) {
-                return;
-            }
-            try {
-                Optional<TomcatInfo> detected = TomcatServerManagerState.createTomcatInfo(path);
-                if (detected.isPresent()) {
-                    versionField.setText(detected.get().getVersion());
-                    if (nameField.getText().equals("Tomcat Server")) {
-                        nameField.setText(detected.get().getName());
-                    }
-                } else {
-                    versionField.setText("Unknown - Invalid Tomcat installation");
-                }
-            } catch (Exception e) {
-                versionField.setText("Error detecting version");
-            }
-        }
-
-        @Override
-        protected void doOKAction() {
-            String name = nameField.getText().trim();
-            String path = pathField.getText().trim();
-
-            if (name.isEmpty() || path.isEmpty()) {
-                Messages.showErrorDialog("Please fill in all required fields", "Invalid Input");
-                return;
-            }
-
-            if (!new File(path).exists()) {
-                Messages.showErrorDialog("Tomcat installation directory does not exist", "Invalid Path");
-                return;
-            }
-
-            try {
-                Optional<TomcatInfo> created = TomcatServerManagerState.createTomcatInfo(path, serverInfo -> name);
-                if (created.isPresent()) {
-                    tomcatInfo = created.get();
-                    super.doOKAction();
-                } else {
-                    Messages.showErrorDialog("Invalid Tomcat installation directory", "Invalid Installation");
-                }
-            } catch (Exception e) {
-                Messages.showErrorDialog("Failed to create Tomcat server: " + e.getMessage(), "Error");
-            }
-        }
-
-        public TomcatInfo getTomcatInfo() {
-            return tomcatInfo;
-        }
-    }
-
-    private static class EditTomcatServerDialog extends DialogWrapper {
-        private final Project project;
-        private final TomcatInfo originalServer;
-        private JTextField nameField;
-        private JTextField pathField;
-        private JTextField versionField;
-        private TomcatInfo updatedInfo;
-
-        public EditTomcatServerDialog(@NotNull Project project, @NotNull TomcatInfo server) {
-            super(project);
-            this.project = project;
-            this.originalServer = server;
-            setTitle("Edit Tomcat Server");
-            init();
-        }
-
-        @Override
-        protected @Nullable JComponent createCenterPanel() {
-            JPanel panel = new JPanel(new GridBagLayout());
-            panel.setPreferredSize(new Dimension(450, 200));
-            GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = JBUI.insets(5);
-            gbc.anchor = GridBagConstraints.WEST;
-
-            // Name
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("Name:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            nameField = new JTextField(originalServer.getName());
-            panel.add(nameField, gbc);
-
-            // Path
-            gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("Tomcat Home:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            JPanel pathPanel = new JPanel(new BorderLayout());
-            pathField = new JTextField(originalServer.getPath());
-            JButton browseButton = new JButton("Browse...");
-            browseButton.addActionListener(e -> browseTomcatHome());
-            pathPanel.add(pathField, BorderLayout.CENTER);
-            pathPanel.add(browseButton, BorderLayout.EAST);
-            panel.add(pathPanel, gbc);
-
-            // Version
-            gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("Version:"), gbc);
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            versionField = new JTextField(originalServer.getVersion());
-            versionField.setEditable(false);
-            versionField.setBackground(Color.LIGHT_GRAY);
-            panel.add(versionField, gbc);
-
-            return panel;
-        }
-
-        private void browseTomcatHome() {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Select Tomcat Installation Directory");
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            chooser.setMultiSelectionEnabled(false);
-
-            if (chooser.showOpenDialog(getContentPane()) == JFileChooser.APPROVE_OPTION) {
-                File file = chooser.getSelectedFile();
-                if (file != null) {
-                    pathField.setText(file.getAbsolutePath());
-                    detectVersion(file.getAbsolutePath());
-                }
-            }
-        }
-
-        private void detectVersion(String path) {
-            try {
-                Optional<TomcatInfo> detected = TomcatServerManagerState.createTomcatInfo(path);
-                if (detected.isPresent()) {
-                    versionField.setText(detected.get().getVersion());
-                } else {
-                    versionField.setText("Unknown - Invalid Tomcat installation");
-                }
-            } catch (Exception e) {
-                versionField.setText("Error detecting version");
-            }
-        }
-
-        @Override
-        protected void doOKAction() {
-            String name = nameField.getText().trim();
-            String path = pathField.getText().trim();
-
-            if (name.isEmpty() || path.isEmpty()) {
-                Messages.showErrorDialog("Please fill in all required fields", "Invalid Input");
-                return;
-            }
-
-            if (!new File(path).exists()) {
-                Messages.showErrorDialog("Tomcat installation directory does not exist", "Invalid Path");
-                return;
-            }
-
-            try {
-                Optional<TomcatInfo> created = TomcatServerManagerState.createTomcatInfo(path, serverInfo -> name);
-                if (created.isPresent()) {
-                    updatedInfo = created.get();
-                    super.doOKAction();
-                } else {
-                    Messages.showErrorDialog("Invalid Tomcat installation directory", "Invalid Installation");
-                }
-            } catch (Exception e) {
-                Messages.showErrorDialog("Failed to update Tomcat server: " + e.getMessage(), "Error");
-            }
-        }
-
-        public TomcatInfo getTomcatInfo() {
-            return updatedInfo;
-        }
-    }
-
-    private static class AutoDetectDialog extends DialogWrapper {
-        private JBList<TomcatInfo> detectedList;
-        private DefaultListModel<TomcatInfo> detectedModel;
-        private JButton scanButton;
-
-        public AutoDetectDialog(@NotNull Project project) {
-            super(project);
-            setTitle("Auto-Detect Tomcat Servers");
-            init();
-        }
-
-        @Override
-        protected @Nullable JComponent createCenterPanel() {
-            JPanel panel = new JPanel(new BorderLayout());
-            panel.setPreferredSize(new Dimension(500, 300));
-
-            // Instructions
-            JLabel instructions = new JLabel("<html>Scanning common Tomcat installation locations...<br>" +
-                    "Select servers to add to your configuration:</html>");
-            instructions.setBorder(JBUI.Borders.empty(10));
-            panel.add(instructions, BorderLayout.NORTH);
-
-            // Detected servers list
-            detectedModel = new DefaultListModel<>();
-            detectedList = new JBList<>(detectedModel);
-            detectedList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-            detectedList.setCellRenderer(new TomcatServerRenderer());
-            panel.add(new JBScrollPane(detectedList), BorderLayout.CENTER);
-
-            // Scan button
-            JPanel buttonPanel = new JPanel(new FlowLayout());
-            scanButton = new JButton("Scan Again");
-            scanButton.addActionListener(e -> scanForTomcatServers());
-            buttonPanel.add(scanButton);
-            panel.add(buttonPanel, BorderLayout.SOUTH);
-
-            // Initial scan
-            scanForTomcatServers();
-
-            return panel;
-        }
-
-        private void scanForTomcatServers() {
-            detectedModel.clear();
-
-            // Common Tomcat installation paths
-            String[] commonPaths = {
-                    "/usr/local/tomcat",
-                    "/opt/tomcat",
-                    "/usr/share/tomcat",
-                    System.getProperty("user.home") + "/tomcat",
-                    System.getProperty("user.home") + "/apache-tomcat",
-                    "C:\\Program Files\\Apache Software Foundation\\Tomcat",
-                    "C:\\tomcat",
-                    "/Applications/tomcat"
-            };
-
-            for (String path : commonPaths) {
-                File tomcatDir = new File(path);
-                if (tomcatDir.exists() && tomcatDir.isDirectory()) {
-                    try {
-                        Optional<TomcatInfo> detected = TomcatServerManagerState.createTomcatInfo(path);
-                        if (detected.isPresent()) {
-                            detectedModel.addElement(detected.get());
-                        }
-                    } catch (Exception e) {
-                        // Ignore invalid installations
+        public void customizeCellRenderer(@NotNull JTree tree, Object value, boolean selected,
+                                          boolean expanded, boolean leaf, int row, boolean hasFocus) {
+            if (value instanceof DefaultMutableTreeNode node) {
+                Object userObject = node.getUserObject();
+                if (userObject instanceof String str) {
+                    if (node.isRoot()) {
+                        setIcon(AllIcons.Nodes.PpLibFolder);
+                        append("Classes");
+                    } else {
+                        setIcon(AllIcons.FileTypes.Archive);
+                        append(new File(str).getName());
                     }
                 }
             }
-
-            // Also scan subdirectories of common parent directories
-            String[] parentDirs = {
-                    "/opt",
-                    System.getProperty("user.home"),
-                    "C:\\Program Files"
-            };
-
-            for (String parentDir : parentDirs) {
-                scanParentDirectory(parentDir);
-            }
-
-            if (detectedModel.isEmpty()) {
-                TomcatInfo noServers = new TomcatInfo();
-                noServers.setName("No Tomcat installations found");
-                noServers.setVersion("Try manual configuration");
-                noServers.setPath("");
-                detectedModel.addElement(noServers);
-            }
-        }
-
-        private void scanParentDirectory(String parentPath) {
-            File parentDir = new File(parentPath);
-            if (parentDir.exists() && parentDir.isDirectory()) {
-                File[] children = parentDir.listFiles();
-                if (children != null) {
-                    for (File child : children) {
-                        if (child.isDirectory() && child.getName().toLowerCase().contains("tomcat")) {
-                            try {
-                                Optional<TomcatInfo> detected = TomcatServerManagerState.createTomcatInfo(child.getAbsolutePath());
-                                if (detected.isPresent()) {
-                                    detectedModel.addElement(detected.get());
-                                }
-                            } catch (Exception e) {
-                                // Ignore invalid installations
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        public List<TomcatInfo> getDetectedServers() {
-            List<TomcatInfo> selected = detectedList.getSelectedValuesList();
-            return selected.stream()
-                    .filter(server -> !server.getName().equals("No Tomcat installations found"))
-                    .collect(Collectors.toList());
         }
     }
 }

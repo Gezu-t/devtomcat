@@ -6,6 +6,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -23,8 +25,9 @@ public class UpdateActionsSection implements ConfigurationSection {
     private static final Logger LOG = Logger.getInstance(UpdateActionsSection.class);
 
     private ComboBox<String> updateActionCombo;
-    private JCheckBox showDialogCheckBox;
+    private JBCheckBox showDialogCheckBox;
     private ComboBox<String> frameDeactivationCombo;
+    private JBCheckBox showFrameDialogCheckBox;
     private JPanel panel;
 
     @Override
@@ -32,43 +35,49 @@ public class UpdateActionsSection implements ConfigurationSection {
     public JPanel createPanel() {
         if (panel == null) {
             panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(2, 0, 2, 0));
+            panel.setBorder(JBUI.Borders.empty(0));
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            gbc.insets = JBUI.insets(2, 0, 2, 4);
 
             gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("On 'Update' action:"), gbc);
+            panel.add(new JBLabel("On 'Update' action:"), gbc);
 
             gbc.gridx = 1;
-            gbc.insets = JBUI.insets(4, 4, 4, 8);
+            gbc.weightx = 1.0;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            gbc.insets = JBUI.insets(2, 4, 2, 8);
             updateActionCombo = new ComboBox<>();
-            updateActionCombo.setPreferredSize(new Dimension(180, 25));
             panel.add(updateActionCombo, gbc);
 
             gbc.gridx = 2;
-            gbc.insets = JBUI.insets(4, 4, 4, 4);
-            showDialogCheckBox = new JCheckBox("Show dialog");
+            gbc.weightx = 0;
+            gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(2, 4, 2, 4);
+            showDialogCheckBox = new JBCheckBox("Show dialog");
             showDialogCheckBox.setSelected(true);
             panel.add(showDialogCheckBox, gbc);
-
-            // Spacer column pushes everything to the left
-            gbc.gridx = 3;
-            gbc.weightx = 1.0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            panel.add(Box.createHorizontalGlue(), gbc);
 
             gbc.gridx = 0; gbc.gridy = 1;
             gbc.weightx = 0;
             gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(4, 0, 4, 4);
-            panel.add(new JLabel("On frame deactivation:"), gbc);
+            gbc.insets = JBUI.insets(2, 0, 2, 4);
+            panel.add(new JBLabel("On frame deactivation:"), gbc);
 
             gbc.gridx = 1;
-            gbc.insets = JBUI.insets(4, 4, 4, 8);
+            gbc.weightx = 1.0;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            gbc.insets = JBUI.insets(2, 4, 2, 8);
             frameDeactivationCombo = new ComboBox<>();
-            frameDeactivationCombo.setPreferredSize(new Dimension(180, 25));
             panel.add(frameDeactivationCombo, gbc);
+
+            gbc.gridx = 2;
+            gbc.weightx = 0;
+            gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(2, 4, 2, 4);
+            showFrameDialogCheckBox = new JBCheckBox("Show dialog");
+            showFrameDialogCheckBox.setSelected(false);
+            panel.add(showFrameDialogCheckBox, gbc);
         }
         return panel;
     }
@@ -80,7 +89,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         for (String option : options) {
             updateActionCombo.addItem(option);
         }
-        updateActionCombo.setSelectedItem(TomcatConstants.ACTION_RESTART_SERVER);
+        updateActionCombo.setSelectedItem(TomcatConstants.ACTION_UPDATE_CLASSES_AND_RESOURCES);
         showDialogCheckBox.setSelected(true);
 
         frameDeactivationCombo.removeAllItems();
@@ -89,6 +98,7 @@ public class UpdateActionsSection implements ConfigurationSection {
             frameDeactivationCombo.addItem(option);
         }
         frameDeactivationCombo.setSelectedItem(TomcatConstants.ACTION_DO_NOTHING);
+        showFrameDialogCheckBox.setSelected(false);
     }
 
     @Override
@@ -97,6 +107,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         updateActionCombo.setSelectedItem(mapInternalToDisplay(uc.getOnUpdate()));
         showDialogCheckBox.setSelected(uc.isShowUpdateDialog());
         frameDeactivationCombo.setSelectedItem(mapInternalToDisplay(uc.getOnFrameDeactivation()));
+        showFrameDialogCheckBox.setSelected(uc.isShowFrameDeactivationDialog());
     }
 
     @Override
@@ -106,10 +117,11 @@ public class UpdateActionsSection implements ConfigurationSection {
         uc.setShowUpdateDialog(isShowDialogEnabled());
         String frameAction = (String) frameDeactivationCombo.getSelectedItem();
         uc.setOnFrameDeactivation(mapDisplayToInternal(frameAction));
+        uc.setShowFrameDeactivationDialog(showFrameDialogCheckBox.isSelected());
     }
 
     @Override
-    public boolean isValid() {
+    public boolean isConfigurationValid() {
         return true;
     }
 
@@ -124,7 +136,8 @@ public class UpdateActionsSection implements ConfigurationSection {
         if (!Objects.equals(mapInternalToDisplay(uc.getOnUpdate()), getSelectedAction())) return true;
         if (uc.isShowUpdateDialog() != isShowDialogEnabled()) return true;
         String frameAction = (String) frameDeactivationCombo.getSelectedItem();
-        return !Objects.equals(mapInternalToDisplay(uc.getOnFrameDeactivation()), frameAction);
+        if (!Objects.equals(mapInternalToDisplay(uc.getOnFrameDeactivation()), frameAction)) return true;
+        return uc.isShowFrameDeactivationDialog() != showFrameDialogCheckBox.isSelected();
     }
 
     @Override

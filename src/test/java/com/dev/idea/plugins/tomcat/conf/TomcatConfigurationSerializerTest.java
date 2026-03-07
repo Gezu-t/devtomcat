@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import org.jdom.Element;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
@@ -205,6 +206,105 @@ class TomcatConfigurationSerializerTest {
         assertEquals(original.getPortConfig(), restored.getPortConfig());
         assertEquals(original.getContextPath(), restored.getContextPath());
         assertEquals(original.getServerMode(), restored.getServerMode());
+    }
+
+    @Test
+    @DisplayName("round-trip preserves per-runner settings (startup/shutdown scripts, env vars)")
+    void roundTripRunnerSettings() {
+        TomcatConfigurationData original = new TomcatConfigurationData();
+
+        RunnerSettings runSettings = original.getRunnerSettings("Run");
+        runSettings.setUseDefaultStartup(false);
+        runSettings.setStartupScript("/opt/scripts/start.sh");
+        runSettings.setUseDefaultShutdown(false);
+        runSettings.setShutdownScript("/opt/scripts/stop.sh");
+        runSettings.setPassParentEnvs(false);
+        runSettings.setEnvironmentVariables(Map.of("CATALINA_OPTS", "-Xmx2g"));
+
+        RunnerSettings debugSettings = original.getRunnerSettings("Debug");
+        debugSettings.setUseDefaultStartup(true);
+        debugSettings.setStartupScript("");
+        debugSettings.setPassParentEnvs(true);
+        debugSettings.setEnvironmentVariables(Map.of("DEBUG", "true"));
+
+        Element element = new Element("configuration");
+        TomcatConfigurationSerializer.write(original, element);
+
+        TomcatConfigurationData restored = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(restored, element);
+
+        // Verify Run profile
+        RunnerSettings restoredRun = restored.getRunnerSettings("Run");
+        assertFalse(restoredRun.isUseDefaultStartup());
+        assertEquals("/opt/scripts/start.sh", restoredRun.getStartupScript());
+        assertFalse(restoredRun.isUseDefaultShutdown());
+        assertEquals("/opt/scripts/stop.sh", restoredRun.getShutdownScript());
+        assertFalse(restoredRun.isPassParentEnvs());
+        assertEquals("-Xmx2g", restoredRun.getEnvironmentVariables().get("CATALINA_OPTS"));
+
+        // Verify Debug profile
+        RunnerSettings restoredDebug = restored.getRunnerSettings("Debug");
+        assertTrue(restoredDebug.isUseDefaultStartup());
+        assertTrue(restoredDebug.isPassParentEnvs());
+        assertEquals("true", restoredDebug.getEnvironmentVariables().get("DEBUG"));
+    }
+
+    @Test
+    @DisplayName("backward compat: old JS debugger attribute name is read correctly")
+    void backwardCompatJsDebugger() {
+        Element element = new Element("configuration");
+        // Old attribute name (pre-rename)
+        element.setAttribute("withJavaScriptDebugger", "true");
+        element.setAttribute("afterLaunchEnabled", "true");
+
+        TomcatConfigurationData data = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(data, element);
+
+        assertTrue(data.getBrowserConfig().isWithJsDebugger());
+    }
+
+    @Test
+    @DisplayName("backward compat: old updateAction attribute maps to onUpdate")
+    void backwardCompatUpdateAction() {
+        Element element = new Element("configuration");
+        element.setAttribute("updateAction", "redeploy");
+
+        TomcatConfigurationData data = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(data, element);
+
+        assertEquals("redeploy", data.getUpdateConfig().getOnUpdate());
+    }
+
+    @Test
+    @DisplayName("write then read with null TomcatInfo does not crash")
+    void nullTomcatInfoRoundTrip() {
+        TomcatConfigurationData original = new TomcatConfigurationData();
+        original.setTomcatInfo(null);
+
+        Element element = new Element("configuration");
+        TomcatConfigurationSerializer.write(original, element);
+
+        TomcatConfigurationData restored = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(restored, element);
+
+        assertNull(restored.getTomcatInfo());
+    }
+
+    @Test
+    @DisplayName("write with special characters in context path survives round-trip")
+    void specialCharsInContextPath() {
+        TomcatConfigurationData original = new TomcatConfigurationData();
+        original.setContextPath("/my-app_v2.0");
+        original.getVmConfig().setVmOptions("-Dfoo=\"bar & baz\"");
+
+        Element element = new Element("configuration");
+        TomcatConfigurationSerializer.write(original, element);
+
+        TomcatConfigurationData restored = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(restored, element);
+
+        assertEquals("/my-app_v2.0", restored.getContextPath());
+        assertEquals("-Dfoo=\"bar & baz\"", restored.getVmConfig().getVmOptions());
     }
 
     private TomcatConfigurationData createFullConfig() {

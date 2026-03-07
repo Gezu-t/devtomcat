@@ -48,7 +48,9 @@ public interface ConfigurationSection {
 
     void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException;
 
-    boolean isValid();
+    default boolean isConfigurationValid() {
+        return validateSettings().isEmpty();
+    }
 
     default boolean shouldFillVertically() {
         return false;

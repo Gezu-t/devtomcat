@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.*;
-import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatCommandLineState;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
@@ -19,18 +19,29 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.RunManagerEx;
+import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
+import com.intellij.packaging.artifacts.ArtifactType;
+import com.intellij.packaging.artifacts.ModifiableArtifactModel;
+import com.intellij.packaging.elements.CompositePackagingElement;
+import com.intellij.packaging.elements.PackagingElementFactory;
+import com.intellij.packaging.impl.artifacts.PlainArtifactType;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
-import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTaskProvider;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Tomcat run configuration. Delegates init/serialize/validate/clone to helper classes.
@@ -41,14 +52,12 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     private static final Logger LOG = Logger.getInstance(TomcatRunConfiguration.class);
 
     private final TomcatConfigurationData configData = new TomcatConfigurationData();
-    private final AtomicBoolean isUpdating = new AtomicBoolean(false);
-    private List<String> portValidationWarnings = new ArrayList<>();
-
     public TomcatRunConfiguration(@NotNull Project project, @NotNull ConfigurationFactory factory, String name) {
         super(project, factory, name);
         try {
             TomcatConfigurationInitializer.initialize(this);
             syncTomcatLogFiles();
+            syncPlatformFlags();
         } catch (Exception e) {
             LOG.error("Failed to initialize configuration: " + name, e);
         }
@@ -102,18 +111,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         Objects.requireNonNull(element, "Element cannot be null");
         try {
             super.writeExternal(element);
-            if (!isUpdating.getAndSet(true)) {
-                try {
-                    // Ensure the Before Launch tasks list contains the deployed artifacts right before saving
-                    syncBeforeLaunchWithDeployments();
-                    TomcatConfigurationSerializer.write(this, element);
-                    LOG.debug("Wrote configuration: " + getName());
-                } finally {
-                    isUpdating.set(false);
-                }
-            } else {
-                LOG.warn("Skipped writing configuration '" + getName() + "' — concurrent update in progress");
-            }
+            TomcatConfigurationSerializer.write(this, element);
+            LOG.debug("Wrote configuration: " + getName());
         } catch (WriteExternalException e) {
             LOG.error("Failed to write configuration: " + getName(), e);
             throw e;
@@ -131,6 +130,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             TomcatConfigurationSerializer.read(this, element);
             TomcatConfigurationInitializer.refresh(this);
             syncTomcatLogFiles();
+            syncPlatformFlags();
             LOG.debug("Read configuration: " + getName());
         } catch (InvalidDataException e) {
             LOG.error("Failed to read configuration: " + getName(), e);
@@ -150,15 +150,12 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         return configData;
     }
 
-    @Deprecated
     private String docBase = "";
 
-    @Deprecated
     public String getDocBase() {
         return docBase;
     }
 
-    @Deprecated
     public void setDocBase(String docBase) {
         this.docBase = docBase;
     }
@@ -167,128 +164,36 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // Port configuration accessors
     // =====================================================================
 
-    public void setPortValidationWarnings(@Nullable List<String> warnings) {
-        this.portValidationWarnings = warnings != null ? warnings : new ArrayList<>();
+    @Nullable public Integer getHttpPort()     { return positiveOrNull(configData.getPortConfig().getHttp()); }
+    @Nullable public Integer getShutdownPort() { return positiveOrNull(configData.getPortConfig().getShutdown()); }
+
+    @Nullable public Integer getHttpsPort() {
+        PortConfig pc = configData.getPortConfig();
+        return pc.isHttpsEnabled() ? positiveOrNull(pc.getHttps()) : null;
     }
 
-    @NotNull
-    public List<String> getPortValidationWarnings() {
-        return portValidationWarnings;
+    @Nullable public Integer getJmxPort() {
+        PortConfig pc = configData.getPortConfig();
+        return pc.isJmxEnabled() ? positiveOrNull(pc.getJmx()) : null;
     }
 
-    @Nullable
-    public Integer getHttpPort() {
-        try {
-            PortConfig pc = configData.getPortConfig();
-            int port = pc.getHttp();
-            if (port > 0) return port;
-            return null;
-        } catch (Exception e) {
-            LOG.warn("Error getting HTTP port", e);
-            return null;
-        }
+    @Nullable public Integer getAjpPort() {
+        PortConfig pc = configData.getPortConfig();
+        return pc.isAjpEnabled() ? positiveOrNull(pc.getAjp()) : null;
     }
 
-    @Nullable
-    public Integer getHttpsPort() {
-        try {
-            PortConfig pc = configData.getPortConfig();
-            if (pc.isHttpsEnabled()) {
-                int port = pc.getHttps();
-                if (port > 0) return port;
-            }
-            return null;
-        } catch (Exception e) {
-            LOG.warn("Error getting HTTPS port", e);
-            return null;
-        }
-    }
+    public void setHttpPort(@Nullable Integer port)     { if (port != null && port > 0) configData.getPortConfig().setHttp(port); }
+    public void setHttpsPort(@Nullable Integer port)    { if (port != null && port > 0) configData.getPortConfig().setHttps(port); }
+    public void setShutdownPort(@Nullable Integer port) { if (port != null && port > 0) configData.getPortConfig().setShutdown(port); }
+    public void setJmxPort(@Nullable Integer port)      { if (port != null && port > 0) configData.getPortConfig().setJmx(port); }
+    public void setAjpPort(@Nullable Integer port)      { if (port != null && port > 0) configData.getPortConfig().setAjp(port); }
+
+    public boolean isHttpsEnabled() { return configData.getPortConfig().isHttpsEnabled(); }
+    public boolean isJmxEnabled()   { return configData.getPortConfig().isJmxEnabled(); }
+    public boolean isAjpEnabled()   { return configData.getPortConfig().isAjpEnabled(); }
 
     @Nullable
-    public Integer getShutdownPort() {
-        try {
-            PortConfig pc = configData.getPortConfig();
-            int port = pc.getShutdown();
-            if (port > 0) return port;
-            return null;
-        } catch (Exception e) {
-            LOG.warn("Error getting shutdown port", e);
-            return null;
-        }
-    }
-
-    @Nullable
-    public Integer getJmxPort() {
-        try {
-            PortConfig pc = configData.getPortConfig();
-            if (pc.isJmxEnabled()) {
-                int port = pc.getJmx();
-                if (port > 0) return port;
-            }
-            return null;
-        } catch (Exception e) {
-            LOG.warn("Error getting JMX port", e);
-            return null;
-        }
-    }
-
-    public void setHttpPort(@Nullable Integer port) {
-        try {
-            if (port != null && port > 0) {
-                configData.getPortConfig().setHttp(port);
-            }
-        } catch (Exception e) {
-            LOG.warn("Error setting HTTP port", e);
-        }
-    }
-
-    public void setHttpsPort(@Nullable Integer port) {
-        try {
-            if (port != null && port > 0) {
-                configData.getPortConfig().setHttps(port);
-            }
-        } catch (Exception e) {
-            LOG.warn("Error setting HTTPS port", e);
-        }
-    }
-
-    public void setShutdownPort(@Nullable Integer port) {
-        try {
-            if (port != null && port > 0) {
-                configData.getPortConfig().setShutdown(port);
-            }
-        } catch (Exception e) {
-            LOG.warn("Error setting shutdown port", e);
-        }
-    }
-
-    public void setJmxPort(@Nullable Integer port) {
-        try {
-            if (port != null && port > 0) {
-                configData.getPortConfig().setJmx(port);
-            }
-        } catch (Exception e) {
-            LOG.warn("Error setting JMX port", e);
-        }
-    }
-
-    public boolean isHttpsEnabled() {
-        try {
-            return configData.getPortConfig().isHttpsEnabled();
-        } catch (Exception e) {
-            LOG.warn("Error checking HTTPS enabled", e);
-            return false;
-        }
-    }
-
-    public boolean isJmxEnabled() {
-        try {
-            return configData.getPortConfig().isJmxEnabled();
-        } catch (Exception e) {
-            LOG.warn("Error checking JMX enabled", e);
-            return false;
-        }
-    }
+    private static Integer positiveOrNull(int port) { return port > 0 ? port : null; }
 
     // =====================================================================
     // Server & context accessors
@@ -317,154 +222,130 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // =====================================================================
 
     @NotNull
-    public String getVmOptions() {
-        try {
-            return StringUtil.notNullize(configData.getVmConfig().getVmOptions());
-        } catch (Exception e) {
-            LOG.warn("Error getting VM options", e);
-            return "";
-        }
-    }
+    public String getVmOptions() { return StringUtil.notNullize(configData.getVmConfig().getVmOptions()); }
 
-    public void setVmOptions(@Nullable String vmOptions) {
-        try {
-            configData.getVmConfig().setVmOptions(vmOptions);
-        } catch (Exception e) {
-            LOG.warn("Error setting VM options", e);
-        }
-    }
+    public void setVmOptions(@Nullable String vmOptions) { configData.getVmConfig().setVmOptions(vmOptions); }
 
     @NotNull
     public java.util.Map<String, String> getEnvironmentVariables() {
-        try {
-            // Deprecated global fetch: default to the 'Run' profile for backwards compatibility
-            // if we are simply reading the configuration globally
-            java.util.Map<String, String> env = configData.getRunnerSettings("Run").getEnvironmentVariables();
-            return env != null ? env : new java.util.HashMap<>();
-        } catch (Exception e) {
-            LOG.warn("Error getting environment variables", e);
-            return new java.util.HashMap<>();
-        }
+        return configData.getRunnerSettings(TomcatConstants.RUN_MODE).getEnvironmentVariables();
     }
 
     public void setEnvironmentVariables(@NotNull java.util.Map<String, String> envVars) {
-        try {
-            configData.getRunnerSettings("Run").setEnvironmentVariables(envVars);
-        } catch (Exception e) {
-            LOG.warn("Error setting environment variables", e);
-        }
+        configData.getRunnerSettings(TomcatConstants.RUN_MODE).setEnvironmentVariables(envVars);
     }
 
-    public boolean isPassParentEnvs() {
-        try {
-            return configData.getRunnerSettings("Run").isPassParentEnvs();
-        } catch (Exception e) {
-            LOG.warn("Error checking pass parent envs", e);
-            return true;
-        }
-    }
+    public boolean isPassParentEnvs() { return configData.getRunnerSettings(TomcatConstants.RUN_MODE).isPassParentEnvs(); }
 
     public void setPassParentEnvs(boolean passParentEnvs) {
-        try {
-            configData.getRunnerSettings("Run").setPassParentEnvs(passParentEnvs);
-        } catch (Exception e) {
-            LOG.warn("Error setting pass parent envs", e);
-        }
+        configData.getRunnerSettings(TomcatConstants.RUN_MODE).setPassParentEnvs(passParentEnvs);
     }
 
     // =====================================================================
     // Deployment accessors
     // =====================================================================
 
-    public boolean isHotDeploymentEnabled() {
-        try {
-            return configData.getDeploymentConfig().isHotDeploymentEnabled();
-        } catch (Exception e) {
-            LOG.warn("Error checking hot deployment", e);
-            return false;
-        }
-    }
-
-    public void setHotDeploymentEnabled(boolean enabled) {
-        try {
-            configData.getDeploymentConfig().setHotDeploymentEnabled(enabled);
-        } catch (Exception e) {
-            LOG.warn("Error setting hot deployment", e);
-        }
-    }
-
-    public boolean isPreserveSessions() {
-        try {
-            return configData.getDeploymentConfig().isPreserveSessions();
-        } catch (Exception e) {
-            LOG.warn("Error checking preserve sessions", e);
-            return false;
-        }
-    }
-
-    public void setPreserveSessions(boolean preserve) {
-        try {
-            configData.getDeploymentConfig().setPreserveSessions(preserve);
-        } catch (Exception e) {
-            LOG.warn("Error setting preserve sessions", e);
-        }
-    }
+    public boolean isHotDeploymentEnabled() { return configData.getDeploymentConfig().isHotDeploymentEnabled(); }
+    public void setHotDeploymentEnabled(boolean enabled) { configData.getDeploymentConfig().setHotDeploymentEnabled(enabled); }
+    public boolean isPreserveSessions()     { return configData.getDeploymentConfig().isPreserveSessions(); }
+    public void setPreserveSessions(boolean preserve)    { configData.getDeploymentConfig().setPreserveSessions(preserve); }
 
     /**
      * Synchronizes "Build Artifact" Before Launch tasks with the current deployment artifacts.
      * When an IntelliJ artifact is added to the Deployment tab, this ensures a corresponding
      * "Build Artifact" task appears in Before Launch. When removed, the task is cleaned up.
+     *
+     * <p>Also ensures a default "Build" (Make) task is present so the project
+     * is compiled before launch, matching IntelliJ Ultimate's Tomcat behaviour.</p>
+     *
+     * <p><b>Important:</b> Call this only from {@code resetEditorFrom()} —
+     * NOT from {@code applyEditorTo()} (panel's doApply overwrites) or
+     * {@code writeExternal()} (serialization should be read-only).</p>
      */
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public void syncBeforeLaunchWithDeployments() {
         try {
             Project project = getProject();
             RunManagerEx runManager = RunManagerEx.getInstanceEx(project);
 
+            // Get current tasks from RunManager (this is what BeforeRunStepsPanel reads)
+            List<BeforeRunTask> currentTasks = new ArrayList<>(runManager.getBeforeRunTasks(this));
+
+            // 1. Ensure a "Build" (Make) task exists — standard for all Java run configs
+            boolean hasMake = currentTasks.stream()
+                    .anyMatch(t -> t instanceof CompileStepBeforeRun.MakeBeforeRunTask);
+            if (!hasMake) {
+                CompileStepBeforeRun.MakeBeforeRunTask makeTask =
+                        new CompileStepBeforeRun.MakeBeforeRunTask();
+                makeTask.setEnabled(true);
+                currentTasks.add(0, makeTask);
+                LOG.info("DevTomcat: Added default Build (Make) task to Before Launch");
+            }
+
+            // 2. Sync Build Artifact tasks with deployment artifacts
+            currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
+
             ArtifactManager artifactManager;
             try {
                 artifactManager = ArtifactManager.getInstance(project);
             } catch (Exception e) {
-                LOG.debug("ArtifactManager not available, skipping Before Launch sync");
+                LOG.info("DevTomcat: ArtifactManager not available, skipping artifact sync");
+                runManager.setBeforeRunTasks(this, currentTasks);
                 return;
             }
 
-            // Get the current Before Launch tasks (raw type from IntelliJ API)
-            @SuppressWarnings("rawtypes")
-            List<BeforeRunTask> currentTasks = new ArrayList<>(runManager.getBeforeRunTasks(this));
+            Artifact[] allArtifacts = artifactManager.getArtifacts();
+            LOG.info("DevTomcat: IntelliJ ArtifactManager has " + allArtifacts.length + " artifacts: " +
+                    java.util.Arrays.stream(allArtifacts).map(Artifact::getName)
+                            .collect(java.util.stream.Collectors.joining(", ")));
 
-            // Remove all existing BuildArtifactsBeforeRunTask entries (we'll re-add the needed ones)
-            currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
+            List<DeploymentArtifact> deploymentArtifacts = configData.getDeploymentConfig().getDeployedArtifacts();
+            LOG.info("DevTomcat: Deployment config has " +
+                    (deploymentArtifacts != null ? deploymentArtifacts.size() : 0) + " artifacts" +
+                    (deploymentArtifacts != null ? ": " + deploymentArtifacts.stream()
+                            .map(DeploymentArtifact::getName)
+                            .collect(java.util.stream.Collectors.joining(", ")) : ""));
 
-            // For each deployment artifact, find the matching IntelliJ artifact and add a Build task
-            List<DeploymentArtifact> deploymentArtifacts = configData.getDeploymentConfig().getArtifacts();
-            if (deploymentArtifacts != null) {
+            if (deploymentArtifacts != null && !deploymentArtifacts.isEmpty()) {
+                // Consolidate all deployment artifacts into a single BuildArtifactsBeforeRunTask
+                // so the Before Launch list shows "Build N artifacts" instead of separate entries
+                BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
                 for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
                     Artifact matchedArtifact = findMatchingArtifact(artifactManager, deploymentArtifact);
-                    if (matchedArtifact != null) {
-                        BuildArtifactsBeforeRunTaskProvider provider =
-                                new BuildArtifactsBeforeRunTaskProvider(project);
-                        BuildArtifactsBeforeRunTask buildTask = provider.createTask(this);
-                        if (buildTask != null) {
-                            buildTask.addArtifact(matchedArtifact);
-                            buildTask.setEnabled(true);
-                            currentTasks.add(buildTask);
-                            LOG.debug("Added Build Artifact task for: " + matchedArtifact.getName());
-                        }
+
+                    // If no match, auto-create an IntelliJ artifact for this deployment
+                    if (matchedArtifact == null) {
+                        matchedArtifact = autoCreateArtifactForDeployment(artifactManager, deploymentArtifact);
                     }
+
+                    if (matchedArtifact != null) {
+                        buildTask.addArtifact(matchedArtifact);
+                        LOG.info("DevTomcat: Added artifact to Build task: " + matchedArtifact.getName());
+                    } else {
+                        LOG.warn("DevTomcat: No matching IntelliJ artifact for deployment '" +
+                                deploymentArtifact.getName() + "' and could not auto-create one");
+                    }
+                }
+                if (!buildTask.getArtifactPointers().isEmpty()) {
+                    buildTask.setEnabled(true);
+                    currentTasks.add(buildTask);
                 }
             }
 
+            // Set via RunManagerEx — BeforeRunStepsPanel.doReset() reads from here
             runManager.setBeforeRunTasks(this, currentTasks);
-            LOG.info("Synced Before Launch tasks: " + currentTasks.size() + " total");
+            // Also set directly on the config object for platforms that read from it
+            setBeforeRunTasks((List) new ArrayList<>(currentTasks));
+            LOG.info("DevTomcat: Before Launch sync complete — " + currentTasks.size() + " total tasks");
 
         } catch (Exception e) {
-            LOG.warn("Error syncing Before Launch tasks: " + e.getMessage(), e);
+            LOG.warn("DevTomcat: Error syncing Before Launch tasks: " + e.getMessage(), e);
         }
     }
 
     /**
-     * Finds an IntelliJ Artifact that matches the given DeploymentArtifact by name.
+     * Finds an IntelliJ Artifact that matches the given DeploymentArtifact.
+     * Tries exact name match first, then falls back to case-insensitive matching.
      */
     @Nullable
     private Artifact findMatchingArtifact(@NotNull ArtifactManager artifactManager,
@@ -472,183 +353,234 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         String name = deploymentArtifact.getName();
         if (name.isEmpty()) return null;
 
+        // Exact match
         for (Artifact artifact : artifactManager.getArtifacts()) {
             if (name.equals(artifact.getName())) {
                 return artifact;
             }
         }
+
+        // Case-insensitive fallback
+        for (Artifact artifact : artifactManager.getArtifacts()) {
+            if (name.equalsIgnoreCase(artifact.getName())) {
+                LOG.info("DevTomcat: Matched artifact by case-insensitive name: " + artifact.getName());
+                return artifact;
+            }
+        }
+
+        // Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
+        String deployBase = extractBaseModuleName(name);
+        for (Artifact artifact : artifactManager.getArtifacts()) {
+            if (deployBase.equals(extractBaseModuleName(artifact.getName()))) {
+                LOG.info("DevTomcat: Matched artifact by base module name: " + artifact.getName());
+                return artifact;
+            }
+        }
+
         return null;
     }
 
+    private static String extractBaseModuleName(String name) {
+        return com.dev.idea.plugins.tomcat.utils.ContextPathUtils.extractBaseModuleName(name);
+    }
+
+    /**
+     * Auto-creates an IntelliJ Artifact for a deployment that has no existing match.
+     * Finds the web module in the project and creates a WAR-exploded artifact structure
+     * so that "Build Artifact" can appear in Before Launch.
+     */
+    @Nullable
+    private Artifact autoCreateArtifactForDeployment(@NotNull ArtifactManager artifactManager,
+                                                      @NotNull DeploymentArtifact deployment) {
+        Project project = getProject();
+        Module module = findModuleForDeployment(project, deployment);
+        if (module == null) {
+            LOG.info("DevTomcat: No module found for deployment '" + deployment.getName() +
+                    "', cannot auto-create artifact");
+            return null;
+        }
+
+        try {
+            // Choose artifact type: prefer exploded-war (Ultimate) > plain (Community)
+            ArtifactType artifactType = ArtifactType.findById("exploded-war");
+            if (artifactType == null) artifactType = ArtifactType.findById("exploded");
+            if (artifactType == null) artifactType = PlainArtifactType.getInstance();
+
+            String artifactName = module.getName() + TomcatConstants.ARTIFACT_SUFFIX_WAR_EXPLODED;
+
+            // Check if this artifact already exists (maybe created earlier)
+            for (Artifact a : artifactManager.getArtifacts()) {
+                if (artifactName.equals(a.getName())) {
+                    LOG.info("DevTomcat: Found existing artifact: " + artifactName);
+                    return a;
+                }
+            }
+
+            PackagingElementFactory factory = PackagingElementFactory.getInstance();
+            CompositePackagingElement<?> root = factory.createArtifactRootElement();
+
+            // WEB-INF/classes ← module compiled output
+            CompositePackagingElement<?> classesDir = factory.getOrCreateDirectory(root, TomcatConstants.WEB_INF_CLASSES_PATH);
+            classesDir.addOrFindChild(factory.createModuleOutput(module));
+
+            // WEB-INF/lib ← module library dependencies
+            CompositePackagingElement<?> libDir = factory.getOrCreateDirectory(root, TomcatConstants.WEB_INF_LIB_PATH);
+            OrderEnumerator.orderEntries(module)
+                    .withoutSdk()
+                    .withoutModuleSourceEntries()
+                    .forEachLibrary(library -> {
+                        if (library != null) {
+                            try {
+                                for (com.intellij.packaging.elements.PackagingElement<?> element :
+                                        factory.createLibraryElements(library)) {
+                                    libDir.addOrFindChild(element);
+                                }
+                            } catch (Exception e) {
+                                LOG.debug("DevTomcat: Skipping library: " + library.getName());
+                            }
+                        }
+                        return true;
+                    });
+
+            // Add web resource root content (e.g. src/main/webapp)
+            List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(module);
+            for (VirtualFile webRoot : webRoots) {
+                root.addOrFindChild(factory.createDirectoryCopyWithParentDirectories(webRoot.getPath(), ""));
+            }
+
+            String basePath = project.getBasePath();
+            if (basePath == null) {
+                LOG.warn("Project has no base path, cannot create artifact output directory");
+                return null;
+            }
+            String outputPath = basePath + "/out/artifacts/" +
+                    module.getName().replace(':', '_') + "_war_exploded";
+
+            final ArtifactType finalType = artifactType;
+            final Artifact[] result = new Artifact[1];
+
+            WriteAction.runAndWait(() -> {
+                ModifiableArtifactModel model = artifactManager.createModifiableModel();
+                com.intellij.packaging.artifacts.ModifiableArtifact modArtifact =
+                        model.addArtifact(artifactName, finalType, root);
+                modArtifact.setOutputPath(outputPath);
+                model.commit();
+                for (Artifact a : artifactManager.getArtifacts()) {
+                    if (artifactName.equals(a.getName())) {
+                        result[0] = a;
+                        break;
+                    }
+                }
+            });
+
+            if (result[0] != null) {
+                LOG.info("DevTomcat: Auto-created IntelliJ artifact: " + artifactName +
+                        " [type=" + finalType.getId() + ", output=" + outputPath + "]");
+            }
+            return result[0];
+
+        } catch (Exception e) {
+            LOG.warn("DevTomcat: Failed to auto-create artifact for " +
+                    deployment.getName() + ": " + e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Finds the IntelliJ Module that corresponds to a deployment artifact.
+     * Tries multiple strategies: exact name, name without .war, path-based,
+     * single web module fallback, and partial name matching.
+     */
+    @Nullable
+    private Module findModuleForDeployment(@NotNull Project project,
+                                            @NotNull DeploymentArtifact deployment) {
+        ModuleManager moduleManager = ModuleManager.getInstance(project);
+        String name = deployment.getName();
+
+        // 1. Exact name match
+        Module module = moduleManager.findModuleByName(name);
+        if (module != null) return module;
+
+        // 2. Strip .war extension and parenthetical suffixes
+        String baseName = name.replaceAll("\\.war$", "").replaceAll("\\s*\\(.*\\)$", "").trim();
+        module = moduleManager.findModuleByName(baseName);
+        if (module != null) return module;
+
+        // 3. Path-based: find web module whose content root contains the deployment path
+        String deploymentPath = deployment.getPath();
+        if (deploymentPath != null && !deploymentPath.isEmpty()) {
+            for (Module m : moduleManager.getModules()) {
+                for (VirtualFile contentRoot : ModuleRootManager.getInstance(m).getContentRoots()) {
+                    if (deploymentPath.startsWith(contentRoot.getPath())) {
+                        if (TomcatModuleUtils.isWebModule(m)) {
+                            LOG.info("DevTomcat: Matched module '" + m.getName() +
+                                    "' by path for deployment '" + name + "'");
+                            return m;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Single web module fallback — if there's only one web module, use it
+        List<Module> webModules = new ArrayList<>();
+        for (Module m : moduleManager.getModules()) {
+            if (TomcatModuleUtils.isWebModule(m)) {
+                webModules.add(m);
+            }
+        }
+        if (webModules.size() == 1) {
+            LOG.info("DevTomcat: Using single web module '" + webModules.get(0).getName() +
+                    "' for deployment '" + name + "'");
+            return webModules.get(0);
+        }
+
+        // 5. Partial name matching against web modules
+        for (Module m : webModules) {
+            String mName = m.getName().toLowerCase();
+            String lowerBase = baseName.toLowerCase();
+            if (mName.contains(lowerBase) || lowerBase.contains(mName)) {
+                LOG.info("DevTomcat: Matched module '" + m.getName() +
+                        "' by partial name for deployment '" + name + "'");
+                return m;
+            }
+        }
+
+        return null;
+    }
 
     // =====================================================================
     // Debug accessors
     // =====================================================================
 
-    public int getDebugPort() {
-        try {
-            DebugConfig dc = configData.getDebugConfig();
-            return dc.getPort();
-        } catch (Exception e) {
-            LOG.warn("Error getting debug port", e);
-            return 5005;
-        }
-    }
-
-    public void setDebugPort(int port) {
-        try {
-            configData.getDebugConfig().setPort(port);
-        } catch (Exception e) {
-            LOG.warn("Error setting debug port", e);
-        }
-    }
-
-    @NotNull
-    public String getDebugTransport() {
-        try {
-            return configData.getDebugConfig().getTransport();
-        } catch (Exception e) {
-            LOG.warn("Error getting debug transport", e);
-            return "Socket";
-        }
-    }
-
-    public void setDebugTransport(@NotNull String transport) {
-        try {
-            configData.getDebugConfig().setTransport(transport);
-        } catch (Exception e) {
-            LOG.warn("Error setting debug transport", e);
-        }
-    }
-
-    public boolean isUseModuleClasspath() {
-        try {
-            return configData.getDebugConfig().isUseModuleClasspath();
-        } catch (Exception e) {
-            LOG.warn("Error checking module classpath", e);
-            return true;
-        }
-    }
-
-    public void setUseModuleClasspath(boolean useModuleClasspath) {
-        try {
-            configData.getDebugConfig().setUseModuleClasspath(useModuleClasspath);
-        } catch (Exception e) {
-            LOG.warn("Error setting use module classpath", e);
-        }
-    }
+    public int getDebugPort()                              { return configData.getDebugConfig().getPort(); }
+    public void setDebugPort(int port)                     { configData.getDebugConfig().setPort(port); }
+    @NotNull public String getDebugTransport()             { return configData.getDebugConfig().getTransport(); }
+    public void setDebugTransport(@NotNull String transport) { configData.getDebugConfig().setTransport(transport); }
+    public boolean isUseModuleClasspath()                  { return configData.getDebugConfig().isUseModuleClasspath(); }
+    public void setUseModuleClasspath(boolean use)         { configData.getDebugConfig().setUseModuleClasspath(use); }
 
     // =====================================================================
     // Browser accessors
     // =====================================================================
 
-    public boolean isAfterLaunchEnabled() {
-        try {
-            return configData.getBrowserConfig().isAfterLaunchEnabled();
-        } catch (Exception e) {
-            LOG.warn("Error checking after launch enabled", e);
-            return true;
-        }
-    }
-
-    public void setAfterLaunchEnabled(boolean enabled) {
-        try {
-            configData.getBrowserConfig().setAfterLaunchEnabled(enabled);
-        } catch (Exception e) {
-            LOG.warn("Error setting after launch enabled", e);
-        }
-    }
-
-    @NotNull
-    public String getBrowserUrl() {
-        try {
-            return configData.getBrowserConfig().getBrowserUrl();
-        } catch (Exception e) {
-            LOG.warn("Error getting browser URL", e);
-            return "";
-        }
-    }
-
-    public void setBrowserUrl(@NotNull String url) {
-        try {
-            configData.getBrowserConfig().setBrowserUrl(url);
-        } catch (Exception e) {
-            LOG.warn("Error setting browser URL", e);
-        }
-    }
-
-    @NotNull
-    public String getBrowserName() {
-        try {
-            return configData.getBrowserConfig().getBrowserName();
-        } catch (Exception e) {
-            LOG.warn("Error getting browser name", e);
-            return "System Default";
-        }
-    }
-
-    public void setBrowserName(@NotNull String browserName) {
-        try {
-            configData.getBrowserConfig().setBrowserName(browserName);
-        } catch (Exception e) {
-            LOG.warn("Error setting browser name", e);
-        }
-    }
-
-    public boolean isWithJsDebugger() {
-        try {
-            return configData.getBrowserConfig().isWithJsDebugger();
-        } catch (Exception e) {
-            LOG.warn("Error checking JS debugger", e);
-            return false;
-        }
-    }
-
-    public void setWithJsDebugger(boolean enabled) {
-        try {
-            configData.getBrowserConfig().setWithJsDebugger(enabled);
-        } catch (Exception e) {
-            LOG.warn("Error setting JS debugger", e);
-        }
-    }
+    public boolean isAfterLaunchEnabled()                     { return configData.getBrowserConfig().isAfterLaunchEnabled(); }
+    public void setAfterLaunchEnabled(boolean enabled)        { configData.getBrowserConfig().setAfterLaunchEnabled(enabled); }
+    @NotNull public String getBrowserUrl()                    { return configData.getBrowserConfig().getBrowserUrl(); }
+    public void setBrowserUrl(@NotNull String url)            { configData.getBrowserConfig().setBrowserUrl(url); }
+    @NotNull public String getBrowserName()                   { return configData.getBrowserConfig().getBrowserName(); }
+    public void setBrowserName(@NotNull String browserName)   { configData.getBrowserConfig().setBrowserName(browserName); }
+    public boolean isWithJsDebugger()                         { return configData.getBrowserConfig().isWithJsDebugger(); }
+    public void setWithJsDebugger(boolean enabled)            { configData.getBrowserConfig().setWithJsDebugger(enabled); }
 
     // =====================================================================
     // UI accessors
     // =====================================================================
 
-    public boolean isActivateToolWindow() {
-        try {
-            return configData.getUiConfig().isActivateToolWindow();
-        } catch (Exception e) {
-            LOG.warn("Error checking activate tool window", e);
-            return UiConfig.DEFAULT_ACTIVATE_TOOL_WINDOW;
-        }
-    }
-
-    public void setActivateToolWindow(boolean activate) {
-        try {
-            configData.getUiConfig().setActivateToolWindow(activate);
-        } catch (Exception e) {
-            LOG.warn("Error setting activate tool window", e);
-        }
-    }
-
-    public boolean isShowLogsPage() {
-        try {
-            return configData.getUiConfig().isShowLogsPage();
-        } catch (Exception e) {
-            LOG.warn("Error checking show logs page", e);
-            return UiConfig.DEFAULT_SHOW_LOGS_PAGE;
-        }
-    }
-
-    public void setShowLogsPage(boolean show) {
-        try {
-            configData.getUiConfig().setShowLogsPage(show);
-        } catch (Exception e) {
-            LOG.warn("Error setting show logs page", e);
-        }
-    }
+    public boolean isActivateToolWindow()                  { return configData.getUiConfig().isActivateToolWindow(); }
+    public void setActivateToolWindow(boolean activate)    { configData.getUiConfig().setActivateToolWindow(activate); }
+    public boolean isShowLogsPage()                        { return configData.getUiConfig().isShowLogsPage(); }
+    public void setShowLogsPage(boolean show)              { configData.getUiConfig().setShowLogsPage(show); }
 
     // =====================================================================
     // Log file tabs for Run tool window
@@ -663,6 +595,14 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
      * accumulation across repeated calls. The {@link #getAllLogFiles()} override
      * ensures correct path/enabled state regardless of what's in myLogFiles.
      */
+    /**
+     * Syncs our config data flags to the platform's built-in fields
+     * (e.g. allowRunningInParallel, which is final and can't be overridden).
+     */
+    void syncPlatformFlags() {
+        setAllowRunningInParallel(configData.isAllowMultipleInstances());
+    }
+
     void syncTomcatLogFiles() {
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
         if (logsDir == null) return;
@@ -678,8 +618,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
             if (alreadyRegistered.contains(logFile.getId())) continue;
             boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
-            String pathPattern = logsDir.resolve(logFile.getFilenamePattern()).toString();
-            addLogFile(pathPattern, logFile.getId(), enabled);
+            String path = logFile.resolveFullPath(logsDir);
+            addLogFile(path, logFile.getId(), enabled);
         }
     }
 
@@ -704,10 +644,12 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         }
 
         List<String> enabledLogs = getLogFileConfigurations();
+        var logFileConfig = configData.getLogFileConfig();
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
             boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
-            String pathPattern = logsDir.resolve(logFile.getFilenamePattern()).toString();
-            result.add(new LogFileOptions(logFile.getId(), pathPattern, enabled));
+            String path = logFile.resolveFullPath(logsDir);
+            boolean skipContent = logFileConfig.isSkipContent(logFile.getId());
+            result.add(new LogFileOptions(logFile.getId(), path, enabled, skipContent, true));
         }
         return result;
     }
@@ -718,20 +660,15 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     @NotNull
     public java.util.List<String> getLogFileConfigurations() {
-        try {
-            java.util.List<String> logFiles = configData.getLogFileConfig().getLogFiles();
-            return logFiles != null ? logFiles : new java.util.ArrayList<>();
-        } catch (Exception e) {
-            LOG.warn("Error getting log file configurations", e);
-            return new java.util.ArrayList<>();
-        }
+        java.util.List<String> logFiles = configData.getLogFileConfig().getLogFiles();
+        return logFiles != null ? logFiles : new java.util.ArrayList<>();
     }
 
     public void setStartupScript(String startupScript) {
-        configData.getRunnerSettings("Run").setStartupScript(startupScript);
+        configData.getRunnerSettings(TomcatConstants.RUN_MODE).setStartupScript(startupScript);
     }
 
     public void setShutdownScript(String shutdownScript) {
-        configData.getRunnerSettings("Run").setShutdownScript(shutdownScript);
+        configData.getRunnerSettings(TomcatConstants.RUN_MODE).setShutdownScript(shutdownScript);
     }
 }

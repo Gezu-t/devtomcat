@@ -6,9 +6,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.Serial;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * Log File Configuration for Tomcat.
@@ -33,6 +31,10 @@ public class LogFileConfig implements Serializable, Cloneable {
     @NotNull
     private String saveConsoleFilePath = "";
 
+    /** Per-log-file "skip existing content" flag, keyed by log file ID/path. */
+    @NotNull
+    private Map<String, Boolean> skipContentEntries = new HashMap<>();
+
     public LogFileConfig() {
         this.id = generateId();
     }
@@ -47,6 +49,7 @@ public class LogFileConfig implements Serializable, Cloneable {
             this.showStderrConsole = other.showStderrConsole;
             this.saveConsoleToFile = other.saveConsoleToFile;
             this.saveConsoleFilePath = other.saveConsoleFilePath;
+            this.skipContentEntries.putAll(other.skipContentEntries);
         } else {
             this.id = generateId();
         }
@@ -139,6 +142,26 @@ public class LogFileConfig implements Serializable, Cloneable {
     public String getSaveConsoleFilePath() { return saveConsoleFilePath; }
     public void setSaveConsoleFilePath(@NotNull String path) { this.saveConsoleFilePath = Objects.requireNonNull(path); }
 
+    public boolean isSkipContent(@NotNull String logId) {
+        return skipContentEntries.getOrDefault(logId, false);
+    }
+
+    public void setSkipContent(@NotNull String logId, boolean skip) {
+        skipContentEntries.put(Objects.requireNonNull(logId), skip);
+    }
+
+    @NotNull
+    public Map<String, Boolean> getSkipContentEntries() {
+        return new HashMap<>(skipContentEntries);
+    }
+
+    public void setSkipContentEntries(@Nullable Map<String, Boolean> entries) {
+        skipContentEntries.clear();
+        if (entries != null) {
+            skipContentEntries.putAll(entries);
+        }
+    }
+
     public boolean filesExist() {
         return logFiles.stream()
                 .filter(p -> p != null && !p.trim().isEmpty())
@@ -157,6 +180,7 @@ public class LogFileConfig implements Serializable, Cloneable {
             clone.showStderrConsole = this.showStderrConsole;
             clone.saveConsoleToFile = this.saveConsoleToFile;
             clone.saveConsoleFilePath = this.saveConsoleFilePath;
+            clone.skipContentEntries = new HashMap<>(this.skipContentEntries);
             return clone;
         } catch (CloneNotSupportedException e) {
             return new LogFileConfig(this);
@@ -171,12 +195,13 @@ public class LogFileConfig implements Serializable, Cloneable {
                 showStderrConsole == that.showStderrConsole &&
                 saveConsoleToFile == that.saveConsoleToFile &&
                 logFiles.equals(that.logFiles) &&
-                saveConsoleFilePath.equals(that.saveConsoleFilePath);
+                saveConsoleFilePath.equals(that.saveConsoleFilePath) &&
+                skipContentEntries.equals(that.skipContentEntries);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(logFiles, showStdoutConsole, showStderrConsole, saveConsoleToFile, saveConsoleFilePath);
+        return Objects.hash(logFiles, showStdoutConsole, showStderrConsole, saveConsoleToFile, saveConsoleFilePath, skipContentEntries);
     }
 
     @NotNull

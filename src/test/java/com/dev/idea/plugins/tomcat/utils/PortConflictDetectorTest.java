@@ -1,4 +1,4 @@
-package com.dev.idea.plugins.tomcat.util;
+package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import org.junit.jupiter.api.DisplayName;

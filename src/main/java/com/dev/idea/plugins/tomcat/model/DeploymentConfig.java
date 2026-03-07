@@ -66,6 +66,8 @@ public class DeploymentConfig implements Serializable, Cloneable {
 
     private boolean updateClassesAndResources = DEFAULT_UPDATE_CLASSES;
 
+    private boolean preserveSessions = false;
+
     @NotNull
     private String deploymentPath = DEFAULT_DEPLOYMENT_PATH;
 
@@ -120,6 +122,7 @@ public class DeploymentConfig implements Serializable, Cloneable {
             // Copy settings
             this.hotDeploymentEnabled = other.hotDeploymentEnabled;
             this.updateClassesAndResources = other.updateClassesAndResources;
+            this.preserveSessions = other.preserveSessions;
             this.deploymentPath = other.deploymentPath != null ? other.deploymentPath : DEFAULT_DEPLOYMENT_PATH;
 
             LOG.debug("DeploymentConfig copied from another instance: " + this.artifacts.size() + " artifacts");
@@ -144,6 +147,21 @@ public class DeploymentConfig implements Serializable, Cloneable {
     @NotNull
     public List<DeploymentArtifact> getArtifacts() {
         return new ArrayList<>(artifacts);
+    }
+
+    @NotNull
+    public List<DeploymentArtifact> getDeployedArtifacts() {
+        List<DeploymentArtifact> deployedArtifacts = artifacts.stream()
+                .filter(Objects::nonNull)
+                .filter(DeploymentArtifact::isDeployed)
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (!deployedArtifacts.isEmpty()) {
+            return deployedArtifacts;
+        }
+
+        return artifacts.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     @Nullable
@@ -337,7 +355,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         }
         return count;
     }
-    private boolean preserveSessions = false;
 
     public boolean isPreserveSessions() {
         return preserveSessions;
@@ -404,6 +421,7 @@ public class DeploymentConfig implements Serializable, Cloneable {
 
         return hotDeploymentEnabled == that.hotDeploymentEnabled &&
                 updateClassesAndResources == that.updateClassesAndResources &&
+                preserveSessions == that.preserveSessions &&
                 artifacts.equals(that.artifacts) &&
                 deploymentPath.equals(that.deploymentPath);
     }
@@ -411,7 +429,7 @@ public class DeploymentConfig implements Serializable, Cloneable {
     @Override
     public int hashCode() {
         return Objects.hash(artifacts, hotDeploymentEnabled,
-                updateClassesAndResources, deploymentPath);
+                updateClassesAndResources, preserveSessions, deploymentPath);
     }
 
     // =====================================================================

@@ -30,7 +30,6 @@ public class TomcatConfigurationInitializer {
 
     private static void applyDynamicDefaults(@NotNull TomcatRunConfiguration config) {
         TomcatConfigurationData data = config.getConfigData();
-        if (data == null) return;
 
         if (StringUtil.isEmpty(data.getContextPath())) {
             data.setContextPath("/");

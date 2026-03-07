@@ -73,7 +73,7 @@ public class PortValidator {
         }
 
         if (portMap.containsKey(port)) {
-            result.addError(portName + " and " + portMap.get(port) + " ports cannot be the same (" + port + ")");
+            result.addError(portMap.get(port) + " and " + portName + " ports cannot be the same (" + port + ")");
         } else {
             portMap.put(port, portName);
         }
@@ -151,33 +151,6 @@ public class PortValidator {
             this.jmxEnabled = jmxEnabled;
             this.ajpPort = ajpPort;
             this.ajpEnabled = ajpEnabled;
-        }
-
-        public static PortConfiguration from(@NotNull Object configuration) {
-            try {
-                Integer httpPort = (Integer) configuration.getClass().getMethod("getHttpPort").invoke(configuration);
-                Integer shutdownPort = (Integer) configuration.getClass().getMethod("getShutdownPort").invoke(configuration);
-                Integer httpsPort = (Integer) configuration.getClass().getMethod("getHttpsPort").invoke(configuration);
-                boolean httpsEnabled = (Boolean) configuration.getClass().getMethod("isHttpsEnabled").invoke(configuration);
-                Integer jmxPort = (Integer) configuration.getClass().getMethod("getJmxPort").invoke(configuration);
-                boolean jmxEnabled = (Boolean) configuration.getClass().getMethod("isJmxEnabled").invoke(configuration);
-
-                Integer ajpPort = null;
-                boolean ajpEnabled = false;
-                try {
-                    Object portConfig = configuration.getClass().getMethod("getConfigData").invoke(configuration);
-                    Object pc = portConfig.getClass().getMethod("getPortConfig").invoke(portConfig);
-                    ajpEnabled = (Boolean) pc.getClass().getMethod("isAjpEnabled").invoke(pc);
-                    if (ajpEnabled) {
-                        ajpPort = (Integer) pc.getClass().getMethod("getAjp").invoke(pc);
-                    }
-                } catch (Exception ignored) {
-                }
-
-                return new PortConfiguration(httpPort, shutdownPort, httpsPort, httpsEnabled, jmxPort, jmxEnabled, ajpPort, ajpEnabled);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to extract port configuration", e);
-            }
         }
 
         public static Builder builder() {

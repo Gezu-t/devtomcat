@@ -1,12 +1,9 @@
 package com.dev.idea.plugins.tomcat.conf;
 
-         import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
          import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
          import com.intellij.openapi.diagnostic.Logger;
          import org.jetbrains.annotations.NotNull;
 
-         import java.util.ArrayList;
-         import java.util.List;
          import java.util.Objects;
 
          /**
@@ -23,19 +20,20 @@ package com.dev.idea.plugins.tomcat.conf;
                  Objects.requireNonNull(original, "Configuration cannot be null");
 
                  try {
-                     LOG.debug("Cloning configuration: {}", original.getName());
+                     LOG.debug("Cloning configuration: " + original.getName());
 
                      TomcatRunConfiguration clone = new TomcatRunConfiguration(
                              original.getProject(),
                              original.getFactory(),
-                             original.getName() + " (copy)"
+                             original.getName()
                      );
 
                      TomcatConfigurationData src = original.getConfigData();
                      TomcatConfigurationData dst = clone.getConfigData();
 
                      // === CORE ===
-                     dst.setTomcatInfo(src.getTomcatInfo() != null ? src.getTomcatInfo().clone() : null);
+                     var srcTomcatInfo = src.getTomcatInfo();
+                    dst.setTomcatInfo(srcTomcatInfo != null ? srcTomcatInfo.clone() : null);
                      dst.setContextPath(src.getContextPath());
                      dst.setServerMode(src.getServerMode());
                      dst.setCatalinaBase(src.getCatalinaBase());
@@ -52,20 +50,20 @@ package com.dev.idea.plugins.tomcat.conf;
                      dst.setDebugConfig(src.getDebugConfig().clone());
                      dst.setRemoteConfig(src.getRemoteConfig().clone());
                      dst.setLogFileConfig(src.getLogFileConfig().clone());
+                     dst.setCoverageConfig(src.getCoverageConfig().clone());
 
-                     // === DEPLOYMENT ARTIFACTS ===
-                     List<DeploymentArtifact> srcArtifacts = src.getDeploymentConfig().getArtifacts();
-                     if (srcArtifacts != null && !srcArtifacts.isEmpty()) {
-                         List<DeploymentArtifact> clonedArtifacts = new ArrayList<>(srcArtifacts.size());
-                         for (DeploymentArtifact artifact : srcArtifacts) {
-                             if (artifact != null) {
-                                 clonedArtifacts.add(artifact.clone());
-                             }
-                         }
-                         dst.getDeploymentConfig().setArtifacts(clonedArtifacts);
+                     // Deep-clone per-runner settings (startup/shutdown scripts, env vars)
+                     java.util.Map<String, com.dev.idea.plugins.tomcat.model.RunnerSettings> clonedRunnerSettings = new java.util.LinkedHashMap<>();
+                     for (java.util.Map.Entry<String, com.dev.idea.plugins.tomcat.model.RunnerSettings> entry :
+                              src.getRunnerSettingsMap().entrySet()) {
+                         clonedRunnerSettings.put(entry.getKey(), entry.getValue().clone());
                      }
+                     dst.setRunnerSettingsMap(clonedRunnerSettings);
 
-                     LOG.debug("Cloned: {} -> {}", original.getName(), clone.getName());
+                     // Clone fields on TomcatRunConfiguration itself (outside TomcatConfigurationData)
+                     clone.setDocBase(original.getDocBase());
+
+                     LOG.debug("Cloned: " + original.getName() + " -> " + clone.getName());
                      validateClone(clone);
                      return clone;
 
@@ -87,24 +85,4 @@ package com.dev.idea.plugins.tomcat.conf;
                  }
              }
 
-             @NotNull
-             public static String getCloneSummary(@NotNull TomcatRunConfiguration clone) {
-                 Objects.requireNonNull(clone, "Clone cannot be null");
-                 TomcatConfigurationData d = clone.getConfigData();
-
-                 String serverName = d.getTomcatInfo() != null ? d.getTomcatInfo().getName() : "None";
-                 int httpPort = d.getPortConfig().getHttp();
-                 int artifactCount = d.getDeploymentConfig().getArtifacts() != null
-                         ? d.getDeploymentConfig().getArtifacts().size()
-                         : 0;
-
-                 return String.format(
-                         "Cloned '%s': Server=%s, HTTP=%d, Mode=%s, Artifacts=%d",
-                         clone.getName(),
-                         serverName,
-                         httpPort,
-                         d.getServerMode(),
-                         artifactCount
-                 );
-             }
          }

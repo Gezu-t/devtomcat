@@ -5,10 +5,12 @@ import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
+import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
+import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.RunConfiguration;
-import com.intellij.execution.configurations.RuntimeConfigurationException;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.IconLoader;
@@ -19,7 +21,6 @@ import org.jetbrains.annotations.Nullable;
 import com.intellij.icons.AllIcons;
 import javax.swing.*;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 
@@ -138,6 +139,15 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             return true;
         }
 
+        @SuppressWarnings("rawtypes")
+        @Override
+        public void configureBeforeRunTaskDefaults(Key<? extends BeforeRunTask> providerID,
+                                                    BeforeRunTask task) {
+            // Keep the default "Build" (Make) task enabled so new configurations
+            // always have at least a compile step in Before Launch.
+            super.configureBeforeRunTaskDefaults(providerID, task);
+        }
+
         protected void applyDynamicDefaults(@NotNull TomcatRunConfiguration config) {
             Objects.requireNonNull(config, "Configuration cannot be null");
 
@@ -212,6 +222,11 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     deploymentConfig.setHotDeploymentEnabled(hotDeployEnabled);
                     deploymentConfig.setUpdateClassesAndResources(hotDeployEnabled);
                     LOG.debug("Deployment config: hotDeploy=" + hotDeployEnabled);
+
+                    // Auto-detect deployment artifacts for new configurations
+                    if (!deploymentConfig.hasArtifacts()) {
+                        autoDetectDeploymentArtifacts(config.getProject(), deploymentConfig);
+                    }
                 } catch (Exception e) {
                     LOG.warn("Error configuring deployment settings", e);
                 }
@@ -232,8 +247,10 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 }
 
                 try {
-                    data.setContextPath("/");
-                    LOG.debug("Context path set to: /");
+                    if (StringUtil.isEmpty(data.getContextPath())) {
+                        data.setContextPath("/");
+                        LOG.debug("Context path defaulted to: /");
+                    }
                 } catch (Exception e) {
                     LOG.warn("Error setting context path", e);
                 }
@@ -249,25 +266,9 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     LOG.warn("Error configuring VM options", e);
                 }
 
-                try {
-                    VmConfig vmConfig = data.getVmConfig();
-                    if (vmConfig == null) {
-                        LOG.debug("Creating new VmConfig for environment variables");
-                        vmConfig = new VmConfig();
-                        data.setVmConfig(vmConfig);
-                    }
-
-                    Map<String, String> envVars = DynamicTomcatEnvironment.buildEnvironmentVariables();
-                    if (envVars != null && !envVars.isEmpty()) {
-                        data.getRunnerSettings("Run").setEnvironmentVariables(envVars);
-                        LOG.debug("Environment variables set: " + envVars.size() + " variables");
-                    }
-
-                    data.getRunnerSettings("Run").setPassParentEnvs(true);
-                    LOG.debug("Pass parent environment variables: true");
-                } catch (Exception e) {
-                    LOG.warn("Error configuring environment variables", e);
-                }
+                // Environment variables are NOT pre-filled — users add them manually
+                // via the Startup/Connection tab (matching IntelliJ Ultimate behavior).
+                // passParentEnvs defaults to true in RunnerSettings.
                 try {
                     autoSelectTomcatServer(config);
                 } catch (Exception e) {
@@ -277,6 +278,28 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 LOG.debug("Applied dynamic defaults: " + DynamicTomcatEnvironment.getConfigurationSummary());
             } catch (Exception e) {
                 LOG.error("Unexpected error applying dynamic defaults", e);
+            }
+        }
+
+        /**
+         * Auto-detects deployment artifacts for new configurations that have none.
+         * Uses a tiered strategy: IntelliJ artifacts > web modules > WAR files.
+         */
+        private void autoDetectDeploymentArtifacts(@NotNull Project project,
+                                                    @NotNull DeploymentConfig deploymentConfig) {
+            try {
+                java.util.List<DeploymentArtifact> detected = ProjectArtifactDetector.detect(project);
+                if (!detected.isEmpty()) {
+                    deploymentConfig.setArtifacts(detected);
+                    LOG.info("DevTomcat: Auto-detected " + detected.size() +
+                            " deployment artifact(s): " + detected.stream()
+                            .map(DeploymentArtifact::getDisplayName)
+                            .collect(java.util.stream.Collectors.joining(", ")));
+                } else {
+                    LOG.debug("DevTomcat: No artifacts auto-detected for project: " + project.getName());
+                }
+            } catch (Exception e) {
+                LOG.debug("DevTomcat: Artifact auto-detection skipped: " + e.getMessage());
             }
         }
 
@@ -299,9 +322,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 TomcatInfo selected = servers.stream()
                         .filter(Objects::nonNull)
                         .max((s1, s2) -> {
-                            String v1 = s1.getVersion() != null ? s1.getVersion() : "0";
-                            String v2 = s2.getVersion() != null ? s2.getVersion() : "0";
-                            return compareSemanticVersions(v1, v2);
+                            return compareSemanticVersions(s1.getVersion(), s2.getVersion());
                         })
                         .orElse(null);
 
@@ -332,81 +353,11 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 LOG.warn("Error re-applying dynamic defaults", e);
             }
 
-            try {
-                newConfig.checkConfiguration();
-                LOG.debug("Configuration validated successfully: " + configName);
-            } catch (RuntimeConfigurationException e) {
-                LOG.warn("Configuration validation failed, attempting auto-fix: " + configName);
-                autoFixConfiguration(newConfig);
-            }
+            // Do NOT call checkConfiguration() here — validation is the IDE's responsibility
+            // when the user clicks Run/Debug. Calling it here produces noisy false-alarm logs
+            // (e.g., "no Tomcat server selected") that autoFixConfiguration cannot resolve.
 
             return newConfig;
-        }
-
-        private void autoFixConfiguration(@NotNull TomcatRunConfiguration config) {
-            Objects.requireNonNull(config, "Configuration cannot be null");
-
-            try {
-                TomcatConfigurationData data = config.getConfigData();
-                if (data == null) {
-                    LOG.warn("Configuration data is null, cannot auto-fix");
-                    return;
-                }
-
-                PortConfig pc = data.getPortConfig();
-                if (pc == null) {
-                    LOG.warn("Port configuration is null, cannot auto-fix");
-                    return;
-                }
-
-                boolean fixed = false;
-
-                int httpPort = pc.getHttp();
-                if (httpPort < 1 || httpPort > 65535) {
-                    LOG.debug("Fixing invalid HTTP port: " + httpPort);
-                    pc.setHttp(PortConfig.DEFAULT_HTTP_PORT);
-                    fixed = true;
-                }
-
-                int shutdownPort = pc.getShutdown();
-                if (shutdownPort < 1 || shutdownPort > 65535) {
-                    LOG.debug("Fixing invalid shutdown port: " + shutdownPort);
-                    pc.setShutdown(PortConfig.DEFAULT_SHUTDOWN_PORT);
-                    fixed = true;
-                }
-
-                if (pc.isHttpsEnabled()) {
-                    int httpsPort = pc.getHttps();
-                    if (httpsPort < 1 || httpsPort > 65535) {
-                        LOG.debug("Fixing invalid HTTPS port: " + httpsPort);
-                        pc.setHttps(8443);
-                        fixed = true;
-                    }
-                }
-
-                if (pc.isJmxEnabled()) {
-                    int jmxPort = pc.getJmx();
-                    if (jmxPort < 1 || jmxPort > 65535) {
-                        LOG.debug("Fixing invalid JMX port: " + jmxPort);
-                        pc.setJmx(9010);
-                        fixed = true;
-                    }
-                }
-
-                if (fixed) {
-                    LOG.debug("Auto-fixed configuration, new ports: HTTP=" + pc.getHttp() +
-                            ", Shutdown=" + pc.getShutdown());
-
-                        try {
-                        config.checkConfiguration();
-                        LOG.debug("Configuration re-validated successfully after auto-fix");
-                    } catch (RuntimeConfigurationException e) {
-                        LOG.warn("Configuration still invalid after auto-fix", e);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.warn("Error during auto-fix", e);
-            }
         }
 
         private static int compareSemanticVersions(@NotNull String v1, @NotNull String v2) {

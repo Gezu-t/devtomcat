@@ -6,7 +6,7 @@ import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.util.xmlb.XmlSerializerUtil;
+
 import com.intellij.util.xmlb.annotations.XCollection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -73,7 +73,7 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     // =====================================================================
 
     @XCollection(elementTypes = TomcatInfo.class)
-    private final List<TomcatInfo> tomcatInfos = new ArrayList<>();
+    private final List<TomcatInfo> tomcatInfos = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     // =====================================================================
     // SINGLETON ACCESSOR
@@ -96,11 +96,24 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     /**
      * Get all configured Tomcat servers.
      *
-     * @return list of TomcatInfo instances (never null, may be empty)
+     * @return unmodifiable snapshot of TomcatInfo instances (never null, may be empty)
      */
     @NotNull
     public List<TomcatInfo> getTomcatInfos() {
-        return tomcatInfos;
+        return Collections.unmodifiableList(new ArrayList<>(tomcatInfos));
+    }
+
+    /**
+     * Replace all configured Tomcat servers.
+     *
+     * @param infos the new list of server configurations (cannot be null)
+     * @throws NullPointerException if infos is null
+     */
+    public void setTomcatInfos(@NotNull List<TomcatInfo> infos) {
+        Objects.requireNonNull(infos, "TomcatInfo list cannot be null");
+        tomcatInfos.clear();
+        tomcatInfos.addAll(infos);
+        LOG.info("Replaced all Tomcat servers: " + infos.size() + " servers");
     }
 
     /**
@@ -180,6 +193,16 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
                 .anyMatch(info -> name.equals(info.getName()));
     }
 
+    @Nullable
+    public TomcatInfo findTomcatInfoByPath(@NotNull String path) {
+        Objects.requireNonNull(path, "Path cannot be null");
+
+        return tomcatInfos.stream()
+                .filter(info -> path.equals(info.getPath()))
+                .findFirst()
+                .orElse(null);
+    }
+
     // =====================================================================
     // PERSISTENCE (PersistentStateComponent)
     // =====================================================================
@@ -203,7 +226,11 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     @Override
     public void loadState(@NotNull TomcatServerManagerState state) {
         Objects.requireNonNull(state, "State cannot be null");
-        XmlSerializerUtil.copyBean(state, this);
+        // Copy contents instead of copyBean to preserve CopyOnWriteArrayList type.
+        // XmlSerializerUtil.copyBean replaces field references via reflection,
+        // which would overwrite our thread-safe COWAL with a plain ArrayList.
+        tomcatInfos.clear();
+        tomcatInfos.addAll(state.tomcatInfos);
         LOG.info("Loaded " + tomcatInfos.size() + " Tomcat servers from state");
     }
 
@@ -223,6 +250,11 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     @NotNull
     public static Optional<TomcatInfo> createTomcatInfo(@NotNull String tomcatHome) {
         return createTomcatInfo(tomcatHome, null);
+    }
+
+    @NotNull
+    public static Optional<TomcatInfo> tryCreateTomcatInfo(@NotNull String tomcatHome) {
+        return tryCreateTomcatInfo(tomcatHome, null);
     }
 
     /**
@@ -245,18 +277,18 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
 
         Path tomcatPath = Paths.get(tomcatHome);
         if (!Files.exists(tomcatPath)) {
-            Messages.showErrorDialog("Tomcat home directory does not exist: " + tomcatHome, "Invalid Directory");
+            showErrorOnEdt("Tomcat home directory does not exist: " + tomcatHome, "Invalid Directory");
             return Optional.empty();
         }
 
         if (!Files.isDirectory(tomcatPath)) {
-            Messages.showErrorDialog("Path is not a directory: " + tomcatHome, "Invalid Directory");
+            showErrorOnEdt("Path is not a directory: " + tomcatHome, "Invalid Directory");
             return Optional.empty();
         }
 
         File catalinaJar = tomcatPath.resolve(CATALINA_JAR).toFile();
         if (!catalinaJar.exists()) {
-            Messages.showErrorDialog(
+            showErrorOnEdt(
                     "Cannot find catalina.jar in " + tomcatHome +
                     "\nPlease select a valid Tomcat installation directory.",
                     "Invalid Tomcat Installation"
@@ -278,11 +310,38 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
 
         } catch (IOException e) {
             LOG.error("Failed to read Tomcat version from " + tomcatHome, e);
-            Messages.showErrorDialog(
+            showErrorOnEdt(
                     "Cannot read server version from " + tomcatHome +
                     "\nError: " + e.getMessage(),
                     "Error Reading Version"
             );
+            return Optional.empty();
+        }
+    }
+
+    @NotNull
+    public static Optional<TomcatInfo> tryCreateTomcatInfo(@NotNull String tomcatHome,
+                                                           @Nullable UnaryOperator<String> nameGenerator) {
+        Objects.requireNonNull(tomcatHome, "Tomcat home cannot be null");
+
+        Path tomcatPath = Paths.get(tomcatHome);
+        if (!Files.exists(tomcatPath) || !Files.isDirectory(tomcatPath)) {
+            return Optional.empty();
+        }
+
+        File catalinaJar = tomcatPath.resolve(CATALINA_JAR).toFile();
+        if (!catalinaJar.exists()) {
+            return Optional.empty();
+        }
+
+        try {
+            ServerInfo serverInfo = extractServerInfo(catalinaJar);
+            String name = nameGenerator != null
+                    ? nameGenerator.apply(serverInfo.serverInfo)
+                    : generateTomcatName(serverInfo.serverInfo);
+            return Optional.of(new TomcatInfo(name, serverInfo.serverNumber, tomcatHome));
+        } catch (IOException e) {
+            LOG.debug("Failed to read Tomcat version from " + tomcatHome, e);
             return Optional.empty();
         }
     }
@@ -409,6 +468,17 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
         stats.put("invalidServers", tomcatInfos.size() - validCount);
 
         return stats;
+    }
+
+    // =====================================================================
+    // EDT-SAFE DIALOGS
+    // =====================================================================
+
+    /**
+     * Show an error dialog on the EDT, regardless of calling thread.
+     */
+    private static void showErrorOnEdt(@NotNull String message, @NotNull String title) {
+        ApplicationManager.getApplication().invokeLater(() -> Messages.showErrorDialog(message, title));
     }
 
     // =====================================================================

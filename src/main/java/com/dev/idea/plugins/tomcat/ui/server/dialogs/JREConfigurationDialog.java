@@ -4,9 +4,13 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
+import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -45,7 +49,7 @@ public class JREConfigurationDialog extends DialogWrapper {
     @Override
     protected @Nullable JComponent createCenterPanel() {
         JPanel mainPanel = new JPanel(new BorderLayout());
-        mainPanel.setPreferredSize(new Dimension(580, 350));
+        mainPanel.setPreferredSize(new Dimension(JBUI.scale(580), JBUI.scale(350)));
 
         createJdkList();
 
@@ -95,7 +99,7 @@ public class JREConfigurationDialog extends DialogWrapper {
         // Separator
         gbc.gridy = 3;
         gbc.insets = JBUI.insets(15, 5, 5, 5);
-        panel.add(new JSeparator(), gbc);
+        panel.add(new com.intellij.ui.SeparatorComponent(), gbc);
 
         detectButton = new JButton("Auto-Detect");
         detectButton.addActionListener(this::autoDetectJdks);
@@ -111,13 +115,13 @@ public class JREConfigurationDialog extends DialogWrapper {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(JBUI.Borders.empty(10));
 
-        JLabel titleLabel = new JLabel("Available JDKs/JREs:");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD));
+        JBLabel titleLabel = new JBLabel("Available JDKs/JREs:");
+        titleLabel.setFont(com.intellij.util.ui.JBFont.label().asBold());
         panel.add(titleLabel, BorderLayout.WEST);
 
-        JLabel helpLabel = new JLabel("Select a Java runtime environment for Tomcat execution");
-        helpLabel.setFont(helpLabel.getFont().deriveFont(Font.ITALIC, 11f));
-        helpLabel.setForeground(Color.GRAY);
+        JBLabel helpLabel = new JBLabel("Select a Java runtime environment for Tomcat execution");
+        helpLabel.setFont(com.intellij.util.ui.JBFont.small());
+        helpLabel.setForeground(com.intellij.ui.JBColor.GRAY);
         panel.add(helpLabel, BorderLayout.SOUTH);
 
         return panel;
@@ -242,7 +246,7 @@ public class JREConfigurationDialog extends DialogWrapper {
             // For now, we'll just track it internally
             LOG.debug("DevTomcat: Would add JDK to IntelliJ: " + jdkInfo.getName());
         } catch (Exception e) {
-            LOG.warn("DevTomcat: Error adding JDK to IntelliJ: " + e.getMessage());
+            LOG.warn("DevTomcat: Error adding JDK to IntelliJ", e);
         }
     }
 
@@ -251,7 +255,7 @@ public class JREConfigurationDialog extends DialogWrapper {
             // This would integrate with IntelliJ's SDK management
             LOG.debug("DevTomcat: Would remove JDK from IntelliJ: " + jdkInfo.getName());
         } catch (Exception e) {
-            LOG.warn("DevTomcat: Error removing JDK from IntelliJ: " + e.getMessage());
+            LOG.warn("DevTomcat: Error removing JDK from IntelliJ", e);
         }
     }
 
@@ -297,41 +301,28 @@ public class JREConfigurationDialog extends DialogWrapper {
         }
     }
 
-    private static class JdkRenderer extends DefaultListCellRenderer {
+    private static class JdkRenderer extends com.intellij.ui.ColoredListCellRenderer<JdkInfo> {
         @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                      boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-
-            if (value instanceof JdkInfo) {
-                JdkInfo jdk = (JdkInfo) value;
-                String display = "<html><b>" + jdk.getName() + "</b>";
-                if (!jdk.getVersion().isEmpty()) {
-                    display += "<br><small>" + jdk.getVersion();
-                    if (!jdk.getPath().isEmpty()) {
-                        display += " - " + jdk.getPath();
+        protected void customizeCellRenderer(@NotNull JList<? extends JdkInfo> list, JdkInfo value, int index,
+                                             boolean selected, boolean hasFocus) {
+            if (value != null) {
+                append(value.getName(), com.intellij.ui.SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+                if (!value.getVersion().isEmpty()) {
+                    append(" " + value.getVersion(), com.intellij.ui.SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    if (!value.getPath().isEmpty()) {
+                        append(" - " + value.getPath(), com.intellij.ui.SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
                     }
-                    display += "</small>";
                 }
-                display += "</html>";
-                setText(display);
-
-                if (jdk.isProjectSdk()) {
-                    setIcon(UIManager.getIcon("FileView.directoryIcon"));
-                } else {
-                    setIcon(UIManager.getIcon("FileView.fileIcon"));
-                }
+                setIcon(com.intellij.icons.AllIcons.Nodes.PpJdk);
             }
-
-            return this;
         }
     }
 
     private static class AddJdkDialog extends DialogWrapper {
         private final Project project;
-        private JTextField nameField;
-        private JTextField pathField;
-        private JTextField versionField;
+        private JBTextField nameField;
+        private TextFieldWithBrowseButton pathField;
+        private JBTextField versionField;
         private JdkInfo jdkInfo;
 
         public AddJdkDialog(@NotNull Project project) {
@@ -344,67 +335,58 @@ public class JREConfigurationDialog extends DialogWrapper {
         @Override
         protected @Nullable JComponent createCenterPanel() {
             JPanel panel = new JPanel(new GridBagLayout());
-            panel.setPreferredSize(new Dimension(450, 200));
+            panel.setPreferredSize(new Dimension(JBUI.scale(450), JBUI.scale(200)));
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.insets = JBUI.insets(5);
             gbc.anchor = GridBagConstraints.WEST;
 
             // Name
             gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("Name:"), gbc);
+            panel.add(new JBLabel("Name:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            nameField = new JTextField("JDK");
+            nameField = new JBTextField("JDK", 20);
             panel.add(nameField, gbc);
 
             // Path
             gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("JDK Home:"), gbc);
+            panel.add(new JBLabel("JDK Home:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            JPanel pathPanel = new JPanel(new BorderLayout());
-            pathField = new JTextField();
-            JButton browseButton = new JButton("Browse...");
-            browseButton.addActionListener(e -> browseJdkHome());
-            pathPanel.add(pathField, BorderLayout.CENTER);
-            pathPanel.add(browseButton, BorderLayout.EAST);
-            panel.add(pathPanel, gbc);
+            pathField = new TextFieldWithBrowseButton();
+            pathField.addBrowseFolderListener(
+                    "Select JDK Installation Directory",
+                    "Choose a JDK installation directory",
+                    project,
+                    FileChooserDescriptorFactory.createSingleFolderDescriptor()
+            );
+            pathField.getTextField().getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { onPathChanged(); }
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { onPathChanged(); }
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { onPathChanged(); }
+                private void onPathChanged() {
+                    String path = pathField.getText().trim();
+                    if (!path.isEmpty()) detectVersion(path);
+                }
+            });
+            panel.add(pathField, gbc);
 
             // Version (auto-detected)
             gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("Version:"), gbc);
+            panel.add(new JBLabel("Version:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            versionField = new JTextField();
+            versionField = new JBTextField();
             versionField.setEditable(false);
-            versionField.setBackground(Color.LIGHT_GRAY);
             panel.add(versionField, gbc);
 
             return panel;
         }
 
-        private void browseJdkHome() {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Select JDK Installation Directory");
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            chooser.setMultiSelectionEnabled(false);
-
-            if (chooser.showOpenDialog(getContentPane()) == JFileChooser.APPROVE_OPTION) {
-                File file = chooser.getSelectedFile();
-                if (file != null) {
-                    pathField.setText(file.getAbsolutePath());
-                    detectVersion(file.getAbsolutePath());
-                }
-            }
-        }
-
         private void detectVersion(String path) {
             try {
-                // Try to detect Java version from release file
                 File releaseFile = new File(path, "release");
                 if (releaseFile.exists()) {
-                    // Parse release file for version info
-                    String version = "JDK detected"; // Simplified for now
+                    String version = "JDK detected";
                     versionField.setText(version);
 
-                    // Update name if still default
                     if (nameField.getText().equals("JDK")) {
                         nameField.setText("JDK " + version);
                     }
@@ -433,7 +415,6 @@ public class JREConfigurationDialog extends DialogWrapper {
                 return;
             }
 
-            // Basic validation for JDK directory
             File binDir = new File(jdkDir, "bin");
             if (!binDir.exists()) {
                 Messages.showErrorDialog("Invalid JDK installation - missing bin directory", "Invalid Installation");
@@ -452,9 +433,9 @@ public class JREConfigurationDialog extends DialogWrapper {
     private static class EditJdkDialog extends DialogWrapper {
         private final Project project;
         private final JdkInfo originalJdk;
-        private JTextField nameField;
-        private JTextField pathField;
-        private JTextField versionField;
+        private JBTextField nameField;
+        private TextFieldWithBrowseButton pathField;
+        private JBTextField versionField;
         private JdkInfo updatedInfo;
 
         public EditJdkDialog(@NotNull Project project, @NotNull JdkInfo jdk) {
@@ -468,55 +449,50 @@ public class JREConfigurationDialog extends DialogWrapper {
         @Override
         protected @Nullable JComponent createCenterPanel() {
             JPanel panel = new JPanel(new GridBagLayout());
-            panel.setPreferredSize(new Dimension(450, 200));
+            panel.setPreferredSize(new Dimension(JBUI.scale(450), JBUI.scale(200)));
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.insets = JBUI.insets(5);
             gbc.anchor = GridBagConstraints.WEST;
 
             // Name
             gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("Name:"), gbc);
+            panel.add(new JBLabel("Name:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            nameField = new JTextField(originalJdk.getName());
+            nameField = new JBTextField(originalJdk.getName(), 20);
             panel.add(nameField, gbc);
 
             // Path
             gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("JDK Home:"), gbc);
+            panel.add(new JBLabel("JDK Home:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            JPanel pathPanel = new JPanel(new BorderLayout());
-            pathField = new JTextField(originalJdk.getPath());
-            JButton browseButton = new JButton("Browse...");
-            browseButton.addActionListener(e -> browseJdkHome());
-            pathPanel.add(pathField, BorderLayout.CENTER);
-            pathPanel.add(browseButton, BorderLayout.EAST);
-            panel.add(pathPanel, gbc);
+            pathField = new TextFieldWithBrowseButton();
+            pathField.setText(originalJdk.getPath());
+            pathField.addBrowseFolderListener(
+                    "Select JDK Installation Directory",
+                    "Choose a JDK installation directory",
+                    project,
+                    FileChooserDescriptorFactory.createSingleFolderDescriptor()
+            );
+            pathField.getTextField().getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { onPathChanged(); }
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { onPathChanged(); }
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { onPathChanged(); }
+                private void onPathChanged() {
+                    String path = pathField.getText().trim();
+                    if (!path.isEmpty()) detectVersion(path);
+                }
+            });
+            panel.add(pathField, gbc);
 
             // Version
             gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0;
-            panel.add(new JLabel("Version:"), gbc);
+            panel.add(new JBLabel("Version:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
-            versionField = new JTextField(originalJdk.getVersion());
+            versionField = new JBTextField(originalJdk.getVersion(), 20);
             versionField.setEditable(false);
-            versionField.setBackground(Color.LIGHT_GRAY);
             panel.add(versionField, gbc);
 
             return panel;
-        }
-
-        private void browseJdkHome() {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Select JDK Installation Directory");
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            chooser.setMultiSelectionEnabled(false);
-
-            if (chooser.showOpenDialog(getContentPane()) == JFileChooser.APPROVE_OPTION) {
-                File file = chooser.getSelectedFile();
-                if (file != null) {
-                    pathField.setText(file.getAbsolutePath());
-                    detectVersion(file.getAbsolutePath());
-                }
-            }
         }
 
         private void detectVersion(String path) {
@@ -581,10 +557,10 @@ public class JREConfigurationDialog extends DialogWrapper {
         @Override
         protected @Nullable JComponent createCenterPanel() {
             JPanel panel = new JPanel(new BorderLayout());
-            panel.setPreferredSize(new Dimension(500, 300));
+            panel.setPreferredSize(new Dimension(JBUI.scale(500), JBUI.scale(300)));
 
             // Instructions
-            JLabel instructions = new JLabel("<html>Scanning common JDK installation locations...<br>" +
+            JBLabel instructions = new JBLabel("<html>Scanning common JDK installation locations...<br>" +
                     "Select JDKs to add to your configuration:</html>");
             instructions.setBorder(JBUI.Borders.empty(10));
             panel.add(instructions, BorderLayout.NORTH);

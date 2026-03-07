@@ -20,12 +20,25 @@ public class IntelliJArtifactSelectionDialog extends ChooseElementsDialog<Artifa
 
     @Override
     protected Icon getItemIcon(Artifact item) {
-        return item.getArtifactType().getIcon();
+        try {
+            return item.getArtifactType().getIcon();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
     protected String getItemText(Artifact item) {
-        return item.getName();
+        String name = item.getName();
+        try {
+            String typeName = item.getArtifactType().getPresentableName();
+            if (typeName != null && !typeName.isEmpty()) {
+                return name + "  [" + typeName + "]";
+            }
+        } catch (Exception e) {
+            // Fall through to plain name
+        }
+        return name;
     }
     
     public List<Artifact> getSelectedArtifacts() {

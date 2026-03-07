@@ -42,7 +42,7 @@ package com.dev.idea.plugins.tomcat.model;
             @Nullable private String catalinaBase;
             @NotNull private Map<String, RunnerSettings> runnerSettingsMap = new LinkedHashMap<>();
 
-            @NotNull public Map<String, RunnerSettings> getRunnerSettingsMap() { return runnerSettingsMap; }
+            @NotNull public Map<String, RunnerSettings> getRunnerSettingsMap() { return java.util.Collections.unmodifiableMap(runnerSettingsMap); }
             public void setRunnerSettingsMap(@Nullable Map<String, RunnerSettings> map) {
                 if (map != null) {
                     this.runnerSettingsMap = new LinkedHashMap<>(map);
@@ -56,11 +56,6 @@ package com.dev.idea.plugins.tomcat.model;
                 RunnerSettings rs = runnerSettingsMap.get(runnerId);
                 if (rs == null) {
                     rs = new RunnerSettings();
-                    if ("Run".equals(runnerId) && !runnerSettingsMap.isEmpty()) {
-                        // Fallback logic for backward compatibility if we only had debug/coverage saved
-                        RunnerSettings first = runnerSettingsMap.values().iterator().next();
-                        rs = first.clone();
-                    }
                     runnerSettingsMap.put(runnerId, rs);
                 }
                 return rs;
@@ -120,7 +115,7 @@ package com.dev.idea.plugins.tomcat.model;
             @NotNull
             public TomcatConfigurationData clone() {
                 TomcatConfigurationData c = new TomcatConfigurationData();
-                c.tomcatInfo = this.tomcatInfo;
+                c.tomcatInfo = this.tomcatInfo != null ? this.tomcatInfo.clone() : null;
                 c.contextPath = this.contextPath;
                 c.portConfig = this.portConfig.clone();
                 c.deploymentConfig = this.deploymentConfig.clone();
@@ -142,6 +137,26 @@ package com.dev.idea.plugins.tomcat.model;
                 }
                 
                 return c;
+            }
+
+            /**
+             * Copies portable fields from another data instance (used by Config Import).
+             * Only overwrites fields that ConfigExportImport serializes — leaves
+             * UI config, debug config, coverage config, and log config untouched.
+             */
+            public void copyFrom(@NotNull TomcatConfigurationData source) {
+                this.tomcatInfo = source.tomcatInfo != null ? source.tomcatInfo.clone() : null;
+                this.contextPath = source.contextPath;
+                this.serverMode = source.serverMode;
+                this.portConfig = source.portConfig.clone();
+                this.deploymentConfig = source.deploymentConfig.clone();
+                this.vmConfig = source.vmConfig.clone();
+                this.browserConfig = source.browserConfig.clone();
+                this.jreSelection = source.jreSelection;
+                // Merge runner settings (env vars, startup scripts) from source
+                for (Map.Entry<String, RunnerSettings> entry : source.runnerSettingsMap.entrySet()) {
+                    this.runnerSettingsMap.put(entry.getKey(), entry.getValue().clone());
+                }
             }
 
             @Override

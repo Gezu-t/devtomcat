@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui;
 import com.dev.idea.plugins.tomcat.model.CoverageConfig;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.table.JBTable;
@@ -81,7 +82,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
 
         JBTable table = new JBTable(model);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setRowHeight(25);
+        table.setRowHeight(JBUI.scale(24));
 
         if (isInclude) {
             includeTableModel = model;
@@ -98,7 +99,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
                 .disableUpDownActions();
 
         JComponent decoratedPanel = decorator.createPanel();
-        decoratedPanel.setPreferredSize(new Dimension(0, 150));
+        decoratedPanel.setPreferredSize(new Dimension(0, JBUI.scale(150)));
         panel.add(decoratedPanel, BorderLayout.CENTER);
 
         return panel;
@@ -107,11 +108,14 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
     private void addPattern(boolean isInclude) {
         String type = isInclude ? "include" : "exclude";
         String example = isInclude ? "com.mycompany.*" : "*.test.*, *Test";
-        String pattern = JOptionPane.showInputDialog(this,
+        String pattern = Messages.showInputDialog(
+                project,
                 "Enter package pattern to " + type + " in coverage:\n" +
                         "(Use * for wildcards, e.g., " + example + ")",
                 "Add " + (isInclude ? "Include" : "Exclude") + " Pattern",
-                JOptionPane.QUESTION_MESSAGE);
+                null,
+                null,
+                null);
 
         if (pattern != null && !pattern.trim().isEmpty()) {
             pattern = pattern.trim();
@@ -143,11 +147,13 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         if (selectedRow >= 0 && selectedRow < patterns.size()) {
             String currentPattern = patterns.get(selectedRow);
 
-            String newPattern = (String) JOptionPane.showInputDialog(this,
+            String newPattern = Messages.showInputDialog(
+                    project,
                     "Edit " + (isInclude ? "include" : "exclude") + " pattern:",
                     "Edit Pattern",
-                    JOptionPane.QUESTION_MESSAGE,
-                    null, null, currentPattern);
+                    null,
+                    currentPattern,
+                    null);
 
             if (newPattern != null && !newPattern.trim().isEmpty()) {
                 patterns.set(selectedRow, newPattern.trim());
@@ -193,7 +199,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
             LOG.debug("DevTomcat: Reset code coverage configuration");
 
         } catch (Exception e) {
-            LOG.warn("DevTomcat: Error resetting coverage configuration: " + e.getMessage());
+            LOG.warn("DevTomcat: Error resetting coverage configuration", e);
             includePatterns.clear();
             excludePatterns.clear();
             refreshIncludeTable();

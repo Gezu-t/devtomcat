@@ -8,17 +8,24 @@ import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.dashboard.RunDashboardCustomizer;
 import com.intellij.execution.dashboard.RunDashboardRunConfigurationNode;
 import com.intellij.execution.ui.RunContentDescriptor;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.projectView.PresentationData;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.ui.SimpleTextAttributes;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.ide.util.treeView.AbstractTreeNode;
+import com.intellij.openapi.project.Project;
+
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
  * Customizes how DevTomcat run configurations appear in the Services tool window.
- * Adds status text (e.g., Tomcat version, port, deployed artifacts) to the tree node.
+ * Adds status text (e.g., Tomcat version, port) to the tree node and exposes
+ * deployed artifacts as expandable child nodes — matching IntelliJ Ultimate behavior.
  */
 public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
 
@@ -43,7 +50,7 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
 
             // Tomcat version
             TomcatInfo tomcatInfo = tomcatConfig.getTomcatInfo();
-            if (tomcatInfo != null && tomcatInfo.getVersion() != null && !tomcatInfo.getVersion().isEmpty()) {
+            if (tomcatInfo != null && !tomcatInfo.getVersion().isEmpty()) {
                 statusText.append("Tomcat ").append(tomcatInfo.getVersion());
             }
 
@@ -54,11 +61,49 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                 statusText.append(":").append(httpPort);
             }
 
-            // Deployed artifacts count
-            List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData().getDeploymentConfig().getArtifacts();
-            if (artifacts != null && !artifacts.isEmpty()) {
+            // Live deployment status from the status service
+            Project project = node.getProject();
+            TomcatDeploymentStatusService statusService =
+                    TomcatDeploymentStatusService.getInstance(project);
+            TomcatDeploymentStatusService.ConfigStatus liveStatus =
+                    statusService.getStatus(tomcatConfig.getName());
+
+            if (liveStatus != null) {
+                TomcatDeploymentStatusService.ServerState state = liveStatus.getServerState();
                 if (!statusText.isEmpty()) statusText.append(" · ");
-                statusText.append(artifacts.size()).append(artifacts.size() == 1 ? " artifact" : " artifacts");
+
+                switch (state) {
+                    case STARTING, DEPLOYING -> {
+                        statusText.append(state.getLabel());
+                        presentation.setIcon(AllIcons.Actions.Execute);
+                    }
+                    case RUNNING -> {
+                        statusText.append(state.getLabel());
+                        if (liveStatus.getStartupTimeMs() > 0) {
+                            statusText.append(" (").append(liveStatus.getStartupTimeMs()).append("ms)");
+                        }
+                        int errors = liveStatus.getErrorCount();
+                        int warnings = liveStatus.getWarningCount();
+                        if (errors > 0) {
+                            statusText.append(" · ").append(errors).append(errors == 1 ? " error" : " errors");
+                        }
+                        if (warnings > 0) {
+                            statusText.append(" · ").append(warnings).append(warnings == 1 ? " warning" : " warnings");
+                        }
+                    }
+                    case FAILED -> {
+                        statusText.append(state.getLabel());
+                        presentation.setIcon(AllIcons.General.Error);
+                    }
+                    case STOPPED -> statusText.append(state.getLabel());
+                }
+            } else {
+                // No live status — show static artifact count
+                List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData().getDeploymentConfig().getArtifacts();
+                if (artifacts != null && !artifacts.isEmpty()) {
+                    if (!statusText.isEmpty()) statusText.append(" · ");
+                    statusText.append(artifacts.size()).append(artifacts.size() == 1 ? " artifact" : " artifacts");
+                }
             }
 
             if (!statusText.isEmpty()) {
@@ -70,6 +115,39 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
         } catch (Exception e) {
             LOG.debug("Error updating presentation for: " + config.getName(), e);
             return false;
+        }
+    }
+
+    @Override
+    public @Nullable Collection<? extends AbstractTreeNode<?>> getChildren(
+            @NotNull RunDashboardRunConfigurationNode node) {
+        RunConfiguration config = node.getConfigurationSettings().getConfiguration();
+        if (!(config instanceof TomcatRunConfiguration tomcatConfig)) {
+            return null;
+        }
+
+        try {
+            List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
+                    .getDeploymentConfig().getArtifacts();
+            if (artifacts == null || artifacts.isEmpty()) {
+                return null;
+            }
+
+            Project project = node.getProject();
+            Integer httpPort = tomcatConfig.getHttpPort();
+            int port = httpPort != null ? httpPort : 8080;
+            String configName = tomcatConfig.getName();
+
+            List<AbstractTreeNode<?>> children = new ArrayList<>(artifacts.size());
+            for (DeploymentArtifact artifact : artifacts) {
+                if (artifact != null) {
+                    children.add(new TomcatDeploymentNode(project, artifact, port, configName));
+                }
+            }
+            return children.isEmpty() ? null : children;
+        } catch (Exception e) {
+            LOG.debug("Error getting deployment children", e);
+            return null;
         }
     }
 }

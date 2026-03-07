@@ -1,4 +1,4 @@
-package com.dev.idea.plugins.tomcat.conf;
+package com.dev.idea.plugins.tomcat.model;
 
 import com.intellij.execution.configurations.LogFileOptions;
 import com.intellij.execution.configurations.PredefinedLogFile;
@@ -17,6 +17,12 @@ class TomcatLogFileTest {
     @Nested
     @DisplayName("constants")
     class Constants {
+
+        @Test
+        @DisplayName("catalina out ID")
+        void catalinaOutId() {
+            assertEquals("Tomcat Catalina Out", TomcatLogFile.TOMCAT_CATALINA_OUT_ID);
+        }
 
         @Test
         @DisplayName("catalina log ID")
@@ -108,6 +114,15 @@ class TomcatLogFileTest {
     class FactoryMethods {
 
         @Test
+        @DisplayName("createCatalinaOut has correct properties")
+        void catalinaOut() {
+            TomcatLogFile log = TomcatLogFile.createCatalinaOut();
+            assertEquals(TomcatLogFile.TOMCAT_CATALINA_OUT_ID, log.getId());
+            assertEquals("catalina.out", log.getFilenamePattern());
+            assertTrue(log.isEnabledByDefault());
+        }
+
+        @Test
         @DisplayName("createCatalinaLog has correct properties")
         void catalinaLog() {
             TomcatLogFile log = TomcatLogFile.createCatalinaLog();
@@ -155,27 +170,28 @@ class TomcatLogFileTest {
     class StandardLogFiles {
 
         @Test
-        @DisplayName("returns 5 standard log files")
-        void returnsFiveFiles() {
+        @DisplayName("returns 6 standard log files")
+        void returnsSixFiles() {
             TomcatLogFile[] files = TomcatLogFile.getStandardLogFiles();
-            assertEquals(5, files.length);
+            assertEquals(6, files.length);
         }
 
         @Test
-        @DisplayName("first two are enabled by default")
-        void firstTwoEnabled() {
+        @DisplayName("first three are enabled by default")
+        void firstThreeEnabled() {
             TomcatLogFile[] files = TomcatLogFile.getStandardLogFiles();
             assertTrue(files[0].isEnabledByDefault());
             assertTrue(files[1].isEnabledByDefault());
+            assertTrue(files[2].isEnabledByDefault());
         }
 
         @Test
         @DisplayName("last three are disabled by default")
         void lastThreeDisabled() {
             TomcatLogFile[] files = TomcatLogFile.getStandardLogFiles();
-            assertFalse(files[2].isEnabledByDefault());
             assertFalse(files[3].isEnabledByDefault());
             assertFalse(files[4].isEnabledByDefault());
+            assertFalse(files[5].isEnabledByDefault());
         }
     }
 
@@ -184,10 +200,10 @@ class TomcatLogFileTest {
     class DefaultEnabledLogFiles {
 
         @Test
-        @DisplayName("returns 2 files")
-        void returnsTwoFiles() {
+        @DisplayName("returns 3 files")
+        void returnsThreeFiles() {
             TomcatLogFile[] files = TomcatLogFile.getDefaultEnabledLogFiles();
-            assertEquals(2, files.length);
+            assertEquals(3, files.length);
         }
 
         @Test

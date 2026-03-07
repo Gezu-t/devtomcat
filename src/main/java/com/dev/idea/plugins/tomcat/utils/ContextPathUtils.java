@@ -3,6 +3,8 @@ package com.dev.idea.plugins.tomcat.utils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
+
 public final class ContextPathUtils {
 
     private ContextPathUtils() {}
@@ -14,9 +16,9 @@ public final class ContextPathUtils {
                 .replaceAll("\\.(war|jar)$", "")
                 .replaceAll("[-_]?exploded$", "");
 
-        if (context.equalsIgnoreCase("ROOT") ||
+        if (context.equalsIgnoreCase(ROOT_CONTEXT_NAME) ||
                 context.equalsIgnoreCase("root.war")) {
-            return "/";
+            return DEFAULT_CONTEXT_PATH;
         }
 
         context = context.replaceAll("-\\d+(\\.\\d+)*(-SNAPSHOT)?$", "");
@@ -27,22 +29,22 @@ public final class ContextPathUtils {
                 .toLowerCase();
 
         if (context.isEmpty() || context.matches("-+")) {
-            return "/";
+            return DEFAULT_CONTEXT_PATH;
         }
 
-        return "/" + context;
+        return DEFAULT_CONTEXT_PATH + context;
     }
 
     @NotNull
     public static String normalizeContextPath(@Nullable String path) {
         if (path == null || path.trim().isEmpty()) {
-            return "/";
+            return DEFAULT_CONTEXT_PATH;
         }
 
         path = path.trim();
 
-        if (!path.startsWith("/")) {
-            path = "/" + path;
+        if (!path.startsWith(DEFAULT_CONTEXT_PATH)) {
+            path = DEFAULT_CONTEXT_PATH + path;
         }
 
         if (path.length() > 1 && path.endsWith("/")) {
@@ -54,12 +56,37 @@ public final class ContextPathUtils {
         return path;
     }
 
+    /**
+     * Extracts a base module name by stripping common artifact naming suffixes.
+     * Used to match deployment names against IntelliJ artifact names across naming conventions.
+     *
+     * <p>Examples:
+     * <ul>
+     *   <li>{@code "webapp-one_war_exploded"} → {@code "webapp-one"}</li>
+     *   <li>{@code "webapp-one:war exploded"} → {@code "webapp-one"}</li>
+     *   <li>{@code "webapp-one.war"} → {@code "webapp-one"}</li>
+     *   <li>{@code "plain-name"} → {@code "plain-name"}</li>
+     * </ul>
+     */
+    @NotNull
+    public static String extractBaseModuleName(@Nullable String name) {
+        if (name == null || name.isEmpty()) return "";
+        String lower = name.toLowerCase();
+        String[] suffixes = {"_war_exploded", "_war", ":war exploded", ":war", ".war", " (exploded)"};
+        for (String suffix : suffixes) {
+            if (lower.endsWith(suffix)) {
+                return lower.substring(0, lower.length() - suffix.length());
+            }
+        }
+        return lower;
+    }
+
     public static boolean isValidContextPath(@Nullable String context) {
         if (context == null || context.isEmpty()) {
             return false;
         }
 
-        if (!context.equals("/") && !context.startsWith("/")) {
+        if (!context.equals(DEFAULT_CONTEXT_PATH) && !context.startsWith(DEFAULT_CONTEXT_PATH)) {
             return false;
         }
 

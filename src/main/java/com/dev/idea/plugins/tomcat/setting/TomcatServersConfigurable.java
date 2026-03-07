@@ -94,17 +94,15 @@ public class TomcatServersConfigurable extends MasterDetailsComponent {
 
         super.apply();
 
-        List<TomcatInfo> tomcatInfos = TomcatServerManagerState.getInstance().getTomcatInfos();
-        tomcatInfos.clear();
-
+        List<TomcatInfo> newInfos = new ArrayList<>();
         for (int i = 0; i < myRoot.getChildCount(); i++) {
             MyNode node = (MyNode) myRoot.getChildAt(i);
             TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) node.getConfigurable();
-            TomcatInfo info = configurable.getEditableObject();
-            tomcatInfos.add(info);
+            newInfos.add(configurable.getEditableObject());
         }
+        TomcatServerManagerState.getInstance().setTomcatInfos(newInfos);
 
-        LOG.info("Applied configuration with " + tomcatInfos.size() + " servers");
+        LOG.info("Applied configuration with " + newInfos.size() + " servers");
     }
 
     private void validateAllServers() throws ConfigurationException {

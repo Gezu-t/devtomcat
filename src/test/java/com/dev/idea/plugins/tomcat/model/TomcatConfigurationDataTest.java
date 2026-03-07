@@ -148,6 +148,75 @@ class TomcatConfigurationDataTest {
     }
 
     @Test
+    @DisplayName("copyFrom copies portable fields but leaves UI/debug/coverage/log untouched")
+    void copyFromSelectiveFields() {
+        TomcatConfigurationData source = new TomcatConfigurationData();
+        source.setContextPath("/imported");
+        source.setServerMode("Remote");
+        source.setJreSelection("Java 17");
+        source.getPortConfig().setHttp(9999);
+        source.getDeploymentConfig().addArtifact(
+                new DeploymentArtifact("importedApp", "/imp", "war"));
+        source.getVmConfig().setVmOptions("-Xmx2g");
+        source.getBrowserConfig().setUrl("http://imported:9999/");
+        TomcatInfo srcInfo = new TomcatInfo("ImportedTomcat", "10.1.5", "/imported/path");
+        source.setTomcatInfo(srcInfo);
+
+        TomcatConfigurationData target = new TomcatConfigurationData();
+        target.getDebugConfig().setPort(7777);
+        target.getUiConfig().setAllowMultipleInstances(true);
+        target.getLogFileConfig().addLogFile("/var/log/custom.log");
+
+        target.copyFrom(source);
+
+        // Portable fields copied
+        assertEquals("/imported", target.getContextPath());
+        assertEquals("Remote", target.getServerMode());
+        assertEquals("Java 17", target.getJreSelection());
+        assertEquals(9999, target.getPortConfig().getHttp());
+        assertEquals(1, target.getDeploymentConfig().getArtifactCount());
+        assertEquals("-Xmx2g", target.getVmConfig().getVmOptions());
+        assertNotNull(target.getTomcatInfo());
+        assertEquals("ImportedTomcat", target.getTomcatInfo().getName());
+
+        // Non-portable fields untouched
+        assertEquals(7777, target.getDebugConfig().getPort());
+        assertTrue(target.getUiConfig().isAllowMultipleInstances());
+        assertTrue(target.getLogFileConfig().hasLogFiles());
+
+        // Source independence (deep copy)
+        source.getPortConfig().setHttp(1111);
+        assertEquals(9999, target.getPortConfig().getHttp());
+    }
+
+    @Test
+    @DisplayName("copyFrom with null tomcatInfo clears target info")
+    void copyFromNullTomcatInfo() {
+        TomcatConfigurationData target = new TomcatConfigurationData();
+        target.setTomcatInfo(new TomcatInfo("Old", "9.0", "/old"));
+
+        TomcatConfigurationData source = new TomcatConfigurationData();
+
+        target.copyFrom(source);
+        assertNull(target.getTomcatInfo());
+    }
+
+    @Test
+    @DisplayName("runnerSettingsMap is cloned independently")
+    void runnerSettingsMapClone() {
+        TomcatConfigurationData original = new TomcatConfigurationData();
+        original.getRunnerSettings("Run").setEnvironmentVariables(
+                java.util.Map.of("KEY", "VALUE"));
+
+        TomcatConfigurationData cloned = original.clone();
+        assertEquals("VALUE", cloned.getRunnerSettings("Run")
+                .getEnvironmentVariables().get("KEY"));
+
+        // Independence
+        assertNotSame(original.getRunnerSettingsMap(), cloned.getRunnerSettingsMap());
+    }
+
+    @Test
     @DisplayName("toString contains key fields")
     void toStringContainsFields() {
         TomcatConfigurationData data = new TomcatConfigurationData();

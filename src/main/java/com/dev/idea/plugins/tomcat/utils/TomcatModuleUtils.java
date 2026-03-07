@@ -13,6 +13,8 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
 import java.util.List;
 import java.util.Set;
 
@@ -91,7 +93,7 @@ public final class TomcatModuleUtils {
 
             // Check direct children with web root names
             for (VirtualFile child : contentRoot.getChildren()) {
-                if (child.isDirectory() && WEB_ROOT_NAMES.contains(child.getName())) {
+                if (child.isValid() && child.isDirectory() && WEB_ROOT_NAMES.contains(child.getName())) {
                     if (isValidWebRoot(child)) {
                         webRoots.add(child);
                     }
@@ -155,7 +157,7 @@ public final class TomcatModuleUtils {
         }
 
         // Check for WEB-INF directory (traditional Java web apps)
-        VirtualFile webInf = dir.findChild("WEB-INF");
+        VirtualFile webInf = dir.findChild(WEB_INF);
         if (webInf != null && webInf.isDirectory()) {
             return true;
         }
@@ -173,12 +175,38 @@ public final class TomcatModuleUtils {
         return false;
     }
 
+    /**
+     * Determines whether a module is a test module.
+     *
+     * <p>Uses suffix-based matching to avoid false positives: a module named
+     * "devtomcat-test" or "my-contest-app" is NOT a test module, but
+     * "myapp.test", "myapp-tests", or "myapp_test" ARE test modules.
+     * Also checks Gradle composite build naming (e.g., "project.test").
+     */
     private static boolean isTestModule(@NotNull Module module) {
         String name = module.getName().toLowerCase();
-        return name.contains("test") ||
-                name.contains("spec") ||
-                name.endsWith("-test") ||
-                name.endsWith("_test");
+
+        // Suffix-based checks (precise)
+        if (name.endsWith(".test") || name.endsWith(".tests") ||
+                name.endsWith("-test") || name.endsWith("-tests") ||
+                name.endsWith("_test") || name.endsWith("_tests") ||
+                name.endsWith(".spec") || name.endsWith("-spec") ||
+                name.endsWith("_spec")) {
+            return true;
+        }
+
+        // Exact name checks
+        if ("test".equals(name) || "tests".equals(name)) {
+            return true;
+        }
+
+        // Gradle sub-project test source sets: "project.module.test"
+        // Only match when "test" is the final path segment after a dot
+        if (name.contains(".") && name.substring(name.lastIndexOf('.') + 1).equals("test")) {
+            return true;
+        }
+
+        return false;
     }
 
     private static boolean hasWebBuildConfiguration(@NotNull Module module) {
@@ -191,7 +219,7 @@ public final class TomcatModuleUtils {
         }
 
         // Also check the project base dir (for single-module projects where the module root differs)
-        VirtualFile baseDir = module.getProject().getBaseDir();
+        VirtualFile baseDir = com.intellij.openapi.project.ProjectUtil.guessProjectDir(module.getProject());
         if (baseDir != null) {
             if (checkMavenWebConfig(baseDir) || checkGradleWebConfig(baseDir)) {
                 return true;
@@ -207,6 +235,10 @@ public final class TomcatModuleUtils {
 
         try {
             String content = com.intellij.openapi.vfs.VfsUtil.loadText(pomFile);
+            // POM-packaged projects are aggregators/parents, not web apps
+            if (content.contains("<packaging>pom</packaging>")) {
+                return false;
+            }
             return content.contains("<packaging>war</packaging>") ||
                     content.contains("maven-war-plugin") ||
                     content.contains("spring-boot-starter-web");

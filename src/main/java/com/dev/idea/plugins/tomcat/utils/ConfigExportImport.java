@@ -1,4 +1,4 @@
-package com.dev.idea.plugins.tomcat.util;
+package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
@@ -160,6 +160,9 @@ public final class ConfigExportImport {
     @NotNull
     public static TomcatConfigurationData importFromXml(@NotNull String xml) throws Exception {
         SAXBuilder builder = new SAXBuilder();
+        builder.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        builder.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        builder.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
         Document doc = builder.build(new StringReader(xml));
         Element root = doc.getRootElement();
 

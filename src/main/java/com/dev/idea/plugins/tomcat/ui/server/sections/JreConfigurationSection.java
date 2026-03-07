@@ -4,8 +4,14 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.ui.server.dialogs.JREConfigurationDialog;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JavaSdk;
+import com.intellij.openapi.projectRoots.ProjectJdkTable;
+import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -14,15 +20,13 @@ import java.awt.*;
 import java.util.Collections;
 import java.util.List;
 import com.intellij.openapi.diagnostic.Logger;
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 public class JreConfigurationSection implements ConfigurationSection {
 
     private static final Logger LOG = Logger.getInstance(JreConfigurationSection.class);
 
     private final Project project;
-    private JComboBox<String> jreComboBox;
-    private JButton jreConfigureButton;
+    private ComboBox<JreEntry> jreComboBox;
     private JPanel panel;
 
     public JreConfigurationSection(Project project) {
@@ -34,25 +38,31 @@ public class JreConfigurationSection implements ConfigurationSection {
     public JPanel createPanel() {
         if (panel == null) {
             panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(2, 0, 2, 0));
+            panel.setBorder(JBUI.Borders.empty(0));
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            gbc.insets = JBUI.insets(2, 0, 2, 4);
 
             gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("JRE:"), gbc);
+            panel.add(new JBLabel("JRE:"), gbc);
 
             gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(4, 4, 4, 4);
-            jreComboBox = new JComboBox<>();
+            gbc.insets = JBUI.insets(2, 4, 2, 8);
+            jreComboBox = new ComboBox<>();
+            jreComboBox.setRenderer(new JreEntryRenderer());
             panel.add(jreComboBox, gbc);
 
             gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(4, 0, 4, 0);
-            jreConfigureButton = new JButton("...");
-            jreConfigureButton.setPreferredSize(new Dimension(30, 25));
-            jreConfigureButton.addActionListener(e -> configureJRE());
-            panel.add(jreConfigureButton, gbc);
+            gbc.insets = JBUI.insets(2, 0, 2, 0);
+            JButton configButton = new JButton("Configure...");
+            configButton.addActionListener(e -> configureJRE());
+            Dimension comboSize = jreComboBox.getPreferredSize();
+            Dimension buttonSize = configButton.getPreferredSize();
+            configButton.setPreferredSize(new Dimension(
+                    Math.max(buttonSize.width, JBUI.scale(96)),
+                    comboSize.height
+            ));
+            panel.add(configButton, gbc);
         }
         return panel;
     }
@@ -60,28 +70,105 @@ public class JreConfigurationSection implements ConfigurationSection {
     @Override
     public void loadConfiguration() {
         jreComboBox.removeAllItems();
-        jreComboBox.addItem(TomcatConstants.JRE_PROJECT_DEFAULT);
+
+        // Add project default entry with actual SDK version info
+        String projectSdkLabel = buildProjectSdkLabel();
+        jreComboBox.addItem(new JreEntry(projectSdkLabel, null, true));
+
+        // Add all configured Java SDKs
+        for (Sdk sdk : ProjectJdkTable.getInstance().getAllJdks()) {
+            if (sdk.getSdkType() instanceof JavaSdk) {
+                String version = sdk.getVersionString();
+                String label = sdk.getName() + (version != null ? " (" + version + ")" : "");
+                jreComboBox.addItem(new JreEntry(label, sdk.getName(), false));
+            }
+        }
+    }
+
+    private String buildProjectSdkLabel() {
+        try {
+            Sdk projectSdk = ProjectRootManager.getInstance(project).getProjectSdk();
+            if (projectSdk != null) {
+                String version = projectSdk.getVersionString();
+                String majorVersion = extractMajorVersion(version);
+                if (majorVersion != null) {
+                    return "Default (" + majorVersion + " - project SDK)";
+                }
+                return "Default (" + projectSdk.getName() + " - project SDK)";
+            }
+        } catch (Exception e) {
+            LOG.debug("Could not detect project SDK", e);
+        }
+        return "Default (project SDK)";
+    }
+
+    private String extractMajorVersion(String versionString) {
+        if (versionString == null) return null;
+        // Version strings are like "17.0.2", "java version \"21.0.1\"", "1.8.0_351"
+        String cleaned = versionString.replaceAll("[^0-9.]", "").trim();
+        if (cleaned.isEmpty()) return null;
+
+        String[] parts = cleaned.split("\\.");
+        if (parts.length > 0) {
+            String major = parts[0];
+            // For old-style "1.8.x" versions, use the minor version
+            if ("1".equals(major) && parts.length > 1) {
+                return parts[1];
+            }
+            return major;
+        }
+        return null;
     }
 
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
-        jreComboBox.setSelectedItem(TomcatConstants.JRE_PROJECT_DEFAULT);
+        String saved = configuration.getConfigData().getJreSelection();
+        if (saved == null || saved.isEmpty()
+                || com.dev.idea.plugins.tomcat.TomcatConstants.JRE_PROJECT_DEFAULT.equals(saved)) {
+            if (jreComboBox.getItemCount() > 0) {
+                jreComboBox.setSelectedIndex(0);
+            }
+        } else {
+            boolean found = false;
+            for (int i = 0; i < jreComboBox.getItemCount(); i++) {
+                JreEntry entry = jreComboBox.getItemAt(i);
+                if (saved.equals(entry.sdkName)) {
+                    jreComboBox.setSelectedIndex(i);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && jreComboBox.getItemCount() > 0) {
+                jreComboBox.setSelectedIndex(0);
+            }
+        }
     }
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        String selectedJre = (String) jreComboBox.getSelectedItem();
-        LOG.debug("DevTomcat: JRE selection: " + selectedJre);
+        JreEntry selected = (JreEntry) jreComboBox.getSelectedItem();
+        if (selected != null) {
+            String sdkName = selected.isDefault
+                    ? com.dev.idea.plugins.tomcat.TomcatConstants.JRE_PROJECT_DEFAULT
+                    : selected.sdkName;
+            configuration.getConfigData().setJreSelection(sdkName);
+        }
     }
 
     @Override
-    public boolean isValid() {
+    public boolean isConfigurationValid() {
         return true;
     }
 
     @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
-        return false;
+        JreEntry selected = (JreEntry) jreComboBox.getSelectedItem();
+        if (selected == null) return false;
+        String current = selected.isDefault
+                ? com.dev.idea.plugins.tomcat.TomcatConstants.JRE_PROJECT_DEFAULT
+                : selected.sdkName;
+        String saved = config.getConfigData().getJreSelection();
+        return !java.util.Objects.equals(current, saved);
     }
 
     @Override
@@ -98,22 +185,60 @@ public class JreConfigurationSection implements ConfigurationSection {
                 if (selectedJdk != null) {
                     loadConfiguration();
                     if (!selectedJdk.isProjectSdk()) {
-                        jreComboBox.addItem(selectedJdk.toString());
-                        jreComboBox.setSelectedItem(selectedJdk.toString());
+                        // Select the matching SDK in the combo
+                        for (int i = 0; i < jreComboBox.getItemCount(); i++) {
+                            JreEntry entry = jreComboBox.getItemAt(i);
+                            if (selectedJdk.getName().equals(entry.sdkName)) {
+                                jreComboBox.setSelectedIndex(i);
+                                break;
+                            }
+                        }
                     } else {
-                        jreComboBox.setSelectedItem(TomcatConstants.JRE_PROJECT_DEFAULT);
+                        jreComboBox.setSelectedIndex(0);
                     }
-                    LOG.debug("DevTomcat: JRE configuration updated to: " + selectedJdk.getName());
+                    LOG.debug("JRE configuration updated to: " + selectedJdk.getName());
                 }
             }
         } catch (Exception e) {
-            LOG.warn("DevTomcat: Error opening JRE configuration: " + e.getMessage());
+            LOG.warn("Error opening JRE configuration", e);
             Messages.showErrorDialog(project, "Failed to open JRE configuration: " + e.getMessage(), "Error");
         }
     }
 
     public String getSelectedJRE() {
-        return (String) jreComboBox.getSelectedItem();
+        JreEntry entry = (JreEntry) jreComboBox.getSelectedItem();
+        return entry != null ? entry.label : null;
     }
 
+    // =========================================================================
+    // Inner classes
+    // =========================================================================
+
+    private static class JreEntry {
+        final String label;
+        final String sdkName;
+        final boolean isDefault;
+
+        JreEntry(String label, String sdkName, boolean isDefault) {
+            this.label = label;
+            this.sdkName = sdkName;
+            this.isDefault = isDefault;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    private static class JreEntryRenderer extends com.intellij.ui.SimpleListCellRenderer<JreEntry> {
+        @Override
+        public void customize(@NotNull JList<? extends JreEntry> list, JreEntry value, int index,
+                              boolean selected, boolean hasFocus) {
+            if (value != null) {
+                setText(value.label);
+                setToolTipText(value.isDefault ? "Uses the project's configured SDK" : value.sdkName);
+            }
+        }
+    }
 }

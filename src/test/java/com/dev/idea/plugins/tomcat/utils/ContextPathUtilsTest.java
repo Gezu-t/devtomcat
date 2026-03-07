@@ -191,4 +191,69 @@ class ContextPathUtilsTest {
             assertTrue(ContextPathUtils.isValidContextPath("/my-app_v2"));
         }
     }
+
+    @Nested
+    @DisplayName("extractBaseModuleName")
+    class ExtractBaseModuleName {
+
+        @Test
+        @DisplayName("null returns empty")
+        void nullReturnsEmpty() {
+            assertEquals("", ContextPathUtils.extractBaseModuleName(null));
+        }
+
+        @Test
+        @DisplayName("empty returns empty")
+        void emptyReturnsEmpty() {
+            assertEquals("", ContextPathUtils.extractBaseModuleName(""));
+        }
+
+        @Test
+        @DisplayName("strips _war_exploded suffix")
+        void stripsWarExploded() {
+            assertEquals("webapp-one", ContextPathUtils.extractBaseModuleName("webapp-one_war_exploded"));
+        }
+
+        @Test
+        @DisplayName("strips :war exploded suffix")
+        void stripsColonWarExploded() {
+            assertEquals("webapp-one", ContextPathUtils.extractBaseModuleName("webapp-one:war exploded"));
+        }
+
+        @Test
+        @DisplayName("strips .war suffix")
+        void stripsDotWar() {
+            assertEquals("webapp-one", ContextPathUtils.extractBaseModuleName("webapp-one.war"));
+        }
+
+        @Test
+        @DisplayName("strips _war suffix")
+        void stripsUnderscoreWar() {
+            assertEquals("webapp-one", ContextPathUtils.extractBaseModuleName("webapp-one_war"));
+        }
+
+        @Test
+        @DisplayName("strips :war suffix")
+        void stripsColonWar() {
+            assertEquals("webapp-one", ContextPathUtils.extractBaseModuleName("webapp-one:war"));
+        }
+
+        @Test
+        @DisplayName("strips (exploded) suffix")
+        void stripsExplodedParen() {
+            assertEquals("webapp-one", ContextPathUtils.extractBaseModuleName("webapp-one (exploded)"));
+        }
+
+        @Test
+        @DisplayName("plain name returns lowercase")
+        void plainNameLowercase() {
+            assertEquals("plain-name", ContextPathUtils.extractBaseModuleName("plain-name"));
+        }
+
+        @Test
+        @DisplayName("result is always lowercase")
+        void alwaysLowercase() {
+            assertEquals("myapp", ContextPathUtils.extractBaseModuleName("MyApp.war"));
+        }
+    }
 }

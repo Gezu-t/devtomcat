@@ -1,13 +1,20 @@
 package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.ui.server.dialogs.WebBrowsersDialog;
+import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.intellij.icons.AllIcons;
+import com.intellij.ide.browsers.WebBrowser;
+import com.intellij.ide.browsers.WebBrowserManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.TitledSeparator;
+import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -16,18 +23,18 @@ import java.awt.*;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 public class BrowserLaunchSection implements ConfigurationSection {
 
     private static final Logger LOG = Logger.getInstance(BrowserLaunchSection.class);
+    private static final String URL_PREFIX = "http://" + TomcatConstants.DEFAULT_HOST + ":";
 
     private final Project project;
-    private JCheckBox afterLaunchCheckBox;
-    private JComboBox<String> browserComboBox;
+    private JBCheckBox afterLaunchCheckBox;
+    private ComboBox<String> browserComboBox;
     private JButton browserConfigButton;
-    private JCheckBox withJavaScriptDebuggerCheckBox;
-    private JTextField urlField;
+    private JBCheckBox withJavaScriptDebuggerCheckBox;
+    private JBTextField urlField;
     private JPanel panel;
 
     private boolean isInitialized = false;
@@ -49,14 +56,14 @@ public class BrowserLaunchSection implements ConfigurationSection {
     }
 
     private void initializeComponents() {
-        afterLaunchCheckBox = new JCheckBox("After launch");
-        browserComboBox = new JComboBox<>();
+        afterLaunchCheckBox = new JBCheckBox("After launch");
+        browserComboBox = new ComboBox<>();
+        browserComboBox.setRenderer(new BrowserComboRenderer());
         browserConfigButton = new JButton("...");
-        withJavaScriptDebuggerCheckBox = new JCheckBox("with JavaScript debugger");
-        urlField = new JTextField();
+        withJavaScriptDebuggerCheckBox = new JBCheckBox("with JavaScript debugger");
+        urlField = new JBTextField();
 
-        browserComboBox.setPreferredSize(new Dimension(120, 25));
-        browserConfigButton.setPreferredSize(new Dimension(30, 25));
+        browserConfigButton.setPreferredSize(new Dimension(JBUI.scale(30), JBUI.scale(25)));
 
         afterLaunchCheckBox.addActionListener(e -> updateBrowserControls());
         browserConfigButton.addActionListener(e -> configureBrowsers());
@@ -65,7 +72,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
     private void createLayout() {
         panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(JBUI.Borders.empty(2, 0, 2, 0));
+        panel.setBorder(JBUI.Borders.empty(0));
 
         TitledSeparator separator = new TitledSeparator("Open browser");
         separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, separator.getPreferredSize().height));
@@ -74,14 +81,14 @@ public class BrowserLaunchSection implements ConfigurationSection {
         JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = JBUI.insets(4, 0, 4, 6);
+        gbc.insets = JBUI.insets(2, 0, 2, 6);
         gbc.gridwidth = 1;
 
         gbc.gridx = 0; gbc.gridy = 0;
         formPanel.add(afterLaunchCheckBox, gbc);
 
-        gbc.gridx = 1; gbc.weightx = 0;
-        gbc.fill = GridBagConstraints.NONE;
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
         formPanel.add(browserComboBox, gbc);
 
         gbc.gridx = 2;
@@ -90,15 +97,17 @@ public class BrowserLaunchSection implements ConfigurationSection {
         formPanel.add(browserConfigButton, gbc);
 
         gbc.gridx = 3;
+        gbc.weightx = 0;
         formPanel.add(withJavaScriptDebuggerCheckBox, gbc);
 
         gbc.gridx = 0; gbc.gridy = 1;
-        gbc.insets = JBUI.insets(4, 0, 4, 4);
-        formPanel.add(new JLabel("URL:"), gbc);
+        gbc.insets = JBUI.insets(2, 0, 2, 6);
+        formPanel.add(new JBLabel("URL:"), gbc);
 
         gbc.gridx = 1; gbc.gridwidth = 3;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
+        gbc.insets = JBUI.insets(2, 4, 2, 8);
         formPanel.add(urlField, gbc);
 
         formPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, formPanel.getPreferredSize().height));
@@ -112,13 +121,21 @@ public class BrowserLaunchSection implements ConfigurationSection {
         }
 
         try {
+            String previousSelection = (String) browserComboBox.getSelectedItem();
+
             browserComboBox.removeAllItems();
             browserComboBox.addItem(TomcatConstants.BROWSER_SYSTEM_DEFAULT);
 
-            List<WebBrowsersDialog.BrowserInfo> browsers = WebBrowsersDialog.getBrowserConfigurations();
-            for (WebBrowsersDialog.BrowserInfo browser : browsers) {
-                if (browser.isActive()) {
-                    browserComboBox.addItem(browser.getName());
+            // Use IntelliJ's built-in WebBrowserManager to get active configured browsers
+            for (WebBrowser browser : WebBrowserManager.getInstance().getActiveBrowsers()) {
+                browserComboBox.addItem(browser.getName());
+            }
+
+            // Restore previous selection if still available
+            if (previousSelection != null) {
+                browserComboBox.setSelectedItem(previousSelection);
+                if (browserComboBox.getSelectedItem() == null || !previousSelection.equals(browserComboBox.getSelectedItem())) {
+                    browserComboBox.setSelectedIndex(0);
                 }
             }
 
@@ -150,11 +167,11 @@ public class BrowserLaunchSection implements ConfigurationSection {
                 String contextPath = configuration.getContextPath();
                 Integer port = configuration.getHttpPort();
                 if (contextPath != null && port != null) {
-                    urlField.setText("http://localhost:" + port + contextPath);
+                    urlField.setText(URL_PREFIX + port + contextPath);
                 } else if (port != null) {
-                    urlField.setText("http://localhost:" + port + "/");
+                    urlField.setText(URL_PREFIX + port + TomcatConstants.DEFAULT_CONTEXT_PATH);
                 } else {
-                    urlField.setText("http://localhost:8080/");
+                    urlField.setText(URL_PREFIX + TomcatConstants.DEFAULT_PORT + TomcatConstants.DEFAULT_CONTEXT_PATH);
                 }
             }
 
@@ -197,7 +214,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean isValid() {
+    public boolean isConfigurationValid() {
         return true;
     }
 
@@ -260,24 +277,10 @@ public class BrowserLaunchSection implements ConfigurationSection {
     }
 
     private void configureBrowsers() {
-        try {
-            WebBrowsersDialog dialog = new WebBrowsersDialog(project);
-            if (dialog.showAndGet()) {
-                loadConfiguration();
-                String defaultBrowser = dialog.getDefaultBrowser();
-                if (defaultBrowser != null && !defaultBrowser.equals(TomcatConstants.BROWSER_SYSTEM_DEFAULT)) {
-                    browserComboBox.setSelectedItem(defaultBrowser);
-                } else {
-                    browserComboBox.setSelectedItem(TomcatConstants.BROWSER_SYSTEM_DEFAULT);
-                }
-                LOG.debug("Browser configuration updated");
-            }
-        } catch (Exception e) {
-            LOG.error("Error opening browser configuration", e);
-            Messages.showErrorDialog(project,
-                    "Failed to open browser configuration: " + e.getMessage(),
-                    "Browser Configuration Error");
-        }
+        // Open IntelliJ's built-in "Web Browsers and Preview" settings page
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, "Web Browsers and Preview");
+        // Reload browser list after settings dialog closes (user may have changed browsers)
+        loadConfiguration();
     }
 
     public boolean isAfterLaunchEnabled() {
@@ -300,29 +303,40 @@ public class BrowserLaunchSection implements ConfigurationSection {
                 withJavaScriptDebuggerCheckBox.isSelected();
     }
 
-    public void updateUrlPort(Integer newPort) {
-        if (isInitialized && urlField != null && newPort != null) {
-            String currentUrl = urlField.getText();
-            if (currentUrl.startsWith("http://localhost:")) {
-                int portStart = "http://localhost:".length();
-                int pathStart = currentUrl.indexOf('/', portStart);
-                String path = (pathStart != -1) ? currentUrl.substring(pathStart) : "/";
-
-                String newUrl = "http://localhost:" + newPort + path;
-                urlField.setText(newUrl);
-            }
-        }
-    }
-
     public void updateUrlContext(String contextPath) {
         if (!isInitialized || urlField == null || contextPath == null) return;
 
         String currentUrl = urlField.getText();
-        if (currentUrl.startsWith("http://localhost:")) {
-            int portStart = "http://localhost:".length();
+        if (currentUrl.startsWith(URL_PREFIX)) {
+            int portStart = URL_PREFIX.length();
             int pathStart = currentUrl.indexOf('/', portStart);
             String portPart = (pathStart != -1) ? currentUrl.substring(0, pathStart) : currentUrl;
             urlField.setText(portPart + contextPath);
+        }
+    }
+
+    private static class BrowserComboRenderer extends com.intellij.ui.SimpleListCellRenderer<String> {
+        @Override
+        public void customize(@NotNull JList<? extends String> list, String value, int index,
+                              boolean selected, boolean hasFocus) {
+            if (value != null) {
+                setText(value);
+                Icon icon = findBrowserIcon(value);
+                setIcon(icon != null ? icon : AllIcons.General.Web);
+            }
+        }
+
+        private Icon findBrowserIcon(String browserName) {
+            if (TomcatConstants.BROWSER_SYSTEM_DEFAULT.equalsIgnoreCase(browserName)
+                    || "Default".equalsIgnoreCase(browserName)) {
+                return AllIcons.General.Web;
+            }
+            for (WebBrowser browser : WebBrowserManager.getInstance().getBrowsers()) {
+                if (browserName.equals(browser.getName())) {
+                    return browser.getIcon();
+                }
+            }
+            return null;
         }
     }
 }

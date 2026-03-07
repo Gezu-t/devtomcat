@@ -12,6 +12,8 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
+
 /**
  * Validates Tomcat server installations by checking required directories,
  * scripts, and configuration files.
@@ -23,9 +25,6 @@ public final class TomcatServerValidator {
 
     // Tomcat directory structure
     private static final String DIR_BIN = "bin";
-    private static final String DIR_CONF = "conf";
-    private static final String DIR_WEBAPPS = "webapps";
-    private static final String DIR_LOGS = "logs";
 
     // Required files
     private static final String CATALINA_SH = "catalina.sh";

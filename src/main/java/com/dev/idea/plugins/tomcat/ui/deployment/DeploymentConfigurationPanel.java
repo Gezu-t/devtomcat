@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -68,6 +69,16 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
                 String text = contextTextField.getText();
                 boolean valid = tableManager.updateSelectedContext(text);
                 contextTextField.setForeground(valid ? JBColor.foreground() : JBColor.RED);
+                if (!valid && text != null && !text.isEmpty()) {
+                    String normalized = ContextPathUtils.normalizeContextPath(text);
+                    if (!ContextPathUtils.isValidContextPath(normalized)) {
+                        contextTextField.setToolTipText("Invalid context path format");
+                    } else {
+                        contextTextField.setToolTipText("Context path already in use by another artifact");
+                    }
+                } else {
+                    contextTextField.setToolTipText(null);
+                }
             }
         });
 
@@ -97,16 +108,20 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         TitledSeparator title = new TitledSeparator("Deploy at the server startup");
         add(title, BorderLayout.NORTH);
 
-        // List with toolbar in center
-        JPanel listPanel = createListWithToolbar();
-        add(listPanel, BorderLayout.CENTER);
+        // List with toolbar + context editor together in center
+        JPanel centerPanel = new JPanel(new BorderLayout());
 
-        // Context path editor at bottom
+        JPanel listPanel = createListWithToolbar();
+        centerPanel.add(listPanel, BorderLayout.CENTER);
+
+        // Context path editor directly below the list toolbar
         JPanel contextPanel = new JPanel(new BorderLayout(8, 0));
-        contextPanel.setBorder(JBUI.Borders.emptyTop(6));
-        contextPanel.add(new JLabel("Application context:"), BorderLayout.WEST);
+        contextPanel.setBorder(JBUI.Borders.emptyTop(4));
+        contextPanel.add(new com.intellij.ui.components.JBLabel("Application context:"), BorderLayout.WEST);
         contextPanel.add(contextTextField, BorderLayout.CENTER);
-        add(contextPanel, BorderLayout.SOUTH);
+        centerPanel.add(contextPanel, BorderLayout.SOUTH);
+
+        add(centerPanel, BorderLayout.CENTER);
 
         LOG.info("DeploymentConfigurationPanel layout setup complete");
     }
@@ -122,8 +137,8 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             decorator.setMoveDownAction(button -> tableManager.moveSelectedDown());
 
             JPanel decoratedPanel = decorator.createPanel();
-            decoratedPanel.setMinimumSize(new Dimension(320, 180));
-            decoratedPanel.setPreferredSize(new Dimension(600, 220));
+            decoratedPanel.setMinimumSize(new Dimension(JBUI.scale(320), JBUI.scale(180)));
+            decoratedPanel.setPreferredSize(new Dimension(JBUI.scale(600), JBUI.scale(220)));
             LOG.info("Toolbar created successfully with list");
             return decoratedPanel;
 
@@ -131,7 +146,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             LOG.error("Error creating toolbar, using fallback", e);
 
             JPanel fallbackPanel = new JPanel(new BorderLayout());
-            JScrollPane scrollPane = new JScrollPane(tableManager.getComponent());
+            com.intellij.ui.components.JBScrollPane scrollPane = new com.intellij.ui.components.JBScrollPane(tableManager.getComponent());
             fallbackPanel.add(scrollPane, BorderLayout.CENTER);
             return fallbackPanel;
         }
@@ -144,16 +159,23 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             @Override
             public PopupStep<?> onChosen(String selectedValue, boolean finalChoice) {
                 if (TomcatConstants.DEPLOY_OPTION_ARTIFACT.equals(selectedValue)) {
-                    SwingUtilities.invokeLater(() -> selectionHandler.showArtifactSelectionDialog());
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(
+                            () -> selectionHandler.showArtifactSelectionDialog());
                 } else if (TomcatConstants.DEPLOY_OPTION_EXTERNAL.equals(selectedValue)) {
-                    SwingUtilities.invokeLater(() -> selectionHandler.showExternalSourceDialog());
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(
+                            () -> selectionHandler.showExternalSourceDialog());
                 }
                 return FINAL_CHOICE;
             }
         };
 
         ListPopup popup = JBPopupFactory.getInstance().createListPopup(step);
-        popup.showUnderneathOf(button.getContextComponent());
+        com.intellij.ui.awt.RelativePoint point = button.getPreferredPopupPoint();
+        if (point != null) {
+            popup.show(point);
+        } else {
+            popup.showUnderneathOf(button.getContextComponent());
+        }
     }
 
     private void editSelectedArtifact() {
@@ -178,13 +200,17 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     public void resetFrom(@NotNull TomcatRunConfiguration config) {
         tableManager.clearAll();
 
-        if (config.getConfigData().getDeploymentConfig() != null &&
-                config.getConfigData().getDeploymentConfig().getArtifacts() != null) {
-            for (DeploymentArtifact artifact : config.getConfigData().getDeploymentConfig().getArtifacts()) {
+        List<DeploymentArtifact> artifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
+        if (artifacts != null) {
+            for (DeploymentArtifact artifact : artifacts) {
                 if (artifact != null) {
                     tableManager.addDeployment(artifact.clone());
                 }
             }
+        }
+
+        if (tableManager.getDeploymentCount() > 0) {
+            tableManager.setSelectedIndex(0);
         }
 
         updateEmptyState();
@@ -192,11 +218,19 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
 
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
         List<DeploymentArtifact> artifacts = tableManager.getDeployments();
+        for (DeploymentArtifact artifact : artifacts) {
+            artifact.setDeployed(true);
+        }
         config.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
     }
 
     public boolean isConfigurationValid() {
-        // Deployment configuration is always valid (artifacts are optional)
+        // Artifacts are optional, but if present they must have valid paths
+        for (DeploymentArtifact d : tableManager.getDeployments()) {
+            if (d.getPath() == null || d.getPath().trim().isEmpty()) {
+                return false;
+            }
+        }
         return true;
     }
 }

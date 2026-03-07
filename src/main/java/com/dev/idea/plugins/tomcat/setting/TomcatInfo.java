@@ -18,12 +18,14 @@ public class TomcatInfo implements Serializable, Cloneable {
     private String name;
     private String version;
     private String path;
+    private String catalinaBase;
 
     public TomcatInfo() {
         this.id = UUID.randomUUID().toString();
         this.name = "";
         this.version = "";
         this.path = "";
+        this.catalinaBase = "";
     }
 
     public TomcatInfo(@NotNull String name, @NotNull String version, @NotNull String path) {
@@ -31,6 +33,7 @@ public class TomcatInfo implements Serializable, Cloneable {
         this.name = Objects.requireNonNull(name);
         this.version = Objects.requireNonNull(version);
         this.path = Objects.requireNonNull(path);
+        this.catalinaBase = "";
     }
 
     @NotNull
@@ -129,11 +132,16 @@ public class TomcatInfo implements Serializable, Cloneable {
      * For a standard installation, this is the same as CATALINA_HOME.
      * For run configurations, this is typically the project-specific directory.
      *
-     * @return the Tomcat installation path (same as getPath())
+     * @return the CATALINA_BASE path, or CATALINA_HOME if not set
      */
     @NotNull
     public String getCatalinaBase() {
-        return getPath();
+        String base = StringUtil.notNullize(catalinaBase).trim();
+        return base.isEmpty() ? getPath() : base;
+    }
+
+    public void setCatalinaBase(@Nullable String catalinaBase) {
+        this.catalinaBase = StringUtil.notNullize(catalinaBase);
     }
 
     @Override
@@ -147,6 +155,7 @@ public class TomcatInfo implements Serializable, Cloneable {
             copy.setName(this.name);
             copy.setVersion(this.version);
             copy.setPath(this.path);
+            copy.setCatalinaBase(this.catalinaBase);
             return copy;
         }
     }

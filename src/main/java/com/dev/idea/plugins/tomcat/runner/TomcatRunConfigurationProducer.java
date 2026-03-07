@@ -301,8 +301,9 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return false;
         }
 
-        // Professional web file pattern detection
-        String fileName = element.getContainingFile().getName().toLowerCase();
+        com.intellij.psi.PsiFile containingFile = element.getContainingFile();
+        if (containingFile == null) return false;
+        String fileName = containingFile.getName().toLowerCase();
         return fileName.endsWith(".jsp") ||
                 fileName.endsWith(".jspx") ||
                 fileName.endsWith(".html") ||
@@ -391,10 +392,29 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
      * Select optimal Tomcat server for enterprise deployment
      */
     private TomcatInfo selectOptimalTomcatServer(List<TomcatInfo> servers) {
-        // Professional server selection strategy (prefer latest version)
         return servers.stream()
-                .max((s1, s2) -> s1.getVersion().compareTo(s2.getVersion()))
+                .max((s1, s2) -> compareSemanticVersions(s1.getVersion(), s2.getVersion()))
                 .orElse(servers.get(0));
+    }
+
+    private static int compareSemanticVersions(@NotNull String v1, @NotNull String v2) {
+        String[] parts1 = v1.split("\\.");
+        String[] parts2 = v2.split("\\.");
+        int maxLen = Math.max(parts1.length, parts2.length);
+        for (int i = 0; i < maxLen; i++) {
+            int num1 = i < parts1.length ? parseVersionPart(parts1[i]) : 0;
+            int num2 = i < parts2.length ? parseVersionPart(parts2[i]) : 0;
+            if (num1 != num2) return Integer.compare(num1, num2);
+        }
+        return 0;
+    }
+
+    private static int parseVersionPart(@NotNull String part) {
+        try {
+            return Integer.parseInt(part.replaceAll("[^0-9]", ""));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**
@@ -499,27 +519,4 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     }
 
 
-    /**
-     * Get professional project type analysis
-     */
-    public String getProjectTypeAnalysis(@NotNull Module module) {
-        StringBuilder analysis = new StringBuilder();
-        analysis.append("Tomcat Project Analysis: ");
-
-        if (isSpringBootModule(module)) {
-            analysis.append("Spring Boot Framework ");
-        }
-
-        if (isMavenModule(module)) {
-            analysis.append("Maven Build System ");
-        }
-
-        if (isGradleModule(module)) {
-            analysis.append("Gradle Build System ");
-        }
-
-        analysis.append("(Module: ").append(module.getName()).append(")");
-
-        return analysis.toString();
-    }
 }

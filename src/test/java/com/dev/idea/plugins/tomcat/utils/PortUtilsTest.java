@@ -33,9 +33,9 @@ class PortUtilsTest {
         }
 
         @Test
-        @DisplayName("DEFAULT_JMX is 9010")
+        @DisplayName("DEFAULT_JMX is 1099")
         void defaultJmx() {
-            assertEquals(9010, PortUtils.DEFAULT_JMX);
+            assertEquals(1099, PortUtils.DEFAULT_JMX);
         }
 
         @Test

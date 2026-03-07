@@ -563,15 +563,17 @@ package com.dev.idea.plugins.tomcat.logging;
                  Objects.requireNonNull(sb, "StringBuilder cannot be null");
                  Objects.requireNonNull(throwable, "Throwable cannot be null");
 
-                 sb.append(throwable.toString()).append("\n");
-
-                 for (StackTraceElement element : throwable.getStackTrace()) {
-                     sb.append("  at ").append(element.toString()).append("\n");
-                 }
-
-                 if (throwable.getCause() != null) {
-                     sb.append("Caused by: ");
-                     appendThrowable(sb, throwable.getCause());
+                 java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+                 Throwable current = throwable;
+                 while (current != null && seen.add(current)) {
+                     if (current != throwable) {
+                         sb.append("Caused by: ");
+                     }
+                     sb.append(current.toString()).append("\n");
+                     for (StackTraceElement element : current.getStackTrace()) {
+                         sb.append("  at ").append(element.toString()).append("\n");
+                     }
+                     current = current.getCause();
                  }
              }
 

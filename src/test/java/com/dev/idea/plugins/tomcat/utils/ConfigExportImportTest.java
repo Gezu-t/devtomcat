@@ -1,4 +1,4 @@
-package com.dev.idea.plugins.tomcat.util;
+package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;

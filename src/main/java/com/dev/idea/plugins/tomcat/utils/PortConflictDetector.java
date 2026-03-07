@@ -1,15 +1,13 @@
-package com.dev.idea.plugins.tomcat.util;
+package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Pre-launch port conflict detector.
@@ -90,16 +88,29 @@ public final class PortConflictDetector {
     }
 
     /**
-     * Check if a specific port is available for binding.
+     * Check if a specific port is available for binding on both wildcard and localhost.
+     * Checks both addresses because Tomcat's shutdown socket binds to {@code localhost}
+     * which on macOS/IPv6 resolves to {@code ::1}, a different address family from
+     * the wildcard {@code 0.0.0.0}.
      *
      * @param port the port to check
-     * @return true if the port is available
+     * @return true if the port is available on all relevant addresses
      */
     public static boolean isPortAvailable(int port) {
         if (port < 1 || port > 65535) return false;
-        try (ServerSocket socket = new ServerSocket(port)) {
-            socket.setReuseAddress(true);
-            return true;
+        // Check wildcard address (0.0.0.0)
+        if (!tryBind(port, null)) return false;
+        // Check localhost (may resolve to ::1 on macOS/IPv6)
+        if (!tryBind(port, "localhost")) return false;
+        return true;
+    }
+
+    private static boolean tryBind(int port, String address) {
+        try {
+            InetAddress addr = address != null ? InetAddress.getByName(address) : null;
+            try (ServerSocket socket = new ServerSocket(port, 1, addr)) {
+                return true;
+            }
         } catch (IOException e) {
             return false;
         }
@@ -148,6 +159,88 @@ public final class PortConflictDetector {
      */
     public static boolean hasConflicts(@NotNull PortConfig portConfig) {
         return !detectConflicts(portConfig).isEmpty();
+    }
+
+    /**
+     * Result of port conflict resolution, containing the resolved config and
+     * descriptions of what was changed.
+     */
+    public static final class PortResolution {
+        private final PortConfig resolvedConfig;
+        private final List<String> changes;
+
+        PortResolution(@NotNull PortConfig resolvedConfig, @NotNull List<String> changes) {
+            this.resolvedConfig = resolvedConfig;
+            this.changes = changes;
+        }
+
+        @NotNull public PortConfig getResolvedConfig() { return resolvedConfig; }
+        @NotNull public List<String> getChanges() { return changes; }
+        public boolean hasChanges() { return !changes.isEmpty(); }
+    }
+
+    /**
+     * Detects port conflicts and auto-resolves them by finding next available ports.
+     * Returns a resolved PortConfig that is safe to use for launch, plus a log
+     * of what was changed so the caller can inform the user.
+     *
+     * <p>Resolution priority (first service keeps its port):
+     * HTTP &rarr; Shutdown &rarr; HTTPS &rarr; JMX &rarr; AJP
+     *
+     * @param portConfig the original port configuration
+     * @return resolution result with conflict-free ports and change descriptions
+     */
+    @NotNull
+    public static PortResolution resolveConflicts(@NotNull PortConfig portConfig) {
+        PortConfig resolved = portConfig.clone();
+        List<String> changes = new ArrayList<>();
+        Set<Integer> allocated = new LinkedHashSet<>();
+
+        resolved.setHttp(resolvePort("HTTP", resolved.getHttp(), allocated, changes));
+        resolved.setShutdown(resolvePort("Shutdown", resolved.getShutdown(), allocated, changes));
+        if (resolved.isHttpsEnabled()) {
+            resolved.setHttps(resolvePort("HTTPS", resolved.getHttps(), allocated, changes));
+        }
+        if (resolved.isJmxEnabled()) {
+            resolved.setJmx(resolvePort("JMX", resolved.getJmx(), allocated, changes));
+        }
+        if (resolved.isAjpEnabled()) {
+            resolved.setAjp(resolvePort("AJP", resolved.getAjp(), allocated, changes));
+        }
+
+        return new PortResolution(resolved, changes);
+    }
+
+    /**
+     * Resolves a single port: checks for internal conflicts (duplicate among our own services)
+     * and external conflicts (port in use by another process).
+     */
+    private static int resolvePort(@NotNull String serviceName, int port,
+                                   @NotNull Set<Integer> allocated, @NotNull List<String> changes) {
+        boolean internalConflict = !allocated.add(port);
+        boolean externalConflict = !isPortAvailable(port);
+
+        if (internalConflict || externalConflict) {
+            String reason = internalConflict
+                    ? "conflicts with another configured service"
+                    : "is in use by another process";
+            int next = findNextAvailable(port);
+            if (next > 0 && allocated.add(next)) {
+                if (!internalConflict) {
+                    // External conflict only: this service's port was added at line 220 but
+                    // is being replaced, so remove it. Don't remove on internal conflict —
+                    // the port belongs to a previously resolved service and must stay reserved.
+                    allocated.remove(port);
+                }
+                changes.add(serviceName + " port " + port + " " + reason + ", resolved to " + next);
+                LOG.info("Port auto-resolved: " + serviceName + " " + port + " -> " + next);
+                return next;
+            }
+            // If no port found, keep original and let Tomcat fail with clear error
+            changes.add(serviceName + " port " + port + " " + reason + ", no alternative found");
+            LOG.warn("Port conflict unresolved: " + serviceName + " port " + port);
+        }
+        return port;
     }
 
     private static String getSuggestion(String service, int port) {

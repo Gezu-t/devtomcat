@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
+import com.dev.idea.plugins.tomcat.model.VmConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
@@ -17,59 +18,101 @@ import com.intellij.ui.components.*;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.DataFlavor;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.List;
 
+/**
+ * Startup/Connection tab — mirrors IntelliJ Ultimate's Tomcat run configuration behavior.
+ *
+ * <p>Architecture:
+ * <ul>
+ *   <li><b>Computed defaults</b> — CATALINA_OPTS (with VM options), JAVA_OPTS, CATALINA_HOME/BASE,
+ *       JDK_JAVA_OPTIONS are auto-populated and visually distinguished (gray italic).</li>
+ *   <li><b>User ownership tracking</b> — Each env var is either "computed" (auto-managed) or
+ *       "user-modified" (edited/added by the user). Computed vars auto-refresh when VM options
+ *       or Tomcat server change; user-modified vars are never overwritten.</li>
+ *   <li><b>Double-click edit</b> — Editing a computed var promotes it to user-modified.</li>
+ *   <li><b>Reset Defaults</b> — Restores all computed defaults, clearing user modifications.</li>
+ *   <li><b>Per-mode state</b> — Run/Debug/Coverage/Profile each have independent env var maps.</li>
+ * </ul>
+ */
 public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     private static final Logger LOG = Logger.getInstance(StartupConnectionTab.class);
 
     private final Project project;
-    private final TomcatRunConfiguration configuration;
+    private TomcatRunConfiguration configuration;
 
     private static final String RUN_MODE = "Run";
     private static final String DEBUG_MODE = "Debug";
     private static final String COVERAGE_MODE = "Coverage";
+    private static final String PROFILE_MODE = "Profile";
+
+    private static final String[] ALL_MODES = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE, PROFILE_MODE};
+
+    /** Keys that are auto-computed by the plugin. Order matters for display. */
+    private static final List<String> COMPUTED_KEYS = List.of(
+            "CATALINA_OPTS", "JAVA_OPTS", "JDK_JAVA_OPTIONS", "CATALINA_HOME", "CATALINA_BASE"
+    );
 
     private JBList<String> modeList;
     private String selectedMode = RUN_MODE;
 
-    // We maintain a snapshot of settings per mode in UI
     private final Map<String, UIState> modeStates = new HashMap<>();
 
+    /**
+     * Per-mode UI snapshot. Tracks both the env var values and which keys are
+     * still "computed" (auto-managed) vs "user-modified" (user took ownership).
+     */
     private static class UIState {
         boolean useDefaultStartup = true;
         String startupScript = "";
         boolean useDefaultShutdown = true;
         String shutdownScript = "";
         boolean passParentEnvs = true;
+        /** All env vars (computed + user). Insertion order preserved. */
         Map<String, String> envVars = new LinkedHashMap<>();
+        /** Keys still auto-managed — refresh updates only these. */
+        Set<String> computedKeys = new LinkedHashSet<>();
+        /** Keys the user explicitly deleted — never auto-restore until Reset Defaults. */
+        Set<String> deletedComputedKeys = new LinkedHashSet<>();
     }
 
     private TextFieldWithBrowseButton startupScriptField;
     private TextFieldWithBrowseButton shutdownScriptField;
-    private JCheckBox useDefaultStartupCB;
-    private JCheckBox useDefaultShutdownCB;
+    private JBCheckBox useDefaultStartupCB;
+    private JBCheckBox useDefaultShutdownCB;
+
+    private JBTextField vmOptionsDisplay;
 
     private JBTable envTable;
     private DefaultTableModel envModel;
-    private JCheckBox passParentEnvsCB;
+    private JBCheckBox passParentEnvsCB;
 
     public StartupConnectionTab(@NotNull Project project, @NotNull TomcatRunConfiguration configuration) {
         this.project = project;
         this.configuration = configuration;
         initUI();
     }
+
+    // =========================================================================
+    // UI Construction
+    // =========================================================================
 
     private void initUI() {
         setLayout(new BorderLayout());
@@ -81,26 +124,27 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
-        // Mode selector list (Run / Debug / Coverage)
         gbc.gridy = 0;
         gbc.weighty = 0;
         gbc.fill = GridBagConstraints.BOTH;
         gbc.insets = JBUI.insets(0, 0, 10, 0);
         mainPanel.add(createModeSelector(), gbc);
 
-        // Startup script row
         gbc.gridy = 1;
         gbc.weighty = 0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = JBUI.insets(4, 0);
         mainPanel.add(createStartupSection(), gbc);
 
-        // Shutdown script row
         gbc.gridy = 2;
         mainPanel.add(createShutdownSection(), gbc);
 
-        // Environment Variables section (fills remaining space)
+        // Effective VM Options (read-only, reflects Server tab's VM options)
         gbc.gridy = 3;
+        gbc.insets = JBUI.insets(10, 0, 0, 0);
+        mainPanel.add(createVmOptionsDisplay(), gbc);
+
+        gbc.gridy = 4;
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
         gbc.insets = JBUI.insets(10, 0, 0, 0);
@@ -113,25 +157,27 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     }
 
     private JComponent createModeSelector() {
-        String[] modes = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE};
-        modeList = new JBList<>(modes);
+        modeList = new JBList<>(ALL_MODES);
         modeList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         modeList.setSelectedIndex(0);
-        modeList.setVisibleRowCount(3);
+        modeList.setVisibleRowCount(ALL_MODES.length);
 
-        modeList.setCellRenderer(new DefaultListCellRenderer() {
+        modeList.setCellRenderer(new com.intellij.ui.SimpleListCellRenderer<String>() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value,
-                                                          int index, boolean isSelected, boolean cellHasFocus) {
-                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                label.setBorder(JBUI.Borders.empty(4, 8));
-                String mode = (String) value;
-                switch (mode) {
-                    case RUN_MODE -> label.setIcon(AllIcons.Actions.Execute);
-                    case DEBUG_MODE -> label.setIcon(AllIcons.Actions.StartDebugger);
-                    case COVERAGE_MODE -> label.setIcon(AllIcons.General.RunWithCoverage);
+            public void customize(@NotNull JList<? extends String> list, String value, int index,
+                                  boolean selected, boolean hasFocus) {
+                setBorder(JBUI.Borders.empty(4, 8));
+                if (value != null) {
+                    switch (value) {
+                        case RUN_MODE -> setIcon(AllIcons.Actions.Execute);
+                        case DEBUG_MODE -> setIcon(AllIcons.Actions.StartDebugger);
+                        case COVERAGE_MODE -> {
+                            setIcon(AllIcons.General.RunWithCoverage);
+                            setText("Cover");
+                        }
+                        case PROFILE_MODE -> setIcon(AllIcons.Actions.ProfileCPU);
+                    }
                 }
-                return label;
             }
         });
 
@@ -139,17 +185,17 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             if (!e.getValueIsAdjusting()) {
                 String newMode = modeList.getSelectedValue();
                 if (newMode != null && !newMode.equals(selectedMode)) {
-                    saveCurrentState(); // Save current UI fields to state
+                    saveCurrentState();
                     selectedMode = newMode;
-                    restoreCurrentState(); // Restore state to UI fields
+                    restoreCurrentState();
                     LOG.debug("Mode switched to: " + newMode);
                 }
             }
         });
 
         JBScrollPane scrollPane = new JBScrollPane(modeList);
-        scrollPane.setPreferredSize(new Dimension(0, 90));
-        scrollPane.setMinimumSize(new Dimension(0, 90));
+        scrollPane.setPreferredSize(new Dimension(0, JBUI.scale(120)));
+        scrollPane.setMinimumSize(new Dimension(0, JBUI.scale(120)));
         return scrollPane;
     }
 
@@ -161,7 +207,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
         g.gridx = 0;
         g.gridy = 0;
-        p.add(new JLabel("Startup script:"), g);
+        p.add(new JBLabel("Startup script:"), g);
 
         g.gridx = 1;
         g.weightx = 1.0;
@@ -176,7 +222,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.weightx = 0;
         g.fill = GridBagConstraints.NONE;
         g.insets = JBUI.insets(2);
-        useDefaultStartupCB = new JCheckBox("Use default", true);
+        useDefaultStartupCB = new JBCheckBox("Use default", true);
         useDefaultStartupCB.addActionListener(e -> updateStartupState());
         p.add(useDefaultStartupCB, g);
 
@@ -191,7 +237,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
         g.gridx = 0;
         g.gridy = 0;
-        p.add(new JLabel("Shutdown script:"), g);
+        p.add(new JBLabel("Shutdown script:"), g);
 
         g.gridx = 1;
         g.weightx = 1.0;
@@ -206,9 +252,32 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.weightx = 0;
         g.fill = GridBagConstraints.NONE;
         g.insets = JBUI.insets(2);
-        useDefaultShutdownCB = new JCheckBox("Use default", true);
+        useDefaultShutdownCB = new JBCheckBox("Use default", true);
         useDefaultShutdownCB.addActionListener(e -> updateShutdownState());
         p.add(useDefaultShutdownCB, g);
+
+        return p;
+    }
+
+    private JPanel createVmOptionsDisplay() {
+        JPanel p = new JPanel(new GridBagLayout());
+        GridBagConstraints g = new GridBagConstraints();
+        g.anchor = GridBagConstraints.WEST;
+        g.insets = JBUI.insets(2);
+
+        g.gridx = 0;
+        g.gridy = 0;
+        p.add(new JBLabel("VM options:"), g);
+
+        g.gridx = 1;
+        g.weightx = 1.0;
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.insets = JBUI.insets(2, 15, 2, 10);
+        vmOptionsDisplay = new JBTextField();
+        vmOptionsDisplay.setEditable(false);
+        vmOptionsDisplay.setForeground(NamedColorUtil.getInactiveTextColor());
+        vmOptionsDisplay.setToolTipText("VM options from the Server tab (read-only). Edit on the Server tab.");
+        p.add(vmOptionsDisplay, g);
 
         return p;
     }
@@ -220,7 +289,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
         JPanel center = new JPanel(new BorderLayout());
 
-        passParentEnvsCB = new JCheckBox("Pass environment variables", true);
+        passParentEnvsCB = new JBCheckBox("Pass environment variables", true);
         passParentEnvsCB.setBorder(JBUI.Borders.emptyBottom(6));
         center.add(passParentEnvsCB, BorderLayout.NORTH);
 
@@ -231,14 +300,40 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         };
         envTable = new JBTable(envModel);
         envTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        envTable.setRowHeight(25);
+        envTable.setRowHeight(JBUI.scale(24));
         envTable.getColumnModel().getColumn(0).setPreferredWidth(200);
         envTable.getColumnModel().getColumn(1).setPreferredWidth(400);
+
+        // Computed defaults render in gray italic; user vars render normally
+        envTable.setDefaultRenderer(Object.class, new ComputedVarCellRenderer());
+
+        // Double-click to edit (promotes computed → user-modified)
+        envTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2 && envTable.getSelectedRow() >= 0) {
+                    editSelectedEnvVar();
+                }
+            }
+        });
 
         ToolbarDecorator decorator = ToolbarDecorator.createDecorator(envTable)
                 .setAddAction(button -> addEnvVar())
                 .setRemoveAction(button -> removeEnvVar())
+                .setEditAction(button -> editSelectedEnvVar())
                 .disableUpDownActions();
+
+        decorator.addExtraAction(new com.intellij.ui.AnActionButton("Populate Defaults", AllIcons.Actions.Rollback) {
+            @Override
+            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+                populateDefaults();
+            }
+
+            @Override
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
+            }
+        });
 
         decorator.addExtraAction(new com.intellij.ui.AnActionButton("Copy", AllIcons.Actions.Copy) {
             @Override
@@ -270,12 +365,258 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         });
 
         JComponent envTablePanel = decorator.createPanel();
-        envTablePanel.setPreferredSize(new Dimension(0, 150));
+        envTablePanel.setPreferredSize(new Dimension(0, JBUI.scale(150)));
         center.add(envTablePanel, BorderLayout.CENTER);
         p.add(center, BorderLayout.CENTER);
 
         return p;
     }
+
+    /**
+     * Cell renderer that visually distinguishes computed defaults from user-defined vars.
+     * Computed defaults render in gray italic; user vars render normally.
+     */
+    private class ComputedVarCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+                                                       boolean hasFocus, int row, int column) {
+            Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+
+            if (row < envModel.getRowCount()) {
+                String name = (String) envModel.getValueAt(row, 0);
+                UIState state = modeStates.get(selectedMode);
+                boolean isComputed = state != null && state.computedKeys.contains(name);
+
+                if (isComputed && !isSelected) {
+                    c.setForeground(NamedColorUtil.getInactiveTextColor());
+                    c.setFont(c.getFont().deriveFont(Font.ITALIC));
+                } else if (!isSelected) {
+                    c.setForeground(table.getForeground());
+                    c.setFont(table.getFont());
+                }
+            }
+            return c;
+        }
+    }
+
+    // =========================================================================
+    // Computed Defaults
+    // =========================================================================
+
+    /**
+     * Computes default environment variables from the current configuration.
+     * CATALINA_OPTS includes the user's VM options from the Server tab.
+     */
+    private Map<String, String> computeDefaultEnvVars(@NotNull TomcatRunConfiguration cfg) {
+        Map<String, String> defaults = new LinkedHashMap<>();
+
+        // CATALINA_OPTS = user VM options + dynamic environment defaults
+        StringBuilder catalinaOpts = new StringBuilder();
+        VmConfig vmConfig = cfg.getConfigData().getVmConfig();
+        if (vmConfig != null && vmConfig.hasVmOptions()) {
+            catalinaOpts.append(vmConfig.getVmOptions());
+        }
+        String dynamicCatalinaOpts = DynamicTomcatEnvironment.buildCatalinaOpts();
+        if (!dynamicCatalinaOpts.isEmpty()) {
+            if (!catalinaOpts.isEmpty()) catalinaOpts.append(" ");
+            catalinaOpts.append(dynamicCatalinaOpts);
+        }
+        defaults.put("CATALINA_OPTS", catalinaOpts.toString().trim());
+
+        defaults.put("JAVA_OPTS", DynamicTomcatEnvironment.buildJavaOpts());
+
+        Map<String, String> envMap = DynamicTomcatEnvironment.buildEnvironmentVariables();
+        String jdkJavaOptions = envMap.get("JDK_JAVA_OPTIONS");
+        if (!StringUtil.isEmpty(jdkJavaOptions)) {
+            defaults.put("JDK_JAVA_OPTIONS", jdkJavaOptions);
+        }
+
+        TomcatInfo tomcatInfo = cfg.getTomcatInfo();
+        if (tomcatInfo != null && !StringUtil.isEmpty(tomcatInfo.getPath())) {
+            defaults.put("CATALINA_HOME", tomcatInfo.getPath());
+            defaults.put("CATALINA_BASE", tomcatInfo.getPath());
+        }
+
+        return defaults;
+    }
+
+    /**
+     * Refreshes the VM options display and any computed env vars to reflect
+     * current state from the Server tab. Called by the editor on tab switch.
+     */
+    public void refreshComputedEnvVars(@NotNull TomcatRunConfiguration cfg) {
+        this.configuration = cfg;
+
+        // Update the read-only VM options display
+        VmConfig vmConfig = cfg.getConfigData().getVmConfig();
+        String vmOpts = (vmConfig != null && vmConfig.hasVmOptions()) ? vmConfig.getVmOptions() : "(none)";
+        vmOptionsDisplay.setText(vmOpts);
+
+        // Refresh computed env var values (only keys the user hasn't edited)
+        saveCurrentState();
+        Map<String, String> freshDefaults = computeDefaultEnvVars(cfg);
+        for (UIState state : modeStates.values()) {
+            for (Map.Entry<String, String> entry : freshDefaults.entrySet()) {
+                String key = entry.getKey();
+                if (state.computedKeys.contains(key)) {
+                    state.envVars.put(key, entry.getValue());
+                }
+            }
+        }
+
+        restoreCurrentState();
+        LOG.debug("Refreshed VM options display and computed env vars");
+    }
+
+    /** Populates the current mode's env vars with computed defaults (CATALINA_OPTS, JAVA_OPTS, etc.). */
+    private void populateDefaults() {
+        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
+        Map<String, String> defaults = computeDefaultEnvVars(configuration);
+
+        // Preserve user-added vars that aren't in the computed set
+        Map<String, String> userOnly = new LinkedHashMap<>();
+        for (Map.Entry<String, String> e : state.envVars.entrySet()) {
+            if (!COMPUTED_KEYS.contains(e.getKey()) && !defaults.containsKey(e.getKey())) {
+                userOnly.put(e.getKey(), e.getValue());
+            }
+        }
+
+        state.envVars.clear();
+        state.computedKeys.clear();
+        state.deletedComputedKeys.clear();
+
+        // Computed defaults first (in stable order), then user-added vars
+        for (String key : COMPUTED_KEYS) {
+            if (defaults.containsKey(key)) {
+                state.envVars.put(key, defaults.get(key));
+                state.computedKeys.add(key);
+            }
+        }
+        state.envVars.putAll(userOnly);
+
+        restoreCurrentState();
+        LOG.info("Reset environment variables to defaults for mode: " + selectedMode);
+    }
+
+    // =========================================================================
+    // Env Var Actions
+    // =========================================================================
+
+    private void addEnvVar() {
+        EnvVarDialog dlg = new EnvVarDialog(project, null, null);
+        if (dlg.showAndGet()) {
+            String[] v = dlg.getVar();
+            String name = v[0];
+            if (hasDuplicate(name)) {
+                Messages.showErrorDialog(project, "Duplicate variable name: " + name, "Error");
+                return;
+            }
+            envModel.addRow(v);
+            // User-added var is not tracked as computed
+            UIState state = modeStates.get(selectedMode);
+            if (state != null) {
+                state.computedKeys.remove(name);
+            }
+        }
+    }
+
+    private void editSelectedEnvVar() {
+        int row = envTable.getSelectedRow();
+        if (row < 0) return;
+
+        String oldName = (String) envModel.getValueAt(row, 0);
+        String oldValue = (String) envModel.getValueAt(row, 1);
+
+        EnvVarDialog dlg = new EnvVarDialog(project, oldName, oldValue);
+        if (dlg.showAndGet()) {
+            String[] v = dlg.getVar();
+            String newName = v[0];
+
+            // Check duplicate (skip self)
+            for (int i = 0; i < envModel.getRowCount(); i++) {
+                if (i != row && newName.equals(envModel.getValueAt(i, 0))) {
+                    Messages.showErrorDialog(project, "Duplicate variable name: " + newName, "Error");
+                    return;
+                }
+            }
+
+            envModel.setValueAt(newName, row, 0);
+            envModel.setValueAt(v[1], row, 1);
+
+            // Editing promotes computed → user-modified (won't auto-refresh)
+            UIState state = modeStates.get(selectedMode);
+            if (state != null) {
+                state.computedKeys.remove(oldName);
+                state.computedKeys.remove(newName);
+            }
+            envTable.repaint();
+        }
+    }
+
+    private void removeEnvVar() {
+        int row = envTable.getSelectedRow();
+        if (row < 0) return;
+
+        String name = (String) envModel.getValueAt(row, 0);
+        UIState state = modeStates.get(selectedMode);
+        if (state != null) {
+            // Track that user explicitly deleted this computed key
+            if (state.computedKeys.remove(name)) {
+                state.deletedComputedKeys.add(name);
+            }
+        }
+
+        envModel.removeRow(row);
+        if (envModel.getRowCount() > 0) {
+            int newSel = Math.min(row, envModel.getRowCount() - 1);
+            envTable.setRowSelectionInterval(newSel, newSel);
+        }
+    }
+
+    private void copyEnvVar() {
+        int row = envTable.getSelectedRow();
+        if (row < 0) return;
+        String name = (String) envModel.getValueAt(row, 0);
+        String value = (String) envModel.getValueAt(row, 1);
+        String text = name + "=" + value;
+        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+        clipboard.setContents(new StringSelection(text), null);
+    }
+
+    private void pasteEnvVar() {
+        try {
+            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            String text = (String) clipboard.getData(DataFlavor.stringFlavor);
+            if (text == null || text.isEmpty()) return;
+
+            int eq = text.indexOf('=');
+            if (eq > 0) {
+                String name = text.substring(0, eq).trim();
+                String value = text.substring(eq + 1).trim();
+                if (!name.isEmpty() && !hasDuplicate(name)) {
+                    envModel.addRow(new String[]{name, value});
+                    // Pasted var is user-owned
+                    UIState state = modeStates.get(selectedMode);
+                    if (state != null) {
+                        state.computedKeys.remove(name);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            LOG.debug("Paste failed: " + ex.getMessage());
+        }
+    }
+
+    private boolean hasDuplicate(String name) {
+        for (int i = 0; i < envModel.getRowCount(); i++) {
+            if (name.equals(envModel.getValueAt(i, 0))) return true;
+        }
+        return false;
+    }
+
+    // =========================================================================
+    // Script Helpers
+    // =========================================================================
 
     private FileChooserDescriptor scriptFileDescriptor() {
         FileChooserDescriptor d = new FileChooserDescriptor(true, false, false, false, false, false);
@@ -300,7 +641,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         TomcatInfo ti = configuration.getTomcatInfo();
         if (ti == null) return "";
         String bin = Paths.get(ti.getPath(), "bin").toString();
-        String os = System.getProperty("os.name").toLowerCase();
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
         String script = os.contains("win") ? base + ".bat" : base + ".sh";
         return bin + File.separator + script + " " + command;
     }
@@ -317,74 +658,20 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         if (useDef) shutdownScriptField.setText(defaultShutdownScript());
     }
 
-    private void addEnvVar() {
-        EnvVarDialog dlg = new EnvVarDialog(project, null, null);
-        if (dlg.showAndGet()) {
-            String[] v = dlg.getVar();
-            if (hasDuplicate(v[0])) {
-                Messages.showErrorDialog(project, "Duplicate variable name", "Error");
-                return;
-            }
-            envModel.addRow(v);
-        }
-    }
-
-    private void removeEnvVar() {
-        int row = envTable.getSelectedRow();
-        if (row >= 0) {
-            envModel.removeRow(row);
-            if (envModel.getRowCount() > 0) {
-                int newSel = Math.min(row, envModel.getRowCount() - 1);
-                envTable.setRowSelectionInterval(newSel, newSel);
-            }
-        }
-    }
-
-    private void copyEnvVar() {
-        int row = envTable.getSelectedRow();
-        if (row < 0) return;
-        String name = (String) envModel.getValueAt(row, 0);
-        String value = (String) envModel.getValueAt(row, 1);
-        String text = name + "=" + value;
-        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-        clipboard.setContents(new StringSelection(text), null);
-    }
-
-    private void pasteEnvVar() {
-        try {
-            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-            String text = (String) clipboard.getData(DataFlavor.stringFlavor);
-            if (text == null || text.isEmpty()) return;
-
-            // Parse "NAME=VALUE" format
-            int eq = text.indexOf('=');
-            if (eq > 0) {
-                String name = text.substring(0, eq).trim();
-                String value = text.substring(eq + 1).trim();
-                if (!name.isEmpty() && !hasDuplicate(name)) {
-                    envModel.addRow(new String[]{name, value});
-                }
-            }
-        } catch (Exception ex) {
-            LOG.debug("Paste failed: " + ex.getMessage());
-        }
-    }
-
-    private boolean hasDuplicate(String name) {
-        for (int i = 0; i < envModel.getRowCount(); i++) {
-            if (name.equals(envModel.getValueAt(i, 0))) return true;
-        }
-        return false;
-    }
+    // =========================================================================
+    // State Management (per-mode save/restore)
+    // =========================================================================
 
     public void resetFrom(@NotNull TomcatRunConfiguration cfg) {
+        this.configuration = cfg;
         modeStates.clear();
-        String[] allModes = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE};
-        
-        for (String mode : allModes) {
+
+        Map<String, String> defaults = computeDefaultEnvVars(cfg);
+
+        for (String mode : ALL_MODES) {
             UIState state = new UIState();
             var runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
-            
+
             String startup = runnerSettings.getStartupScript();
             state.useDefaultStartup = StringUtil.isEmpty(startup);
             state.startupScript = state.useDefaultStartup ? defaultStartupScript() : startup;
@@ -392,22 +679,40 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             String shutdown = runnerSettings.getShutdownScript();
             state.useDefaultShutdown = StringUtil.isEmpty(shutdown);
             state.shutdownScript = state.useDefaultShutdown ? defaultShutdownScript() : shutdown;
-            
+
             state.passParentEnvs = runnerSettings.isPassParentEnvs();
-            
-            Map<String, String> envs = runnerSettings.getEnvironmentVariables();
-            if (envs != null) {
-                state.envVars.putAll(envs);
+
+            Map<String, String> persisted = runnerSettings.getEnvironmentVariables();
+            if (persisted != null && !persisted.isEmpty()) {
+                // Load persisted vars. Identify which match computed values
+                // (mark as computed so they auto-refresh on tab switch).
+                state.envVars.putAll(persisted);
+                for (String key : COMPUTED_KEYS) {
+                    if (persisted.containsKey(key)) {
+                        String computedVal = defaults.get(key);
+                        if (computedVal != null && computedVal.equals(persisted.get(key))) {
+                            state.computedKeys.add(key);
+                        }
+                    }
+                }
             }
-            
+            // Fresh configs start with an empty table (matching IntelliJ Ultimate).
+            // Users can add defaults via the "Populate Defaults" toolbar button.
+
             modeStates.put(mode, state);
         }
+
+        // Show current VM options from Server tab
+        VmConfig vmConfig = cfg.getConfigData().getVmConfig();
+        String vmOpts = (vmConfig != null && vmConfig.hasVmOptions()) ? vmConfig.getVmOptions() : "(none)";
+        vmOptionsDisplay.setText(vmOpts);
 
         selectedMode = RUN_MODE;
         modeList.setSelectedIndex(0);
         restoreCurrentState();
 
-        LOG.debug("StartupConnectionTab reset completed");
+        LOG.debug("StartupConnectionTab reset: vmOptions=" + vmOpts + ", "
+                + modeStates.values().stream().mapToInt(s -> s.computedKeys.size()).sum() + " auto-managed env keys");
     }
 
     private void saveCurrentState() {
@@ -426,6 +731,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
                 state.envVars.put(name, value);
             }
         }
+        // computedKeys and deletedComputedKeys are maintained by add/edit/remove actions
     }
 
     private void restoreCurrentState() {
@@ -446,7 +752,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
-        // Ensure current active UI fields are pushed to state before applying
         saveCurrentState();
 
         for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
@@ -478,16 +783,16 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             runnerSettings.setPassParentEnvs(state.passParentEnvs);
         }
 
-        cfg.setDebugPort(cfg.getDebugPort());
-        cfg.setDebugTransport(cfg.getDebugTransport());
-        cfg.setUseModuleClasspath(cfg.isUseModuleClasspath());
-
         LOG.info("StartupConnectionTab applied for all modes");
     }
 
+    // =========================================================================
+    // Env Var Dialog
+    // =========================================================================
+
     private static class EnvVarDialog extends DialogWrapper {
-        private final JTextField nameF = new JTextField(25);
-        private final JTextField valueF = new JTextField(25);
+        private final JBTextField nameF = new JBTextField(25);
+        private final JBTextField valueF = new JBTextField(25);
         private final ComboBox<String> commonCombo = new ComboBox<>(new String[]{
                 "Custom Variable", "JAVA_OPTS", "CATALINA_OPTS", "CATALINA_HOME",
                 "CATALINA_BASE", "JAVA_HOME", "CLASSPATH", "PATH"
@@ -529,17 +834,17 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             g.anchor = GridBagConstraints.WEST;
 
             g.gridx = 0; g.gridy = 0;
-            panel.add(new JLabel("Common:"), g);
+            panel.add(new JBLabel("Common:"), g);
             g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
             panel.add(commonCombo, g);
 
             g.gridx = 0; g.gridy = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
-            panel.add(new JLabel("Name:"), g);
+            panel.add(new JBLabel("Name:"), g);
             g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
             panel.add(nameF, g);
 
             g.gridx = 0; g.gridy = 2; g.fill = GridBagConstraints.NONE; g.weightx = 0;
-            panel.add(new JLabel("Value:"), g);
+            panel.add(new JBLabel("Value:"), g);
             g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
             panel.add(valueF, g);
 

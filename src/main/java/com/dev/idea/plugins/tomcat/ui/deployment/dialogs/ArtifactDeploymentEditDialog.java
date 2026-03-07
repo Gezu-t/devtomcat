@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.deployment.dialogs;
 
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.components.JBLabel;
@@ -8,12 +9,14 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.ui.components.JBTextField;
+
 import javax.swing.*;
 import java.awt.*;
 
 public class ArtifactDeploymentEditDialog extends DialogWrapper {
     private final DeploymentArtifact deployment;
-    private JTextField contextField;
+    private JBTextField contextField;
 
     public ArtifactDeploymentEditDialog(JComponent parent, @NotNull DeploymentArtifact deployment) {
         super(SwingUtilities.getWindowAncestor(parent), true);
@@ -27,7 +30,7 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
     @Override
     protected @Nullable JComponent createCenterPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setPreferredSize(new Dimension(400, 150));
+        panel.setPreferredSize(new Dimension(JBUI.scale(400), JBUI.scale(150)));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = JBUI.insets(5);
@@ -42,8 +45,9 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         panel.add(new JBLabel("Application context:"), gbc);
 
         gbc.gridx = 1; gbc.weightx = 1.0;
-        contextField = new JTextField(deployment.getApplicationContext());
-        contextField.setPreferredSize(new Dimension(250, 25));
+        contextField = new JBTextField();
+        contextField.setText(deployment.getApplicationContext());
+        contextField.setPreferredSize(new Dimension(JBUI.scale(250), JBUI.scale(25)));
         contextField.selectAll();
         panel.add(contextField, gbc);
 
@@ -51,7 +55,7 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         JBLabel helpLabel = new JBLabel(
                 "<html><small>The context path where the application will be accessible<br>" +
                         "For example: /myapp will be accessible at http://localhost:8080/myapp</small></html>");
-        helpLabel.setForeground(UIManager.getColor("Label.disabledForeground"));
+        helpLabel.setForeground(com.intellij.util.ui.NamedColorUtil.getInactiveTextColor());
         panel.add(helpLabel, gbc);
 
         gbc.gridy = 3; gbc.weighty = 1.0;
@@ -66,12 +70,10 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         if (context.isEmpty()) {
             return new ValidationInfo("Application context cannot be empty", contextField);
         }
-        if (context.contains(" ")) {
-            return new ValidationInfo("Application context cannot contain spaces", contextField);
-        }
-        if (!context.matches("^/[a-zA-Z0-9\\-_/]*$") && !context.equals("/")) {
+        String normalized = ContextPathUtils.normalizeContextPath(context);
+        if (!ContextPathUtils.isValidContextPath(normalized)) {
             return new ValidationInfo(
-                    "Application context can only contain letters, numbers, hyphens, and underscores",
+                    "Invalid context path. Must start with '/' and contain only valid URL characters.",
                     contextField);
         }
         return null;
@@ -79,12 +81,8 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
 
     @Override
     protected void doOKAction() {
-        String context = contextField.getText().trim();
-        if (!context.startsWith("/")) context = "/" + context;
+        String context = ContextPathUtils.normalizeContextPath(contextField.getText().trim());
         deployment.setApplicationContext(context);
-        if (deployment.isUsingDefaultContext()) {
-            deployment.setServerPath(context);
-        }
         super.doOKAction();
     }
 

@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.Serial;
@@ -101,9 +100,9 @@ public class PortConfig implements Serializable, Cloneable {
         if (port < MIN_PORT || port > MAX_PORT) {
             result.addError(name + " port must be between " + MIN_PORT + "-" + MAX_PORT);
         }
-        if (!PortUtils.isAvailable(port)) {
-            result.addWarning(name + " port " + port + " is in use");
-        }
+        // Port availability (socket binding) is intentionally NOT checked here — this method
+        // runs on the EDT during live validation. Availability is checked at launch time
+        // by PortConflictDetector and TomcatJavaParametersBuilder.
         if (port < PRIVILEGED_PORT_THRESHOLD) {
             result.addWarning(name + " port " + port + " requires admin privileges");
         }

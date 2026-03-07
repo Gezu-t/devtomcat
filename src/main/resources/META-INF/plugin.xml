@@ -1,31 +1,69 @@
 <idea-plugin>
     <id>com.dev.idea.plugins.tomcat</id>
     <name>DevTomcat</name>
-    <vendor email="support@devtomcat.com" url="https://github.com/Gezu-t/devtomcat">Dev Tomcat Team</vendor>
+    <vendor email="support@devtomcat.com" url="https://github.com/Gezu-t/devtomcat">Gezu</vendor>
 
     <description><![CDATA[
     <h2>DevTomcat</h2>
-    <p>Free Tomcat integration for IntelliJ IDEA Community Edition.</p>
+    <p>Free, full-featured Apache Tomcat integration for IntelliJ IDEA.
+    Run, debug, and deploy web applications with smart diagnostics, live status tracking, and zero configuration overhead.</p>
 
-    <h3>Features</h3>
+    <h3>Core Features</h3>
     <ul>
-        <li>Configure and manage multiple Tomcat instances</li>
-        <li>Deploy WAR files and exploded directories</li>
-        <li>Debug applications with full IDE support</li>
-        <li>Hot deployment without restart</li>
-        <li>Multi-log support (Catalina, localhost, access)</li>
-        <li>JMX monitoring</li>
+        <li>Full Tomcat lifecycle — start, stop, debug, and redeploy from the IDE</li>
+        <li>Deploy WAR files and exploded directories with auto-detected artifacts</li>
+        <li>Multi-artifact deployment with independent context paths</li>
+        <li>Debug with full breakpoint and hot-swap support</li>
+        <li>Code coverage with JaCoCo integration</li>
+        <li>Hot deployment and Update Running Application (Ctrl+F10)</li>
+        <li>CATALINA_BASE isolation — each configuration gets its own instance directory</li>
+        <li>server.xml auto-generation with HTTP, HTTPS, AJP, and shutdown connectors</li>
+        <li>JMX monitoring support</li>
+        <li>Remote deployment via Tomcat Manager API</li>
+    </ul>
+
+    <h3>Smart Diagnostics</h3>
+    <ul>
+        <li><b>Error Diagnostics Engine</b> — Detects 16+ common Tomcat errors (ClassNotFound, BindException, OOM, SSL, JDBC, etc.) with categorized severity, actionable suggestions, and quick-fix IDs</li>
+        <li><b>Version Compatibility Checker</b> — Validates Tomcat/JDK compatibility before launch (Tomcat 7–11 matrix) and warns about Jakarta EE namespace changes</li>
+        <li><b>Auto-Port Resolution</b> — Detects port conflicts at startup and auto-resolves to available ports with console warnings</li>
+    </ul>
+
+    <h3>Live Deployment Dashboard</h3>
+    <ul>
+        <li><b>Live Status Tracking</b> — Real-time server and per-artifact status (Starting, Deploying, Running, Failed) in the Services tool window</li>
+        <li><b>Deployment History</b> — Persistent history of all deployments with duration, error/warning counts, and consecutive failure tracking</li>
+        <li><b>Startup Time Trends</b> — Tracks startup performance across runs and shows trend comparisons</li>
+    </ul>
+
+    <h3>Enhanced Console & Config</h3>
+    <ul>
+        <li><b>Smart Console Filter</b> — Clickable URLs (opens browser) and file paths (opens in editor) in Tomcat console output</li>
+        <li><b>Config Export/Import</b> — Export and import run configurations as XML files for team sharing</li>
+        <li><b>Per-mode Runner Settings</b> — Separate environment variables and startup scripts for Run, Debug, and Coverage modes</li>
+        <li><b>Multi-log Monitoring</b> — Catalina, localhost, access, and custom log files as dedicated console tabs</li>
     </ul>
 
     <h3>Requirements</h3>
     <ul>
         <li>IntelliJ IDEA 2024.1+</li>
-        <li>Apache Tomcat 6+</li>
+        <li>Apache Tomcat 7+</li>
         <li>Java 17+</li>
     </ul>
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.1.0</h3>
+    <ul>
+        <li>Smart Diagnostics Engine — auto-detects 16+ Tomcat errors with actionable suggestions</li>
+        <li>Tomcat/JDK version compatibility checker (Tomcat 7–11 matrix)</li>
+        <li>Live deployment status tracking in Services tool window</li>
+        <li>Deployment history with persistent storage</li>
+        <li>Enhanced console filter with clickable URLs and file paths</li>
+        <li>Configuration export/import for team sharing</li>
+        <li>Code coverage runner with JaCoCo support</li>
+        <li>Update Running Application (Ctrl+F10) support</li>
+    </ul>
     <h3>Version 1.0.0</h3>
     <ul>
         <li>Initial release of DevTomcat</li>
@@ -50,6 +88,14 @@
         <applicationService
                 serviceImplementation="com.dev.idea.plugins.tomcat.stats.StartupTimeTracker"/>
 
+        <!-- Live deployment status tracking (project-level) -->
+        <projectService
+                serviceImplementation="com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService"/>
+
+        <!-- Deployment history (project-level, persisted) -->
+        <projectService
+                serviceImplementation="com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory"/>
+
         <!-- Run Configuration -->
         <configurationType
                 implementation="com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType"/>
@@ -61,6 +107,12 @@
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatRunner"/>
         <programRunner
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatDebugger"/>
+        <programRunner
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatCoverageRunner"/>
+
+        <!-- Update Running Application (Ctrl+F10) -->
+        <runningApplicationUpdaterProvider
+                implementation="com.dev.idea.plugins.tomcat.update.TomcatRunningApplicationUpdaterProvider"/>
 
         <!-- Settings Panel: Build, Execution, Deployment -->
         <applicationConfigurable
@@ -75,6 +127,13 @@
         <runDashboardCustomizer
                 implementation="com.dev.idea.plugins.tomcat.service.TomcatRunDashboardCustomizer"
                 order="first"/>
+
+        <!-- Console filter: clickable URLs and file paths in Tomcat output -->
+        <consoleFilterProvider
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatConsoleFilterProvider"/>
+
+        <!-- Notification Group for balloon notifications -->
+        <notificationGroup id="DevTomcat" displayType="BALLOON"/>
 
         <!-- Registry Keys -->
         <registryKey key="devtomcat.environment.mode"
@@ -114,4 +173,28 @@
                      description="Default JMX port"
                      restartRequired="false"/>
     </extensions>
+
+    <actions>
+        <group id="DevTomcat.ToolsMenu" text="DevTomcat" popup="true"
+               icon="AllIcons.Nodes.Deploy">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+
+            <action id="DevTomcat.ShowDeploymentHistory"
+                    class="com.dev.idea.plugins.tomcat.action.ShowDeploymentHistoryAction"
+                    text="Deployment History"
+                    description="View deployment history and statistics"
+                    icon="AllIcons.Vcs.History"/>
+
+            <action id="DevTomcat.ShowStartupTrends"
+                    class="com.dev.idea.plugins.tomcat.action.ShowStartupTrendsAction"
+                    text="Startup Time Trends"
+                    description="View startup time trends across configurations"
+                    icon="AllIcons.Actions.Profile"/>
+        </group>
+    </actions>
+
+    <applicationListeners>
+        <listener class="com.dev.idea.plugins.tomcat.update.TomcatFrameDeactivationListener"
+                  topic="com.intellij.openapi.application.ApplicationActivationListener"/>
+    </applicationListeners>
 </idea-plugin>

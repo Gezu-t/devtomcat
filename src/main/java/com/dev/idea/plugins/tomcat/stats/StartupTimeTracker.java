@@ -10,6 +10,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
+
 /**
  * Tracks Tomcat startup times across runs per configuration.
  *
@@ -32,10 +33,11 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     /** Maximum number of startup times to keep per configuration. */
     private static final int MAX_HISTORY_SIZE = 20;
 
-    private State myState = new State();
+    private volatile State myState = new State();
 
     /**
      * Persistent state container.
+     * Uses standard collection types for IntelliJ XmlSerializer compatibility.
      */
     public static class State {
         /** Map of configuration name → list of startup times in ms (most recent last). */
@@ -44,12 +46,12 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
 
     @Nullable
     @Override
-    public State getState() {
+    public synchronized State getState() {
         return myState;
     }
 
     @Override
-    public void loadState(@NotNull State state) {
+    public synchronized void loadState(@NotNull State state) {
         myState = state;
     }
 
@@ -59,7 +61,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @param configName the run configuration name
      * @param startupTimeMs startup time in milliseconds
      */
-    public void recordStartupTime(@NotNull String configName, long startupTimeMs) {
+    public synchronized void recordStartupTime(@NotNull String configName, long startupTimeMs) {
         if (startupTimeMs < 0) return;
 
         List<Long> times = myState.startupTimes.computeIfAbsent(configName, k -> new ArrayList<>());
@@ -79,7 +81,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @param configName the run configuration name
      * @return the previous startup time in ms, or -1 if no previous data
      */
-    public long getPreviousStartupTime(@NotNull String configName) {
+    public synchronized long getPreviousStartupTime(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
         if (times == null || times.size() < 2) return -1;
         return times.get(times.size() - 2);
@@ -91,7 +93,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @param configName the run configuration name
      * @return the last startup time in ms, or -1 if no data
      */
-    public long getLastStartupTime(@NotNull String configName) {
+    public synchronized long getLastStartupTime(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
         if (times == null || times.isEmpty()) return -1;
         return times.get(times.size() - 1);
@@ -103,7 +105,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @param configName the run configuration name
      * @return the average in ms, or -1 if no data
      */
-    public long getAverageStartupTime(@NotNull String configName) {
+    public synchronized long getAverageStartupTime(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
         if (times == null || times.isEmpty()) return -1;
         return (long) times.stream().mapToLong(Long::longValue).average().orElse(-1);
@@ -115,7 +117,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @param configName the run configuration name
      * @return the fastest time in ms, or -1 if no data
      */
-    public long getFastestStartupTime(@NotNull String configName) {
+    public synchronized long getFastestStartupTime(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
         if (times == null || times.isEmpty()) return -1;
         return times.stream().mapToLong(Long::longValue).min().orElse(-1);
@@ -127,7 +129,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @param configName the run configuration name
      * @return the number of recorded runs
      */
-    public int getRunCount(@NotNull String configName) {
+    public synchronized int getRunCount(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
         return times != null ? times.size() : 0;
     }
@@ -139,7 +141,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @return unmodifiable list of startup times, or empty list
      */
     @NotNull
-    public List<Long> getStartupHistory(@NotNull String configName) {
+    public synchronized List<Long> getStartupHistory(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
         return times != null ? Collections.unmodifiableList(times) : Collections.emptyList();
     }
@@ -153,7 +155,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      * @return formatted comparison string, or empty if no previous data
      */
     @NotNull
-    public String formatComparison(@NotNull String configName, long currentTimeMs) {
+    public synchronized String formatComparison(@NotNull String configName, long currentTimeMs) {
         long previousTime = getPreviousStartupTime(configName);
         if (previousTime < 0) {
             int count = getRunCount(configName);
@@ -184,14 +186,14 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     /**
      * Clear all tracked data for a configuration.
      */
-    public void clearHistory(@NotNull String configName) {
+    public synchronized void clearHistory(@NotNull String configName) {
         myState.startupTimes.remove(configName);
     }
 
     /**
      * Clear all tracked data.
      */
-    public void clearAll() {
+    public synchronized void clearAll() {
         myState.startupTimes.clear();
     }
 

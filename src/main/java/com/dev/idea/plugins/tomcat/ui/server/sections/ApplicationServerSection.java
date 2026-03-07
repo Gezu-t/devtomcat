@@ -10,6 +10,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -29,6 +30,7 @@ public class ApplicationServerSection implements ConfigurationSection {
 
     private final Project project;
     private ComboBox<TomcatInfo> serverComboBox;
+    private JButton configureButton;
     private JPanel panel;
 
     public ApplicationServerSection(Project project) {
@@ -40,25 +42,31 @@ public class ApplicationServerSection implements ConfigurationSection {
     public JPanel createPanel() {
         if (panel == null) {
             panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(4, 0, 4, 0));
+            panel.setBorder(JBUI.Borders.empty(2, 0, 0, 0));
 
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(4, 0, 4, 4);
+            gbc.insets = JBUI.insets(2, 0, 2, 4);
 
             gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JLabel("Application server:"), gbc);
+            panel.add(new JBLabel("Application server:"), gbc);
 
             gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(4, 4, 4, 8);
+            gbc.insets = JBUI.insets(2, 4, 2, 8);
             serverComboBox = new ComboBox<>();
             serverComboBox.setRenderer(new TomcatInfoRenderer());
             panel.add(serverComboBox, gbc);
 
             gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(4, 0, 4, 0);
-            JButton configureButton = new JButton("Configure...");
+            gbc.insets = JBUI.insets(2, 0, 2, 0);
+            configureButton = new JButton("Configure...");
             configureButton.addActionListener(e -> openTomcatServerConfiguration());
+            Dimension comboSize = serverComboBox.getPreferredSize();
+            Dimension buttonSize = configureButton.getPreferredSize();
+            configureButton.setPreferredSize(new Dimension(
+                    Math.max(buttonSize.width, JBUI.scale(96)),
+                    comboSize.height
+            ));
             panel.add(configureButton, gbc);
         }
         return panel;
@@ -95,7 +103,7 @@ public class ApplicationServerSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean isValid() {
+    public boolean isConfigurationValid() {
         return getSelectedTomcatServer() != null;
     }
 
@@ -145,19 +153,20 @@ public class ApplicationServerSection implements ConfigurationSection {
         }
     }
 
-    private static class TomcatInfoRenderer extends DefaultListCellRenderer {
+    private static class TomcatInfoRenderer extends com.intellij.ui.SimpleListCellRenderer<TomcatInfo> {
         @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                      boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-
-            if (value instanceof TomcatInfo) {
-                TomcatInfo tomcatInfo = (TomcatInfo) value;
-                setText(tomcatInfo.getName() + " (" + tomcatInfo.getVersion() + ")");
-                setToolTipText("Tomcat " + tomcatInfo.getVersion() + " at " + tomcatInfo.getPath());
+        public void customize(@NotNull JList<? extends TomcatInfo> list, TomcatInfo value, int index,
+                              boolean selected, boolean hasFocus) {
+            if (value != null) {
+                String name = value.getName();
+                String version = value.getVersion();
+                if (!version.isEmpty() && !name.contains(version)) {
+                    setText(name + " " + version);
+                } else {
+                    setText(name);
+                }
+                setToolTipText("Tomcat " + version + " at " + value.getPath());
             }
-
-            return this;
         }
     }
 }

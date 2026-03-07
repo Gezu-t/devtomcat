@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
+import com.dev.idea.plugins.tomcat.runner.TomcatManagerDeployer;
 import com.dev.idea.plugins.tomcat.ui.server.sections.ApplicationServerSection;
 import com.dev.idea.plugins.tomcat.ui.server.sections.BrowserLaunchSection;
 import com.dev.idea.plugins.tomcat.ui.server.sections.ConfigurationSection;
@@ -12,9 +13,14 @@ import com.dev.idea.plugins.tomcat.ui.server.sections.VmOptionsSection;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPanel;
+import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -40,7 +46,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private JPanel localContent;
     private JPanel remoteContent;
 
-    private RemoteStagingSection remoteStagingSection;
     private RemoteConnectionSection remoteConnectionSection;
 
     public ServerConfigurationTab(Project project, TomcatRunConfiguration config) {
@@ -79,7 +84,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private JPanel createCommonSections() {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(JBUI.Borders.empty(0, 12, 0, 12));
+        panel.setBorder(JBUI.Borders.empty(2, 12, 0, 12));
 
         JPanel appServerPanel = applicationServerSection.createPanel();
         appServerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, appServerPanel.getPreferredSize().height));
@@ -98,7 +103,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         vmOptionsSection = new VmOptionsSection();
         updateActionsSection = new UpdateActionsSection();
         jreConfigurationSection = new JreConfigurationSection(project);
-        tomcatSettingsSection = new TomcatSettingsSection();
+        tomcatSettingsSection = new TomcatSettingsSection(project);
 
         sharedSections.clear();
         sharedSections.add(applicationServerSection);
@@ -112,7 +117,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private JPanel createLocalContent() {
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(JBUI.Borders.empty(0, 12, 0, 12));
+        content.setBorder(JBUI.Borders.empty(0, 12, 2, 12));
 
         addSection(content, vmOptionsSection);
         addSection(content, updateActionsSection);
@@ -134,16 +139,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setBorder(JBUI.Borders.empty(4, 12, 4, 12));
 
-        remoteStagingSection = new RemoteStagingSection();
         remoteConnectionSection = new RemoteConnectionSection();
-
-        JPanel stagingPanel = remoteStagingSection.getPanel();
-        stagingPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, stagingPanel.getPreferredSize().height));
-        content.add(stagingPanel);
-
-        JSeparator separator = new JSeparator(JSeparator.HORIZONTAL);
-        separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-        content.add(separator);
 
         JPanel connectionPanel = remoteConnectionSection.getPanel();
         connectionPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, connectionPanel.getPreferredSize().height));
@@ -171,7 +167,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         }
     }
 
-    public void applyTo(TomcatRunConfiguration config) {
+    public void applyTo(TomcatRunConfiguration config) throws ConfigurationException {
         String mode = config.getConfigData().getServerMode();
 
         if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
@@ -181,11 +177,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         }
 
         for (ConfigurationSection section : sharedSections) {
-            try {
-                section.applyTo(config);
-            } catch (ConfigurationException e) {
-                throw new RuntimeException(e);
-            }
+            section.applyTo(config);
         }
     }
 
@@ -223,6 +215,9 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
         } else { // Remote
             RemoteConfig rc = config.getConfigData().getRemoteConfig();
+            if (rc == null) {
+                throw new ConfigurationException("Remote configuration is not initialized.");
+            }
             if (StringUtil.isEmpty(rc.getManagerUrl())) {
                 throw new ConfigurationException("Manager URL is required for Remote mode.");
             }
@@ -253,52 +248,30 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     public void dispose() {
-        remoteStagingSection = null;
         remoteConnectionSection = null;
-    }
-
-    private static class RemoteStagingSection {
-        private final JPanel panel;
-        RemoteStagingSection() {
-            panel = new JPanel(new GridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(4, 0, 4, 0));
-            GridBagConstraints gbc = new GridBagConstraints();
-            gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(4, 0, 4, 4);
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-
-            int y = 0;
-            gbc.gridx = 0; gbc.gridy = y++; gbc.gridwidth = 4;
-            panel.add(new JLabel("Tomcat Server Settings"), gbc);
-            gbc.gridwidth = 1;
-
-            addRow(panel, gbc, y++, "Remote staging", null, 4, true);
-            addRow(panel, gbc, y++, "Type:", new JTextField(), 1, true);
-            addRow(panel, gbc, y++, "Host:", new JTextField(), 1, true);
-            addRow(panel, gbc, y++, "Staging", null, 4, true);
-        }
-
-        private void addRow(JPanel panel, GridBagConstraints gbc, int y, String label, JComponent field, int fieldGridWidth, boolean fill) {
-            gbc.gridx = 0; gbc.gridy = y; gbc.weightx = 0; gbc.gridwidth = 1;
-            panel.add(new JLabel(label), gbc);
-            if (field != null) {
-                gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = fieldGridWidth;
-                if (fill) {
-                    gbc.fill = GridBagConstraints.HORIZONTAL;
-                }
-                panel.add(field, gbc);
-            }
-        }
-
-        JPanel getPanel() { return panel; }
     }
 
     private static class RemoteConnectionSection {
         private final JPanel panel;
-        private final JTextField hostField = new JTextField("localhost");
-        private final JTextField portField = new JTextField("8080");
+        private final JBTextField hostField;
+        private final JBTextField portField;
+        private final JBCheckBox useCredentialsCheck = new JBCheckBox("Use credentials");
+        private final JBTextField usernameField;
+        private final JPasswordField passwordField = new JPasswordField();
+        private final JButton testButton = new JButton("Test Connection");
+        private final JBLabel statusLabel = new JBLabel("");
 
         RemoteConnectionSection() {
+            hostField = new JBTextField();
+            hostField.setText(TomcatConstants.DEFAULT_HOST);
+            hostField.setColumns(20);
+            portField = new JBTextField();
+            portField.setText(TomcatConstants.DEFAULT_PORT);
+            portField.setColumns(10);
+            usernameField = new JBTextField();
+            usernameField.setText("admin");
+            usernameField.setColumns(15);
+
             panel = new JPanel(new GridBagLayout());
             panel.setBorder(JBUI.Borders.empty(4, 0, 4, 0));
             GridBagConstraints gbc = new GridBagConstraints();
@@ -307,19 +280,87 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             gbc.fill = GridBagConstraints.HORIZONTAL;
 
             int y = 0;
-            gbc.gridx = 0; gbc.gridy = y++; gbc.gridwidth = 4;
-            panel.add(new JLabel("Remote Connection Settings"), gbc);
+            gbc.gridx = 0; gbc.gridy = y++; gbc.gridwidth = 2;
+            panel.add(new JBLabel("Remote Connection Settings"), gbc);
             gbc.gridwidth = 1;
 
             gbc.gridx = 0; gbc.gridy = y;
-            panel.add(new JLabel("Host:"), gbc);
+            panel.add(new JBLabel("Host:"), gbc);
             gbc.gridx = 1; gbc.weightx = 1.0;
             panel.add(hostField, gbc);
 
             gbc.gridx = 0; gbc.gridy = ++y; gbc.weightx = 0;
-            panel.add(new JLabel("Port:"), gbc);
+            panel.add(new JBLabel("Port:"), gbc);
             gbc.gridx = 1;
             panel.add(portField, gbc);
+
+            // Credentials
+            gbc.gridx = 0; gbc.gridy = ++y; gbc.gridwidth = 2;
+            panel.add(useCredentialsCheck, gbc);
+            gbc.gridwidth = 1;
+
+            gbc.gridx = 0; gbc.gridy = ++y;
+            panel.add(new JBLabel("Username:"), gbc);
+            gbc.gridx = 1; gbc.weightx = 1.0;
+            panel.add(usernameField, gbc);
+
+            gbc.gridx = 0; gbc.gridy = ++y; gbc.weightx = 0;
+            panel.add(new JBLabel("Password:"), gbc);
+            gbc.gridx = 1; gbc.weightx = 1.0;
+            panel.add(passwordField, gbc);
+
+            // Test Connection
+            JPanel testPanel = new JPanel(new BorderLayout(JBUI.scale(8), 0));
+            testPanel.add(testButton, BorderLayout.WEST);
+            statusLabel.setToolTipText(null);
+            testPanel.add(statusLabel, BorderLayout.CENTER);
+            gbc.gridx = 0; gbc.gridy = ++y; gbc.gridwidth = 2; gbc.weightx = 1.0;
+            panel.add(testPanel, gbc);
+
+            useCredentialsCheck.addActionListener(e -> updateCredentialFieldsState());
+            updateCredentialFieldsState();
+            testButton.addActionListener(e -> testConnection());
+        }
+
+        private void updateCredentialFieldsState() {
+            boolean enabled = useCredentialsCheck.isSelected();
+            usernameField.setEnabled(enabled);
+            passwordField.setEnabled(enabled);
+        }
+
+        private void testConnection() {
+            statusLabel.setText("Testing...");
+            statusLabel.setForeground(com.intellij.util.ui.UIUtil.getContextHelpForeground());
+            testButton.setEnabled(false);
+
+            RemoteConfig rc = buildCurrentRemoteConfig();
+            com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                TomcatManagerDeployer deployer = new TomcatManagerDeployer(rc);
+                String error = deployer.testConnection();
+                SwingUtilities.invokeLater(() -> {
+                    testButton.setEnabled(true);
+                    if (error == null) {
+                        setStatus("Connected successfully", null,
+                                com.intellij.ui.JBColor.namedColor(
+                                        "DevTomcat.deployedForeground",
+                                        new com.intellij.ui.JBColor(0x008000, 0x6AAB73)));
+                    } else {
+                        setStatus(truncateStatus(error), error, com.intellij.ui.JBColor.RED);
+                    }
+                });
+            });
+        }
+
+        private RemoteConfig buildCurrentRemoteConfig() {
+            String host = hostField.getText().trim();
+            String port = portField.getText().trim();
+            String managerUrl = "http://" + host + ":" + port + "/manager";
+            return new RemoteConfig(
+                    managerUrl,
+                    usernameField.getText().trim(),
+                    new String(passwordField.getPassword()),
+                    useCredentialsCheck.isSelected()
+            );
         }
 
         JPanel getPanel() { return panel; }
@@ -332,13 +373,18 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                     try {
                         java.net.URL url = new java.net.URL(managerUrl);
                         hostField.setText(url.getHost());
-                        portField.setText(String.valueOf(url.getPort() > 0 ? url.getPort() : 8080));
+                        portField.setText(String.valueOf(url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER));
                     } catch (Exception e) {
-                        hostField.setText("localhost");
-                        portField.setText("8080");
+                        hostField.setText(TomcatConstants.DEFAULT_HOST);
+                        portField.setText(TomcatConstants.DEFAULT_PORT);
                     }
                 }
+                useCredentialsCheck.setSelected(rc.isUseCredentials());
+                usernameField.setText(rc.getUsername());
+                passwordField.setText(rc.getPassword());
+                updateCredentialFieldsState();
             }
+            statusLabel.setText("");
         }
 
         void applyTo(TomcatRunConfiguration config) {
@@ -348,6 +394,9 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 String port = portField.getText().trim();
                 String managerUrl = "http://" + host + ":" + port + "/manager";
                 rc.setManagerUrl(managerUrl);
+                rc.setUseCredentials(useCredentialsCheck.isSelected());
+                rc.setUsername(usernameField.getText().trim());
+                rc.setPassword(new String(passwordField.getPassword()));
             }
         }
 
@@ -355,18 +404,22 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             RemoteConfig rc = config.getConfigData().getRemoteConfig();
             if (rc == null) return false;
 
+            if (useCredentialsCheck.isSelected() != rc.isUseCredentials()) return true;
+            if (!usernameField.getText().trim().equals(rc.getUsername())) return true;
+            if (!new String(passwordField.getPassword()).equals(rc.getPassword())) return true;
+
             String currentHost = hostField.getText().trim();
             String currentPort = portField.getText().trim();
             String managerUrl = rc.getManagerUrl();
 
             if (managerUrl == null || managerUrl.isEmpty()) {
-                return !currentHost.equals("localhost") || !currentPort.equals("8080");
+                return !currentHost.equals(TomcatConstants.DEFAULT_HOST) || !currentPort.equals(TomcatConstants.DEFAULT_PORT);
             }
 
             try {
                 java.net.URL url = new java.net.URL(managerUrl);
                 String savedHost = url.getHost();
-                int savedPort = url.getPort() > 0 ? url.getPort() : 8080;
+                int savedPort = url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER;
                 return !currentHost.equals(savedHost) || !currentPort.equals(String.valueOf(savedPort));
             } catch (Exception e) {
                 return true;
@@ -395,7 +448,23 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 }
             }
 
+            if (useCredentialsCheck.isSelected() && usernameField.getText().trim().isEmpty()) {
+                errors.add(new com.intellij.openapi.ui.ValidationInfo("Username is required when credentials are enabled", usernameField));
+            }
+
             return errors;
+        }
+
+        private void setStatus(@NotNull String text, @Nullable String tooltip, @NotNull java.awt.Color color) {
+            statusLabel.setText(text);
+            statusLabel.setToolTipText(tooltip);
+            statusLabel.setForeground(color);
+        }
+
+        private static @NotNull String truncateStatus(@NotNull String msg) {
+            int max = 100;
+            if (msg.length() <= max) return msg;
+            return msg.substring(0, max) + "...";
         }
     }
 }

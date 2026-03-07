@@ -5,6 +5,7 @@ import com.intellij.openapi.options.ConfigurationException;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 
 public final class PortUtils {
@@ -15,7 +16,8 @@ public final class PortUtils {
     public static final int DEFAULT_HTTP = 8080;
     public static final int DEFAULT_HTTPS = 8443;
     public static final int DEFAULT_SHUTDOWN = 8005;
-    public static final int DEFAULT_JMX = 9010;
+    public static final int DEFAULT_JMX = 1099;
+    public static final int DEFAULT_AJP = 8009;
 
     private PortUtils() {
     }
@@ -33,13 +35,33 @@ public final class PortUtils {
         }
     }
 
+    /**
+     * Checks if a port is available for binding on both wildcard and localhost addresses.
+     *
+     * <p>Must check both because Tomcat binds different services to different addresses:
+     * HTTP connector binds to all interfaces (0.0.0.0), while the shutdown socket binds
+     * to {@code localhost}. On macOS with IPv6, {@code localhost} resolves to {@code ::1}
+     * which is a different address family from {@code 0.0.0.0} — checking only the wildcard
+     * can miss conflicts on the loopback interface, leading to BindException at Tomcat startup.
+     */
     public static boolean isAvailable(int port) {
         if (!isValid(port)) return false;
-        try (ServerSocket socket = new ServerSocket(port)) {
-            socket.setReuseAddress(true);
-            return true;
+        // Check wildcard (0.0.0.0) — how HTTP connectors bind
+        if (!tryBind(port, null)) return false;
+        // Check localhost — how Tomcat's shutdown socket binds.
+        // On macOS/IPv6, localhost (::1) differs from 0.0.0.0.
+        if (!tryBind(port, "localhost")) return false;
+        return true;
+    }
+
+    private static boolean tryBind(int port, String address) {
+        try {
+            InetAddress addr = address != null ? InetAddress.getByName(address) : null;
+            try (ServerSocket socket = new ServerSocket(port, 1, addr)) {
+                return true;
+            }
         } catch (IOException e) {
-            LOG.debug("Port " + port + " is not available");
+            LOG.debug("Port " + port + " not available on " + (address != null ? address : "0.0.0.0"));
             return false;
         }
     }

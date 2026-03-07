@@ -1,16 +1,16 @@
 package com.dev.idea.plugins.tomcat.ui;
 
-import com.dev.idea.plugins.tomcat.conf.TomcatLogFile;
+import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
-import com.intellij.openapi.fileChooser.FileChooserFactory;
-import com.intellij.openapi.fileChooser.PathChooserDialog;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -18,11 +18,10 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
-import java.util.Objects;
-import com.intellij.ui.components.JBPanel;
 
 public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
 
@@ -41,11 +40,15 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
     private final JBCheckBox showPageCheck = new JBCheckBox("Show this page", false);
     private final JBCheckBox activateToolWindowCheck = new JBCheckBox("Activate tool window", true);
     private final JBCheckBox saveToFileCheck = new JBCheckBox("Save console output to file:");
-    private final JTextField saveToFileField = new JTextField();
-    private final JButton saveToFileBrowse = new JButton("...");
+    private final TextFieldWithBrowseButton saveToFileField;
 
     public LogsConfigurationTab(@NotNull Project project, @Nullable TomcatRunConfiguration configuration) {
         this.project = project;
+        saveToFileField = new TextFieldWithBrowseButton();
+        saveToFileField.addBrowseFolderListener(
+                "Save Console Output", "Choose file to save console output",
+                project, FileChooserDescriptorFactory.createSingleLocalFileDescriptor());
+
         initializeUI();
         wireCheckboxConstraints();
         initializeDefaultLogs();
@@ -55,11 +58,6 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         }
     }
 
-    /**
-     * Enforces the constraint: "Show this page" requires "Activate tool window".
-     * Unchecking activateToolWindow disables and unchecks showPage.
-     * Checking showPage auto-checks activateToolWindow.
-     */
     private void wireCheckboxConstraints() {
         activateToolWindowCheck.addActionListener(e -> {
             if (!activateToolWindowCheck.isSelected()) {
@@ -82,16 +80,42 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
 
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(JBUI.Borders.empty(10, 12));
+        content.setBorder(JBUI.Borders.empty(8, 12));
 
+        // --- Log files table ---
         content.add(createLogsSection());
-        content.add(Box.createVerticalStrut(12));
+
+        content.add(Box.createVerticalStrut(10));
+
+        // --- Save to file ---
         content.add(createSaveSection());
-        content.add(Box.createVerticalStrut(8));
-        content.add(stdoutCheck);
-        content.add(stderrCheck);
-        content.add(Box.createVerticalStrut(12));
-        content.add(createBottomOptions());
+
+        content.add(Box.createVerticalStrut(6));
+
+        // --- Stdout / Stderr ---
+        JPanel stdioPanel = new JPanel();
+        stdioPanel.setLayout(new BoxLayout(stdioPanel, BoxLayout.Y_AXIS));
+        stdioPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        stdoutCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+        stderrCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+        stdioPanel.add(stdoutCheck);
+        stdioPanel.add(Box.createVerticalStrut(4));
+        stdioPanel.add(stderrCheck);
+        content.add(stdioPanel);
+
+        content.add(Box.createVerticalStrut(10));
+
+        // --- Bottom options ---
+        JPanel bottomPanel = new JPanel();
+        bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.Y_AXIS));
+        bottomPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        activateToolWindowCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+        showPageCheck.setAlignmentX(Component.LEFT_ALIGNMENT);
+        bottomPanel.add(activateToolWindowCheck);
+        bottomPanel.add(Box.createVerticalStrut(4));
+        bottomPanel.add(showPageCheck);
+        content.add(bottomPanel);
+
         content.add(Box.createVerticalGlue());
 
         add(content, BorderLayout.CENTER);
@@ -99,26 +123,66 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
 
     private void initializeDefaultLogs() {
         logRows.clear();
-        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_ACCESS_LOG_ID, false));
-        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_LOCALHOST_LOG_ID, false));
+        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_CATALINA_OUT_ID, false));
         logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_CATALINA_LOG_ID, false));
+        logRows.add(new LogRow(true, TomcatLogFile.TOMCAT_LOCALHOST_LOG_ID, false));
+        logRows.add(new LogRow(false, TomcatLogFile.TOMCAT_ACCESS_LOG_ID, false));
         logRows.add(new LogRow(false, TomcatLogFile.TOMCAT_MANAGER_LOG_ID, false));
         logRows.add(new LogRow(false, TomcatLogFile.TOMCAT_HOST_MANAGER_LOG_ID, false));
         refreshTable();
     }
 
+    /**
+     * Ensures all standard Tomcat log entries are present in existing configurations.
+     * New standard logs added in plugin updates are appended with their default active state.
+     */
+    private void mergeStandardLogs() {
+        Set<String> existing = new HashSet<>();
+        for (LogRow row : logRows) {
+            if (row.entry != null) {
+                existing.add(row.entry);
+            }
+        }
+
+        String[][] standardLogs = {
+                {TomcatLogFile.TOMCAT_CATALINA_OUT_ID, "true"},
+                {TomcatLogFile.TOMCAT_CATALINA_LOG_ID, "true"},
+                {TomcatLogFile.TOMCAT_LOCALHOST_LOG_ID, "true"},
+                {TomcatLogFile.TOMCAT_ACCESS_LOG_ID, "false"},
+                {TomcatLogFile.TOMCAT_MANAGER_LOG_ID, "false"},
+                {TomcatLogFile.TOMCAT_HOST_MANAGER_LOG_ID, "false"},
+        };
+
+        for (String[] entry : standardLogs) {
+            if (!existing.contains(entry[0])) {
+                logRows.add(new LogRow(Boolean.parseBoolean(entry[1]), entry[0], false));
+            }
+        }
+    }
+
     private JPanel createLogsSection() {
         JPanel panel = new JPanel(new BorderLayout());
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         panel.add(new TitledSeparator("Log files to be shown in console"), BorderLayout.NORTH);
 
         tableModel = new LogTableModel();
         logsTable = new JBTable(tableModel);
         logsTable.setShowGrid(false);
-        logsTable.setRowHeight(24);
+        logsTable.setRowHeight(JBUI.scale(24));
         logsTable.setAutoCreateRowSorter(false);
-        logsTable.getColumnModel().getColumn(0).setMaxWidth(70);
-        logsTable.getColumnModel().getColumn(2).setMaxWidth(100);
+        logsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        logsTable.getTableHeader().setReorderingAllowed(false);
+
+        // Checkbox columns: fixed widths, centered
+        configureCheckboxColumn(0, JBUI.scale(55));
+        configureCheckboxColumn(2, JBUI.scale(110));
+
+        // Center-align checkbox column headers
+        DefaultTableCellRenderer centerHeaderRenderer = new DefaultTableCellRenderer();
+        centerHeaderRenderer.setHorizontalAlignment(SwingConstants.CENTER);
+        logsTable.getColumnModel().getColumn(0).setHeaderRenderer(centerHeaderRenderer);
+        logsTable.getColumnModel().getColumn(2).setHeaderRenderer(centerHeaderRenderer);
 
         ToolbarDecorator decorator = ToolbarDecorator.createDecorator(logsTable)
                 .setAddAction(button -> addLogFile())
@@ -127,52 +191,31 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
                 .disableUpDownActions();
 
         JComponent tableComponent = decorator.createPanel();
-        tableComponent.setMinimumSize(new Dimension(320, 180));
-        tableComponent.setPreferredSize(new Dimension(600, 220));
+        tableComponent.setMinimumSize(new Dimension(JBUI.scale(320), JBUI.scale(160)));
+        tableComponent.setPreferredSize(new Dimension(JBUI.scale(600), JBUI.scale(200)));
         panel.add(tableComponent, BorderLayout.CENTER);
         return panel;
     }
 
+    private void configureCheckboxColumn(int columnIndex, int width) {
+        var column = logsTable.getColumnModel().getColumn(columnIndex);
+        column.setPreferredWidth(width);
+        column.setMinWidth(width);
+        column.setMaxWidth(width);
+    }
+
     private JPanel createSaveSection() {
-        JPanel panel = new JPanel(new BorderLayout(6, 0));
+        JPanel panel = new JPanel(new BorderLayout(JBUI.scale(6), 0));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.setBorder(JBUI.Borders.empty(2, 0));
+
         panel.add(saveToFileCheck, BorderLayout.WEST);
+        panel.add(saveToFileField, BorderLayout.CENTER);
 
-        JPanel pathPanel = new JPanel(new BorderLayout(6, 0));
-        pathPanel.add(saveToFileField, BorderLayout.CENTER);
-        saveToFileBrowse.setMargin(JBUI.insets(2, 8));
-        saveToFileBrowse.addActionListener(e -> openFileChooser());
-        pathPanel.add(saveToFileBrowse, BorderLayout.EAST);
-
-        panel.add(pathPanel, BorderLayout.CENTER);
-        panel.setBorder(JBUI.Borders.empty(4, 0, 0, 0));
         saveToFileField.setEnabled(false);
-        saveToFileBrowse.setEnabled(false);
-        saveToFileCheck.addActionListener(e -> {
-            boolean enabled = saveToFileCheck.isSelected();
-            saveToFileField.setEnabled(enabled);
-            saveToFileBrowse.setEnabled(enabled);
-        });
-        return panel;
-    }
+        saveToFileCheck.addActionListener(e -> saveToFileField.setEnabled(saveToFileCheck.isSelected()));
 
-    private JPanel createBottomOptions() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        panel.add(showPageCheck);
-        panel.add(activateToolWindowCheck);
         return panel;
-    }
-
-    private void openFileChooser() {
-        PathChooserDialog dialog = FileChooserFactory.getInstance()
-                .createPathChooser(FileChooserDescriptorFactory.createSingleFileOrExecutableAppDescriptor(), project, this);
-        dialog.choose(null, (chosen) -> {
-            if (!chosen.isEmpty()) {
-                VirtualFile vf = chosen.get(0);
-                if (vf != null) {
-                    saveToFileField.setText(vf.getPath());
-                }
-            }
-        });
     }
 
     private void refreshTable() {
@@ -188,18 +231,21 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
             String normalized = path.trim();
             logRows.add(new LogRow(true, normalized, false));
             refreshTable();
+            // Select the newly added row
+            int lastRow = logRows.size() - 1;
+            logsTable.setRowSelectionInterval(lastRow, lastRow);
+            logsTable.scrollRectToVisible(logsTable.getCellRect(lastRow, 0, true));
         }
     }
 
     private String promptForLogPath(String title, String currentValue) {
-        return (String) JOptionPane.showInputDialog(
-                this,
+        return Messages.showInputDialog(
+                project,
                 "Enter log file name or path:",
                 title,
-                JOptionPane.PLAIN_MESSAGE,
                 null,
-                null,
-                currentValue == null ? "" : currentValue
+                currentValue == null ? "" : currentValue,
+                null
         );
     }
 
@@ -223,16 +269,23 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         selected = logsTable.convertRowIndexToModel(selected);
         logRows.remove(selected);
         refreshTable();
+        // Select the next row (or previous if removed last)
+        if (!logRows.isEmpty()) {
+            int newSelection = Math.min(selected, logRows.size() - 1);
+            logsTable.setRowSelectionInterval(newSelection, newSelection);
+        }
     }
 
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
         logRows.clear();
 
+        var logFileConfig = configuration.getConfigData().getLogFileConfig();
         List<String> configLogFiles = configuration.getLogFileConfigurations();
         if (configLogFiles != null && !configLogFiles.isEmpty()) {
             for (String path : configLogFiles) {
                 if (path != null && !path.trim().isEmpty()) {
-                    logRows.add(new LogRow(true, path.trim(), false));
+                    String trimmed = path.trim();
+                    logRows.add(new LogRow(true, trimmed, logFileConfig.isSkipContent(trimmed)));
                 }
             }
         }
@@ -240,11 +293,11 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         if (logRows.isEmpty()) {
             initializeDefaultLogs();
         } else {
+            mergeStandardLogs();
             refreshTable();
         }
 
         // Restore console output checkboxes
-        var logFileConfig = configuration.getConfigData().getLogFileConfig();
         stdoutCheck.setSelected(logFileConfig.isShowStdoutConsole());
         stderrCheck.setSelected(logFileConfig.isShowStderrConsole());
 
@@ -252,7 +305,6 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         saveToFileCheck.setSelected(logFileConfig.isSaveConsoleToFile());
         saveToFileField.setText(logFileConfig.getSaveConsoleFilePath());
         saveToFileField.setEnabled(logFileConfig.isSaveConsoleToFile());
-        saveToFileBrowse.setEnabled(logFileConfig.isSaveConsoleToFile());
 
         // Restore UI config checkboxes and enforce constraint
         boolean activateTW = configuration.getConfigData().getUiConfig().isActivateToolWindow();
@@ -272,24 +324,29 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
 
         var logFileConfig = configuration.getConfigData().getLogFileConfig();
         logFileConfig.setLogFiles(activeLogs);
+
+        // Save skipContent per log entry
+        java.util.Map<String, Boolean> skipMap = new java.util.HashMap<>();
+        for (LogRow row : logRows) {
+            if (row != null && row.entry != null && !row.entry.trim().isEmpty()) {
+                skipMap.put(row.entry.trim(), row.skipContent);
+            }
+        }
+        logFileConfig.setSkipContentEntries(skipMap);
+
         logFileConfig.setShowStdoutConsole(stdoutCheck.isSelected());
         logFileConfig.setShowStderrConsole(stderrCheck.isSelected());
         logFileConfig.setSaveConsoleToFile(saveToFileCheck.isSelected());
         logFileConfig.setSaveConsoleFilePath(saveToFileField.getText().trim());
 
-        // UI checkbox constraints guarantee showLogsPage=true implies activateToolWindow=true.
-        // UiConfig setters enforce the same invariant as a model-level safety net.
         var uiConfig = configuration.getConfigData().getUiConfig();
         uiConfig.setActivateToolWindow(activateToolWindowCheck.isSelected());
         uiConfig.setShowLogsPage(showPageCheck.isSelected());
     }
 
     public void validateSettings() throws ConfigurationException {
-        if (logRows == null) {
-            return;
-        }
-
         for (LogRow row : logRows) {
+            if (!row.active) continue; // skip inactive rows
             if (row.entry == null || row.entry.trim().isEmpty()) {
                 throw new ConfigurationException("Log file path cannot be empty");
             }
@@ -342,7 +399,7 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
     }
 
     private class LogTableModel extends AbstractTableModel {
-        private final String[] columns = {"Is Active", "Log File Entry", "Skip Content"};
+        private final String[] columns = {"Active", "Log File Entry", "Skip Content"};
 
         @Override
         public int getRowCount() {

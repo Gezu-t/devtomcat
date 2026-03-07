@@ -10,6 +10,8 @@ package com.dev.idea.plugins.tomcat.utils;
     import org.jetbrains.annotations.Nullable;
 
     import java.nio.file.Files;
+
+    import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
     import java.nio.file.Path;
     import java.nio.file.Paths;
     import java.util.Objects;
@@ -90,7 +92,7 @@ package com.dev.idea.plugins.tomcat.utils;
             if (catalinaBase == null) {
                 return null;
             }
-            return catalinaBase.resolve("logs");
+            return catalinaBase.resolve(DIR_LOGS);
         }
 
             @Nullable
@@ -99,7 +101,7 @@ package com.dev.idea.plugins.tomcat.utils;
             if (catalinaBase == null) {
                 return null;
             }
-            return catalinaBase.resolve("work");
+            return catalinaBase.resolve(DIR_WORK);
         }
 
             @Nullable
@@ -108,7 +110,7 @@ package com.dev.idea.plugins.tomcat.utils;
             if (catalinaBase == null) {
                 return null;
             }
-            return catalinaBase.resolve("conf");
+            return catalinaBase.resolve(DIR_CONF);
         }
 
             @Nullable
@@ -117,7 +119,7 @@ package com.dev.idea.plugins.tomcat.utils;
             if (catalinaBase == null) {
                 return null;
             }
-            return catalinaBase.resolve("webapps");
+            return catalinaBase.resolve(DIR_WEBAPPS);
         }
 
         @NotNull

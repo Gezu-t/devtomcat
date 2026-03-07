@@ -144,10 +144,10 @@ class RemoteConfigTest {
         }
 
         @Test
-        @DisplayName("empty username falls back to default")
-        void emptyUsernameFallsBack() {
+        @DisplayName("empty username is accepted for no-credentials mode")
+        void emptyUsernameAccepted() {
             config.setUsername("");
-            assertEquals("admin", config.getUsername());
+            assertEquals("", config.getUsername());
         }
 
         @Test

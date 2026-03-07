@@ -1,16 +1,19 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+        import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
         import com.dev.idea.plugins.tomcat.model.PortConfig;
         import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
         import com.dev.idea.plugins.tomcat.model.ValidationResult;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
         import com.intellij.execution.configurations.RuntimeConfigurationException;
+        import com.intellij.execution.configurations.RuntimeConfigurationWarning;
         import com.intellij.openapi.diagnostic.Logger;
         import com.intellij.openapi.util.text.StringUtil;
         import org.jetbrains.annotations.NotNull;
 
-        import java.util.Objects;
+        import java.io.File;
+        import java.util.*;
 
         public final class TomcatConfigurationValidator {
 
@@ -51,6 +54,7 @@ package com.dev.idea.plugins.tomcat.conf;
                 validateTomcatServer(data);
                 validatePortConfiguration(data);
                 validateContextPath(data);
+                validateDeploymentArtifacts(data);
             }
 
             private static void validateConfigurationName(@NotNull TomcatRunConfiguration config) {
@@ -70,6 +74,10 @@ package com.dev.idea.plugins.tomcat.conf;
                 }
                 if (StringUtil.isEmpty(tomcatInfo.getPath())) {
                     throw new RuntimeConfigurationException("Tomcat server path is not configured for: " + tomcatInfo.getName());
+                }
+                File tomcatDir = new File(tomcatInfo.getPath());
+                if (!tomcatDir.isDirectory()) {
+                    LOG.warn("Tomcat home directory does not exist: " + tomcatInfo.getPath());
                 }
                 if (StringUtil.isEmpty(tomcatInfo.getVersion())) {
                     LOG.warn(String.format("Tomcat server version not set for: %s", tomcatInfo.getName()));
@@ -94,6 +102,49 @@ package com.dev.idea.plugins.tomcat.conf;
                 ValidationResult result = PortValidator.validate(portConfig);
                 if (result.hasErrors()) {
                     throw new RuntimeConfigurationException(result.getErrorMessage());
+                }
+                if (result.hasWarnings()) {
+                    LOG.debug("Port validation warnings: " + result.getWarningMessage());
+                }
+            }
+
+            private static void validateDeploymentArtifacts(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
+                List<DeploymentArtifact> artifacts = data.getDeploymentConfig().getArtifacts();
+                if (artifacts.isEmpty()) return;
+
+                // Validate artifact paths exist
+                for (DeploymentArtifact artifact : artifacts) {
+                    if (artifact == null) continue;
+                    String path = artifact.getPath();
+                    if (StringUtil.isEmpty(path)) {
+                        throw new RuntimeConfigurationWarning(
+                                "Deployment artifact '" + artifact.getDisplayName() +
+                                "' has no path configured. Remove it or reconfigure in the Deployment tab.");
+                    }
+                    File artifactFile = new File(path);
+                    if (!artifactFile.exists()) {
+                        String hint = DeploymentArtifact.TYPE_WAR.equals(artifact.getType())
+                                ? " Build the project (Build → Build Artifacts) to generate the WAR file."
+                                : " Build the project first — the output directory will be created by the 'Build Artifact' Before Launch task.";
+                        throw new RuntimeConfigurationWarning(
+                                "Artifact output not found: " + path + "." + hint +
+                                " This warning will clear once the artifact is built.");
+                    }
+                }
+
+                // Check for duplicate context paths
+                if (artifacts.size() < 2) return;
+                Set<String> seen = new HashSet<>();
+                for (DeploymentArtifact artifact : artifacts) {
+                    if (artifact == null) continue;
+                    String ctx = artifact.getContextPath();
+                    if (ctx == null || ctx.isEmpty()) ctx = "/";
+                    if (!seen.add(ctx)) {
+                        throw new RuntimeConfigurationWarning(
+                                "Duplicate context path '" + ctx + "' — multiple artifacts " +
+                                "deployed to the same path will conflict. Change the context path " +
+                                "of '" + artifact.getDisplayName() + "' in the Deployment tab.");
+                    }
                 }
             }
 
