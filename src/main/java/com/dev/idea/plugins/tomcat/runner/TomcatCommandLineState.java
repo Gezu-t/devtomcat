@@ -5,7 +5,9 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatCompatibilityChecker;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
+import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+
 import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.execution.ExecutionException;
@@ -44,6 +46,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private final TomcatRunConfiguration configuration;
     private final TomcatDeploymentLogger deploymentLogger;
     private volatile PortConfig resolvedPorts;
+    private final java.util.concurrent.atomic.AtomicBoolean preLaunchDone = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
                                   @NotNull TomcatRunConfiguration configuration) {
@@ -54,6 +57,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     @Override
     protected JavaParameters createJavaParameters() throws ExecutionException {
+        // Ensure pre-launch setup runs exactly once, even if the framework
+        // calls getJavaParameters()/createJavaParameters() before startProcess()
+        ensurePreLaunchSetup();
+
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
         TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
@@ -63,6 +70,30 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             builder.setResolvedPorts(resolvedPorts);
         }
         return builder.build();
+    }
+
+    /**
+     * Runs compatibility checks, port conflict detection, and credential resolution
+     * exactly once, guarded by {@link #preLaunchDone}. Called from both
+     * {@link #createJavaParameters()} and {@link #startProcess()} to handle
+     * IntelliJ framework calling {@code getJavaParameters()} before {@code startProcess()}.
+     */
+    private void ensurePreLaunchSetup() throws ExecutionException {
+        if (!preLaunchDone.compareAndSet(false, true)) return;
+
+        checkCompatibility();
+        resolvePortConflicts();
+
+        DeploymentStrategy.create(configuration).resolveCredentials(configuration);
+
+        if (TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+            RemoteConfig rc = configuration.getConfigData().getRemoteConfig();
+            if (rc != null && rc.isUseCredentials() && rc.getPassword().isEmpty()) {
+                throw new ExecutionException(
+                        "Remote deployment requires credentials but no password was found. " +
+                        "Configure credentials in the Remote tab or store them in PasswordSafe.");
+            }
+        }
     }
 
     /**
@@ -147,12 +178,11 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     @NotNull
     @Override
     protected OSProcessHandler startProcess() throws ExecutionException {
-        // Pre-launch compatibility check (DevTomcat exclusive)
-        checkCompatibility();
+        // Ensure pre-launch setup (compatibility, ports, credentials) runs exactly once.
+        // This may already have been called by createJavaParameters() if the framework
+        // invoked getJavaParameters() before startProcess().
+        ensurePreLaunchSetup();
 
-        // Pre-launch port conflict detection and auto-resolution (DevTomcat exclusive feature)
-        resolvePortConflicts();
-        
         String executorId = getEnvironment().getExecutor().getId();
         RunnerSettings runnerSettings = configuration.getConfigData().getRunnerSettings(executorId);
 
@@ -184,6 +214,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             commandLine = createJavaParameters().toCommandLine();
         }
         
+        // Re-sync log files after catalina.base is prepared (log files now exist on disk)
+        // so RunContentBuilder creates tabs for them
+        configuration.syncTomcatLogFiles();
+
         Process process = commandLine.createProcess();
 
         TomcatProcessHandler handler = new TomcatProcessHandler(

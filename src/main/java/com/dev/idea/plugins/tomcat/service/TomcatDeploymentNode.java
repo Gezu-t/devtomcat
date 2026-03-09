@@ -66,26 +66,26 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
         presentation.addText(artifact.getDisplayName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
 
         // Type badge: [WAR] or [Exploded]
-        String typeBadge = DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
-                ? " [Exploded]" : " [WAR]";
-        presentation.addText(typeBadge,
+        presentation.addText(formatTypeBadge(artifact),
                 SimpleTextAttributes.merge(SimpleTextAttributes.GRAYED_ATTRIBUTES,
                         SimpleTextAttributes.REGULAR_ITALIC_ATTRIBUTES));
 
         // Live status label
         if (artifactState != null) {
+            SimpleTextAttributes statusAttr = switch (artifactState) {
+                case DEPLOYED -> new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN,
+                        JBColor.namedColor("DevTomcat.deployedForeground",
+                                new JBColor(0x59A869, 0x499C54)));
+                case FAILED -> new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN,
+                        JBColor.namedColor("DevTomcat.failedForeground", JBColor.RED));
+                case DEPLOYING, RELOADING -> SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES;
+                default -> SimpleTextAttributes.GRAYED_ATTRIBUTES;
+            };
+            presentation.addText("  " + artifactState.getLabel(), statusAttr);
+
+            // Show URL next to deployed artifacts (double-click node to open in browser)
             if (artifactState == TomcatDeploymentStatusService.ArtifactState.DEPLOYED) {
-                // Clickable hyperlink style — double-click or navigate() opens in browser
-                presentation.addText("  " + artifactState.getLabel(), SimpleTextAttributes.LINK_ATTRIBUTES);
                 presentation.addText("  " + buildUrl(artifact), SimpleTextAttributes.GRAYED_ATTRIBUTES);
-            } else {
-                SimpleTextAttributes statusAttr = switch (artifactState) {
-                    case FAILED -> new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN,
-                            JBColor.namedColor("DevTomcat.failedForeground", JBColor.RED));
-                    case DEPLOYING, RELOADING -> SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES;
-                    default -> SimpleTextAttributes.GRAYED_ATTRIBUTES;
-                };
-                presentation.addText("  " + artifactState.getLabel(), statusAttr);
             }
         }
 
@@ -115,24 +115,43 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
     @NotNull
     private String buildTooltip(@NotNull DeploymentArtifact artifact) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Artifact: ").append(artifact.getDisplayName());
-        sb.append("\nType: ").append(artifact.getType());
-        sb.append("\nContext: ").append(artifact.getContextPath());
-        sb.append("\nPath: ").append(artifact.getPath());
-        if (httpPort > 0) {
-            sb.append("\nURL: ").append(buildUrl(artifact));
-        }
-        return sb.toString();
+        return formatTooltip(artifact, httpPort);
     }
 
     @NotNull
     private String buildUrl(@NotNull DeploymentArtifact artifact) {
+        return formatUrl(artifact, httpPort);
+    }
+
+    /** Builds the tooltip text for a deployment node. Package-visible for testing. */
+    @NotNull
+    static String formatTooltip(@NotNull DeploymentArtifact artifact, int httpPort) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(artifact.getDisplayName());
+        String typeBadge = DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
+                ? " (Exploded)" : " (WAR)";
+        sb.append(typeBadge);
+        if (httpPort > 0) {
+            sb.append("\n").append(formatUrl(artifact, httpPort));
+        }
+        return sb.toString();
+    }
+
+    /** Builds the browser URL for a deployment artifact. Package-visible for testing. */
+    @NotNull
+    static String formatUrl(@NotNull DeploymentArtifact artifact, int httpPort) {
         String context = artifact.getContextPath();
         if (context == null || context.isEmpty()) {
             context = DEFAULT_CONTEXT_PATH;
         }
         return "http://" + DEFAULT_HOST + ":" + httpPort + context;
+    }
+
+    /** Returns the type badge string for display. Package-visible for testing. */
+    @NotNull
+    static String formatTypeBadge(@NotNull DeploymentArtifact artifact) {
+        return DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
+                ? " [Exploded]" : " [WAR]";
     }
 
     // --- Navigatable implementation (double-click opens in browser) ---
@@ -152,15 +171,9 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
     @Override
     public boolean canNavigateToSource() {
-        DeploymentArtifact artifact = getValue();
-        if (artifact == null || !canNavigate()) return false;
-        Project project = getProject();
-        if (project == null || project.isDisposed() || configurationName == null) return false;
-        TomcatDeploymentStatusService.ConfigStatus status =
-                TomcatDeploymentStatusService.getInstance(project).getStatus(configurationName);
-        if (status == null) return false;
-        return status.getArtifactStates().get(artifact.getDisplayName())
-                == TomcatDeploymentStatusService.ArtifactState.DEPLOYED;
+        // Allow navigation (double-click → open browser) whenever the node is valid.
+        // canNavigateToSource() must return true for the Services tree to dispatch navigate().
+        return canNavigate();
     }
 
     @Nullable

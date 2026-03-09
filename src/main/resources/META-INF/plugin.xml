@@ -53,24 +53,25 @@
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>Version 1.1.0</h3>
+    <h3>Version 1.0.0 — Initial Release</h3>
     <ul>
+        <li>Full Tomcat lifecycle — run, debug, and redeploy from the IDE</li>
+        <li>Multi-artifact deployment with independent context paths</li>
         <li>Smart Diagnostics Engine — auto-detects 16+ Tomcat errors with actionable suggestions</li>
         <li>Tomcat/JDK version compatibility checker (Tomcat 7–11 matrix)</li>
+        <li>Auto-port conflict resolution at startup</li>
         <li>Live deployment status tracking in Services tool window</li>
         <li>Deployment history with persistent storage</li>
-        <li>Enhanced console filter with clickable URLs and file paths</li>
+        <li>Startup time trends and performance tracking</li>
+        <li>Smart console filter with clickable URLs and file paths</li>
         <li>Configuration export/import for team sharing</li>
         <li>Code coverage runner with JaCoCo support</li>
         <li>Update Running Application (Ctrl+F10) support</li>
-    </ul>
-    <h3>Version 1.0.0</h3>
-    <ul>
-        <li>Initial release of DevTomcat</li>
-        <li>Full Tomcat server management</li>
-        <li>Run/Debug configuration support</li>
-        <li>Hot deployment</li>
-        <li>JMX monitoring</li>
+        <li>Remote deployment via Tomcat Manager API</li>
+        <li>Per-mode runner settings (Run, Debug, Coverage)</li>
+        <li>Multi-log monitoring with dedicated console tabs</li>
+        <li>CATALINA_BASE isolation per run configuration</li>
+        <li>JMX monitoring support</li>
     </ul>
     ]]></change-notes>
 
@@ -175,6 +176,15 @@
     </extensions>
 
     <actions>
+        <!-- Open in Browser action for deployment nodes in the Services tree -->
+        <action id="DevTomcat.OpenInBrowser"
+                class="com.dev.idea.plugins.tomcat.action.OpenDeploymentInBrowserAction"
+                text="Open in Browser"
+                description="Open the deployed application in a web browser"
+                icon="AllIcons.Nodes.PpWeb">
+            <add-to-group group-id="ServiceViewItemPopup" anchor="first"/>
+        </action>
+
         <group id="DevTomcat.ToolsMenu" text="DevTomcat" popup="true"
                icon="AllIcons.Nodes.Deploy">
             <add-to-group group-id="ToolsMenu" anchor="last"/>

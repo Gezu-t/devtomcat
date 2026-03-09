@@ -48,11 +48,10 @@ public class DeploymentTableManager {
                                                  boolean hasFocus) {
                 if (value != null) {
                     setIcon(AllIcons.Nodes.Artifact);
-                    append(value.getDisplayName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
-                    String ctx = value.getApplicationContext();
-                    if (ctx != null && !ctx.isEmpty()) {
-                        append("  " + ctx, SimpleTextAttributes.GRAYED_ATTRIBUTES);
-                    }
+                    // Format display name using colon notation like IntelliJ Ultimate
+                    String displayName = ContextPathUtils.formatArtifactDisplayName(
+                            value.getDisplayName(), value.getType());
+                    append(displayName, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                 }
             }
         });

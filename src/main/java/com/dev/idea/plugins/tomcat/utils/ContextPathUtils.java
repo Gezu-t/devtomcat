@@ -57,14 +57,17 @@ public final class ContextPathUtils {
     }
 
     /**
-     * Extracts a base module name by stripping common artifact naming suffixes.
-     * Used to match deployment names against IntelliJ artifact names across naming conventions.
+     * Extracts a base module name by stripping common artifact naming suffixes
+     * and version patterns. Used to match deployment names against IntelliJ
+     * artifact names across naming conventions.
      *
      * <p>Examples:
      * <ul>
      *   <li>{@code "webapp-one_war_exploded"} → {@code "webapp-one"}</li>
      *   <li>{@code "webapp-one:war exploded"} → {@code "webapp-one"}</li>
      *   <li>{@code "webapp-one.war"} → {@code "webapp-one"}</li>
+     *   <li>{@code "webapp-one##5.18.0.war"} → {@code "webapp-one"}</li>
+     *   <li>{@code "webapp-one-5.18.0"} → {@code "webapp-one"}</li>
      *   <li>{@code "plain-name"} → {@code "plain-name"}</li>
      * </ul>
      */
@@ -75,10 +78,75 @@ public final class ContextPathUtils {
         String[] suffixes = {"_war_exploded", "_war", ":war exploded", ":war", ".war", " (exploded)"};
         for (String suffix : suffixes) {
             if (lower.endsWith(suffix)) {
-                return lower.substring(0, lower.length() - suffix.length());
+                lower = lower.substring(0, lower.length() - suffix.length());
+                break;
             }
         }
+        // Strip Tomcat parallel deployment version (##version) and Maven/Gradle version suffixes
+        // Note: input is already lowercased, so match -snapshot (not -SNAPSHOT)
+        lower = lower.replaceAll("##\\d+(\\.\\d+)*(-snapshot)?$", "");
+        lower = lower.replaceAll("-\\d+(\\.\\d+)+(-snapshot)?$", "");
         return lower;
+    }
+
+    /**
+     * Formats an artifact name for display using IntelliJ Ultimate's colon notation.
+     * Converts underscore-based naming (e.g. {@code "app_war_exploded"}) to the cleaner
+     * colon format (e.g. {@code "app:war exploded"}) that IntelliJ Ultimate uses.
+     *
+     * <p>If the name already uses colon notation, it is returned as-is.
+     * Version patterns like {@code ##5.18.0} are stripped for cleaner display.
+     *
+     * @param name the raw artifact name
+     * @param type the deployment type ({@code "exploded"}, {@code "war"}, or null)
+     * @return formatted display name in colon notation
+     */
+    @NotNull
+    public static String formatArtifactDisplayName(@NotNull String name, @Nullable String type) {
+        // Already in colon format — return as-is
+        if (name.contains(":war") || name.contains(":ear")) {
+            return name;
+        }
+
+        String baseName = name;
+        String resolvedType = type;
+
+        // Strip known suffixes and detect type from the name
+        String lower = name.toLowerCase();
+        if (lower.endsWith("_war_exploded")) {
+            baseName = name.substring(0, name.length() - "_war_exploded".length());
+            resolvedType = "exploded";
+        } else if (lower.endsWith("_ear_exploded")) {
+            baseName = name.substring(0, name.length() - "_ear_exploded".length());
+            resolvedType = "exploded";
+        } else if (lower.endsWith("_war")) {
+            baseName = name.substring(0, name.length() - "_war".length());
+            resolvedType = "war";
+        } else if (lower.endsWith("_ear")) {
+            baseName = name.substring(0, name.length() - "_ear".length());
+            resolvedType = "ear";
+        } else if (lower.endsWith(".war")) {
+            baseName = name.substring(0, name.length() - ".war".length());
+            resolvedType = "war";
+        } else if (lower.endsWith(".ear")) {
+            baseName = name.substring(0, name.length() - ".ear".length());
+            resolvedType = "ear";
+        }
+
+        // Strip version patterns (##5.18.0, -5.18.0, -5.18.0-SNAPSHOT)
+        baseName = baseName.replaceAll("(?i)##\\d+(\\.\\d+)*(-SNAPSHOT)?$", "");
+        baseName = baseName.replaceAll("(?i)-\\d+(\\.\\d+)+(-SNAPSHOT)?$", "");
+
+        // Format with colon notation
+        if ("exploded".equals(resolvedType)) {
+            return baseName + ":war exploded";
+        } else if ("war".equals(resolvedType)) {
+            return baseName + ":war";
+        } else if ("ear".equals(resolvedType)) {
+            return baseName + ":ear";
+        }
+
+        return name;
     }
 
     public static boolean isValidContextPath(@Nullable String context) {

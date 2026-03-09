@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.ui.history.StartupTimeTrendDialog;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -14,7 +15,9 @@ public class ShowStartupTrendsAction extends AnAction {
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
-        new StartupTimeTrendDialog(e.getProject()).show();
+        Project project = e.getProject();
+        if (project == null) return;
+        new StartupTimeTrendDialog(project).show();
     }
 
     @Override

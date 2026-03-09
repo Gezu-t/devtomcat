@@ -122,12 +122,44 @@ package com.dev.idea.plugins.tomcat.utils;
             return catalinaBase.resolve(DIR_WEBAPPS);
         }
 
+        /**
+         * Returns the conf overlay directory for a run configuration.
+         *
+         * <p>Path: {@code <project>/.devtomcat/<config-name>/conf/}
+         * <ul>
+         *   <li>Outside {@code .idea/} — survives IDE cache cleans</li>
+         *   <li>Per-config — different configurations can have different overlays</li>
+         *   <li>Version-controllable if the team wants shared Tomcat customizations</li>
+         * </ul>
+         *
+         * @return the overlay path, or null if project base path is unavailable
+         */
+        @Nullable
+        public static Path getConfOverlayDirectory(@NotNull TomcatRunConfiguration config) {
+            Project project = config.getProject();
+            if (project == null || project.getBasePath() == null) {
+                return null;
+            }
+            return resolveConfOverlayPath(project.getBasePath(), config.getName());
+        }
+
+        /**
+         * Builds the conf overlay path from a project base path and config name.
+         *
+         * <p>Path: {@code <projectBasePath>/.devtomcat/<sanitized-config-name>/conf/}
+         */
         @NotNull
-        private static String sanitizeFileName(@Nullable String name) {
+        static Path resolveConfOverlayPath(@NotNull String projectBasePath, @Nullable String configName) {
+            return Paths.get(projectBasePath, ".devtomcat", sanitizeFileName(configName), "conf");
+        }
+
+        @NotNull
+        static String sanitizeFileName(@Nullable String name) {
             if (StringUtil.isEmpty(name)) return "unnamed";
-            return name.trim()
+            String sanitized = name.trim()
                 .replaceAll("[^a-zA-Z0-9._-]", "_")
                 .replaceAll("_{2,}", "_")
                 .replaceAll("^_|_$", "");
+            return sanitized.isEmpty() ? "unnamed" : sanitized;
         }
     }

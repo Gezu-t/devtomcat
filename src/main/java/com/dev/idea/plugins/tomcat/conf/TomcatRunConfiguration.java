@@ -313,17 +313,12 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
                     Artifact matchedArtifact = findMatchingArtifact(artifactManager, deploymentArtifact);
 
-                    // If no match, auto-create an IntelliJ artifact for this deployment
-                    if (matchedArtifact == null) {
-                        matchedArtifact = autoCreateArtifactForDeployment(artifactManager, deploymentArtifact);
-                    }
-
                     if (matchedArtifact != null) {
                         buildTask.addArtifact(matchedArtifact);
                         LOG.info("DevTomcat: Added artifact to Build task: " + matchedArtifact.getName());
                     } else {
-                        LOG.warn("DevTomcat: No matching IntelliJ artifact for deployment '" +
-                                deploymentArtifact.getName() + "' and could not auto-create one");
+                        LOG.info("DevTomcat: No matching IntelliJ artifact for deployment '" +
+                                deploymentArtifact.getName() + "'; skipping Build Artifact linkage");
                     }
                 }
                 if (!buildTask.getArtifactPointers().isEmpty()) {
@@ -384,171 +379,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         return com.dev.idea.plugins.tomcat.utils.ContextPathUtils.extractBaseModuleName(name);
     }
 
-    /**
-     * Auto-creates an IntelliJ Artifact for a deployment that has no existing match.
-     * Finds the web module in the project and creates a WAR-exploded artifact structure
-     * so that "Build Artifact" can appear in Before Launch.
-     */
-    @Nullable
-    private Artifact autoCreateArtifactForDeployment(@NotNull ArtifactManager artifactManager,
-                                                      @NotNull DeploymentArtifact deployment) {
-        Project project = getProject();
-        Module module = findModuleForDeployment(project, deployment);
-        if (module == null) {
-            LOG.info("DevTomcat: No module found for deployment '" + deployment.getName() +
-                    "', cannot auto-create artifact");
-            return null;
-        }
-
-        try {
-            // Choose artifact type: prefer exploded-war (Ultimate) > plain (Community)
-            ArtifactType artifactType = ArtifactType.findById("exploded-war");
-            if (artifactType == null) artifactType = ArtifactType.findById("exploded");
-            if (artifactType == null) artifactType = PlainArtifactType.getInstance();
-
-            String artifactName = module.getName() + TomcatConstants.ARTIFACT_SUFFIX_WAR_EXPLODED;
-
-            // Check if this artifact already exists (maybe created earlier)
-            for (Artifact a : artifactManager.getArtifacts()) {
-                if (artifactName.equals(a.getName())) {
-                    LOG.info("DevTomcat: Found existing artifact: " + artifactName);
-                    return a;
-                }
-            }
-
-            PackagingElementFactory factory = PackagingElementFactory.getInstance();
-            CompositePackagingElement<?> root = factory.createArtifactRootElement();
-
-            // WEB-INF/classes ← module compiled output
-            CompositePackagingElement<?> classesDir = factory.getOrCreateDirectory(root, TomcatConstants.WEB_INF_CLASSES_PATH);
-            classesDir.addOrFindChild(factory.createModuleOutput(module));
-
-            // WEB-INF/lib ← module library dependencies
-            CompositePackagingElement<?> libDir = factory.getOrCreateDirectory(root, TomcatConstants.WEB_INF_LIB_PATH);
-            OrderEnumerator.orderEntries(module)
-                    .withoutSdk()
-                    .withoutModuleSourceEntries()
-                    .forEachLibrary(library -> {
-                        if (library != null) {
-                            try {
-                                for (com.intellij.packaging.elements.PackagingElement<?> element :
-                                        factory.createLibraryElements(library)) {
-                                    libDir.addOrFindChild(element);
-                                }
-                            } catch (Exception e) {
-                                LOG.debug("DevTomcat: Skipping library: " + library.getName());
-                            }
-                        }
-                        return true;
-                    });
-
-            // Add web resource root content (e.g. src/main/webapp)
-            List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(module);
-            for (VirtualFile webRoot : webRoots) {
-                root.addOrFindChild(factory.createDirectoryCopyWithParentDirectories(webRoot.getPath(), ""));
-            }
-
-            String basePath = project.getBasePath();
-            if (basePath == null) {
-                LOG.warn("Project has no base path, cannot create artifact output directory");
-                return null;
-            }
-            String outputPath = basePath + "/out/artifacts/" +
-                    module.getName().replace(':', '_') + "_war_exploded";
-
-            final ArtifactType finalType = artifactType;
-            final Artifact[] result = new Artifact[1];
-
-            WriteAction.runAndWait(() -> {
-                ModifiableArtifactModel model = artifactManager.createModifiableModel();
-                com.intellij.packaging.artifacts.ModifiableArtifact modArtifact =
-                        model.addArtifact(artifactName, finalType, root);
-                modArtifact.setOutputPath(outputPath);
-                model.commit();
-                for (Artifact a : artifactManager.getArtifacts()) {
-                    if (artifactName.equals(a.getName())) {
-                        result[0] = a;
-                        break;
-                    }
-                }
-            });
-
-            if (result[0] != null) {
-                LOG.info("DevTomcat: Auto-created IntelliJ artifact: " + artifactName +
-                        " [type=" + finalType.getId() + ", output=" + outputPath + "]");
-            }
-            return result[0];
-
-        } catch (Exception e) {
-            LOG.warn("DevTomcat: Failed to auto-create artifact for " +
-                    deployment.getName() + ": " + e.getMessage(), e);
-            return null;
-        }
-    }
-
-    /**
-     * Finds the IntelliJ Module that corresponds to a deployment artifact.
-     * Tries multiple strategies: exact name, name without .war, path-based,
-     * single web module fallback, and partial name matching.
-     */
-    @Nullable
-    private Module findModuleForDeployment(@NotNull Project project,
-                                            @NotNull DeploymentArtifact deployment) {
-        ModuleManager moduleManager = ModuleManager.getInstance(project);
-        String name = deployment.getName();
-
-        // 1. Exact name match
-        Module module = moduleManager.findModuleByName(name);
-        if (module != null) return module;
-
-        // 2. Strip .war extension and parenthetical suffixes
-        String baseName = name.replaceAll("\\.war$", "").replaceAll("\\s*\\(.*\\)$", "").trim();
-        module = moduleManager.findModuleByName(baseName);
-        if (module != null) return module;
-
-        // 3. Path-based: find web module whose content root contains the deployment path
-        String deploymentPath = deployment.getPath();
-        if (deploymentPath != null && !deploymentPath.isEmpty()) {
-            for (Module m : moduleManager.getModules()) {
-                for (VirtualFile contentRoot : ModuleRootManager.getInstance(m).getContentRoots()) {
-                    if (deploymentPath.startsWith(contentRoot.getPath())) {
-                        if (TomcatModuleUtils.isWebModule(m)) {
-                            LOG.info("DevTomcat: Matched module '" + m.getName() +
-                                    "' by path for deployment '" + name + "'");
-                            return m;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Single web module fallback — if there's only one web module, use it
-        List<Module> webModules = new ArrayList<>();
-        for (Module m : moduleManager.getModules()) {
-            if (TomcatModuleUtils.isWebModule(m)) {
-                webModules.add(m);
-            }
-        }
-        if (webModules.size() == 1) {
-            LOG.info("DevTomcat: Using single web module '" + webModules.get(0).getName() +
-                    "' for deployment '" + name + "'");
-            return webModules.get(0);
-        }
-
-        // 5. Partial name matching against web modules
-        for (Module m : webModules) {
-            String mName = m.getName().toLowerCase();
-            String lowerBase = baseName.toLowerCase();
-            if (mName.contains(lowerBase) || lowerBase.contains(mName)) {
-                LOG.info("DevTomcat: Matched module '" + m.getName() +
-                        "' by partial name for deployment '" + name + "'");
-                return m;
-            }
-        }
-
-        return null;
-    }
-
     // =====================================================================
     // Debug accessors
     // =====================================================================
@@ -603,7 +433,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         setAllowRunningInParallel(configData.isAllowMultipleInstances());
     }
 
-    void syncTomcatLogFiles() {
+    public void syncTomcatLogFiles() {
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
         if (logsDir == null) return;
 
@@ -647,6 +477,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         var logFileConfig = configData.getLogFileConfig();
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
             boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
+            // Use today's concrete filename (e.g. "catalina.2026-03-08.log") — NOT the glob
+            // pattern, because IntelliJ creates a separate tab for every file matching a glob.
             String path = logFile.resolveFullPath(logsDir);
             boolean skipContent = logFileConfig.isSkipContent(logFile.getId());
             result.add(new LogFileOptions(logFile.getId(), path, enabled, skipContent, true));

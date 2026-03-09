@@ -133,8 +133,8 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
             gbc.gridx = 1; gbc.gridwidth = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
             catalinaBaseField = new TextFieldWithBrowseButton();
-            catalinaBaseField.addBrowseFolderListener(
-                    "Select CATALINA_BASE Directory", "Choose the base directory for this Tomcat instance",
+            com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                    catalinaBaseField, "Select CATALINA_BASE Directory", "Choose the base directory for this Tomcat instance",
                     project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
             catalinaBaseField.getTextField().setToolTipText("Leave empty to use default (auto-generated per configuration)");
             formPanel.add(catalinaBaseField, gbc);

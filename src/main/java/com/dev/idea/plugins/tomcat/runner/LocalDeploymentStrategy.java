@@ -1,0 +1,392 @@
+package com.dev.idea.plugins.tomcat.runner;
+
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.configurations.JavaParameters;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.packaging.artifacts.ArtifactManager;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
+
+/**
+ * Local deployment strategy: deploys artifacts to the CATALINA_BASE filesystem.
+ *
+ * <p>Exploded artifacts get a context XML descriptor in {@code conf/Catalina/localhost/};
+ * packaged WARs are copied to {@code webapps/}. Multi-module projects get
+ * {@code <PostResources>} entries so the webapp classloader sees all module outputs.
+ */
+final class LocalDeploymentStrategy implements DeploymentStrategy {
+
+    private static final Logger LOG = Logger.getInstance(LocalDeploymentStrategy.class);
+
+    // --- Tomcat PostResources (context.xml overlay) ---
+    private static final String RESOURCE_CLASS_DIR = "org.apache.catalina.webresources.DirResourceSet";
+    private static final String RESOURCE_CLASS_FILE = "org.apache.catalina.webresources.FileResourceSet";
+    private static final String WEBAPP_MOUNT_CLASSES = "/WEB-INF/classes";
+    private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
+
+    private static final String POST_RESOURCE_TEMPLATE =
+            "\n    <PostResources className=\"%s\"\n                    base=\"%s\" webAppMount=\"%s\" />";
+
+    /**
+     * Container-provided libraries must not be injected into a webapp deployed to
+     * an external Tomcat. Doing so causes duplicate classes/web fragments when the
+     * artifact already contains app-managed variants.
+     */
+    private static final String[] CONTAINER_PROVIDED_JAR_PREFIXES = {
+            "tomcat-",
+            "tomcat-embed-",
+            "jakarta.servlet",
+            "jakarta.servlet-api",
+            "javax.servlet",
+            "servlet-api",
+            "jsp-api",
+            "jakarta.jsp",
+            "jakarta.el",
+            "el-api",
+            "ecj-"
+    };
+
+    @Override
+    public void configureDeployment(@NotNull JavaParameters params,
+                                    @NotNull Path catalinaBase,
+                                    @NotNull TomcatRunConfiguration configuration,
+                                    @NotNull Project project,
+                                    @Nullable TomcatDeploymentLogger logger) throws ExecutionException {
+        Path webappsDir = catalinaBase.resolve(DIR_WEBAPPS);
+        Path confCatalinaLocalhost = catalinaBase.resolve(CONTEXT_XML_DIR);
+
+        try {
+            Files.createDirectories(webappsDir);
+            Files.createDirectories(confCatalinaLocalhost);
+            cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to create deployment directories", e);
+        }
+
+        boolean hotDeploy = configuration.getConfigData().getDeploymentConfig().isHotDeploymentEnabled();
+        boolean preserveSessions = configuration.getConfigData().getDeploymentConfig().isPreserveSessions();
+
+        for (DeploymentArtifact artifact : configuration.getConfigData().getDeploymentConfig().getDeployedArtifacts()) {
+            if (artifact == null || !artifact.isValid()) continue;
+
+            String contextPath = artifact.getContextPath();
+            String contextName;
+            if (contextPath == null || contextPath.isEmpty() || DEFAULT_CONTEXT_PATH.equals(contextPath)) {
+                contextName = ROOT_CONTEXT_NAME;
+            } else {
+                contextName = contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
+            }
+
+            Path artifactPath = Paths.get(artifact.getPath());
+            if (!Files.exists(artifactPath)) {
+                throw new ExecutionException("Deployment artifact not found: " + artifact.getPath());
+            }
+
+            try {
+                if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
+                        || Files.isDirectory(artifactPath)) {
+                    String contextXml = buildContextXml(artifact, artifactPath, hotDeploy, preserveSessions, project);
+                    Path contextFile = confCatalinaLocalhost.resolve(contextName + ".xml");
+                    Files.writeString(contextFile, contextXml);
+                    LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
+                } else {
+                    Path targetWar = webappsDir.resolve(contextName + ".war");
+                    Files.copy(artifactPath, targetWar, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    LOG.info("Deployed WAR artifact: " + targetWar);
+                }
+            } catch (IOException e) {
+                throw new ExecutionException("Failed to deploy artifact: " + artifact.getPath(), e);
+            }
+        }
+    }
+
+    @NotNull
+    private String buildContextXml(@NotNull DeploymentArtifact artifact,
+                                   @NotNull Path artifactPath,
+                                   boolean hotDeploy,
+                                   boolean preserveSessions,
+                                   @NotNull Project project) {
+        String extraResources = buildExtraResourcesXml(artifact, artifactPath, project);
+        String jarScanFilter = buildJarScanFilter(artifactPath);
+
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.append("<Context docBase=\"").append(escapeXmlAttribute(artifactPath.toString()));
+        xml.append("\" reloadable=\"").append(hotDeploy).append("\">");
+
+        if (preserveSessions) {
+            xml.append("\n  <Manager pathname=\"SESSIONS.ser\" />");
+        }
+        if (!extraResources.isEmpty()) {
+            xml.append("\n  <Resources allowLinking=\"true\">");
+            xml.append(extraResources);
+            xml.append("\n  </Resources>");
+        }
+        if (!jarScanFilter.isEmpty()) {
+            xml.append("\n  <JarScanner>");
+            xml.append("\n    <JarScanFilter pluggabilitySkip=\"").append(jarScanFilter).append("\" />");
+            xml.append("\n  </JarScanner>");
+        }
+
+        xml.append("\n</Context>\n");
+        return xml.toString();
+    }
+
+    /**
+     * Scans WEB-INF/lib for container-provided jars that could cause duplicate
+     * web-fragment errors (e.g. tomcat-jasper + tomcat-embed-jasper both declaring
+     * org_apache_jasper). Returns a comma-separated skip pattern for JarScanFilter.
+     */
+    @NotNull
+    private String buildJarScanFilter(@NotNull Path artifactPath) {
+        Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
+        if (!Files.isDirectory(webInfLib)) return "";
+
+        List<String> skipPatterns = new ArrayList<>();
+        try (var stream = Files.list(webInfLib)) {
+            stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+                  .forEach(p -> {
+                      String jarName = p.getFileName().toString();
+                      if (isContainerProvidedJar(jarName)) {
+                          skipPatterns.add(jarName);
+                      }
+                  });
+        } catch (IOException e) {
+            LOG.debug("Could not scan WEB-INF/lib for container jars: " + e.getMessage());
+        }
+
+        if (skipPatterns.isEmpty()) return "";
+
+        LOG.info("JarScanFilter will skip " + skipPatterns.size() +
+                " container-provided jars in WEB-INF/lib: " + skipPatterns);
+        return String.join(",", skipPatterns);
+    }
+
+    private void cleanStaleDeployments(@NotNull Path webappsDir, @NotNull Path confDir) {
+        // Remove previous context XML descriptors to prevent conflicts with new deployments
+        try (var stream = Files.list(confDir)) {
+            stream.filter(p -> p.getFileName().toString().endsWith(".xml"))
+                  .forEach(p -> {
+                      try { Files.deleteIfExists(p); } catch (IOException e) { LOG.debug("Failed to clean: " + p, e); }
+                  });
+        } catch (IOException e) {
+            LOG.debug("Could not clean conf directory: " + confDir, e);
+        }
+
+        // Remove previous WAR files to prevent WAR/context XML conflicts
+        try (var stream = Files.list(webappsDir)) {
+            stream.filter(p -> p.getFileName().toString().endsWith(".war"))
+                  .forEach(p -> {
+                      try { Files.deleteIfExists(p); } catch (IOException e) { LOG.debug("Failed to clean: " + p, e); }
+                  });
+        } catch (IOException e) {
+            LOG.debug("Could not clean webapps directory: " + webappsDir, e);
+        }
+    }
+
+    static String escapeXmlAttribute(@NotNull String value) {
+        return value.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\"", "&quot;")
+                    .replace("'", "&apos;");
+    }
+
+    /**
+     * Builds extra {@code <PostResources>} XML entries for an exploded artifact's context XML.
+     * This adds module classpath entries (class output dirs and dependency JARs) that are not
+     * already present in the artifact's WEB-INF/lib or WEB-INF/classes, matching how IntelliJ
+     * Ultimate enriches the webapp classloader for multi-module projects.
+     */
+    @NotNull
+    private String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
+                                          @NotNull Path artifactPath,
+                                          @NotNull Project project) {
+        Module module = findModuleForArtifact(artifact, project);
+        if (module == null) {
+            LOG.info("No module found for artifact '" + artifact.getName() + "', skipping extra classpath");
+            return "";
+        }
+
+        // Collect existing JARs in WEB-INF/lib to avoid duplicates
+        Set<String> existingLibJars = new HashSet<>();
+        Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
+        if (Files.isDirectory(webInfLib)) {
+            try (var stream = Files.list(webInfLib)) {
+                stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+                      .forEach(p -> existingLibJars.add(p.getFileName().toString()));
+            } catch (IOException e) {
+                LOG.debug("Could not list WEB-INF/lib: " + e.getMessage());
+            }
+        }
+
+        // Normalize artifact paths for cross-platform comparison
+        String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
+        String webInfClassesPath = artifactPath.resolve(WEB_INF).resolve(WEB_INF_CLASSES)
+                .toAbsolutePath().toString().replace('\\', '/');
+
+        // Get all runtime classpath entries from the module (recursively includes dependencies)
+        List<String> extraDirs = new ArrayList<>();
+        List<String> extraJars = new ArrayList<>();
+
+        VirtualFile[] classesRoots = OrderEnumerator.orderEntries(module)
+                .recursively()
+                .withoutSdk()
+                .classes()
+                .getRoots();
+
+        for (VirtualFile root : classesRoots) {
+            String rootPath = root.getPath();
+            // Strip trailing !/ from JAR URLs
+            if (rootPath.endsWith("!/")) {
+                rootPath = rootPath.substring(0, rootPath.length() - 2);
+            }
+
+            // Skip entries already under the artifact's docBase
+            if (rootPath.startsWith(artifactAbsPath)) {
+                continue;
+            }
+
+            // Convert to OS-native path for File operations and context XML
+            String nativePath = rootPath.replace('/', File.separatorChar);
+            File file = new File(nativePath);
+            if (!file.exists()) continue;
+
+            if (file.isDirectory()) {
+                // Class output directory — skip if it IS the artifact's WEB-INF/classes
+                if (rootPath.equals(webInfClassesPath)) continue;
+                extraDirs.add(nativePath);
+            } else if (rootPath.endsWith(".jar")) {
+                // JAR file — skip container-provided libs and jars already packaged in WEB-INF/lib
+                String jarName = file.getName();
+                if (isContainerProvidedJar(jarName)) continue;
+                if (existingLibJars.contains(jarName)) continue;
+                extraJars.add(nativePath);
+            }
+        }
+
+        if (extraDirs.isEmpty() && extraJars.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (String dir : extraDirs) {
+            sb.append(String.format(POST_RESOURCE_TEMPLATE,
+                    RESOURCE_CLASS_DIR, escapeXmlAttribute(dir), WEBAPP_MOUNT_CLASSES));
+        }
+        for (String jar : extraJars) {
+            String jarName = new File(jar).getName();
+            sb.append(String.format(POST_RESOURCE_TEMPLATE,
+                    RESOURCE_CLASS_FILE, escapeXmlAttribute(jar),
+                    WEBAPP_MOUNT_LIB + escapeXmlAttribute(jarName)));
+        }
+
+        LOG.info("Added " + extraDirs.size() + " class dirs and " + extraJars.size() +
+                " JARs as extra resources for artifact '" + artifact.getName() + "'");
+        return sb.toString();
+    }
+
+    static boolean isContainerProvidedJar(@NotNull String jarName) {
+        String normalized = jarName.toLowerCase(Locale.ROOT);
+        for (String prefix : CONTAINER_PROVIDED_JAR_PREFIXES) {
+            if (normalized.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Finds the IntelliJ Module associated with a deployment artifact.
+     * Tries: artifact name match via ArtifactManager, name-based module lookup,
+     * path-based matching, and web module fallback.
+     */
+    @Nullable
+    private Module findModuleForArtifact(@NotNull DeploymentArtifact artifact,
+                                         @NotNull Project project) {
+        try {
+            ModuleManager moduleManager = ModuleManager.getInstance(project);
+            String name = artifact.getName();
+
+            // 1. Try to find IntelliJ Artifact by name -> extract module from packaging elements
+            ArtifactManager artifactManager = ArtifactManager.getInstance(project);
+            for (Artifact a : artifactManager.getArtifacts()) {
+                if (name.equals(a.getName())) {
+                    String moduleName = a.getName().replaceAll(":war.*$", "").trim();
+                    Module module = moduleManager.findModuleByName(moduleName);
+                    if (module != null) return module;
+                    break;
+                }
+            }
+
+            // 2. Direct name-based lookup (strip suffixes)
+            String baseName = name.replaceAll(":war.*$", "")
+                                  .replaceAll("\\.war$", "")
+                                  .replaceAll("\\s*\\(.*\\)$", "")
+                                  .trim();
+            Module module = moduleManager.findModuleByName(baseName);
+            if (module != null) return module;
+
+            // 3. Path-based: find module whose content root contains the deployment path
+            String deploymentPath = artifact.getPath();
+            if (!deploymentPath.isEmpty()) {
+                for (Module m : moduleManager.getModules()) {
+                    for (VirtualFile contentRoot : ModuleRootManager.getInstance(m).getContentRoots()) {
+                        if (deploymentPath.startsWith(contentRoot.getPath())) {
+                            if (TomcatModuleUtils.isWebModule(m)) {
+                                return m;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Single web module fallback
+            List<Module> webModules = new ArrayList<>();
+            for (Module m : moduleManager.getModules()) {
+                if (TomcatModuleUtils.isWebModule(m)) {
+                    webModules.add(m);
+                }
+            }
+            if (webModules.size() == 1) return webModules.get(0);
+
+            // 5. Partial name match against web modules
+            for (Module m : webModules) {
+                String mName = m.getName().toLowerCase();
+                String lowerBase = baseName.toLowerCase();
+                if (mName.contains(lowerBase) || lowerBase.contains(mName)) {
+                    return m;
+                }
+            }
+
+            return null;
+        } catch (Exception e) {
+            LOG.warn("Failed to find module for artifact '" + artifact.getName() + "': " + e.getMessage());
+            return null;
+        }
+    }
+}

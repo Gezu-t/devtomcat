@@ -18,7 +18,8 @@ public class VmConfig implements Serializable, Cloneable {
 
     public static final String DEFAULT_VM_OPTIONS = "";
 
-    @NotNull private String vmOptions = DEFAULT_VM_OPTIONS;
+    @NotNull 
+    private String vmOptions = DEFAULT_VM_OPTIONS;
 
     public VmConfig() {}
 
@@ -31,7 +32,7 @@ public class VmConfig implements Serializable, Cloneable {
     public String getVmOptions() { return vmOptions; }
 
     public void setVmOptions(@Nullable String vmOptions) {
-        this.vmOptions = StringUtil.notNullize(vmOptions);
+        this.vmOptions = StringUtil.notNullize(vmOptions).replaceAll("\\s+", " ").trim();
     }
 
     public boolean hasVmOptions() { return !vmOptions.isEmpty(); }

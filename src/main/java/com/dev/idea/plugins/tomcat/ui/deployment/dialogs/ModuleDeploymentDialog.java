@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.deployment.dialogs;
 
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.ChooseElementsDialog;
 import com.intellij.openapi.project.Project;
@@ -31,12 +32,8 @@ public class ModuleDeploymentDialog extends ChooseElementsDialog<DeploymentArtif
 
     @Override
     protected String getItemText(DeploymentArtifact item) {
-        String typeLabel = switch (item.getType()) {
-            case DeploymentArtifact.TYPE_WAR -> "WAR";
-            case DeploymentArtifact.TYPE_EXPLODED -> "Exploded";
-            default -> item.getType();
-        };
-        return item.getDisplayName() + "  [" + typeLabel + "]";
+        // Format using colon notation like IntelliJ Ultimate (e.g. "app:war exploded")
+        return ContextPathUtils.formatArtifactDisplayName(item.getDisplayName(), item.getType());
     }
 
     public List<DeploymentArtifact> getSelectedDeployments() {

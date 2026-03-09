@@ -6,7 +6,6 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
-import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
 import com.intellij.ide.browsers.BrowserLauncher;
 import com.intellij.ide.browsers.WebBrowser;
 import com.intellij.ide.browsers.WebBrowserManager;
@@ -34,12 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
-import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory;
-import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
+import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -51,24 +45,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
     private static final Logger LOG = Logger.getInstance(TomcatProcessHandler.class);
 
-    private static final long SHUTDOWN_TIMEOUT_MS = 10_000;
-
-    private static final Pattern STARTUP_PATTERN = Pattern.compile(
-            "(?i).*server startup in (\\d+).*(?:ms|milliseconds).*");
-    private static final Pattern DESCRIPTOR_DEPLOYED_PATTERN = Pattern.compile(
-            "Deployment of (?:deployment descriptor|web application archive) \\[.*?([^/\\\\]+)\\.(?:xml|war)\\] has finished in \\[(\\d+)\\] ms");
-    private static final Pattern JMX_PATTERN = Pattern.compile(
-            "(?i).*jmx.*(?:started|enabled|listening).*port\\s*(\\d+).*");
-    private static final Pattern ERROR_PATTERN = Pattern.compile(
-            "\\b(?:SEVERE|ERROR|FATAL)\\b|" +
-            "^\\s*Caused by:\\s|" +
-            "^[a-zA-Z_$][a-zA-Z0-9_$.]*(?:Exception|Error)\\b");
-    private static final Pattern WARNING_PATTERN = Pattern.compile(
-            "\\b(?:WARNING|WARN)\\b");
-    private static final Pattern CONTEXT_PATTERN = Pattern.compile(
-            "(?i).*context\\s+\\[([^\\]]+)\\].*(?:started|deployed|initialized).*");
-    private static final Pattern RELOAD_PATTERN = Pattern.compile(
-            "(?i)Reloading Context with name \\[([^\\]]+)\\] (?:is completed|has started)");
+    private static final long SHUTDOWN_TIMEOUT_MS = 15_000;
 
     private final TomcatRunConfiguration configuration;
     private final TomcatDeploymentLogger deploymentLogger;
@@ -83,13 +60,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private volatile int expectedArtifactCount;
     private final Map<String, String> contextToArtifactName = new ConcurrentHashMap<>();
     private final boolean jmxEnabled;
-    @Nullable private final TomcatDeploymentStatusService statusService;
-    @Nullable private final TomcatDeploymentHistory historyService;
-    @Nullable private volatile TomcatDeploymentHistory.HistoryEntry historyEntry;
+    private final TomcatLifecycleListener lifecycleListener;
     private volatile long startupTime;
     private volatile long serverStartupTimeMs;
     private final AtomicInteger errorCount = new AtomicInteger(0);
     private final AtomicInteger warningCount = new AtomicInteger(0);
+    private final TomcatOutputPipeline pipeline;
+    private final TomcatOutputPipeline.Context pipelineContext;
 
     public TomcatProcessHandler(@NotNull Process process,
                                 @NotNull String commandLine,
@@ -110,11 +87,25 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         PortConfig ports = resolvedPorts != null ? resolvedPorts : configuration.getConfigData().getPortConfig();
         this.shutdownPort = ports.getShutdown();
         this.httpPort = ports.getHttp();
-        boolean projectAvailable = !configuration.getProject().isDisposed();
-        this.statusService = projectAvailable
-                ? TomcatDeploymentStatusService.getInstance(configuration.getProject()) : null;
-        this.historyService = projectAvailable
-                ? TomcatDeploymentHistory.getInstance(configuration.getProject()) : null;
+        // Build lifecycle listener from event consumers
+        TomcatOutputPipeline.PipelineLogger pipelineLogger = new TomcatOutputPipeline.PipelineLogger() {
+            @Override public void logServerStartup(long durationMs) { deploymentLogger.logServerStartup(durationMs); }
+            @Override public void logDeploymentSuccess(@NotNull String name, long ms) { deploymentLogger.logDeploymentSuccess(name, ms); }
+            @Override public void logServerInfo(@NotNull String msg) { deploymentLogger.logServerInfo(msg); }
+            @Override public void logServerError(@NotNull String msg) { deploymentLogger.logServerError(msg); }
+            @Override public void logServerWarning(@NotNull String msg) { deploymentLogger.logServerWarning(msg); }
+        };
+        this.lifecycleListener = TomcatLifecycleListener.forConfiguration(configuration, pipelineLogger);
+
+        this.pipelineContext = new TomcatOutputPipeline.Context(
+                pipelineLogger, lifecycleListener, configurationName,
+                contextToArtifactName, serverStartupDetected, deployedArtifactCount,
+                errorCount, warningCount, jmxEnabled,
+                duration -> { this.serverStartupTimeMs = duration; },
+                () -> { triggerRemoteDeploymentIfNeeded(); launchBrowserIfEnabled(); }
+        );
+        this.pipeline = TomcatOutputPipeline.create(pipelineContext);
+
         addProcessListener(this);
     }
 
@@ -158,6 +149,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 }
                 if (!isProcessTerminated()) {
                     super.destroyProcessImpl();
+                    waitForProcessExit();
                 }
                 return;
             } catch (Exception e) {
@@ -173,12 +165,20 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     out.write(SHUTDOWN_COMMAND.getBytes(StandardCharsets.UTF_8));
                     out.flush();
                 }
+                LOG.info("SHUTDOWN command sent, waiting up to " + SHUTDOWN_TIMEOUT_MS + "ms for process exit");
+                boolean exited = false;
                 try {
-                    getProcess().waitFor(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                    exited = getProcess().waitFor(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    // Thread interrupted (likely IDE shutting down) — give Tomcat a brief grace period
+                    LOG.info("Shutdown wait interrupted, allowing 5s grace period");
+                    try {
+                        exited = getProcess().waitFor(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException e2) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
-                if (isProcessTerminated()) {
+                if (exited || !getProcess().isAlive()) {
                     LOG.info("Tomcat terminated gracefully");
                     return;
                 }
@@ -188,20 +188,32 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             }
         }
         super.destroyProcessImpl();
+        waitForProcessExit();
+    }
+
+    /**
+     * Waits briefly for the OS process to fully exit after a force kill,
+     * ensuring ports and resources are released before the next session starts.
+     */
+    private void waitForProcessExit() {
+        try {
+            boolean exited = getProcess().waitFor(5, TimeUnit.SECONDS);
+            if (exited) {
+                LOG.info("Process exited after force kill");
+            } else {
+                LOG.warn("Process did not exit within 5s after force kill — ports may remain held");
+                getProcess().destroyForcibly().waitFor(3, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
     public void startNotified(@NotNull ProcessEvent event) {
         startupTime = System.currentTimeMillis();
         deploymentLogger.logServerInfo("Tomcat process started");
-        if (statusService != null) {
-            statusService.onServerStarting(configurationName);
-        }
-
-        // Begin history entry
-        if (historyService != null) {
-            historyEntry = historyService.startEntry(configurationName);
-        }
+        lifecycleListener.onServerStarting(configurationName);
 
         List<DeploymentArtifact> artifacts = configuration.getConfigData()
                 .getDeploymentConfig().getDeployedArtifacts();
@@ -213,12 +225,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 deploymentLogger.logDeploymentStart(artifact.getDisplayName());
                 String contextName = resolveContextName(artifact.getContextPath());
                 contextToArtifactName.put(contextName, artifact.getDisplayName());
-                if (statusService != null) {
-                    statusService.onArtifactDeploying(configurationName, artifact.getDisplayName());
-                }
-                if (historyEntry != null) {
-                    historyEntry.artifactNames.add(artifact.getDisplayName());
-                }
+                lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
             }
         }
     }
@@ -243,20 +250,8 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             deploymentLogger.logServerError("Tomcat terminated with exit code " + exitCode);
         }
 
-        if (statusService != null) {
-            statusService.onServerStopped(configurationName, exitCode);
-        }
-
-        // Record deployment history entry
-        if (historyService != null && historyEntry != null) {
-            historyEntry.durationMs = duration;
-            historyEntry.exitCode = exitCode;
-            historyEntry.success = exitCode == 0;
-            historyEntry.errorCount = errorCount.get();
-            historyEntry.warningCount = warningCount.get();
-            historyEntry.startupTimeMs = serverStartupTimeMs;
-            historyService.recordCompleted(historyEntry);
-        }
+        lifecycleListener.onServerStopped(configurationName, exitCode, duration,
+                errorCount.get(), warningCount.get(), serverStartupTimeMs);
 
         generateSessionSummary(duration, exitCode);
         deploymentLogger.dispose();
@@ -271,89 +266,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private void analyzeOutput(@NotNull String text) {
-        if (text.isEmpty()) return;
-
-        Matcher startupMatcher = STARTUP_PATTERN.matcher(text);
-        if (startupMatcher.find() && serverStartupDetected.compareAndSet(false, true)) {
-            try {
-                long duration = Long.parseLong(startupMatcher.group(1));
-                serverStartupTimeMs = duration;
-                deploymentLogger.logServerStartup(duration);
-                trackStartupTime(duration);
-                if (statusService != null) {
-                    statusService.onServerStarted(configurationName, duration);
-                }
-                triggerRemoteDeploymentIfNeeded();
-                launchBrowserIfEnabled();
-            } catch (NumberFormatException e) {
-                LOG.debug("Could not parse startup time from: " + startupMatcher.group(1));
-            }
-        }
-
-        Matcher descriptorMatcher = DESCRIPTOR_DEPLOYED_PATTERN.matcher(text);
-        if (descriptorMatcher.find()) {
-            try {
-                String contextName = descriptorMatcher.group(1);
-                long descriptorDuration = Long.parseLong(descriptorMatcher.group(2));
-                String artifactName = contextToArtifactName.getOrDefault(contextName, contextName);
-                deploymentLogger.logDeploymentSuccess(artifactName, descriptorDuration);
-                deployedArtifactCount.incrementAndGet();
-                if (statusService != null) {
-                    statusService.onArtifactDeployed(configurationName, artifactName);
-                }
-            } catch (NumberFormatException e) {
-                LOG.debug("Could not parse deployment duration from: " + descriptorMatcher.group(2));
-            }
-        }
-
-        Matcher contextMatcher = CONTEXT_PATTERN.matcher(text);
-        if (contextMatcher.find()) {
-            deploymentLogger.logServerInfo("Context deployed: " + contextMatcher.group(1));
-        }
-
-        Matcher reloadMatcher = RELOAD_PATTERN.matcher(text);
-        if (reloadMatcher.find()) {
-            String ctx = reloadMatcher.group(1);
-            String normalizedCtx = ctx.startsWith("/") ? ctx.substring(1) : ctx;
-            String artifactName = contextToArtifactName.getOrDefault(normalizedCtx, ctx);
-            deploymentLogger.logServerInfo("Auto-reloaded: " + artifactName);
-            if (statusService != null) {
-                if (text.contains("has started")) {
-                    statusService.onArtifactReloading(configurationName, artifactName);
-                } else {
-                    statusService.onArtifactDeployed(configurationName, artifactName);
-                }
-            }
-        }
-
-        if (jmxEnabled) {
-            Matcher jmxMatcher = JMX_PATTERN.matcher(text);
-            if (jmxMatcher.find()) {
-                deploymentLogger.logServerInfo("JMX active on port " + jmxMatcher.group(1));
-            }
-        }
-
-        // Smart diagnostics — analyze ALL lines (including warnings and info for TLD hints)
-        List<TomcatErrorDiagnostics.Diagnostic> diagnostics = TomcatErrorDiagnostics.analyze(text);
-        if (!diagnostics.isEmpty()) {
-            for (TomcatErrorDiagnostics.Diagnostic diag : diagnostics) {
-                deploymentLogger.logServerInfo(TomcatErrorDiagnostics.formatForConsole(diag));
-            }
-        }
-
-        if (ERROR_PATTERN.matcher(text).find()) {
-            errorCount.incrementAndGet();
-            deploymentLogger.logServerError(text);
-            if (statusService != null) {
-                statusService.onError(configurationName);
-            }
-        } else if (WARNING_PATTERN.matcher(text).find()) {
-            warningCount.incrementAndGet();
-            deploymentLogger.logServerWarning(text);
-            if (statusService != null) {
-                statusService.onWarning(configurationName);
-            }
-        }
+        pipeline.processLine(text, pipelineContext);
     }
 
     /**
@@ -371,6 +284,10 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            // Belt-and-suspenders: resolve credentials again on pooled thread
+            // in case the pre-launch resolution in TomcatCommandLineState was skipped
+            CredentialResolver.ensureResolved(remoteConfig);
+
             TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
 
             // Test connectivity first
@@ -385,44 +302,18 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             int successCount = 0;
             for (DeploymentArtifact artifact : artifacts) {
                 if (artifact == null || !artifact.isValid()) continue;
-                if (statusService != null) {
-                    statusService.onArtifactDeploying(configurationName, artifact.getDisplayName());
-                }
+                lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
                 boolean ok = deployer.deploy(artifact, deploymentLogger);
                 if (ok) {
                     successCount++;
-                    if (statusService != null) {
-                        statusService.onArtifactDeployed(configurationName, artifact.getDisplayName());
-                    }
+                    lifecycleListener.onArtifactDeployed(configurationName, artifact.getDisplayName());
                 } else {
-                    if (statusService != null) {
-                        statusService.onArtifactFailed(configurationName, artifact.getDisplayName());
-                    }
+                    lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
                 }
             }
             deploymentLogger.logServerInfo("Remote deployment complete: " +
                     successCount + "/" + artifacts.size() + " artifact(s) deployed");
         });
-    }
-
-    /**
-     * Records startup time and logs trend comparison.
-     * DevTomcat exclusive: tracks startup performance across runs.
-     */
-    private void trackStartupTime(long durationMs) {
-        try {
-            StartupTimeTracker tracker = ApplicationManager.getApplication()
-                    .getService(StartupTimeTracker.class);
-            if (tracker != null) {
-                tracker.recordStartupTime(configurationName, durationMs);
-                String comparison = tracker.formatComparison(configurationName, durationMs);
-                if (!comparison.isEmpty()) {
-                    deploymentLogger.logServerInfo("Startup trend: " + comparison);
-                }
-            }
-        } catch (Exception e) {
-            LOG.debug("Failed to track startup time: " + e.getMessage());
-        }
     }
 
     private void launchBrowserIfEnabled() {

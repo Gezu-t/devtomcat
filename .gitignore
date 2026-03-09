@@ -25,3 +25,4 @@ bin
 gradle.properties
 release-notes.txt
 .claude
+/com/

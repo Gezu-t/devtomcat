@@ -44,6 +44,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private final AtomicBoolean isApplying = new AtomicBoolean(false);
     private final AtomicBoolean editorInitialized = new AtomicBoolean(false);
     private final AtomicBoolean isDisposing = new AtomicBoolean(false);
+    private final AtomicBoolean syncScheduled = new AtomicBoolean(false);
     private DeploymentTableManager deploymentTableManager;
     private ServerConfigurationTab serverTab;
     private DeploymentConfigurationPanel deploymentTab;
@@ -202,7 +203,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                         jc.repaint();
                     }
                     // Refresh env vars when switching to Startup/Connection tab
-                    // so CATALINA_OPTS reflects current VM options from Server tab
+                    // so JAVA_OPTS reflects current VM options from Server tab
                     if (comp == startupConnectionTab && currentConfiguration != null) {
                         try {
                             // Apply server tab changes to get current VM options
@@ -280,14 +281,15 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             });
 
             // Keep the Before Launch artifact task aligned with all configured deployments.
+            // Use coalescing to avoid repeated sync during bulk resetFrom() operations.
             final ArtifactManager capturedArtifactMgr = artifactMgr;
             tableManager.setArtifactListChangeListener(() -> {
                 if (isEventsSuppressed() || tabbedPane == null || capturedArtifactMgr == null) return;
-                syncBeforeLaunchPanelWithSelectedDeployment(capturedArtifactMgr);
+                scheduleBeforeLaunchSync(capturedArtifactMgr);
             });
             tableManager.setSelectionChangeListener(artifact -> {
                 if (isEventsSuppressed() || tabbedPane == null || capturedArtifactMgr == null) return;
-                syncBeforeLaunchPanelWithSelectedDeployment(capturedArtifactMgr);
+                scheduleBeforeLaunchSync(capturedArtifactMgr);
             });
 
             deploymentTab = new DeploymentConfigurationPanel(
@@ -358,55 +360,82 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     }
 
     /**
+     * Coalesces multiple rapid-fire listener invocations (e.g. during resetFrom() loading
+     * 8 artifacts) into a single sync on the next EDT cycle.
+     */
+    private void scheduleBeforeLaunchSync(@NotNull ArtifactManager artifactManager) {
+        if (!syncScheduled.compareAndSet(false, true)) return;
+        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+            syncScheduled.set(false);
+            if (!isEventsSuppressed() && tabbedPane != null) {
+                syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
+            }
+        });
+    }
+
+    /**
      * Replaces the live Before Launch artifact steps so they reflect all deployment
      * artifacts consolidated into a single Build Artifacts task, while preserving non-artifact tasks.
      * This matches IntelliJ Ultimate's behaviour of showing "Build N artifacts" as one entry.
      */
     private void syncBeforeLaunchPanelWithSelectedDeployment(@NotNull ArtifactManager artifactManager) {
-        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
-            try {
-                ConfigurationSettingsEditorWrapper wrapper = findEditorWrapper();
-                if (wrapper == null) {
-                    LOG.warn("DevTomcat: ConfigurationSettingsEditorWrapper not found — cannot sync Build Artifact steps");
-                    return;
-                }
-
-                java.util.List<com.intellij.execution.BeforeRunTask<?>> existingSteps =
-                        new java.util.ArrayList<>(wrapper.getStepsBeforeLaunch());
-                java.util.List<com.intellij.execution.BeforeRunTask<?>> updatedSteps = new java.util.ArrayList<>();
-                for (com.intellij.execution.BeforeRunTask<?> task : existingSteps) {
-                    if (!(task instanceof BuildArtifactsBeforeRunTask)) {
-                        updatedSteps.add(task);
+        try {
+            ConfigurationSettingsEditorWrapper wrapper = findEditorWrapper();
+            if (wrapper == null) {
+                // Wrapper unavailable — editor not yet attached to dialog hierarchy.
+                // Defer one retry on the next EDT cycle when the component tree is realized.
+                LOG.debug("DevTomcat: EditorWrapper not found, deferring sync");
+                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                    if (isEventsSuppressed() || tabbedPane == null) return;
+                    ConfigurationSettingsEditorWrapper retryWrapper = findEditorWrapper();
+                    if (retryWrapper != null) {
+                        doSyncBeforeLaunch(retryWrapper, artifactManager);
+                    } else {
+                        LOG.debug("DevTomcat: EditorWrapper still absent after defer — sync skipped");
                     }
-                }
-
-                // Consolidate all deployment artifacts into a single BuildArtifactsBeforeRunTask
-                java.util.List<DeploymentArtifact> allDeployments = deploymentTableManager != null
-                        ? deploymentTableManager.getDeployments()
-                        : java.util.Collections.emptyList();
-
-                if (!allDeployments.isEmpty()) {
-                    BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
-                    for (DeploymentArtifact deployment : allDeployments) {
-                        Artifact matched = findMatchingArtifact(deployment, artifactManager);
-                        if (matched != null) {
-                            buildTask.addArtifact(matched);
-                        }
-                    }
-                    if (!buildTask.getArtifactPointers().isEmpty()) {
-                        buildTask.setEnabled(true);
-                        updatedSteps.add(buildTask);
-                        LOG.info("DevTomcat: Before Launch consolidated " +
-                                buildTask.getArtifactPointers().size() + " artifact(s) into single Build task");
-                    }
-                }
-
-                wrapper.replaceBeforeLaunchSteps(updatedSteps);
-                wrapper.fireStepsBeforeRunChanged();
-            } catch (Exception e) {
-                LOG.warn("DevTomcat: Error syncing Build Artifact steps", e);
+                });
+                return;
             }
-        });
+
+            doSyncBeforeLaunch(wrapper, artifactManager);
+        } catch (Exception e) {
+            LOG.warn("DevTomcat: Error syncing Build Artifact steps", e);
+        }
+    }
+
+    private void doSyncBeforeLaunch(@NotNull ConfigurationSettingsEditorWrapper wrapper,
+                                     @NotNull ArtifactManager artifactManager) {
+        java.util.List<com.intellij.execution.BeforeRunTask<?>> existingSteps =
+                new java.util.ArrayList<>(wrapper.getStepsBeforeLaunch());
+        java.util.List<com.intellij.execution.BeforeRunTask<?>> updatedSteps = new java.util.ArrayList<>();
+        for (com.intellij.execution.BeforeRunTask<?> task : existingSteps) {
+            if (!(task instanceof BuildArtifactsBeforeRunTask)) {
+                updatedSteps.add(task);
+            }
+        }
+
+        java.util.List<DeploymentArtifact> allDeployments = deploymentTableManager != null
+                ? deploymentTableManager.getDeployments()
+                : java.util.Collections.emptyList();
+
+        if (!allDeployments.isEmpty()) {
+            BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
+            for (DeploymentArtifact deployment : allDeployments) {
+                Artifact matched = findMatchingArtifact(deployment, artifactManager);
+                if (matched != null) {
+                    buildTask.addArtifact(matched);
+                }
+            }
+            if (!buildTask.getArtifactPointers().isEmpty()) {
+                buildTask.setEnabled(true);
+                updatedSteps.add(buildTask);
+                LOG.info("DevTomcat: Before Launch consolidated " +
+                        buildTask.getArtifactPointers().size() + " artifact(s) into single Build task");
+            }
+        }
+
+        wrapper.replaceBeforeLaunchSteps(updatedSteps);
+        wrapper.fireStepsBeforeRunChanged();
     }
 
     private void syncBeforeLaunchPanelWithSelectedDeployment() {

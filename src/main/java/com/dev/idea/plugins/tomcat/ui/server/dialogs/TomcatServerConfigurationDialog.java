@@ -43,6 +43,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
     private final TextFieldWithBrowseButton baseField = new TextFieldWithBrowseButton();
     private final Tree librariesTree = new Tree(new DefaultMutableTreeNode("Classes"));
     private boolean updatingDetails;
+    private final LibraryStateController libraryController = new LibraryStateController();
 
     public TomcatServerConfigurationDialog(@NotNull Project project) {
         super(project);
@@ -110,8 +111,8 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JBLabel("Tomcat Home:"), gbc);
 
-        homeField.addBrowseFolderListener(
-                "Tomcat Home", "Select Tomcat installation directory",
+        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                homeField, "Tomcat Home", "Select Tomcat installation directory",
                 project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
         gbc.gridx = 1;
         gbc.weightx = 1.0;
@@ -137,8 +138,8 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JBLabel("Tomcat base directory:"), gbc);
 
-        baseField.addBrowseFolderListener(
-                "Tomcat Base Directory", "Select Tomcat base directory (CATALINA_BASE)",
+        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                baseField, "Tomcat Base Directory", "Select Tomcat base directory (CATALINA_BASE)",
                 project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
         gbc.gridx = 1;
         gbc.weightx = 1.0;
@@ -160,17 +161,80 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(JBUI.Borders.emptyTop(16));
 
-        JBLabel librariesLabel = new JBLabel("Libraries (auto-detected from Tomcat Home)");
-        librariesLabel.setBorder(JBUI.Borders.emptyBottom(6));
-        panel.add(librariesLabel, BorderLayout.NORTH);
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        JBLabel librariesLabel = new JBLabel("Libraries");
+        librariesLabel.setBorder(JBUI.Borders.emptyBottom(2));
+        headerPanel.add(librariesLabel, BorderLayout.NORTH);
+
+        JBLabel hintLabel = new JBLabel("Defaults show Tomcat API jars only. Custom entries are stored per server.");
+        hintLabel.setForeground(com.intellij.util.ui.NamedColorUtil.getInactiveTextColor());
+        hintLabel.setFont(com.intellij.util.ui.JBFont.small());
+        hintLabel.setBorder(JBUI.Borders.emptyBottom(6));
+        headerPanel.add(hintLabel, BorderLayout.SOUTH);
+
+        panel.add(headerPanel, BorderLayout.NORTH);
 
         librariesTree.setRootVisible(true);
         librariesTree.setShowsRootHandles(true);
         librariesTree.setCellRenderer(new LibraryTreeRenderer());
 
-        JScrollPane scrollPane = new com.intellij.ui.components.JBScrollPane(librariesTree);
-        panel.add(scrollPane, BorderLayout.CENTER);
+        ToolbarDecorator libraryDecorator = ToolbarDecorator.createDecorator(librariesTree)
+                .setAddAction(button -> addLibraryJar())
+                .setRemoveAction(button -> removeSelectedLibraryNode())
+                .disableUpDownActions();
+
+        panel.add(libraryDecorator.createPanel(), BorderLayout.CENTER);
         return panel;
+    }
+
+    private void addLibraryJar() {
+        com.intellij.openapi.fileChooser.FileChooserDescriptor descriptor =
+                new com.intellij.openapi.fileChooser.FileChooserDescriptor(true, false, true, true, false, true)
+                        .withTitle("Select Library JARs")
+                        .withDescription("Choose JAR files to add to the library");
+        com.intellij.openapi.vfs.VirtualFile[] files =
+                com.intellij.openapi.fileChooser.FileChooser.chooseFiles(descriptor, project, null);
+        if (files.length == 0) return;
+
+        DefaultTreeModel model = (DefaultTreeModel) librariesTree.getModel();
+        DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
+        for (com.intellij.openapi.vfs.VirtualFile file : files) {
+            root.add(new DefaultMutableTreeNode(file.getPath()));
+        }
+        model.reload();
+        for (int i = 0; i < librariesTree.getRowCount(); i++) {
+            librariesTree.expandRow(i);
+        }
+        persistTreeToSelectedServer();
+    }
+
+    private void removeSelectedLibraryNode() {
+        javax.swing.tree.TreePath path = librariesTree.getSelectionPath();
+        if (path == null) return;
+        DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
+        if (node.isRoot()) return;
+        DefaultTreeModel model = (DefaultTreeModel) librariesTree.getModel();
+        model.removeNodeFromParent(node);
+        persistTreeToSelectedServer();
+    }
+
+    private void persistTreeToSelectedServer() {
+        TomcatInfo selected = serverList.getSelectedValue();
+        if (selected == null) return;
+        libraryController.persistLibraries(selected, collectTreeLibraries());
+    }
+
+    private List<String> collectTreeLibraries() {
+        DefaultMutableTreeNode root = (DefaultMutableTreeNode) librariesTree.getModel().getRoot();
+        List<String> paths = new ArrayList<>();
+        for (int i = 0; i < root.getChildCount(); i++) {
+            DefaultMutableTreeNode child = (DefaultMutableTreeNode) root.getChildAt(i);
+            Object userObject = child.getUserObject();
+            if (userObject instanceof String str) {
+                paths.add(str);
+            }
+        }
+        return paths;
     }
 
     private void bindDetailEditors() {
@@ -272,6 +336,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
             homeField.setText(selected.getPath());
             versionLabel.setText(selected.getVersion());
             baseField.setText(selected.getCatalinaBase());
+            libraryController.onServerLoaded(selected);
             updateLibrariesTree(selected.getPath());
         } finally {
             updatingDetails = false;
@@ -309,6 +374,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
                     selected.setCatalinaBase(home);
                     baseField.setText(home);
                 }
+                libraryController.onHomeChanged(selected, home, true);
             } else {
                 selected.setVersion("");
                 versionLabel.setText("");
@@ -334,25 +400,16 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
 
     private void updateLibrariesTree(@Nullable String tomcatHome) {
         DefaultMutableTreeNode root = new DefaultMutableTreeNode("Classes");
-        if (tomcatHome != null && !tomcatHome.isBlank()) {
-            List<File> allJars = new ArrayList<>();
-            collectJars(new File(tomcatHome, "lib"), allJars);
-            collectJars(new File(tomcatHome, "bin"), allJars);
-            allJars.sort(Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
-            for (File jar : allJars) {
-                root.add(new DefaultMutableTreeNode(jar.getAbsolutePath()));
+        TomcatInfo selected = serverList.getSelectedValue();
+
+        if (selected != null) {
+            for (String path : libraryController.resolveLibraries(selected, tomcatHome)) {
+                root.add(new DefaultMutableTreeNode(path));
             }
         }
         librariesTree.setModel(new DefaultTreeModel(root));
         for (int i = 0; i < librariesTree.getRowCount(); i++) {
             librariesTree.expandRow(i);
-        }
-    }
-
-    private static void collectJars(@NotNull File dir, @NotNull List<File> jars) {
-        File[] files = dir.listFiles(file -> file.isFile() && file.getName().endsWith(".jar"));
-        if (files != null) {
-            java.util.Collections.addAll(jars, files);
         }
     }
 
@@ -444,7 +501,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
                         append("Classes");
                     } else {
                         setIcon(AllIcons.FileTypes.Archive);
-                        append(new File(str).getName());
+                        append(str);
                     }
                 }
             }

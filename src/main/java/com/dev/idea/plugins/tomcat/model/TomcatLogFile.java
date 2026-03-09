@@ -92,6 +92,19 @@ public class TomcatLogFile {
         return logsDirPath + java.io.File.separator + resolveTodayFilename();
     }
 
+    /**
+     * Builds the path pattern string for IntelliJ's {@link LogFileOptions}.
+     * Uses the original glob pattern (e.g. {@code catalina.*.log}) so that
+     * IntelliJ's log console can resolve and watch the file dynamically.
+     * <p>
+     * This avoids passing glob characters through {@link Path#resolve} (which
+     * would cause URI-validation errors) by using direct string concatenation.
+     */
+    @NotNull
+    public String resolvePathPattern(@NotNull Path logsDirPath) {
+        return logsDirPath + java.io.File.separator + filenamePattern;
+    }
+
     @NotNull
     public LogFileOptions createLogFileOptions(@NotNull Path logsDirPath) {
         Objects.requireNonNull(logsDirPath, "Logs directory path cannot be null");
@@ -136,7 +149,9 @@ public class TomcatLogFile {
 
     @NotNull
     public static TomcatLogFile createCatalinaOut() {
-        return new TomcatLogFile(TOMCAT_CATALINA_OUT_ID, CATALINA_OUT_FILENAME, true,
+        // Disabled by default: when launching Java directly (not via catalina.sh),
+        // stdout/stderr goes to IntelliJ's Console tab, not to catalina.out file.
+        return new TomcatLogFile(TOMCAT_CATALINA_OUT_ID, CATALINA_OUT_FILENAME, false,
                 "Main Tomcat console output (stdout/stderr)");
     }
 
@@ -185,7 +200,6 @@ public class TomcatLogFile {
     @NotNull
     public static TomcatLogFile[] getDefaultEnabledLogFiles() {
         return new TomcatLogFile[]{
-                createCatalinaOut(),
                 createCatalinaLog(),
                 createLocalhostLog()
         };

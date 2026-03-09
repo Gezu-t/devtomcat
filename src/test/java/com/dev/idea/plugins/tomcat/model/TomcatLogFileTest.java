@@ -119,7 +119,8 @@ class TomcatLogFileTest {
             TomcatLogFile log = TomcatLogFile.createCatalinaOut();
             assertEquals(TomcatLogFile.TOMCAT_CATALINA_OUT_ID, log.getId());
             assertEquals("catalina.out", log.getFilenamePattern());
-            assertTrue(log.isEnabledByDefault());
+            // Disabled by default: stdout goes to Console tab, not catalina.out file
+            assertFalse(log.isEnabledByDefault());
         }
 
         @Test
@@ -177,21 +178,21 @@ class TomcatLogFileTest {
         }
 
         @Test
-        @DisplayName("first three are enabled by default")
-        void firstThreeEnabled() {
+        @DisplayName("catalina.out disabled, catalina log and localhost log enabled by default")
+        void enabledByDefault() {
             TomcatLogFile[] files = TomcatLogFile.getStandardLogFiles();
-            assertTrue(files[0].isEnabledByDefault());
-            assertTrue(files[1].isEnabledByDefault());
-            assertTrue(files[2].isEnabledByDefault());
+            assertFalse(files[0].isEnabledByDefault());  // catalina.out (stdout goes to Console tab)
+            assertTrue(files[1].isEnabledByDefault());   // catalina.*.log
+            assertTrue(files[2].isEnabledByDefault());   // localhost.*.log
         }
 
         @Test
         @DisplayName("last three are disabled by default")
         void lastThreeDisabled() {
             TomcatLogFile[] files = TomcatLogFile.getStandardLogFiles();
-            assertFalse(files[3].isEnabledByDefault());
-            assertFalse(files[4].isEnabledByDefault());
-            assertFalse(files[5].isEnabledByDefault());
+            assertFalse(files[3].isEnabledByDefault());  // access log
+            assertFalse(files[4].isEnabledByDefault());  // manager log
+            assertFalse(files[5].isEnabledByDefault());  // host-manager log
         }
     }
 
@@ -200,10 +201,10 @@ class TomcatLogFileTest {
     class DefaultEnabledLogFiles {
 
         @Test
-        @DisplayName("returns 3 files")
-        void returnsThreeFiles() {
+        @DisplayName("returns 2 files (catalina log and localhost log)")
+        void returnsTwoFiles() {
             TomcatLogFile[] files = TomcatLogFile.getDefaultEnabledLogFiles();
-            assertEquals(3, files.length);
+            assertEquals(2, files.length);
         }
 
         @Test

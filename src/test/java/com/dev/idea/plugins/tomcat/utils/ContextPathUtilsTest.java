@@ -255,5 +255,88 @@ class ContextPathUtilsTest {
         void alwaysLowercase() {
             assertEquals("myapp", ContextPathUtils.extractBaseModuleName("MyApp.war"));
         }
+
+        @Test
+        @DisplayName("strips ##version from .war name")
+        void stripsParallelDeployVersion() {
+            assertEquals("wipo-connect-shared-service",
+                    ContextPathUtils.extractBaseModuleName("wipo-connect-shared-service##5.18.0.war"));
+        }
+
+        @Test
+        @DisplayName("strips -version suffix from exploded name")
+        void stripsVersionSuffix() {
+            assertEquals("wipo-connect-shared-service",
+                    ContextPathUtils.extractBaseModuleName("wipo-connect-shared-service-5.18.0"));
+        }
+
+        @Test
+        @DisplayName("strips -version-SNAPSHOT suffix")
+        void stripsSnapshotVersion() {
+            assertEquals("my-app",
+                    ContextPathUtils.extractBaseModuleName("my-app-1.2.3-SNAPSHOT"));
+        }
+
+        @Test
+        @DisplayName("does not strip single-segment version (could be module name)")
+        void doesNotStripSingleSegmentVersion() {
+            // "-5" alone is ambiguous — don't strip it
+            assertEquals("my-app-5",
+                    ContextPathUtils.extractBaseModuleName("my-app-5"));
+        }
+    }
+
+    @Nested
+    @DisplayName("formatArtifactDisplayName")
+    class FormatArtifactDisplayName {
+
+        @Test
+        @DisplayName("converts _war_exploded to colon notation")
+        void convertsUnderscoreWarExploded() {
+            assertEquals("webapp-one:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName("webapp-one_war_exploded", "exploded"));
+        }
+
+        @Test
+        @DisplayName("converts _war to colon notation")
+        void convertsUnderscoreWar() {
+            assertEquals("webapp-one:war",
+                    ContextPathUtils.formatArtifactDisplayName("webapp-one_war", "war"));
+        }
+
+        @Test
+        @DisplayName("preserves existing colon notation")
+        void preservesColonNotation() {
+            assertEquals("app:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName("app:war exploded", "exploded"));
+        }
+
+        @Test
+        @DisplayName("strips version from WAR file name")
+        void stripsVersionFromWar() {
+            assertEquals("my-service:war",
+                    ContextPathUtils.formatArtifactDisplayName("my-service##5.18.0.war", "war"));
+        }
+
+        @Test
+        @DisplayName("strips version from exploded name")
+        void stripsVersionFromExploded() {
+            assertEquals("my-service:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName("my-service-5.18.0", "exploded"));
+        }
+
+        @Test
+        @DisplayName("adds type suffix for plain module name")
+        void addsTypeSuffixForPlainName() {
+            assertEquals("my-module:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName("my-module", "exploded"));
+        }
+
+        @Test
+        @DisplayName("returns name as-is when type is null and no suffix detected")
+        void returnsNameAsIsForUnknownType() {
+            assertEquals("some-thing",
+                    ContextPathUtils.formatArtifactDisplayName("some-thing", null));
+        }
     }
 }

@@ -5,7 +5,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -389,6 +393,257 @@ class TomcatInfoTest {
             TomcatInfo info = new TomcatInfo("Tomcat", "10", "/custom/path");
             assertEquals(info.getPath(), info.getCatalinaHome());
             assertEquals(info.getPath(), info.getCatalinaBase());
+        }
+    }
+
+    @Nested
+    @DisplayName("libraries")
+    class Libraries {
+
+        @Test
+        @DisplayName("no custom libraries by default")
+        void noCustomLibrariesByDefault() {
+            TomcatInfo info = new TomcatInfo();
+            assertNull(info.getLibraries());
+            assertFalse(info.hasCustomLibraries());
+        }
+
+        @Test
+        @DisplayName("set and get libraries")
+        void setAndGetLibraries() {
+            TomcatInfo info = new TomcatInfo();
+            info.setLibraries(List.of("/path/to/servlet-api.jar", "/path/to/jsp-api.jar"));
+            assertTrue(info.hasCustomLibraries());
+            assertEquals(2, info.getLibraries().size());
+            assertEquals("/path/to/servlet-api.jar", info.getLibraries().get(0));
+        }
+
+        @Test
+        @DisplayName("set null clears custom libraries")
+        void setNullClearsCustomLibraries() {
+            TomcatInfo info = new TomcatInfo();
+            info.setLibraries(List.of("/path/to/some.jar"));
+            assertTrue(info.hasCustomLibraries());
+            info.setLibraries(null);
+            assertFalse(info.hasCustomLibraries());
+            assertNull(info.getLibraries());
+        }
+
+        @Test
+        @DisplayName("empty list counts as custom")
+        void emptyListCountsAsCustom() {
+            TomcatInfo info = new TomcatInfo();
+            info.setLibraries(List.of());
+            assertTrue(info.hasCustomLibraries());
+            assertTrue(info.getLibraries().isEmpty());
+        }
+
+        @Test
+        @DisplayName("set libraries makes defensive copy")
+        void setLibrariesMakesDefensiveCopy() {
+            TomcatInfo info = new TomcatInfo();
+            List<String> original = new java.util.ArrayList<>(List.of("/a.jar", "/b.jar"));
+            info.setLibraries(original);
+            original.add("/c.jar");
+            assertEquals(2, info.getLibraries().size());
+        }
+
+        @Test
+        @DisplayName("clone copies custom libraries independently")
+        void cloneCopiesLibrariesIndependently() {
+            TomcatInfo original = new TomcatInfo("Tomcat", "10", "/path");
+            original.setLibraries(List.of("/a.jar", "/b.jar"));
+            TomcatInfo cloned = original.clone();
+
+            assertTrue(cloned.hasCustomLibraries());
+            assertEquals(original.getLibraries(), cloned.getLibraries());
+
+            // Mutating clone's list should not affect original
+            cloned.getLibraries().add("/c.jar");
+            assertEquals(2, original.getLibraries().size());
+        }
+
+        @Test
+        @DisplayName("clone preserves null libraries")
+        void clonePreservesNullLibraries() {
+            TomcatInfo original = new TomcatInfo("Tomcat", "10", "/path");
+            TomcatInfo cloned = original.clone();
+            assertFalse(cloned.hasCustomLibraries());
+        }
+    }
+
+    @Nested
+    @DisplayName("filterDefaultLibraries")
+    class FilterDefaultLibraries {
+
+        @Test
+        @DisplayName("filters only API JARs from lib directory")
+        void filtersOnlyApiJars(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            // Create matching JARs
+            Files.createFile(tempDir.resolve("servlet-api.jar"));
+            Files.createFile(tempDir.resolve("jsp-api.jar"));
+            // Create non-matching JARs
+            Files.createFile(tempDir.resolve("catalina.jar"));
+            Files.createFile(tempDir.resolve("tomcat-util.jar"));
+            Files.createFile(tempDir.resolve("ecj-4.6.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+
+            assertEquals(2, result.size());
+            assertTrue(result.get(0).endsWith("jsp-api.jar"));
+            assertTrue(result.get(1).endsWith("servlet-api.jar"));
+        }
+
+        @Test
+        @DisplayName("matches versioned API JARs")
+        void matchesVersionedApiJars(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            Files.createFile(tempDir.resolve("servlet-api-9.0.jar"));
+            Files.createFile(tempDir.resolve("jsp-api-2.3.jar"));
+            Files.createFile(tempDir.resolve("catalina.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+
+            assertEquals(2, result.size());
+            assertTrue(result.get(0).endsWith("jsp-api-2.3.jar"));
+            assertTrue(result.get(1).endsWith("servlet-api-9.0.jar"));
+        }
+
+        @Test
+        @DisplayName("returns empty for nonexistent directory")
+        void returnsEmptyForNonexistentDir() {
+            List<String> result = TomcatInfo.filterDefaultLibraries(new File("/nonexistent/path"));
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty when no API JARs present")
+        void returnsEmptyWhenNoApiJars(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            Files.createFile(tempDir.resolve("catalina.jar"));
+            Files.createFile(tempDir.resolve("tomcat-dbcp.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("ignores non-JAR files")
+        void ignoresNonJarFiles(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            Files.createFile(tempDir.resolve("servlet-api.txt"));
+            Files.createFile(tempDir.resolve("jsp-api.xml"));
+            Files.createFile(tempDir.resolve("servlet-api.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+            assertEquals(1, result.size());
+            assertTrue(result.get(0).endsWith("servlet-api.jar"));
+        }
+
+        @Test
+        @DisplayName("results are sorted case-insensitively")
+        void resultsSortedCaseInsensitively(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            Files.createFile(tempDir.resolve("servlet-api.jar"));
+            Files.createFile(tempDir.resolve("jsp-api.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+            assertEquals(2, result.size());
+            // jsp-api sorts before servlet-api
+            assertTrue(result.get(0).endsWith("jsp-api.jar"));
+            assertTrue(result.get(1).endsWith("servlet-api.jar"));
+        }
+
+        @Test
+        @DisplayName("returns empty for empty directory")
+        void returnsEmptyForEmptyDir(@TempDir Path tempDir) {
+            List<String> result = TomcatInfo.filterDefaultLibraries(tempDir.toFile());
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("matches Jakarta-era API JARs (Tomcat 10+)")
+        void matchesJakartaApiJars(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            Files.createFile(tempDir.resolve("jakarta.servlet-api-6.0.0.jar"));
+            Files.createFile(tempDir.resolve("jakarta.servlet.jsp-api-3.1.1.jar"));
+            Files.createFile(tempDir.resolve("catalina.jar"));
+            Files.createFile(tempDir.resolve("tomcat-util.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+
+            assertEquals(2, result.size());
+            assertTrue(result.get(0).endsWith("jakarta.servlet-api-6.0.0.jar"));
+            assertTrue(result.get(1).endsWith("jakarta.servlet.jsp-api-3.1.1.jar"));
+        }
+
+        @Test
+        @DisplayName("matches mixed legacy and Jakarta JARs")
+        void matchesMixedLegacyAndJakarta(@TempDir Path tempDir) throws IOException {
+            File libDir = tempDir.toFile();
+            // Unlikely in practice, but tests the prefix matching is exhaustive
+            Files.createFile(tempDir.resolve("servlet-api.jar"));
+            Files.createFile(tempDir.resolve("jakarta.servlet-api-6.0.jar"));
+            Files.createFile(tempDir.resolve("catalina.jar"));
+
+            List<String> result = TomcatInfo.filterDefaultLibraries(libDir);
+
+            assertEquals(2, result.size());
+            assertTrue(result.get(0).endsWith("jakarta.servlet-api-6.0.jar"));
+            assertTrue(result.get(1).endsWith("servlet-api.jar"));
+        }
+    }
+
+    @Nested
+    @DisplayName("shouldResetLibraries")
+    class ShouldResetLibraries {
+
+        @Test
+        @DisplayName("resets when valid detection and home differs")
+        void resetsWhenValidAndDifferent() {
+            assertTrue(TomcatInfo.shouldResetLibraries(true, "/new/tomcat", "/old/tomcat"));
+        }
+
+        @Test
+        @DisplayName("does not reset when valid detection but same home")
+        void noResetWhenValidAndSameHome() {
+            assertFalse(TomcatInfo.shouldResetLibraries(true, "/same/tomcat", "/same/tomcat"));
+        }
+
+        @Test
+        @DisplayName("does not reset when detection fails and home differs")
+        void noResetWhenInvalidDetection() {
+            assertFalse(TomcatInfo.shouldResetLibraries(false, "/new/tomcat", "/old/tomcat"));
+        }
+
+        @Test
+        @DisplayName("does not reset when detection fails and same home")
+        void noResetWhenInvalidAndSameHome() {
+            assertFalse(TomcatInfo.shouldResetLibraries(false, "/same/tomcat", "/same/tomcat"));
+        }
+
+        @Test
+        @DisplayName("does not reset for partial path typed during editing")
+        void noResetForPartialPath() {
+            // Simulates user typing "/opt/tom" which fails detection
+            assertFalse(TomcatInfo.shouldResetLibraries(false, "/opt/tom", "/opt/tomcat9"));
+        }
+
+        @Test
+        @DisplayName("resets when user pastes a complete new valid path")
+        void resetsWhenPastingNewValidPath() {
+            // Simulates user pasting a full valid path that differs
+            assertTrue(TomcatInfo.shouldResetLibraries(true, "/opt/tomcat10", "/opt/tomcat9"));
+        }
+
+        @Test
+        @DisplayName("does not reset when user reverts to same confirmed home")
+        void noResetWhenRevertingToConfirmedHome() {
+            // User types something, then undoes back to original
+            assertTrue(TomcatInfo.shouldResetLibraries(true, "/opt/tomcat10", "/opt/tomcat9"));
+            // Now they revert — same as confirmed, no reset
+            assertFalse(TomcatInfo.shouldResetLibraries(true, "/opt/tomcat9", "/opt/tomcat9"));
         }
     }
 }

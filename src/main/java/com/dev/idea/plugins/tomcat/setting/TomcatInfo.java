@@ -6,6 +6,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -14,11 +17,21 @@ public class TomcatInfo implements Serializable, Cloneable {
     @Serial
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Default library JAR name prefixes shown when no custom library list has been persisted.
+     * Covers both legacy Tomcat (jsp-api, servlet-api) and Jakarta-era Tomcat 10+
+     * (jakarta.servlet-api, jakarta.servlet.jsp-api).
+     */
+    public static final List<String> DEFAULT_LIBRARY_PREFIXES =
+            List.of("jakarta.servlet.jsp-api", "jakarta.servlet-api",
+                    "jsp-api", "servlet-api");
+
     private String id;
     private String name;
     private String version;
     private String path;
     private String catalinaBase;
+    private List<String> libraries;
 
     public TomcatInfo() {
         this.id = UUID.randomUUID().toString();
@@ -144,11 +157,84 @@ public class TomcatInfo implements Serializable, Cloneable {
         this.catalinaBase = StringUtil.notNullize(catalinaBase);
     }
 
+    /**
+     * Get the persisted library paths.
+     * Returns null if no custom library selection has been made (i.e. use defaults).
+     * Returns a defensive copy so callers cannot mutate internal state.
+     */
+    @Nullable
+    public List<String> getLibraries() {
+        return libraries != null ? new ArrayList<>(libraries) : null;
+    }
+
+    /**
+     * Set the persisted library paths.
+     * Pass null to indicate "use default filtered libraries".
+     * Pass an explicit list (even empty) to indicate the user has customized libraries.
+     */
+    public void setLibraries(@Nullable List<String> libraries) {
+        this.libraries = libraries != null ? new ArrayList<>(libraries) : null;
+    }
+
+    /**
+     * Check whether the user has customized the library list.
+     */
+    public boolean hasCustomLibraries() {
+        return libraries != null;
+    }
+
+    /**
+     * Determine whether custom libraries should be reset when the Tomcat Home changes.
+     * Libraries are only reset when a valid Tomcat installation was detected AND
+     * the new home differs from the previously confirmed home. This avoids wiping
+     * a curated library list on every keystroke or when typing a partial/invalid path.
+     *
+     * @param validTomcatDetected true if the new home was successfully identified as a Tomcat installation
+     * @param newHome             the current home path being evaluated
+     * @param confirmedHome       the last home path that was confirmed as valid
+     * @return true if custom libraries should be cleared
+     */
+    public static boolean shouldResetLibraries(boolean validTomcatDetected,
+                                               @NotNull String newHome,
+                                               @NotNull String confirmedHome) {
+        return validTomcatDetected && !newHome.equals(confirmedHome);
+    }
+
+    /**
+     * Filter JAR files from a Tomcat lib directory to only the default API JARs.
+     *
+     * @param libDir the Tomcat lib directory
+     * @return sorted list of absolute paths for matching JARs
+     */
+    @NotNull
+    public static List<String> filterDefaultLibraries(@NotNull java.io.File libDir) {
+        List<String> result = new ArrayList<>();
+        if (!libDir.isDirectory()) return result;
+        java.io.File[] files = libDir.listFiles(file ->
+                file.isFile() && file.getName().endsWith(".jar"));
+        if (files == null) return result;
+        java.util.Arrays.sort(files, java.util.Comparator.comparing(java.io.File::getName, String.CASE_INSENSITIVE_ORDER));
+        for (java.io.File jar : files) {
+            String name = jar.getName();
+            for (String prefix : DEFAULT_LIBRARY_PREFIXES) {
+                if (name.startsWith(prefix)) {
+                    result.add(jar.getAbsolutePath());
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
     @Override
     @NotNull
     public TomcatInfo clone() {
         try {
-            return (TomcatInfo) super.clone();
+            TomcatInfo copy = (TomcatInfo) super.clone();
+            if (this.libraries != null) {
+                copy.libraries = new ArrayList<>(this.libraries);
+            }
+            return copy;
         } catch (CloneNotSupportedException e) {
             TomcatInfo copy = new TomcatInfo();
             copy.setId(this.id);
@@ -156,6 +242,7 @@ public class TomcatInfo implements Serializable, Cloneable {
             copy.setVersion(this.version);
             copy.setPath(this.path);
             copy.setCatalinaBase(this.catalinaBase);
+            copy.setLibraries(this.libraries);
             return copy;
         }
     }

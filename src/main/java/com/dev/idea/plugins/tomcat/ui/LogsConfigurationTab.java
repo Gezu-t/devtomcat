@@ -45,8 +45,8 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
     public LogsConfigurationTab(@NotNull Project project, @Nullable TomcatRunConfiguration configuration) {
         this.project = project;
         saveToFileField = new TextFieldWithBrowseButton();
-        saveToFileField.addBrowseFolderListener(
-                "Save Console Output", "Choose file to save console output",
+        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                saveToFileField, "Save Console Output", "Choose file to save console output",
                 project, FileChooserDescriptorFactory.createSingleLocalFileDescriptor());
 
         initializeUI();

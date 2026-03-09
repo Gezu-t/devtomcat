@@ -352,8 +352,8 @@ public class JREConfigurationDialog extends DialogWrapper {
             panel.add(new JBLabel("JDK Home:"), gbc);
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
             pathField = new TextFieldWithBrowseButton();
-            pathField.addBrowseFolderListener(
-                    "Select JDK Installation Directory",
+            com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                    pathField, "Select JDK Installation Directory",
                     "Choose a JDK installation directory",
                     project,
                     FileChooserDescriptorFactory.createSingleFolderDescriptor()
@@ -467,8 +467,8 @@ public class JREConfigurationDialog extends DialogWrapper {
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
             pathField = new TextFieldWithBrowseButton();
             pathField.setText(originalJdk.getPath());
-            pathField.addBrowseFolderListener(
-                    "Select JDK Installation Directory",
+            com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                    pathField, "Select JDK Installation Directory",
                     "Choose a JDK installation directory",
                     project,
                     FileChooserDescriptorFactory.createSingleFolderDescriptor()

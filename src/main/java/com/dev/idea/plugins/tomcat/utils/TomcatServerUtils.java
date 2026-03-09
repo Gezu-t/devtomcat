@@ -50,7 +50,7 @@ public final class TomcatServerUtils {
         descriptor.setDescription("Choose the root directory of your Apache Tomcat installation (e.g., /opt/tomcat, C:\\apache-tomcat-9.0.56)");
 
         // Show file chooser dialog
-        VirtualFile selectedFile = FileChooser.chooseFile(descriptor, null, null);
+        VirtualFile selectedFile = SafeBrowseUtil.chooseFile(descriptor, null, null);
 
         if (selectedFile == null) {
             LOG.debug("Tomcat installation selection cancelled by user");

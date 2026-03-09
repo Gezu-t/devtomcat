@@ -5,7 +5,6 @@ import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
-import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationType;
@@ -223,10 +222,8 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     deploymentConfig.setUpdateClassesAndResources(hotDeployEnabled);
                     LOG.debug("Deployment config: hotDeploy=" + hotDeployEnabled);
 
-                    // Auto-detect deployment artifacts for new configurations
-                    if (!deploymentConfig.hasArtifacts()) {
-                        autoDetectDeploymentArtifacts(config.getProject(), deploymentConfig);
-                    }
+                    // Deployment tab starts empty — users add artifacts via "+" button,
+                    // matching IntelliJ Ultimate behavior.
                 } catch (Exception e) {
                     LOG.warn("Error configuring deployment settings", e);
                 }
@@ -278,28 +275,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 LOG.debug("Applied dynamic defaults: " + DynamicTomcatEnvironment.getConfigurationSummary());
             } catch (Exception e) {
                 LOG.error("Unexpected error applying dynamic defaults", e);
-            }
-        }
-
-        /**
-         * Auto-detects deployment artifacts for new configurations that have none.
-         * Uses a tiered strategy: IntelliJ artifacts > web modules > WAR files.
-         */
-        private void autoDetectDeploymentArtifacts(@NotNull Project project,
-                                                    @NotNull DeploymentConfig deploymentConfig) {
-            try {
-                java.util.List<DeploymentArtifact> detected = ProjectArtifactDetector.detect(project);
-                if (!detected.isEmpty()) {
-                    deploymentConfig.setArtifacts(detected);
-                    LOG.info("DevTomcat: Auto-detected " + detected.size() +
-                            " deployment artifact(s): " + detected.stream()
-                            .map(DeploymentArtifact::getDisplayName)
-                            .collect(java.util.stream.Collectors.joining(", ")));
-                } else {
-                    LOG.debug("DevTomcat: No artifacts auto-detected for project: " + project.getName());
-                }
-            } catch (Exception e) {
-                LOG.debug("DevTomcat: Artifact auto-detection skipped: " + e.getMessage());
             }
         }
 

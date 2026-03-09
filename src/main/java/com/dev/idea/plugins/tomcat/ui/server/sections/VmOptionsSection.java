@@ -60,7 +60,7 @@ public class VmOptionsSection implements ConfigurationSection {
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        String vmOptions = vmOptionsEditor.getText().trim();
+        String vmOptions = vmOptionsEditor.getText().trim().replaceAll("\\s+", " ");
         configuration.setVmOptions(vmOptions.isEmpty() ? null : vmOptions);
     }
 
@@ -76,7 +76,7 @@ public class VmOptionsSection implements ConfigurationSection {
 
     @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
-        return !Objects.equals(config.getVmOptions(), vmOptionsEditor.getText().trim());
+        return !Objects.equals(config.getVmOptions(), vmOptionsEditor.getText().trim().replaceAll("\\s+", " "));
     }
 
     @Override
@@ -86,6 +86,6 @@ public class VmOptionsSection implements ConfigurationSection {
     }
 
     public String getVmOptions() {
-        return vmOptionsEditor.getText().trim();
+        return vmOptionsEditor.getText().trim().replaceAll("\\s+", " ");
     }
 }

@@ -118,18 +118,6 @@ public class ArtifactSelectionHandler {
                 String context = getUniqueContext(deployment.getContextPath());
                 deployment.setContextPath(context);
 
-                // Auto-create IntelliJ artifact for this module so that
-                // "Build Artifact" appears in Before Launch automatically
-                Artifact created = ensureIntelliJArtifactExists(deployment);
-                if (created != null) {
-                    // Update deployment name to match the IntelliJ artifact
-                    deployment.setName(created.getName());
-                    String outputPath = created.getOutputFilePath();
-                    if (outputPath != null && !outputPath.isEmpty()) {
-                        deployment.setPath(outputPath);
-                    }
-                }
-
                 tableManager.addAndSelectDeployment(deployment);
                 LOG.info("Added auto-detected deployment: " + deployment.getName() +
                         " [" + deployment.getType() + "] context=" + context);
@@ -235,138 +223,12 @@ public class ArtifactSelectionHandler {
         return pomNames;
     }
 
-    /**
-     * Ensures an IntelliJ Artifact exists for an auto-detected deployment.
-     * If no matching artifact exists, creates one programmatically so that
-     * "Build Artifact" can appear in Before Launch.
-     *
-     * <p>Tries "exploded-war" type first (Ultimate), falls back to "exploded" or "jar".</p>
-     */
-    @Nullable
-    private Artifact ensureIntelliJArtifactExists(@NotNull DeploymentArtifact deployment) {
-        if (artifactManager == null) return null;
-
-        // Find the module for this deployment
-        String deployName = deployment.getName();
-        Module module = ModuleManager.getInstance(project).findModuleByName(deployName);
-        if (module == null) {
-            // Try matching by removing suffixes like " (webapp)"
-            String baseName = deployName.replaceAll("\\s*\\(.*\\)$", "").trim();
-            module = ModuleManager.getInstance(project).findModuleByName(baseName);
-        }
-
-        // Check if an artifact already matches by deployment name or expected artifact name
-        String expectedName = module != null
-                ? module.getName() + TomcatConstants.ARTIFACT_SUFFIX_WAR_EXPLODED
-                : null;
-        for (Artifact a : artifactManager.getArtifacts()) {
-            String aName = a.getName();
-            if (deployName.equalsIgnoreCase(aName) ||
-                    (expectedName != null && expectedName.equalsIgnoreCase(aName))) {
-                LOG.info("IntelliJ artifact already exists: " + aName);
-                return a;
-            }
-        }
-        if (module == null) {
-            LOG.info("No module found for deployment '" + deployment.getName() + "', skipping artifact creation");
-            return null;
-        }
-
-        try {
-            // Choose artifact type: prefer exploded-war (Ultimate) > plain (Community)
-            ArtifactType artifactType = ArtifactType.findById("exploded-war");
-            if (artifactType == null) {
-                artifactType = ArtifactType.findById("exploded");
-            }
-            if (artifactType == null) {
-                artifactType = PlainArtifactType.getInstance();
-            }
-
-            String artifactName = module.getName() + TomcatConstants.ARTIFACT_SUFFIX_WAR_EXPLODED;
-            PackagingElementFactory factory = PackagingElementFactory.getInstance();
-
-            // Build WAR exploded structure:
-            //   /WEB-INF/classes  ← module compiled output
-            //   /WEB-INF/lib     ← module library dependencies
-            CompositePackagingElement<?> root = factory.createArtifactRootElement();
-
-            // Add module output → WEB-INF/classes
-            CompositePackagingElement<?> classesDir = factory.getOrCreateDirectory(root, TomcatConstants.WEB_INF_CLASSES_PATH);
-            classesDir.addOrFindChild(factory.createModuleOutput(module));
-
-            // Add library dependencies → WEB-INF/lib
-            CompositePackagingElement<?> libDir = factory.getOrCreateDirectory(root, TomcatConstants.WEB_INF_LIB_PATH);
-            final Module finalModule = module;
-            OrderEnumerator.orderEntries(finalModule)
-                    .withoutSdk()
-                    .withoutModuleSourceEntries()
-                    .forEachLibrary(library -> {
-                        if (library != null) {
-                            try {
-                                List<? extends com.intellij.packaging.elements.PackagingElement<?>> elements =
-                                        factory.createLibraryElements(library);
-                                for (com.intellij.packaging.elements.PackagingElement<?> element : elements) {
-                                    libDir.addOrFindChild(element);
-                                }
-                            } catch (Exception e) {
-                                LOG.debug("Skipping library: " + library.getName());
-                            }
-                        }
-                        return true;
-                    });
-
-            // Add web resource root content (e.g. src/main/webapp)
-            List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(finalModule);
-            for (VirtualFile webRoot : webRoots) {
-                root.addOrFindChild(factory.createDirectoryCopyWithParentDirectories(webRoot.getPath(), ""));
-            }
-
-            // Set output path
-            String basePath = project.getBasePath();
-            if (basePath == null) {
-                LOG.warn("Project has no base path, cannot create artifact output directory");
-                return null;
-            }
-            String outputPath = basePath + "/out/artifacts/" +
-                    module.getName().replace(':', '_') + "_war_exploded";
-
-            // Create the artifact in a write action
-            final ArtifactType finalType = artifactType;
-            final String finalArtifactName = artifactName;
-            final String finalOutputPath = outputPath;
-            Artifact[] result = new Artifact[1];
-
-            WriteAction.run(() -> {
-                ModifiableArtifactModel model = artifactManager.createModifiableModel();
-                com.intellij.packaging.artifacts.ModifiableArtifact modArtifact =
-                        model.addArtifact(finalArtifactName, finalType, root);
-                modArtifact.setOutputPath(finalOutputPath);
-                model.commit();
-                // Re-fetch the committed artifact by name
-                for (Artifact a : artifactManager.getArtifacts()) {
-                    if (finalArtifactName.equals(a.getName())) {
-                        result[0] = a;
-                        break;
-                    }
-                }
-            });
-
-            LOG.info("Auto-created IntelliJ artifact: " + finalArtifactName +
-                    " [type=" + finalType.getId() + ", output=" + finalOutputPath + "]");
-            return result[0];
-
-        } catch (Exception e) {
-            LOG.warn("Failed to auto-create IntelliJ artifact for " + deployment.getName() + ": " + e.getMessage(), e);
-            return null;
-        }
-    }
-
     public void showExternalSourceDialog() {
         FileChooserDescriptor descriptor = new FileChooserDescriptor(true, true, true, true, false, false)
                 .withTitle("Select External WAR or Directory")
                 .withDescription("Select a WAR file or exploded directory to deploy");
 
-        VirtualFile chosen = FileChooser.chooseFile(descriptor, project, null);
+        VirtualFile chosen = com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.chooseFile(descriptor, project, null);
         if (chosen == null) {
             return;
         }
@@ -460,28 +322,9 @@ public class ArtifactSelectionHandler {
      * </ul>
      */
     private static String extractModuleKey(@NotNull Artifact artifact) {
-        String name = artifact.getName();
-        if (name == null || name.isEmpty()) return "";
-
-        // Strip known IntelliJ artifact naming suffixes (case-insensitive)
-        // Order matters: strip longer suffixes first
-        String lower = name.toLowerCase();
-        String[] suffixes = {
-                TomcatConstants.ARTIFACT_SUFFIX_WAR_EXPLODED,
-                TomcatConstants.ARTIFACT_SUFFIX_EAR_EXPLODED,
-                TomcatConstants.ARTIFACT_SUFFIX_WEBAPP_EXPLODED,
-                TomcatConstants.ARTIFACT_SUFFIX_WAR,
-                TomcatConstants.ARTIFACT_SUFFIX_EAR,
-                TomcatConstants.ARTIFACT_SUFFIX_WEBAPP_ARCHIVE,
-                " (exploded)", ".war", ".ear"
-        };
-        for (String suffix : suffixes) {
-            if (lower.endsWith(suffix)) {
-                name = name.substring(0, name.length() - suffix.length());
-                break;
-            }
-        }
-        return name.trim().toLowerCase();
+        // Delegate to ContextPathUtils which handles type suffixes, version patterns,
+        // and Tomcat parallel deployment notation (##version)
+        return ContextPathUtils.extractBaseModuleName(artifact.getName());
     }
 
     /**

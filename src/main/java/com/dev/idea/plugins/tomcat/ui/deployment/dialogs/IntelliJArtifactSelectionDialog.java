@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.deployment.dialogs;
 
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.ide.util.ChooseElementsDialog;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
@@ -29,16 +30,13 @@ public class IntelliJArtifactSelectionDialog extends ChooseElementsDialog<Artifa
 
     @Override
     protected String getItemText(Artifact item) {
-        String name = item.getName();
+        // Format using colon notation like IntelliJ Ultimate (e.g. "app:war exploded")
+        String typeId = null;
         try {
-            String typeName = item.getArtifactType().getPresentableName();
-            if (typeName != null && !typeName.isEmpty()) {
-                return name + "  [" + typeName + "]";
-            }
-        } catch (Exception e) {
-            // Fall through to plain name
-        }
-        return name;
+            typeId = item.getArtifactType().getId().toLowerCase();
+        } catch (Exception ignored) {}
+        String type = typeId != null && typeId.contains("exploded") ? "exploded" : "war";
+        return ContextPathUtils.formatArtifactDisplayName(item.getName(), type);
     }
     
     public List<Artifact> getSelectedArtifacts() {

@@ -41,8 +41,8 @@ import java.util.List;
  *
  * <p>Architecture:
  * <ul>
- *   <li><b>Computed defaults</b> — CATALINA_OPTS (with VM options), JAVA_OPTS, CATALINA_HOME/BASE,
- *       JDK_JAVA_OPTIONS are auto-populated and visually distinguished (gray italic).</li>
+ *   <li><b>Computed defaults</b> — only JAVA_OPTS is auto-managed here, and only when
+ *       VM options are defined on the Server tab.</li>
  *   <li><b>User ownership tracking</b> — Each env var is either "computed" (auto-managed) or
  *       "user-modified" (edited/added by the user). Computed vars auto-refresh when VM options
  *       or Tomcat server change; user-modified vars are never overwritten.</li>
@@ -65,10 +65,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     private static final String[] ALL_MODES = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE, PROFILE_MODE};
 
-    /** Keys that are auto-computed by the plugin. Order matters for display. */
-    private static final List<String> COMPUTED_KEYS = List.of(
-            "CATALINA_OPTS", "JAVA_OPTS", "JDK_JAVA_OPTIONS", "CATALINA_HOME", "CATALINA_BASE"
-    );
+    /** Only Server-tab VM options are mirrored into Startup/Connection. */
+    private static final List<String> COMPUTED_KEYS = List.of("JAVA_OPTS");
 
     private JBList<String> modeList;
     private String selectedMode = RUN_MODE;
@@ -97,6 +95,9 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private TextFieldWithBrowseButton shutdownScriptField;
     private JBCheckBox useDefaultStartupCB;
     private JBCheckBox useDefaultShutdownCB;
+
+    private static final String VM_OPTIONS_TOOLTIP = "VM options from the Server tab (read-only). Edit on the Server tab.";
+    private static final int VM_OPTIONS_DISPLAY_COLUMNS = 40;
 
     private JBTextField vmOptionsDisplay;
 
@@ -214,7 +215,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
         startupScriptField = new TextFieldWithBrowseButton();
-        startupScriptField.addBrowseFolderListener("Select Startup Script",
+        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                startupScriptField, "Select Startup Script",
                 "Choose a custom startup script for Tomcat", project, scriptFileDescriptor());
         p.add(startupScriptField, g);
 
@@ -244,7 +246,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
         shutdownScriptField = new TextFieldWithBrowseButton();
-        shutdownScriptField.addBrowseFolderListener("Select Shutdown Script",
+        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                shutdownScriptField, "Select Shutdown Script",
                 "Choose a custom shutdown script for Tomcat", project, scriptFileDescriptor());
         p.add(shutdownScriptField, g);
 
@@ -273,10 +276,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.weightx = 1.0;
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
-        vmOptionsDisplay = new JBTextField();
+        vmOptionsDisplay = new JBTextField(VM_OPTIONS_DISPLAY_COLUMNS);
         vmOptionsDisplay.setEditable(false);
         vmOptionsDisplay.setForeground(NamedColorUtil.getInactiveTextColor());
-        vmOptionsDisplay.setToolTipText("VM options from the Server tab (read-only). Edit on the Server tab.");
+        vmOptionsDisplay.setToolTipText(VM_OPTIONS_TOOLTIP);
         p.add(vmOptionsDisplay, g);
 
         return p;
@@ -404,39 +407,16 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     // =========================================================================
 
     /**
-     * Computes default environment variables from the current configuration.
-     * CATALINA_OPTS includes the user's VM options from the Server tab.
+     * Computes Startup/Connection env vars derived from the current configuration.
+     * Only JAVA_OPTS is mirrored here, and only when the Server tab has VM options.
      */
     private Map<String, String> computeDefaultEnvVars(@NotNull TomcatRunConfiguration cfg) {
         Map<String, String> defaults = new LinkedHashMap<>();
 
-        // CATALINA_OPTS = user VM options + dynamic environment defaults
-        StringBuilder catalinaOpts = new StringBuilder();
         VmConfig vmConfig = cfg.getConfigData().getVmConfig();
         if (vmConfig != null && vmConfig.hasVmOptions()) {
-            catalinaOpts.append(vmConfig.getVmOptions());
+            defaults.put("JAVA_OPTS", vmConfig.getVmOptions());
         }
-        String dynamicCatalinaOpts = DynamicTomcatEnvironment.buildCatalinaOpts();
-        if (!dynamicCatalinaOpts.isEmpty()) {
-            if (!catalinaOpts.isEmpty()) catalinaOpts.append(" ");
-            catalinaOpts.append(dynamicCatalinaOpts);
-        }
-        defaults.put("CATALINA_OPTS", catalinaOpts.toString().trim());
-
-        defaults.put("JAVA_OPTS", DynamicTomcatEnvironment.buildJavaOpts());
-
-        Map<String, String> envMap = DynamicTomcatEnvironment.buildEnvironmentVariables();
-        String jdkJavaOptions = envMap.get("JDK_JAVA_OPTIONS");
-        if (!StringUtil.isEmpty(jdkJavaOptions)) {
-            defaults.put("JDK_JAVA_OPTIONS", jdkJavaOptions);
-        }
-
-        TomcatInfo tomcatInfo = cfg.getTomcatInfo();
-        if (tomcatInfo != null && !StringUtil.isEmpty(tomcatInfo.getPath())) {
-            defaults.put("CATALINA_HOME", tomcatInfo.getPath());
-            defaults.put("CATALINA_BASE", tomcatInfo.getPath());
-        }
-
         return defaults;
     }
 
@@ -450,7 +430,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         // Update the read-only VM options display
         VmConfig vmConfig = cfg.getConfigData().getVmConfig();
         String vmOpts = (vmConfig != null && vmConfig.hasVmOptions()) ? vmConfig.getVmOptions() : "(none)";
-        vmOptionsDisplay.setText(vmOpts);
+        updateVmOptionsDisplay(vmOpts);
 
         // Refresh computed env var values (only keys the user hasn't edited)
         saveCurrentState();
@@ -468,7 +448,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         LOG.debug("Refreshed VM options display and computed env vars");
     }
 
-    /** Populates the current mode's env vars with computed defaults (CATALINA_OPTS, JAVA_OPTS, etc.). */
+    /** Populates the current mode's env vars with the current auto-managed values. */
     private void populateDefaults() {
         UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
         Map<String, String> defaults = computeDefaultEnvVars(configuration);
@@ -683,21 +663,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             state.passParentEnvs = runnerSettings.isPassParentEnvs();
 
             Map<String, String> persisted = runnerSettings.getEnvironmentVariables();
-            if (persisted != null && !persisted.isEmpty()) {
-                // Load persisted vars. Identify which match computed values
-                // (mark as computed so they auto-refresh on tab switch).
-                state.envVars.putAll(persisted);
-                for (String key : COMPUTED_KEYS) {
-                    if (persisted.containsKey(key)) {
-                        String computedVal = defaults.get(key);
-                        if (computedVal != null && computedVal.equals(persisted.get(key))) {
-                            state.computedKeys.add(key);
-                        }
-                    }
-                }
-            }
-            // Fresh configs start with an empty table (matching IntelliJ Ultimate).
-            // Users can add defaults via the "Populate Defaults" toolbar button.
+            initializeComputedEnvState(state, defaults, persisted);
 
             modeStates.put(mode, state);
         }
@@ -705,7 +671,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         // Show current VM options from Server tab
         VmConfig vmConfig = cfg.getConfigData().getVmConfig();
         String vmOpts = (vmConfig != null && vmConfig.hasVmOptions()) ? vmConfig.getVmOptions() : "(none)";
-        vmOptionsDisplay.setText(vmOpts);
+        updateVmOptionsDisplay(vmOpts);
 
         selectedMode = RUN_MODE;
         modeList.setSelectedIndex(0);
@@ -732,6 +698,42 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             }
         }
         // computedKeys and deletedComputedKeys are maintained by add/edit/remove actions
+    }
+
+    private void updateVmOptionsDisplay(@NotNull String vmOpts) {
+        vmOptionsDisplay.setText(vmOpts);
+        vmOptionsDisplay.setCaretPosition(0);
+        vmOptionsDisplay.setToolTipText("(none)".equals(vmOpts) ? VM_OPTIONS_TOOLTIP : vmOpts);
+    }
+
+    static void initializeComputedEnvState(@NotNull UIState state,
+                                           @NotNull Map<String, String> defaults,
+                                           @Nullable Map<String, String> persisted) {
+        state.envVars.clear();
+        state.computedKeys.clear();
+
+        boolean hasPersistedVars = persisted != null && !persisted.isEmpty();
+        if (!hasPersistedVars) {
+            for (String key : COMPUTED_KEYS) {
+                String value = defaults.get(key);
+                if (!StringUtil.isEmpty(value)) {
+                    state.envVars.put(key, value);
+                    state.computedKeys.add(key);
+                }
+            }
+            return;
+        }
+
+        state.envVars.putAll(persisted);
+        for (String key : COMPUTED_KEYS) {
+            if (!persisted.containsKey(key)) continue;
+
+            String computedVal = defaults.get(key);
+            String persistedVal = persisted.get(key);
+            if (!StringUtil.isEmpty(computedVal) && Objects.equals(computedVal, persistedVal)) {
+                state.computedKeys.add(key);
+            }
+        }
     }
 
     private void restoreCurrentState() {

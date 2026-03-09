@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.service;
 
 import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.util.Alarm;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -59,11 +60,30 @@ public final class TomcatDeploymentStatusService {
         public long getStartupTimeMs() { return startupTimeMs; }
     }
 
-    private final Project project;
+    /** Debounce interval for error/warning counter refreshes (milliseconds). */
+    static final int COUNTER_REFRESH_DEBOUNCE_MS = 500;
+
+    @Nullable private final Project project;
     private final Map<String, ConfigStatus> statuses = new ConcurrentHashMap<>();
+    /** Debounces rapid error/warning counter updates into a single dashboard refresh. */
+    @Nullable private final Alarm counterRefreshAlarm;
+    /** Callback for dashboard refresh — injectable for testing. */
+    private final Runnable refreshAction;
 
     public TomcatDeploymentStatusService(@NotNull Project project) {
         this.project = project;
+        this.counterRefreshAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, project);
+        this.refreshAction = this::doRefreshDashboard;
+    }
+
+    /**
+     * Package-private constructor for unit testing without IntelliJ platform dependencies.
+     * The refresh callback replaces the real dashboard refresh.
+     */
+    TomcatDeploymentStatusService(@NotNull Runnable refreshAction) {
+        this.project = null;
+        this.counterRefreshAlarm = null;
+        this.refreshAction = refreshAction;
     }
 
     public static TomcatDeploymentStatusService getInstance(@NotNull Project project) {
@@ -128,11 +148,27 @@ public final class TomcatDeploymentStatusService {
         ConfigStatus s = getOrCreate(configName);
         s.errorCount++;
         // Don't override RUNNING with FAILED for transient errors
+        scheduleCounterRefresh();
     }
 
     public void onWarning(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
         s.warningCount++;
+        scheduleCounterRefresh();
+    }
+
+    /**
+     * Debounces rapid error/warning counter increments into a single dashboard refresh.
+     * Resets the 500ms timer on each call so only the trailing edge fires.
+     */
+    private void scheduleCounterRefresh() {
+        if (counterRefreshAlarm != null) {
+            counterRefreshAlarm.cancelAllRequests();
+            counterRefreshAlarm.addRequest(refreshAction, COUNTER_REFRESH_DEBOUNCE_MS);
+        } else {
+            // Test mode — invoke immediately
+            refreshAction.run();
+        }
     }
 
     public void onServerStopped(@NotNull String configName, int exitCode) {
@@ -145,9 +181,14 @@ public final class TomcatDeploymentStatusService {
         statuses.remove(configName);
     }
 
-    /** Triggers a refresh of the Services/Run Dashboard tree so status changes appear. */
+    /** Triggers an immediate refresh of the Services/Run Dashboard tree. */
     private void refreshDashboard() {
-        if (!project.isDisposed()) {
+        refreshAction.run();
+    }
+
+    /** Real dashboard refresh — called via {@link #refreshAction} in production. */
+    private void doRefreshDashboard() {
+        if (project != null && !project.isDisposed()) {
             RunDashboardManager.getInstance(project).updateDashboard(true);
         }
     }
