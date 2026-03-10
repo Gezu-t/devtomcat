@@ -57,6 +57,14 @@ class RunnerSettingsTest {
             RunnerSettings rs = new RunnerSettings();
             assertTrue(rs.isPassParentEnvs());
         }
+
+        @Test
+        @DisplayName("default computed env metadata is empty")
+        void defaultComputedEnvMetadata() {
+            RunnerSettings rs = new RunnerSettings();
+            assertTrue(rs.getComputedEnvironmentKeys().isEmpty());
+            assertTrue(rs.getDeletedComputedEnvironmentKeys().isEmpty());
+        }
     }
 
     @Nested
@@ -139,6 +147,22 @@ class RunnerSettingsTest {
         }
 
         @Test
+        @DisplayName("computed env metadata returns defensive copies")
+        void computedEnvMetadataDefensiveCopies() {
+            RunnerSettings rs = new RunnerSettings();
+            rs.setComputedEnvironmentKeys(java.util.Set.of("JAVA_OPTS"));
+            rs.setDeletedComputedEnvironmentKeys(java.util.Set.of("CATALINA_OPTS"));
+
+            var computed = rs.getComputedEnvironmentKeys();
+            var deleted = rs.getDeletedComputedEnvironmentKeys();
+            computed.add("NEW");
+            deleted.add("OTHER");
+
+            assertFalse(rs.getComputedEnvironmentKeys().contains("NEW"));
+            assertFalse(rs.getDeletedComputedEnvironmentKeys().contains("OTHER"));
+        }
+
+        @Test
         @DisplayName("set use default startup")
         void useDefaultStartup() {
             RunnerSettings rs = new RunnerSettings();
@@ -171,6 +195,8 @@ class RunnerSettingsTest {
             Map<String, String> env = new LinkedHashMap<>();
             env.put("A", "1");
             original.setEnvironmentVariables(env);
+            original.setComputedEnvironmentKeys(java.util.Set.of("JAVA_OPTS"));
+            original.setDeletedComputedEnvironmentKeys(java.util.Set.of("CATALINA_OPTS"));
 
             RunnerSettings cloned = original.clone();
 
@@ -180,6 +206,8 @@ class RunnerSettingsTest {
             assertEquals("/stop.sh", cloned.getShutdownScript());
             assertFalse(cloned.isPassParentEnvs());
             assertEquals("1", cloned.getEnvironmentVariables().get("A"));
+            assertTrue(cloned.getComputedEnvironmentKeys().contains("JAVA_OPTS"));
+            assertTrue(cloned.getDeletedComputedEnvironmentKeys().contains("CATALINA_OPTS"));
         }
 
         @Test
@@ -209,12 +237,16 @@ class RunnerSettingsTest {
             original.setStartupScript("start");
             original.setShutdownScript("stop");
             original.setPassParentEnvs(false);
+            original.setComputedEnvironmentKeys(java.util.Set.of("JAVA_OPTS"));
+            original.setDeletedComputedEnvironmentKeys(java.util.Set.of("CATALINA_OPTS"));
 
             RunnerSettings copy = new RunnerSettings(original);
 
             assertEquals("start", copy.getStartupScript());
             assertEquals("stop", copy.getShutdownScript());
             assertFalse(copy.isPassParentEnvs());
+            assertTrue(copy.getComputedEnvironmentKeys().contains("JAVA_OPTS"));
+            assertTrue(copy.getDeletedComputedEnvironmentKeys().contains("CATALINA_OPTS"));
         }
 
         @Test

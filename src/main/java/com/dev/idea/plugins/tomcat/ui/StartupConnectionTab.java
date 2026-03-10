@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
-import com.dev.idea.plugins.tomcat.model.VmConfig;
+import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
@@ -65,8 +65,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     private static final String[] ALL_MODES = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE, PROFILE_MODE};
 
-    /** Only Server-tab VM options are mirrored into Startup/Connection. */
-    private static final List<String> COMPUTED_KEYS = List.of("JAVA_OPTS");
+    /** Computed env var keys, delegated to RuntimeEnvResolver. */
+    private static final Set<String> COMPUTED_KEYS = RuntimeEnvResolver.COMPUTED_KEYS;
 
     private JBList<String> modeList;
     private String selectedMode = RUN_MODE;
@@ -95,11 +95,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private TextFieldWithBrowseButton shutdownScriptField;
     private JBCheckBox useDefaultStartupCB;
     private JBCheckBox useDefaultShutdownCB;
-
-    private static final String VM_OPTIONS_TOOLTIP = "VM options from the Server tab (read-only). Edit on the Server tab.";
-    private static final int VM_OPTIONS_DISPLAY_COLUMNS = 40;
-
-    private JBTextField vmOptionsDisplay;
 
     private JBTable envTable;
     private DefaultTableModel envModel;
@@ -140,12 +135,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         gbc.gridy = 2;
         mainPanel.add(createShutdownSection(), gbc);
 
-        // Effective VM Options (read-only, reflects Server tab's VM options)
         gbc.gridy = 3;
-        gbc.insets = JBUI.insets(10, 0, 0, 0);
-        mainPanel.add(createVmOptionsDisplay(), gbc);
-
-        gbc.gridy = 4;
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
         gbc.insets = JBUI.insets(10, 0, 0, 0);
@@ -258,29 +248,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         useDefaultShutdownCB = new JBCheckBox("Use default", true);
         useDefaultShutdownCB.addActionListener(e -> updateShutdownState());
         p.add(useDefaultShutdownCB, g);
-
-        return p;
-    }
-
-    private JPanel createVmOptionsDisplay() {
-        JPanel p = new JPanel(new GridBagLayout());
-        GridBagConstraints g = new GridBagConstraints();
-        g.anchor = GridBagConstraints.WEST;
-        g.insets = JBUI.insets(2);
-
-        g.gridx = 0;
-        g.gridy = 0;
-        p.add(new JBLabel("VM options:"), g);
-
-        g.gridx = 1;
-        g.weightx = 1.0;
-        g.fill = GridBagConstraints.HORIZONTAL;
-        g.insets = JBUI.insets(2, 15, 2, 10);
-        vmOptionsDisplay = new JBTextField(VM_OPTIONS_DISPLAY_COLUMNS);
-        vmOptionsDisplay.setEditable(false);
-        vmOptionsDisplay.setForeground(NamedColorUtil.getInactiveTextColor());
-        vmOptionsDisplay.setToolTipText(VM_OPTIONS_TOOLTIP);
-        p.add(vmOptionsDisplay, g);
 
         return p;
     }
@@ -408,44 +375,39 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     /**
      * Computes Startup/Connection env vars derived from the current configuration.
-     * Only JAVA_OPTS is mirrored here, and only when the Server tab has VM options.
+     * Delegates to {@link RuntimeEnvResolver} so all derivation rules are centralized.
      */
     private Map<String, String> computeDefaultEnvVars(@NotNull TomcatRunConfiguration cfg) {
-        Map<String, String> defaults = new LinkedHashMap<>();
-
-        VmConfig vmConfig = cfg.getConfigData().getVmConfig();
-        if (vmConfig != null && vmConfig.hasVmOptions()) {
-            defaults.put("JAVA_OPTS", vmConfig.getVmOptions());
-        }
-        return defaults;
+        return RuntimeEnvResolver.computeDefaults(cfg.getConfigData());
     }
 
     /**
-     * Refreshes the VM options display and any computed env vars to reflect
-     * current state from the Server tab. Called by the editor on tab switch.
+     * Refreshes computed env vars to reflect the current state from the Server tab.
+     * Called by the editor on tab switch.
      */
     public void refreshComputedEnvVars(@NotNull TomcatRunConfiguration cfg) {
         this.configuration = cfg;
-
-        // Update the read-only VM options display
-        VmConfig vmConfig = cfg.getConfigData().getVmConfig();
-        String vmOpts = (vmConfig != null && vmConfig.hasVmOptions()) ? vmConfig.getVmOptions() : "(none)";
-        updateVmOptionsDisplay(vmOpts);
 
         // Refresh computed env var values (only keys the user hasn't edited)
         saveCurrentState();
         Map<String, String> freshDefaults = computeDefaultEnvVars(cfg);
         for (UIState state : modeStates.values()) {
-            for (Map.Entry<String, String> entry : freshDefaults.entrySet()) {
-                String key = entry.getKey();
-                if (state.computedKeys.contains(key)) {
-                    state.envVars.put(key, entry.getValue());
+            for (String key : COMPUTED_KEYS) {
+                if (!state.computedKeys.contains(key)) {
+                    continue;
+                }
+                String value = freshDefaults.get(key);
+                if (value != null) {
+                    state.envVars.put(key, value);
+                } else {
+                    state.envVars.remove(key);
+                    state.computedKeys.remove(key);
                 }
             }
         }
 
         restoreCurrentState();
-        LOG.debug("Refreshed VM options display and computed env vars");
+        LOG.debug("Refreshed computed env vars from Server tab state");
     }
 
     /** Populates the current mode's env vars with the current auto-managed values. */
@@ -662,22 +624,16 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
             state.passParentEnvs = runnerSettings.isPassParentEnvs();
 
-            Map<String, String> persisted = runnerSettings.getEnvironmentVariables();
-            initializeComputedEnvState(state, defaults, persisted);
+            initializeComputedEnvState(state, defaults, runnerSettings);
 
             modeStates.put(mode, state);
         }
-
-        // Show current VM options from Server tab
-        VmConfig vmConfig = cfg.getConfigData().getVmConfig();
-        String vmOpts = (vmConfig != null && vmConfig.hasVmOptions()) ? vmConfig.getVmOptions() : "(none)";
-        updateVmOptionsDisplay(vmOpts);
 
         selectedMode = RUN_MODE;
         modeList.setSelectedIndex(0);
         restoreCurrentState();
 
-        LOG.debug("StartupConnectionTab reset: vmOptions=" + vmOpts + ", "
+        LOG.debug("StartupConnectionTab reset: "
                 + modeStates.values().stream().mapToInt(s -> s.computedKeys.size()).sum() + " auto-managed env keys");
     }
 
@@ -700,19 +656,26 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         // computedKeys and deletedComputedKeys are maintained by add/edit/remove actions
     }
 
-    private void updateVmOptionsDisplay(@NotNull String vmOpts) {
-        vmOptionsDisplay.setText(vmOpts);
-        vmOptionsDisplay.setCaretPosition(0);
-        vmOptionsDisplay.setToolTipText("(none)".equals(vmOpts) ? VM_OPTIONS_TOOLTIP : vmOpts);
-    }
-
     static void initializeComputedEnvState(@NotNull UIState state,
                                            @NotNull Map<String, String> defaults,
-                                           @Nullable Map<String, String> persisted) {
+                                           @NotNull com.dev.idea.plugins.tomcat.model.RunnerSettings runnerSettings) {
         state.envVars.clear();
         state.computedKeys.clear();
+        state.deletedComputedKeys.clear();
 
-        boolean hasPersistedVars = persisted != null && !persisted.isEmpty();
+        Map<String, String> persisted = runnerSettings.getEnvironmentVariables();
+        Set<String> persistedComputed = runnerSettings.getComputedEnvironmentKeys();
+        Set<String> persistedDeleted = runnerSettings.getDeletedComputedEnvironmentKeys();
+
+        state.deletedComputedKeys.addAll(persistedDeleted);
+
+        if (!persistedComputed.isEmpty() || !persistedDeleted.isEmpty()) {
+            state.envVars.putAll(persisted);
+            state.computedKeys.addAll(persistedComputed);
+            return;
+        }
+
+        boolean hasPersistedVars = !persisted.isEmpty();
         if (!hasPersistedVars) {
             for (String key : COMPUTED_KEYS) {
                 String value = defaults.get(key);
@@ -782,6 +745,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             }
 
             runnerSettings.setEnvironmentVariables(new LinkedHashMap<>(state.envVars));
+            runnerSettings.setComputedEnvironmentKeys(new LinkedHashSet<>(state.computedKeys));
+            runnerSettings.setDeletedComputedEnvironmentKeys(new LinkedHashSet<>(state.deletedComputedKeys));
             runnerSettings.setPassParentEnvs(state.passParentEnvs);
         }
 

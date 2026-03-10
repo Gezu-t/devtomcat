@@ -83,6 +83,14 @@ public final class TomcatErrorDiagnostics {
             "One or more filters failed to start");
     private static final Pattern CLASSLOADER_LEAK = Pattern.compile(
             "(?:The web application|webapp).*(?:appears to have started a thread|memory leak|ThreadLocal)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DUPLICATE_WEB_FRAGMENT = Pattern.compile(
+            "More than one fragment with the name \\[([^\\]]+)] was found.*Duplicate fragments found in \\[(.+)]");
+    private static final Pattern MISSING_REQUIRED_SYSTEM_PROPERTY = Pattern.compile(
+            "External configuration file was not found in \"null\", check \"([^\"]+)\" system property");
+    private static final Pattern PERSISTENCE_DIRECTORY_LOCKED = Pattern.compile(
+            "Persistence directory already locked by this process:\\s*(.+)");
+    private static final Pattern FAILED_DUE_TO_PREVIOUS_ERRORS = Pattern.compile(
+            "Context \\[([^\\]]+)] startup failed due to previous errors");
 
     /**
      * Analyzes a Tomcat log line and returns diagnostics if a known error pattern is detected.
@@ -260,6 +268,50 @@ public final class TomcatErrorDiagnostics {
                     "One or more filters failed to start",
                     "A servlet Filter threw an exception during init(). "
                             + "Check the stack trace for the failing filter class.",
+                    null));
+        }
+
+        // Duplicate web fragments from conflicting JARs in the web artifact
+        m = DUPLICATE_WEB_FRAGMENT.matcher(text);
+        if (m.find()) {
+            String fragmentName = m.group(1);
+            String jars = m.group(2);
+            results.add(new Diagnostic(Severity.ERROR, "Packaging Conflict",
+                    "Duplicate web fragment '" + fragmentName + "' found in multiple JARs",
+                    "Your deployed web artifact contains conflicting libraries. Remove one of the duplicate JARs from WEB-INF/lib. "
+                            + "Check your dependency tree and artifact packaging rules. Conflicting entries: " + jars,
+                    null));
+        }
+
+        // Missing required external config system property
+        m = MISSING_REQUIRED_SYSTEM_PROPERTY.matcher(text);
+        if (m.find()) {
+            String property = m.group(1);
+            results.add(new Diagnostic(Severity.CRITICAL, "Missing Runtime Property",
+                    "Required system property is not set: " + property,
+                    "Add '-D" + property + "=<path>' in Server tab VM options, or provide the property through your startup environment. "
+                            + "The application cannot load its external configuration until this property is set.",
+                    null));
+        }
+
+        // Disk-backed cache/store lock under temp or custom persistence directory
+        m = PERSISTENCE_DIRECTORY_LOCKED.matcher(text);
+        if (m.find()) {
+            String path = m.group(1).trim();
+            results.add(new Diagnostic(Severity.ERROR, "Locked Persistence Directory",
+                    "Disk-backed cache directory is already locked: " + path,
+                    "A previous run or a parallel instance is still holding this cache directory. Stop other Tomcat/Java processes using it, "
+                            + "then delete the stale directory if needed. For a durable fix, configure a unique persistence path per run configuration.",
+                    null));
+        }
+
+        // Secondary failure line that often hides the real root cause above it
+        m = FAILED_DUE_TO_PREVIOUS_ERRORS.matcher(text);
+        if (m.find()) {
+            results.add(new Diagnostic(Severity.ERROR, "Secondary Startup Failure",
+                    "Context " + m.group(1) + " failed due to previous errors",
+                    "This line is usually a follow-up symptom, not the root cause. Scroll earlier in the log for the first Caused by:, "
+                            + "deployment error, or application exception that occurred before this message.",
                     null));
         }
 

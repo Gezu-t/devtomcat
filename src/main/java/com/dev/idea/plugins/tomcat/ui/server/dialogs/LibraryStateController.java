@@ -6,7 +6,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Manages the library state transitions for a single server in the Application Servers dialog.
@@ -24,13 +26,22 @@ import java.util.List;
 public class LibraryStateController {
 
     private String confirmedHome = "";
+    private final Map<String, String> confirmedHomeByServerId = new HashMap<>();
 
     /**
      * Called when a server is loaded into the detail panel.
-     * Sets the confirmed home baseline.
+     * Restores the last confirmed home for this server if previously tracked,
+     * otherwise initializes from the server's current path.
+     *
+     * <p>This avoids a bug where switching away from a server mid-edit (with an
+     * invalid partial path) and switching back would set confirmedHome to the
+     * invalid path, causing a subsequent revert to the original valid home to
+     * wrongly clear custom libraries.
      */
     public void onServerLoaded(@NotNull TomcatInfo server) {
-        confirmedHome = server.getPath();
+        String serverId = server.getId();
+        confirmedHome = confirmedHomeByServerId.getOrDefault(serverId, server.getPath());
+        confirmedHomeByServerId.put(serverId, confirmedHome);
     }
 
     /**
@@ -45,6 +56,7 @@ public class LibraryStateController {
         if (TomcatInfo.shouldResetLibraries(validDetection, newHome, confirmedHome)) {
             server.setLibraries(null);
             confirmedHome = newHome;
+            confirmedHomeByServerId.put(server.getId(), newHome);
         }
     }
 

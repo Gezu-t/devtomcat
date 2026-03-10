@@ -7,8 +7,10 @@ import org.jetbrains.annotations.Nullable;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Encapsulates execution settings specific to a single run mode (Run, Debug, Coverage).
@@ -26,6 +28,8 @@ public class RunnerSettings implements Serializable, Cloneable {
     private String shutdownScript = "";
 
     @NotNull private Map<String, String> environmentVariables = new LinkedHashMap<>();
+    @NotNull private Set<String> computedEnvironmentKeys = new LinkedHashSet<>();
+    @NotNull private Set<String> deletedComputedEnvironmentKeys = new LinkedHashSet<>();
     private boolean passParentEnvs = true;
 
     public RunnerSettings() {}
@@ -37,6 +41,8 @@ public class RunnerSettings implements Serializable, Cloneable {
         this.useDefaultShutdown = other.useDefaultShutdown;
         this.shutdownScript = StringUtil.notNullize(other.shutdownScript);
         this.environmentVariables = new LinkedHashMap<>(other.environmentVariables);
+        this.computedEnvironmentKeys = new LinkedHashSet<>(other.computedEnvironmentKeys);
+        this.deletedComputedEnvironmentKeys = new LinkedHashSet<>(other.deletedComputedEnvironmentKeys);
         this.passParentEnvs = other.passParentEnvs;
     }
 
@@ -83,6 +89,24 @@ public class RunnerSettings implements Serializable, Cloneable {
         this.environmentVariables = vars != null ? new LinkedHashMap<>(vars) : new LinkedHashMap<>();
     }
 
+    @NotNull
+    public Set<String> getComputedEnvironmentKeys() {
+        return new LinkedHashSet<>(computedEnvironmentKeys);
+    }
+
+    public void setComputedEnvironmentKeys(@Nullable Set<String> keys) {
+        this.computedEnvironmentKeys = keys != null ? new LinkedHashSet<>(keys) : new LinkedHashSet<>();
+    }
+
+    @NotNull
+    public Set<String> getDeletedComputedEnvironmentKeys() {
+        return new LinkedHashSet<>(deletedComputedEnvironmentKeys);
+    }
+
+    public void setDeletedComputedEnvironmentKeys(@Nullable Set<String> keys) {
+        this.deletedComputedEnvironmentKeys = keys != null ? new LinkedHashSet<>(keys) : new LinkedHashSet<>();
+    }
+
     public boolean isPassParentEnvs() {
         return passParentEnvs;
     }
@@ -106,11 +130,14 @@ public class RunnerSettings implements Serializable, Cloneable {
                 passParentEnvs == that.passParentEnvs &&
                 Objects.equals(startupScript, that.startupScript) &&
                 Objects.equals(shutdownScript, that.shutdownScript) &&
-                Objects.equals(environmentVariables, that.environmentVariables);
+                Objects.equals(environmentVariables, that.environmentVariables) &&
+                Objects.equals(computedEnvironmentKeys, that.computedEnvironmentKeys) &&
+                Objects.equals(deletedComputedEnvironmentKeys, that.deletedComputedEnvironmentKeys);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(useDefaultStartup, startupScript, useDefaultShutdown, shutdownScript, environmentVariables, passParentEnvs);
+        return Objects.hash(useDefaultStartup, startupScript, useDefaultShutdown, shutdownScript,
+                environmentVariables, computedEnvironmentKeys, deletedComputedEnvironmentKeys, passParentEnvs);
     }
 }

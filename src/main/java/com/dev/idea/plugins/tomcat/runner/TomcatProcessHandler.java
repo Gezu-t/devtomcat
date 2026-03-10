@@ -16,10 +16,13 @@ import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessListener;
 import com.intellij.util.io.BaseOutputReader;
 import com.intellij.ide.BrowserUtil;
+import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.openapi.wm.ToolWindowManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,6 +36,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
@@ -67,6 +71,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final AtomicInteger warningCount = new AtomicInteger(0);
     private final TomcatOutputPipeline pipeline;
     private final TomcatOutputPipeline.Context pipelineContext;
+    private final boolean activateToolWindow;
+    private final boolean showConsoleOnStdout;
+    private final boolean showConsoleOnStderr;
+    private final AtomicLong lastConsoleActivation = new AtomicLong(0);
+    private static final long CONSOLE_ACTIVATION_DEBOUNCE_MS = 500;
 
     public TomcatProcessHandler(@NotNull Process process,
                                 @NotNull String commandLine,
@@ -105,6 +114,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 () -> { triggerRemoteDeploymentIfNeeded(); launchBrowserIfEnabled(); }
         );
         this.pipeline = TomcatOutputPipeline.create(pipelineContext);
+
+        this.activateToolWindow = configuration.getConfigData().getUiConfig().isActivateToolWindow();
+        var logConfig = configuration.getConfigData().getLogFileConfig();
+        this.showConsoleOnStdout = logConfig.isShowStdoutConsole();
+        this.showConsoleOnStderr = logConfig.isShowStderrConsole();
 
         addProcessListener(this);
     }
@@ -263,10 +277,43 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (StringUtil.isNotEmpty(text)) {
             analyzeOutput(text.trim());
         }
+        maybeActivateConsole(outputType);
     }
 
     private void analyzeOutput(@NotNull String text) {
         pipeline.processLine(text, pipelineContext);
+    }
+
+    /**
+     * Activates the Run/Debug tool window when output arrives on stdout or stderr,
+     * if the corresponding "Show console when message is printed to..." setting is enabled.
+     * Debounced to avoid excessive EDT dispatches on rapid output.
+     */
+    private void maybeActivateConsole(@NotNull Key outputType) {
+        if (!activateToolWindow) return;
+
+        boolean shouldActivate =
+                (outputType == ProcessOutputTypes.STDOUT && showConsoleOnStdout) ||
+                (outputType == ProcessOutputTypes.STDERR && showConsoleOnStderr);
+        if (!shouldActivate) return;
+
+        long now = System.currentTimeMillis();
+        long last = lastConsoleActivation.get();
+        if (now - last < CONSOLE_ACTIVATION_DEBOUNCE_MS) return;
+        if (!lastConsoleActivation.compareAndSet(last, now)) return;
+
+        ApplicationManager.getApplication().invokeLater(() -> {
+            try {
+                // executorId matches ToolWindow ID ("Run" or "Debug")
+                ToolWindow tw = ToolWindowManager.getInstance(configuration.getProject())
+                        .getToolWindow(executorId);
+                if (tw != null && !tw.isActive()) {
+                    tw.activate(null);
+                }
+            } catch (Exception e) {
+                LOG.debug("Could not activate console: " + e.getMessage());
+            }
+        });
     }
 
     /**

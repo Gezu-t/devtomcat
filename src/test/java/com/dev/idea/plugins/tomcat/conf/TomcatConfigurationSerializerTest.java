@@ -220,6 +220,8 @@ class TomcatConfigurationSerializerTest {
         runSettings.setShutdownScript("/opt/scripts/stop.sh");
         runSettings.setPassParentEnvs(false);
         runSettings.setEnvironmentVariables(Map.of("CATALINA_OPTS", "-Xmx2g"));
+        runSettings.setComputedEnvironmentKeys(java.util.Set.of("JAVA_OPTS"));
+        runSettings.setDeletedComputedEnvironmentKeys(java.util.Set.of("CATALINA_OPTS"));
 
         RunnerSettings debugSettings = original.getRunnerSettings("Debug");
         debugSettings.setUseDefaultStartup(true);
@@ -241,6 +243,8 @@ class TomcatConfigurationSerializerTest {
         assertEquals("/opt/scripts/stop.sh", restoredRun.getShutdownScript());
         assertFalse(restoredRun.isPassParentEnvs());
         assertEquals("-Xmx2g", restoredRun.getEnvironmentVariables().get("CATALINA_OPTS"));
+        assertTrue(restoredRun.getComputedEnvironmentKeys().contains("JAVA_OPTS"));
+        assertTrue(restoredRun.getDeletedComputedEnvironmentKeys().contains("CATALINA_OPTS"));
 
         // Verify Debug profile
         RunnerSettings restoredDebug = restored.getRunnerSettings("Debug");

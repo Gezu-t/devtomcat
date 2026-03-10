@@ -251,6 +251,12 @@ public class TomcatJavaParametersBuilder {
     private void setupEnvironment(@NotNull JavaParameters params) {
         String executorId = environment != null && environment.getExecutor() != null
                 ? environment.getExecutor().getId() : "Run";
+
+        // Ensure computed env vars (JAVA_OPTS from VM options) are present
+        // even if the Startup/Connection tab was never visited
+        com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver.ensureComputedEnvVars(
+                configuration.getConfigData(), executorId);
+
         RunnerSettings rs = configuration.getConfigData().getRunnerSettings(executorId);
         boolean passParent = rs.isPassParentEnvs();
         Map<String, String> env = rs.getEnvironmentVariables();

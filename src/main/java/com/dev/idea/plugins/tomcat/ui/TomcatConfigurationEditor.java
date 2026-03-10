@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.ConfigExportImport;
 import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
@@ -168,6 +169,13 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (codeCoverageTab != null) {
             codeCoverageTab.applyTo(configuration);
             LOG.debug("DevTomcat: Code Coverage tab applied");
+        }
+
+        // Ensure computed env vars (JAVA_OPTS from VM options) are synced into
+        // runner settings for all executor modes, regardless of tab visit order.
+        TomcatConfigurationData configData = configuration.getConfigData();
+        for (String mode : new String[]{"Run", "Debug", "Coverage", "Profile"}) {
+            RuntimeEnvResolver.ensureComputedEnvVars(configData, mode);
         }
     }
 

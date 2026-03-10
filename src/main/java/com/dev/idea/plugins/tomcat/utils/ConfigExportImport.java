@@ -87,7 +87,8 @@ public final class ConfigExportImport {
         VmConfig vm = data.getVmConfig();
         Element vmEl = new Element("vm");
         vmEl.addContent(createElement("options", vm.getVmOptions()));
-        // Serialize environment variables as key=value entries (falling back to Run profile)
+        // Serialize environment variables from the Run profile only.
+        // Debug/Coverage/Profile env state (including computed-key ownership) is not exported.
         Element envVarsEl = new Element("envVars");
         RunnerSettings runSettings = data.getRunnerSettings("Run");
         for (Map.Entry<String, String> entry : runSettings.getEnvironmentVariables().entrySet()) {
@@ -95,6 +96,20 @@ public final class ConfigExportImport {
             varEl.setAttribute("key", entry.getKey());
             varEl.setAttribute("value", entry.getValue());
             envVarsEl.addContent(varEl);
+        }
+        if (!runSettings.getComputedEnvironmentKeys().isEmpty()) {
+            Element computedEl = new Element("computedKeys");
+            for (String key : runSettings.getComputedEnvironmentKeys()) {
+                computedEl.addContent(new Element("key").setAttribute("name", key));
+            }
+            envVarsEl.addContent(computedEl);
+        }
+        if (!runSettings.getDeletedComputedEnvironmentKeys().isEmpty()) {
+            Element deletedEl = new Element("deletedComputedKeys");
+            for (String key : runSettings.getDeletedComputedEnvironmentKeys()) {
+                deletedEl.addContent(new Element("key").setAttribute("name", key));
+            }
+            envVarsEl.addContent(deletedEl);
         }
         vmEl.addContent(envVarsEl);
         root.addContent(vmEl);
@@ -206,7 +221,7 @@ public final class ConfigExportImport {
         if (vmEl != null) {
             VmConfig vm = data.getVmConfig();
             vm.setVmOptions(getChildText(vmEl, "options", ""));
-            // Deserialize environment variables (falling back to Run profile)
+            // Deserialize environment variables into the Run profile only (matches export scope)
             Element envVarsEl = vmEl.getChild("envVars");
             RunnerSettings runSettings = data.getRunnerSettings("Run");
             if (envVarsEl != null) {
@@ -219,6 +234,8 @@ public final class ConfigExportImport {
                     }
                 }
                 runSettings.setEnvironmentVariables(envMap);
+                runSettings.setComputedEnvironmentKeys(readKeySet(envVarsEl, "computedKeys"));
+                runSettings.setDeletedComputedEnvironmentKeys(readKeySet(envVarsEl, "deletedComputedKeys"));
             }
         }
 
@@ -303,5 +320,19 @@ public final class ConfigExportImport {
     private static boolean getChildBool(Element parent, String childName, boolean defaultValue) {
         String text = getChildText(parent, childName, String.valueOf(defaultValue));
         return Boolean.parseBoolean(text);
+    }
+
+    private static java.util.Set<String> readKeySet(Element parent, String containerName) {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        Element container = parent.getChild(containerName);
+        if (container == null) return keys;
+
+        for (Element keyEl : container.getChildren("key")) {
+            String name = keyEl.getAttributeValue("name");
+            if (name != null && !name.isEmpty()) {
+                keys.add(name);
+            }
+        }
+        return keys;
     }
 }

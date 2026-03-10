@@ -67,6 +67,9 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_STARTUP_SCRIPT = "startupScript";
     private static final String ATTR_USE_DEFAULT_SHUTDOWN = "useDefaultShutdown";
     private static final String ATTR_SHUTDOWN_SCRIPT = "shutdownScript";
+    private static final String TAG_COMPUTED_ENV_KEYS = "computedEnvKeys";
+    private static final String TAG_DELETED_COMPUTED_ENV_KEYS = "deletedComputedEnvKeys";
+    private static final String TAG_KEY = "key";
 
     private static final String ATTR_ACTIVATE_TOOL_WINDOW = "activateToolWindow";
     private static final String ATTR_FOCUS_TOOL_WINDOW = "focusToolWindow";
@@ -198,7 +201,24 @@ public class TomcatConfigurationSerializer {
         rsElem.setAttribute(ATTR_SHUTDOWN_SCRIPT, rs.getShutdownScript());
         rsElem.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(rs.isPassParentEnvs()));
         writeEnvironmentVariables(rsElem, rs.getEnvironmentVariables());
+        writeKeySet(rsElem, TAG_COMPUTED_ENV_KEYS, rs.getComputedEnvironmentKeys());
+        writeKeySet(rsElem, TAG_DELETED_COMPUTED_ENV_KEYS, rs.getDeletedComputedEnvironmentKeys());
         element.addContent(rsElem);
+    }
+
+    private static void writeKeySet(@NotNull Element element, @NotNull String tagName, @NotNull java.util.Set<String> keys) {
+        if (keys.isEmpty()) return;
+
+        Element setElem = new Element(tagName);
+        for (String key : keys) {
+            if (StringUtil.isEmpty(key)) continue;
+            Element keyElem = new Element(TAG_KEY);
+            keyElem.setAttribute("name", key);
+            setElem.addContent(keyElem);
+        }
+        if (!setElem.getChildren().isEmpty()) {
+            element.addContent(setElem);
+        }
     }
 
     private static void writeLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {
@@ -296,6 +316,8 @@ public class TomcatConfigurationSerializer {
             rs.setShutdownScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT)));
             readBool(rsElem, ATTR_PASS_PARENT_ENVS, rs::setPassParentEnvs);
             readEnvironmentVariables(rsElem, rs::setEnvironmentVariables);
+            rs.setComputedEnvironmentKeys(readKeySet(rsElem, TAG_COMPUTED_ENV_KEYS));
+            rs.setDeletedComputedEnvironmentKeys(readKeySet(rsElem, TAG_DELETED_COMPUTED_ENV_KEYS));
 
             map.put(runnerId, rs);
         }
@@ -434,6 +456,21 @@ public class TomcatConfigurationSerializer {
         if (!map.isEmpty()) {
             setter.accept(map);
         }
+    }
+
+    @NotNull
+    private static java.util.Set<String> readKeySet(@NotNull Element element, @NotNull String tagName) {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        Element setElem = element.getChild(tagName);
+        if (setElem == null) return keys;
+
+        for (Element keyElem : setElem.getChildren(TAG_KEY)) {
+            String key = keyElem.getAttributeValue("name");
+            if (!StringUtil.isEmpty(key)) {
+                keys.add(key);
+            }
+        }
+        return keys;
     }
 
     private static void readLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {

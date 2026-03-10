@@ -231,4 +231,53 @@ class TomcatErrorDiagnosticsTest {
         assertFalse(results.isEmpty());
         assertEquals("Deployment Error", results.get(0).getCategory());
     }
+
+    @Test
+    @DisplayName("duplicate web fragments are diagnosed as packaging conflicts")
+    void duplicateWebFragments() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "java.lang.IllegalArgumentException: More than one fragment with the name [org_apache_jasper] was found. "
+                        + "This is not legal with relative ordering. Duplicate fragments found in "
+                        + "[[file:/tmp/a/tomcat-jasper.jar, file:/tmp/b/tomcat-embed-jasper.jar]].");
+        assertFalse(results.isEmpty());
+        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
+        assertEquals("Packaging Conflict", d.getCategory());
+        assertTrue(d.getSuggestion().contains("WEB-INF/lib"));
+        assertTrue(d.getSuggestion().contains("tomcat-jasper"));
+    }
+
+    @Test
+    @DisplayName("missing required system property is diagnosed")
+    void missingRequiredSystemProperty() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "External configuration file was not found in \"null\", check \"wcc.config.dir\" system property");
+        assertFalse(results.isEmpty());
+        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
+        assertEquals(TomcatErrorDiagnostics.Severity.CRITICAL, d.getSeverity());
+        assertEquals("Missing Runtime Property", d.getCategory());
+        assertTrue(d.getSuggestion().contains("-Dwcc.config.dir=<path>"));
+    }
+
+    @Test
+    @DisplayName("locked persistence directory is diagnosed with cleanup guidance")
+    void lockedPersistenceDirectory() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "Persistence directory already locked by this process: C:\\tmp\\wcc-local");
+        assertFalse(results.isEmpty());
+        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
+        assertEquals("Locked Persistence Directory", d.getCategory());
+        assertTrue(d.getMessage().contains("C:\\tmp\\wcc-local"));
+        assertTrue(d.getSuggestion().contains("unique persistence path"));
+    }
+
+    @Test
+    @DisplayName("startup failed due to previous errors is explained as secondary symptom")
+    void failedDueToPreviousErrors() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "10-Mar-2026 08:16:54.579 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal Context [/wipo-connect-local-backend] startup failed due to previous errors");
+        assertFalse(results.isEmpty());
+        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
+        assertEquals("Secondary Startup Failure", d.getCategory());
+        assertTrue(d.getSuggestion().contains("first Caused by:"));
+    }
 }

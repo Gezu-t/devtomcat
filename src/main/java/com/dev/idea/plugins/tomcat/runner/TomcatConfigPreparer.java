@@ -12,6 +12,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -108,6 +109,7 @@ public final class TomcatConfigPreparer {
         createDirectories(catalinaBase);
         createLogFiles(catalinaBase.resolve(DIR_LOGS));
         cleanWorkDirectory(catalinaBase);
+        warnings.addAll(inspectTempDirectory(catalinaBase));
 
         copyConfDirectory(catalinaHome, catalinaBase);
 
@@ -122,6 +124,51 @@ public final class TomcatConfigPreparer {
         warnings.addAll(validateConf(catalinaBase));
 
         return warnings;
+    }
+
+    /**
+     * Non-destructive inspection of temp/ before launch.
+     * Disk-backed caches often persist lock/state files here across runs.
+     */
+    @NotNull
+    static List<String> inspectTempDirectory(@NotNull Path catalinaBase) throws IOException {
+        Path tempDir = catalinaBase.resolve(DIR_TEMP);
+        if (!Files.isDirectory(tempDir)) {
+            return List.of();
+        }
+
+        try (Stream<Path> entries = Files.list(tempDir)) {
+            List<Path> suspiciousEntries = entries
+                    .filter(TomcatConfigPreparer::looksLikePersistentAppTempState)
+                    .toList();
+            if (suspiciousEntries.isEmpty()) {
+                return List.of();
+            }
+            return List.of("CATALINA_BASE temp directory contains possible persistent cache/state entries ("
+                    + suspiciousEntries.size() + ") under " + tempDir + ". "
+                    + "These may cause stale state or lock errors on restart. If startup fails with a locked persistence directory, "
+                    + "stop the old process and clean the stale cache path. Suspect entries: " + summarizeSuspiciousEntries(suspiciousEntries));
+        }
+    }
+
+    private static boolean looksLikePersistentAppTempState(@NotNull Path path) {
+        String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase() : "";
+        return Files.isDirectory(path)
+                || name.contains("lock")
+                || name.contains("cache")
+                || name.contains("ehcache")
+                || name.contains("liquibase")
+                || name.endsWith(".lck");
+    }
+
+    @NotNull
+    private static String summarizeSuspiciousEntries(@NotNull List<Path> suspiciousEntries) {
+        return suspiciousEntries.stream()
+                .limit(3)
+                .map(path -> path.getFileName() != null ? path.getFileName().toString() : path.toString())
+                .reduce((left, right) -> left + ", " + right)
+                .map(summary -> suspiciousEntries.size() > 3 ? summary + ", ..." : summary)
+                .orElse("(unknown)");
     }
 
     /**
