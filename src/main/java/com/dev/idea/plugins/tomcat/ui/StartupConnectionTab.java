@@ -91,6 +91,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         Set<String> deletedComputedKeys = new LinkedHashSet<>();
     }
 
+    private JPanel startupSection;
+    private JPanel shutdownSection;
     private TextFieldWithBrowseButton startupScriptField;
     private TextFieldWithBrowseButton shutdownScriptField;
     private JBCheckBox useDefaultStartupCB;
@@ -130,10 +132,12 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         gbc.weighty = 0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = JBUI.insets(4, 0);
-        mainPanel.add(createStartupSection(), gbc);
+        startupSection = createStartupSection();
+        mainPanel.add(startupSection, gbc);
 
         gbc.gridy = 2;
-        mainPanel.add(createShutdownSection(), gbc);
+        shutdownSection = createShutdownSection();
+        mainPanel.add(shutdownSection, gbc);
 
         gbc.gridy = 3;
         gbc.weighty = 1.0;
@@ -367,6 +371,27 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             }
             return c;
         }
+    }
+
+    // =========================================================================
+    // Remote Mode
+    // =========================================================================
+
+    /**
+     * Adjusts the tab content for remote vs local server mode.
+     * Remote mode hides startup/shutdown script sections because the remote
+     * server is already running — scripts are irrelevant.
+     * Environment variables are still shown (used for Manager API connection).
+     */
+    public void setRemoteMode(boolean remote) {
+        if (startupSection != null) {
+            startupSection.setVisible(!remote);
+        }
+        if (shutdownSection != null) {
+            shutdownSection.setVisible(!remote);
+        }
+        revalidate();
+        repaint();
     }
 
     // =========================================================================
@@ -719,12 +744,15 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
         saveCurrentState();
 
+        // Scripts are only relevant for local mode — remote server is already running
+        boolean scriptsApplicable = startupSection != null && startupSection.isVisible();
+
         for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
             String mode = entry.getKey();
             UIState state = entry.getValue();
             var runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
 
-            if (!state.useDefaultStartup) {
+            if (scriptsApplicable && !state.useDefaultStartup) {
                 String path = state.startupScript.trim();
                 if (StringUtil.isEmpty(path)) throw new ConfigurationException("Startup script path is required for mode " + mode);
                 File f = new File(path);
@@ -734,7 +762,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
                 runnerSettings.setStartupScript(null);
             }
 
-            if (!state.useDefaultShutdown) {
+            if (scriptsApplicable && !state.useDefaultShutdown) {
                 String path = state.shutdownScript.trim();
                 if (StringUtil.isEmpty(path)) throw new ConfigurationException("Shutdown script path is required for mode " + mode);
                 File f = new File(path);

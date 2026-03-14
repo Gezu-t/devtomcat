@@ -30,13 +30,29 @@ public class IntelliJArtifactSelectionDialog extends ChooseElementsDialog<Artifa
 
     @Override
     protected String getItemText(Artifact item) {
-        // Format using colon notation like IntelliJ Ultimate (e.g. "app:war exploded")
-        String typeId = null;
-        try {
-            typeId = item.getArtifactType().getId().toLowerCase();
-        } catch (Exception ignored) {}
-        String type = typeId != null && typeId.contains("exploded") ? "exploded" : "war";
+        // Use the actual artifact type from IntelliJ's type system for accurate display.
+        // In Ultimate: type IDs are "exploded-war", "war", "web-application-exploded", etc.
+        // In Community: type IDs are "plain", "jar" — so we also check the artifact name
+        // for type hints (e.g. "myapp_war_exploded", "myapp.war").
+        String type = resolveDisplayType(item);
         return ContextPathUtils.formatArtifactDisplayName(item.getName(), type);
+    }
+
+    private static String resolveDisplayType(@NotNull Artifact item) {
+        try {
+            String typeId = item.getArtifactType().getId().toLowerCase();
+            if (typeId.contains("exploded")) return "exploded";
+            if (typeId.contains("war")) return "war";
+            if (typeId.contains("ear")) return "ear";
+        } catch (Exception ignored) {}
+
+        // Fallback: infer from artifact name (common in Community Edition)
+        String name = item.getName().toLowerCase();
+        if (name.contains("exploded")) return "exploded";
+        if (name.endsWith(".war") || name.endsWith("_war") || name.endsWith(":war")) return "war";
+
+        // No type signal — return null so formatArtifactDisplayName returns the raw name
+        return null;
     }
     
     public List<Artifact> getSelectedArtifacts() {

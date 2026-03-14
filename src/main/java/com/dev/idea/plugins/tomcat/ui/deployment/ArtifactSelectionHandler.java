@@ -1,28 +1,19 @@
 package com.dev.idea.plugins.tomcat.ui.deployment;
 
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
-import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.IntelliJArtifactSelectionDialog;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ModuleDeploymentDialog;
-import com.intellij.openapi.application.WriteAction;
-import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.artifacts.ArtifactType;
-import com.intellij.packaging.artifacts.ModifiableArtifactModel;
-import com.intellij.packaging.elements.CompositePackagingElement;
-import com.intellij.packaging.elements.PackagingElementFactory;
-import com.intellij.packaging.impl.artifacts.PlainArtifactType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -251,12 +242,15 @@ public class ArtifactSelectionHandler {
         }
 
         try {
-            List<Artifact> webArtifacts = Stream.of(artifactManager.getArtifacts())
-                    .filter(ProjectArtifactDetector::isWebArtifact)
+            // Show ALL IntelliJ artifacts (not just web-typed), because Community Edition
+            // only has PlainArtifactType (ID: "plain") and JarArtifactType (ID: "jar") —
+            // neither passes isWebArtifact(). Users must be able to select any artifact.
+            // Sort web artifacts first (exploded → WAR), then others alphabetically.
+            List<Artifact> allArtifacts = Stream.of(artifactManager.getArtifacts())
                     .filter(artifact -> !tableManager.hasDeployment(artifact.getName()))
                     .collect(Collectors.toList());
 
-            return preferExplodedVariants(webArtifacts);
+            return sortByTypeCategory(allArtifacts);
         } catch (Exception e) {
             LOG.warn("Error getting selectable artifacts", e);
             return new ArrayList<>();
@@ -264,67 +258,42 @@ public class ArtifactSelectionHandler {
     }
 
     /**
-     * When both a packaged WAR and an exploded variant exist for the same module,
-     * keeps only the exploded one — matching IntelliJ Ultimate's local Tomcat behavior.
-     * If only a packaged WAR exists (no exploded counterpart), it is kept.
-     *
-     * <p>Grouping uses the artifact type to determine exploded vs. packaged,
-     * and strips common type suffixes case-insensitively from the name to derive
-     * a module identity key. This handles naming conventions across different
-     * IntelliJ versions and build tools (e.g. "app:war", "app:war exploded",
-     * "app (exploded)", "my-app.war").
+     * Sorts artifacts by type category so the user sees them grouped logically:
+     * <ol>
+     *   <li>Web exploded artifacts (best for local Tomcat development)</li>
+     *   <li>Web WAR artifacts (packaged deployments)</li>
+     *   <li>All other artifacts (plain, jar, etc.)</li>
+     * </ol>
+     * Within each category, artifacts are sorted alphabetically by name.
+     * Both exploded AND WAR variants are shown — the user decides which to deploy.
      */
-    static List<Artifact> preferExplodedVariants(@NotNull List<Artifact> artifacts) {
+    static List<Artifact> sortByTypeCategory(@NotNull List<Artifact> artifacts) {
         if (artifacts.isEmpty()) return artifacts;
 
-        // Group artifacts by base module identity
-        java.util.LinkedHashMap<String, List<Artifact>> grouped = new java.util.LinkedHashMap<>();
-        for (Artifact artifact : artifacts) {
-            String key = extractModuleKey(artifact);
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(artifact);
-        }
-
-        List<Artifact> result = new ArrayList<>();
-        for (List<Artifact> group : grouped.values()) {
-            if (group.size() <= 1) {
-                // Single artifact — no disambiguation needed
-                result.addAll(group);
-                continue;
-            }
-
-            // Multiple variants for the same module: prefer exploded
-            List<Artifact> exploded = new ArrayList<>();
-            List<Artifact> other = new ArrayList<>();
-            for (Artifact a : group) {
-                if (isExplodedType(a)) {
-                    exploded.add(a);
-                } else {
-                    other.add(a);
-                }
-            }
-            result.addAll(!exploded.isEmpty() ? exploded : other);
-        }
+        List<Artifact> result = new ArrayList<>(artifacts);
+        result.sort((a, b) -> {
+            int catA = typeCategory(a);
+            int catB = typeCategory(b);
+            if (catA != catB) return Integer.compare(catA, catB);
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
         return result;
     }
 
     /**
-     * Extracts a stable module identity key from an artifact name by stripping
-     * common type suffixes. Case-insensitive to handle variations.
-     *
-     * <p>Examples:
-     * <ul>
-     *   <li>"webapp-one:war" → "webapp-one"</li>
-     *   <li>"webapp-one:war exploded" → "webapp-one"</li>
-     *   <li>"myapp:ear exploded" → "myapp"</li>
-     *   <li>"myapp.war" → "myapp"</li>
-     *   <li>"my-app (exploded)" → "my-app"</li>
-     *   <li>"plain-name" → "plain-name" (no suffix to strip)</li>
-     * </ul>
+     * Returns a sort-order category for the artifact:
+     * 0 = web exploded, 1 = web WAR, 2 = everything else.
      */
-    private static String extractModuleKey(@NotNull Artifact artifact) {
-        // Delegate to ContextPathUtils which handles type suffixes, version patterns,
-        // and Tomcat parallel deployment notation (##version)
-        return ContextPathUtils.extractBaseModuleName(artifact.getName());
+    private static int typeCategory(@NotNull Artifact artifact) {
+        if (ProjectArtifactDetector.isWebArtifact(artifact)) {
+            return isExplodedType(artifact) ? 0 : 1;
+        }
+        // Non-web artifact — check name patterns as a secondary signal
+        // (CE users often name their artifacts with war/exploded suffixes)
+        String name = artifact.getName().toLowerCase();
+        if (name.contains("exploded")) return 0;
+        if (name.contains("war")) return 1;
+        return 2;
     }
 
     /**
@@ -369,8 +338,7 @@ public class ArtifactSelectionHandler {
 
     private void addArtifactWithContext(@NotNull Artifact artifact, @NotNull String applicationContext) {
         try {
-            String typeId = artifact.getArtifactType().getId().toLowerCase();
-            String type = typeId.contains("exploded") ? DeploymentArtifact.TYPE_EXPLODED : DeploymentArtifact.TYPE_WAR;
+            String type = resolveDeploymentType(artifact);
 
             String outputPath = artifact.getOutputFilePath();
             if (outputPath == null) {
@@ -387,11 +355,44 @@ public class ArtifactSelectionHandler {
             tableManager.addAndSelectDeployment(deployment);
 
             LOG.debug("Added artifact: " + artifact.getName() +
-                    " with context: " + applicationContext);
+                    " [" + type + "] with context: " + applicationContext);
 
         } catch (Exception e) {
             LOG.warn("Error adding artifact", e);
         }
+    }
+
+    /**
+     * Resolves the deployment type for an IntelliJ Artifact.
+     * Checks the artifact type ID first (works in Ultimate), then falls back
+     * to checking the artifact name and output path (needed for Community Edition
+     * where types are "plain" or "jar").
+     */
+    static String resolveDeploymentType(@NotNull Artifact artifact) {
+        // 1. Check IntelliJ artifact type ID (authoritative in Ultimate)
+        try {
+            String typeId = artifact.getArtifactType().getId().toLowerCase();
+            if (typeId.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
+            if (typeId.contains("war")) return DeploymentArtifact.TYPE_WAR;
+        } catch (Exception ignored) {}
+
+        // 2. Check artifact name for type hints (CE users often follow naming conventions)
+        String name = artifact.getName().toLowerCase();
+        if (name.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
+        if (name.endsWith("_war") || name.endsWith(".war") || name.endsWith(":war")) {
+            return DeploymentArtifact.TYPE_WAR;
+        }
+
+        // 3. Check output path — directory = exploded, file = packaged
+        String outputPath = artifact.getOutputFilePath();
+        if (outputPath != null) {
+            java.io.File outputFile = new java.io.File(outputPath);
+            if (outputFile.isDirectory()) return DeploymentArtifact.TYPE_EXPLODED;
+            if (outputPath.toLowerCase().endsWith(".war")) return DeploymentArtifact.TYPE_WAR;
+        }
+
+        // Default: treat as exploded (better for local development — supports hot reload)
+        return DeploymentArtifact.TYPE_EXPLODED;
     }
 
     public void addArtifact(@NotNull Artifact artifact) {

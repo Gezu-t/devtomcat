@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
@@ -34,6 +35,7 @@ import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.HierarchyEvent;
 import java.io.File;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -70,6 +72,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             // Sync on the clone, not the live config, to avoid side-effects during reset
             currentConfiguration.syncBeforeLaunchWithDeployments();
             if (editorInitialized.get() && tabbedPane != null) {
+                reconcileTabsForMode();
                 resetAllTabs(currentConfiguration);
                 syncBeforeLaunchPanelWithSelectedDeployment();
                 LOG.info("DevTomcat: Configuration loaded successfully - " + getConfigurationSummary(currentConfiguration));
@@ -185,7 +188,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (isDisposing.get()) return createErrorPanel("Editor is being disposed");
 
         try {
-            LOG.info("DevTomcat: Creating 5-tab configuration interface");
+            LOG.info("DevTomcat: Creating configuration interface");
             if (currentConfiguration == null) {
                 currentConfiguration = createTemplateConfiguration();
             }
@@ -234,6 +237,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             JPanel editorPanel = new JPanel(new BorderLayout());
             editorPanel.add(createExportImportToolbar(), BorderLayout.NORTH);
             editorPanel.add(tabbedPane, BorderLayout.CENTER);
+            installBeforeLaunchSyncOnShow(editorPanel);
             return editorPanel;
         } catch (Throwable t) {
             LOG.error("DevTomcat: Critical error creating editor", t);
@@ -246,7 +250,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         createDeploymentTab();
         createLogsTab();
         createStartupConnectionTab();
-        createCodeCoverageTab();
+        // Code Coverage is only applicable to local mode — remote server
+        // runs independently and can't be instrumented from the plugin.
+        if (!isRemoteMode()) {
+            createCodeCoverageTab();
+        }
     }
 
     private void createServerTab() {
@@ -368,6 +376,54 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     }
 
     /**
+     * Returns {@code true} when the current configuration is in remote server mode.
+     * Remote mode omits the Code Coverage tab and adjusts Startup/Connection content.
+     */
+    private boolean isRemoteMode() {
+        return currentConfiguration != null &&
+                TomcatConstants.MODE_REMOTE.equalsIgnoreCase(
+                        currentConfiguration.getConfigData().getServerMode());
+    }
+
+    /**
+     * Ensures the tab set matches the current server mode.
+     * Adds or removes the Code Coverage tab as needed.
+     */
+    private void reconcileTabsForMode() {
+        if (tabbedPane == null) return;
+
+        boolean remote = isRemoteMode();
+
+        // Find existing Code Coverage tab index
+        int coverageIdx = -1;
+        for (int i = 0; i < tabbedPane.getTabCount(); i++) {
+            if ("Code Coverage".equals(tabbedPane.getTitleAt(i))) {
+                coverageIdx = i;
+                break;
+            }
+        }
+
+        if (remote && coverageIdx >= 0) {
+            // Remote mode: remove Code Coverage tab
+            tabbedPane.removeTabAt(coverageIdx);
+            codeCoverageTab = null;
+            LOG.info("DevTomcat: Removed Code Coverage tab (remote mode)");
+        } else if (!remote && coverageIdx < 0) {
+            // Local mode: add Code Coverage tab back
+            createCodeCoverageTab();
+            if (codeCoverageTab != null && currentConfiguration != null) {
+                codeCoverageTab.resetFrom(currentConfiguration);
+            }
+            LOG.info("DevTomcat: Added Code Coverage tab (local mode)");
+        }
+
+        // Update Startup/Connection tab for mode-specific content
+        if (startupConnectionTab != null) {
+            startupConnectionTab.setRemoteMode(remote);
+        }
+    }
+
+    /**
      * Coalesces multiple rapid-fire listener invocations (e.g. during resetFrom() loading
      * 8 artifacts) into a single sync on the next EDT cycle.
      */
@@ -455,6 +511,24 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         } catch (Throwable t) {
             LOG.debug("DevTomcat: ArtifactManager unavailable while syncing selected deployment", t);
         }
+    }
+
+    /**
+     * The configuration wrapper may not be discoverable during the first reset/sync pass
+     * because the editor has not yet been attached to the dialog hierarchy.
+     * Re-sync once the panel becomes visible so preloaded deployment artifacts are
+     * reflected in the live Before Launch panel without requiring another user action.
+     */
+    private void installBeforeLaunchSyncOnShow(@NotNull JComponent editorPanel) {
+        editorPanel.addHierarchyListener(event -> {
+            if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) == 0) {
+                return;
+            }
+            if (!editorPanel.isShowing() || isEventsSuppressed()) {
+                return;
+            }
+            syncBeforeLaunchPanelWithSelectedDeployment();
+        });
     }
 
     @Nullable
