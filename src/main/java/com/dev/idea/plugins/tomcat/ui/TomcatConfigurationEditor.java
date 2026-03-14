@@ -481,6 +481,18 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             }
         }
 
+        // Ensure a "Build" (Make) task is always present — matches IntelliJ Ultimate's
+        // Tomcat behaviour where the Before Launch list always starts with "Build".
+        boolean hasMake = updatedSteps.stream()
+                .anyMatch(t -> t instanceof com.intellij.compiler.options.CompileStepBeforeRun.MakeBeforeRunTask);
+        if (!hasMake) {
+            com.intellij.compiler.options.CompileStepBeforeRun.MakeBeforeRunTask makeTask =
+                    new com.intellij.compiler.options.CompileStepBeforeRun.MakeBeforeRunTask();
+            makeTask.setEnabled(true);
+            updatedSteps.add(0, makeTask);
+            LOG.info("DevTomcat: Added default Build (Make) task to Before Launch panel");
+        }
+
         java.util.List<DeploymentArtifact> allDeployments = deploymentTableManager != null
                 ? deploymentTableManager.getDeployments()
                 : java.util.Collections.emptyList();

@@ -412,6 +412,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     public boolean isShowLogsPage()                        { return configData.getUiConfig().isShowLogsPage(); }
     public void setShowLogsPage(boolean show)              { configData.getUiConfig().setShowLogsPage(show); }
 
+    public boolean isAllowMultipleInstances()              { return configData.isAllowMultipleInstances(); }
+    public void setAllowMultipleInstances(boolean allow)   { configData.setAllowMultipleInstances(allow); syncPlatformFlags(); }
+
+
     // =====================================================================
     // Log file tabs for Run tool window
     // =====================================================================

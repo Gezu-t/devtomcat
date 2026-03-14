@@ -82,6 +82,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (!preLaunchDone.compareAndSet(false, true)) return;
 
         checkCompatibility();
+        runPreflightValidation();
         resolvePortConflicts();
 
         DeploymentStrategy.create(configuration).resolveCredentials(configuration);
@@ -120,6 +121,29 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             notifyUser("DevTomcat: Port Auto-Resolved",
                     String.join("\n", resolution.getChanges()),
                     NotificationType.WARNING);
+        }
+    }
+
+    /**
+     * Runs preflight validation to catch common failures before Tomcat starts:
+     * missing path-based system properties, duplicate JARs in deployed artifacts,
+     * and locked cache/temp directories.
+     */
+    private void runPreflightValidation() throws ExecutionException {
+        TomcatPreflightValidator.PreflightResult result =
+                TomcatPreflightValidator.validate(configuration);
+
+        if (!result.hasIssues()) return;
+
+        for (TomcatPreflightValidator.PreflightIssue issue : result.getWarnings()) {
+            deploymentLogger.logServerWarning("Preflight: " + issue.getMessage());
+        }
+        for (TomcatPreflightValidator.PreflightIssue issue : result.getBlockingIssues()) {
+            deploymentLogger.logServerError("Preflight: " + issue.getMessage());
+        }
+
+        if (result.hasBlockingIssues()) {
+            throw new ExecutionException("Preflight check failed: " + result.getBlockingMessage());
         }
     }
 

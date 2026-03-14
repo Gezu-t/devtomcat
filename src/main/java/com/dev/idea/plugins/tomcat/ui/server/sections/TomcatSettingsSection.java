@@ -24,6 +24,7 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 public class TomcatSettingsSection implements ConfigurationSection {
     private static final Logger LOG = Logger.getInstance(TomcatSettingsSection.class);
@@ -36,7 +37,12 @@ public class TomcatSettingsSection implements ConfigurationSection {
     private TextFieldWithBrowseButton catalinaBaseField;
     private JBCheckBox deployAppsCheckBox;
     private JBCheckBox preserveSessionsCheckBox;
+    private JBCheckBox allowMultipleInstancesCheckBox;
     private JPanel panel;
+
+    private Consumer<String> portChangeListener;
+    /** Guard to distinguish programmatic setText() from user typing. */
+    private boolean isSettingPort = false;
 
     public TomcatSettingsSection() {
         this(null);
@@ -71,6 +77,16 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
             gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             httpPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpPort()), 8);
+            httpPortField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { onPortChange(); }
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { onPortChange(); }
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { onPortChange(); }
+                private void onPortChange() {
+                    if (!isSettingPort && portChangeListener != null) {
+                        portChangeListener.accept(httpPortField.getText().trim());
+                    }
+                }
+            });
             formPanel.add(httpPortField, gbc);
 
             gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
@@ -95,7 +111,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
             preserveSessionsCheckBox.setSelected(false);
             formPanel.add(preserveSessionsCheckBox, gbc);
 
-            // Row 2: JMX port
+            // Row 2: JMX port + Allow parallel run checkbox
             row++;
             gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 0, 2, 4);
@@ -104,6 +120,12 @@ public class TomcatSettingsSection implements ConfigurationSection {
             gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             jmxPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getJmxPort()), 8);
             formPanel.add(jmxPortField, gbc);
+
+            gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(2, JBUI.scale(20), 2, 4);
+            allowMultipleInstancesCheckBox = new JBCheckBox("Allow parallel run");
+            allowMultipleInstancesCheckBox.setToolTipText("Allow multiple instances of this configuration to run simultaneously");
+            formPanel.add(allowMultipleInstancesCheckBox, gbc);
 
             // Row 3: AJP port
             row++;
@@ -146,9 +168,15 @@ public class TomcatSettingsSection implements ConfigurationSection {
         return panel;
     }
 
+    public void setPortChangeListener(@Nullable Consumer<String> listener) {
+        this.portChangeListener = listener;
+    }
+
     @Override
     public void loadConfiguration() {
+        isSettingPort = true;
         httpPortField.setText(String.valueOf(DynamicTomcatEnvironment.getHttpPort()));
+        isSettingPort = false;
         httpsPortField.setText(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()));
         jmxPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
         ajpPortField.setText("");
@@ -156,12 +184,15 @@ public class TomcatSettingsSection implements ConfigurationSection {
         catalinaBaseField.setText("");
         deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(false);
+        allowMultipleInstancesCheckBox.setSelected(false);
     }
 
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
         Integer httpPort = configuration.getHttpPort();
+        isSettingPort = true;
         httpPortField.setText(httpPort != null ? httpPort.toString() : DynamicTomcatEnvironment.getHttpPort() + "");
+        isSettingPort = false;
 
         Integer httpsPort = configuration.getHttpsPort();
         httpsPortField.setText(httpsPort != null ? httpsPort.toString() : "");
@@ -183,6 +214,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
         deployAppsCheckBox.setSelected(configuration.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(configuration.isPreserveSessions());
+        allowMultipleInstancesCheckBox.setSelected(configuration.isAllowMultipleInstances());
 
         LOG.debug("Reset Tomcat settings: HTTP=" + httpPortField.getText() +
                 ", Shutdown=" + shutdownPortField.getText() +
@@ -227,6 +259,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
         configuration.setHotDeploymentEnabled(deployAppsCheckBox.isSelected());
         configuration.setPreserveSessions(preserveSessionsCheckBox.isSelected());
+        configuration.setAllowMultipleInstances(allowMultipleInstancesCheckBox.isSelected());
 
         LOG.debug("Applied Tomcat settings - HTTP: " + portConfig.httpPort +
                 ", Shutdown: " + portConfig.shutdownPort +
@@ -313,6 +346,9 @@ public class TomcatSettingsSection implements ConfigurationSection {
                 return true;
             }
             if (config.isPreserveSessions() != preserveSessionsCheckBox.isSelected()) {
+                return true;
+            }
+            if (config.isAllowMultipleInstances() != allowMultipleInstancesCheckBox.isSelected()) {
                 return true;
             }
 

@@ -152,7 +152,10 @@ package com.dev.idea.plugins.tomcat.model;
                 this.deploymentConfig = source.deploymentConfig.clone();
                 this.vmConfig = source.vmConfig.clone();
                 this.browserConfig = source.browserConfig.clone();
+                this.updateConfig = source.updateConfig.clone();
+                this.remoteConfig = source.remoteConfig.clone();
                 this.jreSelection = source.jreSelection;
+                this.catalinaBase = source.catalinaBase;
                 // Merge runner settings (env vars, startup scripts) from source
                 for (Map.Entry<String, RunnerSettings> entry : source.runnerSettingsMap.entrySet()) {
                     this.runnerSettingsMap.put(entry.getKey(), entry.getValue().clone());

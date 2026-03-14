@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.model.*;
+import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jdom.Document;
@@ -120,11 +121,23 @@ public final class ConfigExportImport {
         browserEl.addContent(createElement("afterLaunch", String.valueOf(browser.isOpenBrowser())));
         browserEl.addContent(createElement("url", browser.getBrowserUrl()));
         browserEl.addContent(createElement("name", browser.getBrowserName()));
+        browserEl.addContent(createElement("withJsDebugger", String.valueOf(browser.isWithJsDebugger())));
         root.addContent(browserEl);
 
-        // Deployment artifacts
+        // Update actions
+        UpdateConfig update = data.getUpdateConfig();
+        Element updateEl = new Element("updateActions");
+        updateEl.addContent(createElement("onUpdate", update.getOnUpdate()));
+        updateEl.addContent(createElement("onFrameDeactivation", update.getOnFrameDeactivation()));
+        updateEl.addContent(createElement("showUpdateDialog", String.valueOf(update.isShowUpdateDialog())));
+        updateEl.addContent(createElement("showFrameDeactivationDialog", String.valueOf(update.isShowFrameDeactivationDialog())));
+        root.addContent(updateEl);
+
+        // Deployment artifacts and settings
         DeploymentConfig deployment = data.getDeploymentConfig();
         Element deployEl = new Element("deployment");
+        deployEl.addContent(createElement("hotDeploymentEnabled", String.valueOf(deployment.isHotDeploymentEnabled())));
+        deployEl.addContent(createElement("preserveSessions", String.valueOf(deployment.isPreserveSessions())));
         List<DeploymentArtifact> artifacts = deployment.getArtifacts();
         for (DeploymentArtifact artifact : artifacts) {
             Element artEl = new Element("artifact");
@@ -135,6 +148,20 @@ public final class ConfigExportImport {
             deployEl.addContent(artEl);
         }
         root.addContent(deployEl);
+
+        // Remote config (password intentionally excluded for security)
+        RemoteConfig remote = data.getRemoteConfig();
+        Element remoteEl = new Element("remote");
+        remoteEl.addContent(createElement("managerUrl", remote.getManagerUrl()));
+        remoteEl.addContent(createElement("username", remote.getUsername()));
+        remoteEl.addContent(createElement("useCredentials", String.valueOf(remote.isUseCredentials())));
+        root.addContent(remoteEl);
+
+        // CATALINA_BASE override
+        String catalinaBase = data.getCatalinaBase();
+        if (catalinaBase != null && !catalinaBase.isEmpty()) {
+            root.addContent(createElement("catalinaBase", catalinaBase));
+        }
 
         // JRE selection
         root.addContent(createElement("jreSelection", data.getJreSelection()));
@@ -246,12 +273,25 @@ public final class ConfigExportImport {
             browser.setOpenBrowser(getChildBool(browserEl, "afterLaunch", true));
             browser.setBrowserUrl(getChildText(browserEl, "url", ""));
             browser.setBrowserName(getChildText(browserEl, "name", ""));
+            browser.setWithJsDebugger(getChildBool(browserEl, "withJsDebugger", false));
         }
 
-        // Deployment artifacts
+        // Update actions
+        Element updateEl = root.getChild("updateActions");
+        if (updateEl != null) {
+            UpdateConfig update = data.getUpdateConfig();
+            update.setOnUpdate(getChildText(updateEl, "onUpdate", UpdateConfig.DEFAULT_ON_UPDATE));
+            update.setOnFrameDeactivation(getChildText(updateEl, "onFrameDeactivation", UpdateConfig.DEFAULT_ON_FRAME_DEACTIVATION));
+            update.setShowUpdateDialog(getChildBool(updateEl, "showUpdateDialog", true));
+            update.setShowFrameDeactivationDialog(getChildBool(updateEl, "showFrameDeactivationDialog", true));
+        }
+
+        // Deployment artifacts and settings
         Element deployEl = root.getChild("deployment");
         if (deployEl != null) {
             DeploymentConfig deployment = data.getDeploymentConfig();
+            deployment.setHotDeploymentEnabled(getChildBool(deployEl, "hotDeploymentEnabled", false));
+            deployment.setPreserveSessions(getChildBool(deployEl, "preserveSessions", false));
             List<DeploymentArtifact> artifacts = new ArrayList<>();
             for (Element artEl : deployEl.getChildren("artifact")) {
                 DeploymentArtifact artifact = new DeploymentArtifact();
@@ -262,6 +302,25 @@ public final class ConfigExportImport {
                 artifacts.add(artifact);
             }
             deployment.setArtifacts(artifacts);
+        }
+
+        // Remote config (password must be entered manually after import)
+        Element remoteEl = root.getChild("remote");
+        if (remoteEl != null) {
+            RemoteConfig remote = data.getRemoteConfig();
+            String managerUrl = getChildText(remoteEl, "managerUrl", "");
+            if (!managerUrl.isEmpty()) {
+                remote.setManagerUrl(managerUrl);
+            }
+            remote.setUsername(getChildText(remoteEl, "username", "admin"));
+            remote.setUseCredentials(getChildBool(remoteEl, "useCredentials", false));
+            // Password intentionally not imported — must be re-entered for security
+        }
+
+        // CATALINA_BASE override
+        String catalinaBase = getChildText(root, "catalinaBase", "");
+        if (!catalinaBase.isEmpty()) {
+            data.setCatalinaBase(catalinaBase);
         }
 
         // JRE selection

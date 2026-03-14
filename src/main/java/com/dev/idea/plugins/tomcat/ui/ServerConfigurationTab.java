@@ -105,6 +105,13 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         jreConfigurationSection = new JreConfigurationSection(project);
         tomcatSettingsSection = new TomcatSettingsSection(project);
 
+        // Wire HTTP port changes to auto-update the browser URL (only for auto-generated URLs)
+        tomcatSettingsSection.setPortChangeListener(port -> {
+            if (browserLaunchSection != null) {
+                browserLaunchSection.updateUrlPort(port);
+            }
+        });
+
         sharedSections.clear();
         sharedSections.add(applicationServerSection);
         sharedSections.add(browserLaunchSection);
