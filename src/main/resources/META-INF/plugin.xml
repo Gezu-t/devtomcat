@@ -245,4 +245,9 @@
         <listener class="com.dev.idea.plugins.tomcat.update.TomcatFrameDeactivationListener"
                   topic="com.intellij.openapi.application.ApplicationActivationListener"/>
     </applicationListeners>
+
+    <projectListeners>
+        <listener class="com.dev.idea.plugins.tomcat.service.TomcatConfigurationCleanupListener"
+                  topic="com.intellij.execution.RunManagerListener"/>
+    </projectListeners>
 </idea-plugin>

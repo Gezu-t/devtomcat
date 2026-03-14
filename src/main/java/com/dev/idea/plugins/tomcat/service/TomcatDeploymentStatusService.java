@@ -121,7 +121,9 @@ public final class TomcatDeploymentStatusService {
 
     public void onArtifactDeployed(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
-        s.artifactStates.put(artifactName, ArtifactState.DEPLOYED);
+        // Don't overwrite FAILED — an artifact that failed deployment stays failed
+        s.artifactStates.merge(artifactName, ArtifactState.DEPLOYED,
+                (existing, incoming) -> existing == ArtifactState.FAILED ? existing : incoming);
         refreshDashboard();
     }
 

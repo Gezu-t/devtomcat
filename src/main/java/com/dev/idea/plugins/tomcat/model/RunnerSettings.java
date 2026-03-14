@@ -23,9 +23,14 @@ public class RunnerSettings implements Serializable, Cloneable {
 
     private boolean useDefaultStartup = true;
     private String startupScript = "";
-    
+
     private boolean useDefaultShutdown = true;
     private String shutdownScript = "";
+
+    /** Remote debug connection host (used when server mode is Remote + Debug). */
+    @NotNull private String debugHost = "localhost";
+    /** Remote debug connection port (used when server mode is Remote + Debug). */
+    private int debugPort = 5005;
 
     @NotNull private Map<String, String> environmentVariables = new LinkedHashMap<>();
     @NotNull private Set<String> computedEnvironmentKeys = new LinkedHashSet<>();
@@ -40,6 +45,8 @@ public class RunnerSettings implements Serializable, Cloneable {
         this.startupScript = StringUtil.notNullize(other.startupScript);
         this.useDefaultShutdown = other.useDefaultShutdown;
         this.shutdownScript = StringUtil.notNullize(other.shutdownScript);
+        this.debugHost = StringUtil.notNullize(other.debugHost, "localhost");
+        this.debugPort = other.debugPort;
         this.environmentVariables = new LinkedHashMap<>(other.environmentVariables);
         this.computedEnvironmentKeys = new LinkedHashSet<>(other.computedEnvironmentKeys);
         this.deletedComputedEnvironmentKeys = new LinkedHashSet<>(other.deletedComputedEnvironmentKeys);
@@ -78,6 +85,23 @@ public class RunnerSettings implements Serializable, Cloneable {
 
     public void setShutdownScript(@Nullable String shutdownScript) {
         this.shutdownScript = StringUtil.notNullize(shutdownScript);
+    }
+
+    @NotNull
+    public String getDebugHost() {
+        return StringUtil.notNullize(debugHost, "localhost");
+    }
+
+    public void setDebugHost(@Nullable String debugHost) {
+        this.debugHost = StringUtil.notNullize(debugHost, "localhost");
+    }
+
+    public int getDebugPort() {
+        return debugPort;
+    }
+
+    public void setDebugPort(int debugPort) {
+        this.debugPort = debugPort > 0 ? debugPort : 5005;
     }
 
     @NotNull
@@ -128,8 +152,10 @@ public class RunnerSettings implements Serializable, Cloneable {
         return useDefaultStartup == that.useDefaultStartup &&
                 useDefaultShutdown == that.useDefaultShutdown &&
                 passParentEnvs == that.passParentEnvs &&
+                debugPort == that.debugPort &&
                 Objects.equals(startupScript, that.startupScript) &&
                 Objects.equals(shutdownScript, that.shutdownScript) &&
+                Objects.equals(debugHost, that.debugHost) &&
                 Objects.equals(environmentVariables, that.environmentVariables) &&
                 Objects.equals(computedEnvironmentKeys, that.computedEnvironmentKeys) &&
                 Objects.equals(deletedComputedEnvironmentKeys, that.deletedComputedEnvironmentKeys);
@@ -138,6 +164,7 @@ public class RunnerSettings implements Serializable, Cloneable {
     @Override
     public int hashCode() {
         return Objects.hash(useDefaultStartup, startupScript, useDefaultShutdown, shutdownScript,
+                debugHost, debugPort,
                 environmentVariables, computedEnvironmentKeys, deletedComputedEnvironmentKeys, passParentEnvs);
     }
 }

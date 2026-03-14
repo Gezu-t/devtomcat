@@ -281,7 +281,19 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private void analyzeOutput(@NotNull String text) {
-        pipeline.processLine(text, pipelineContext);
+        // ProcessEvent.getText() can deliver multiple lines in a single event
+        // (buffered output). Split and process each line individually so all
+        // analyzers (especially DeploymentAnalyzer) see every deployment message.
+        if (text.indexOf('\n') >= 0) {
+            for (String line : text.split("\n")) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty()) {
+                    pipeline.processLine(trimmed, pipelineContext);
+                }
+            }
+        } else {
+            pipeline.processLine(text, pipelineContext);
+        }
     }
 
     /**

@@ -41,13 +41,15 @@ import java.util.List;
  *
  * <p>Architecture:
  * <ul>
+ *   <li><b>Horizontal mode tabs</b> — Run | Debug | Cover | Profile, matching IntelliJ Ultimate layout.</li>
+ *   <li><b>Mode-aware content</b> — Local: startup/shutdown scripts + env vars.
+ *       Remote + Debug: host/port connection fields + env vars.
+ *       Remote + Run/Cover/Profile: env vars only.</li>
  *   <li><b>Computed defaults</b> — only JAVA_OPTS is auto-managed here, and only when
  *       VM options are defined on the Server tab.</li>
  *   <li><b>User ownership tracking</b> — Each env var is either "computed" (auto-managed) or
  *       "user-modified" (edited/added by the user). Computed vars auto-refresh when VM options
  *       or Tomcat server change; user-modified vars are never overwritten.</li>
- *   <li><b>Double-click edit</b> — Editing a computed var promotes it to user-modified.</li>
- *   <li><b>Reset Defaults</b> — Restores all computed defaults, clearing user modifications.</li>
  *   <li><b>Per-mode state</b> — Run/Debug/Coverage/Profile each have independent env var maps.</li>
  * </ul>
  */
@@ -68,8 +70,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     /** Computed env var keys, delegated to RuntimeEnvResolver. */
     private static final Set<String> COMPUTED_KEYS = RuntimeEnvResolver.COMPUTED_KEYS;
 
-    private JBList<String> modeList;
     private String selectedMode = RUN_MODE;
+    private final Map<String, JToggleButton> modeButtons = new LinkedHashMap<>();
+    private ButtonGroup modeButtonGroup;
+    private boolean remoteMode = false;
 
     private final Map<String, UIState> modeStates = new HashMap<>();
 
@@ -83,6 +87,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         boolean useDefaultShutdown = true;
         String shutdownScript = "";
         boolean passParentEnvs = true;
+        /** Remote debug host (only used in Remote + Debug mode). */
+        String debugHost = "localhost";
+        /** Remote debug port (only used in Remote + Debug mode). */
+        int debugPort = 5005;
         /** All env vars (computed + user). Insertion order preserved. */
         Map<String, String> envVars = new LinkedHashMap<>();
         /** Keys still auto-managed — refresh updates only these. */
@@ -91,6 +99,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         Set<String> deletedComputedKeys = new LinkedHashSet<>();
     }
 
+    // Script sections (local mode only)
     private JPanel startupSection;
     private JPanel shutdownSection;
     private TextFieldWithBrowseButton startupScriptField;
@@ -98,9 +107,18 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private JBCheckBox useDefaultStartupCB;
     private JBCheckBox useDefaultShutdownCB;
 
+    // Debug connection section (remote + debug mode only)
+    private JPanel debugConnectionSection;
+    private JBTextField debugHostField;
+    private JBTextField debugPortField;
+
+    // Env table
     private JBTable envTable;
     private DefaultTableModel envModel;
     private JBCheckBox passParentEnvsCB;
+
+    // Content panel that holds mode-specific sections
+    private JPanel contentPanel;
 
     public StartupConnectionTab(@NotNull Project project, @NotNull TomcatRunConfiguration configuration) {
         this.project = project;
@@ -122,28 +140,20 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
+        // Horizontal mode tab bar
         gbc.gridy = 0;
         gbc.weighty = 0;
-        gbc.fill = GridBagConstraints.BOTH;
         gbc.insets = JBUI.insets(0, 0, 10, 0);
-        mainPanel.add(createModeSelector(), gbc);
+        mainPanel.add(createModeTabBar(), gbc);
 
+        // Content panel with mode-specific sections
         gbc.gridy = 1;
-        gbc.weighty = 0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = JBUI.insets(4, 0);
-        startupSection = createStartupSection();
-        mainPanel.add(startupSection, gbc);
-
-        gbc.gridy = 2;
-        shutdownSection = createShutdownSection();
-        mainPanel.add(shutdownSection, gbc);
-
-        gbc.gridy = 3;
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
-        gbc.insets = JBUI.insets(10, 0, 0, 0);
-        mainPanel.add(createEnvSection(), gbc);
+        gbc.insets = JBUI.insets(0);
+        contentPanel = new JPanel(new GridBagLayout());
+        rebuildContentPanel();
+        mainPanel.add(contentPanel, gbc);
 
         JBScrollPane scrollPane = new JBScrollPane(mainPanel);
         scrollPane.setBorder(JBUI.Borders.empty());
@@ -151,47 +161,155 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         add(scrollPane, BorderLayout.CENTER);
     }
 
-    private JComponent createModeSelector() {
-        modeList = new JBList<>(ALL_MODES);
-        modeList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        modeList.setSelectedIndex(0);
-        modeList.setVisibleRowCount(ALL_MODES.length);
+    /**
+     * Creates a horizontal tab bar with toggle buttons for each mode (Run | Debug | Cover | Profile).
+     * Matches IntelliJ Ultimate's Startup/Connection tab layout.
+     */
+    private JComponent createModeTabBar() {
+        JPanel tabBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        tabBar.setBorder(JBUI.Borders.emptyBottom(4));
 
-        modeList.setCellRenderer(new com.intellij.ui.SimpleListCellRenderer<String>() {
-            @Override
-            public void customize(@NotNull JList<? extends String> list, String value, int index,
-                                  boolean selected, boolean hasFocus) {
-                setBorder(JBUI.Borders.empty(4, 8));
-                if (value != null) {
-                    switch (value) {
-                        case RUN_MODE -> setIcon(AllIcons.Actions.Execute);
-                        case DEBUG_MODE -> setIcon(AllIcons.Actions.StartDebugger);
-                        case COVERAGE_MODE -> {
-                            setIcon(AllIcons.General.RunWithCoverage);
-                            setText("Cover");
-                        }
-                        case PROFILE_MODE -> setIcon(AllIcons.Actions.ProfileCPU);
-                    }
+        modeButtonGroup = new ButtonGroup();
+
+        for (String mode : ALL_MODES) {
+            JToggleButton btn = new JToggleButton();
+            btn.setFocusPainted(false);
+            btn.setBorder(JBUI.Borders.empty(6, 14));
+            btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+            switch (mode) {
+                case RUN_MODE -> {
+                    btn.setText("Run");
+                    btn.setIcon(AllIcons.Actions.Execute);
+                }
+                case DEBUG_MODE -> {
+                    btn.setText("Debug");
+                    btn.setIcon(AllIcons.Actions.StartDebugger);
+                }
+                case COVERAGE_MODE -> {
+                    btn.setText("Cover");
+                    btn.setIcon(AllIcons.General.RunWithCoverage);
+                }
+                case PROFILE_MODE -> {
+                    btn.setText("Profile");
+                    btn.setIcon(AllIcons.Actions.ProfileCPU);
                 }
             }
-        });
 
-        modeList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                String newMode = modeList.getSelectedValue();
-                if (newMode != null && !newMode.equals(selectedMode)) {
+            btn.addActionListener(e -> {
+                if (!mode.equals(selectedMode)) {
                     saveCurrentState();
-                    selectedMode = newMode;
+                    selectedMode = mode;
+                    updateModeVisibility();
                     restoreCurrentState();
-                    LOG.debug("Mode switched to: " + newMode);
+                    LOG.debug("Mode switched to: " + mode);
                 }
-            }
-        });
+            });
 
-        JBScrollPane scrollPane = new JBScrollPane(modeList);
-        scrollPane.setPreferredSize(new Dimension(0, JBUI.scale(120)));
-        scrollPane.setMinimumSize(new Dimension(0, JBUI.scale(120)));
-        return scrollPane;
+            modeButtonGroup.add(btn);
+            modeButtons.put(mode, btn);
+            tabBar.add(btn);
+        }
+
+        // Select Run by default
+        modeButtons.get(RUN_MODE).setSelected(true);
+
+        return tabBar;
+    }
+
+    /**
+     * Rebuilds the content panel with all sections. Call once during init;
+     * visibility is controlled by updateModeVisibility().
+     */
+    private void rebuildContentPanel() {
+        contentPanel.removeAll();
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+
+        // Startup script section (local mode)
+        gbc.gridy = 0;
+        gbc.weighty = 0;
+        gbc.insets = JBUI.insets(4, 0);
+        startupSection = createStartupSection();
+        contentPanel.add(startupSection, gbc);
+
+        // Shutdown script section (local mode)
+        gbc.gridy = 1;
+        shutdownSection = createShutdownSection();
+        contentPanel.add(shutdownSection, gbc);
+
+        // Debug connection section (remote + debug mode)
+        gbc.gridy = 2;
+        debugConnectionSection = createDebugConnectionSection();
+        contentPanel.add(debugConnectionSection, gbc);
+
+        // Environment variables section (always visible)
+        gbc.gridy = 3;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = JBUI.insets(10, 0, 0, 0);
+        contentPanel.add(createEnvSection(), gbc);
+
+        updateModeVisibility();
+        contentPanel.revalidate();
+        contentPanel.repaint();
+    }
+
+    /**
+     * Creates the remote debug connection section with Host and Port fields.
+     * Shown only in Remote + Debug mode — the IDE connects to a remote JDWP agent.
+     */
+    private JPanel createDebugConnectionSection() {
+        JPanel p = new JPanel(new GridBagLayout());
+        p.setBorder(JBUI.Borders.emptyTop(4));
+        GridBagConstraints g = new GridBagConstraints();
+        g.anchor = GridBagConstraints.WEST;
+        g.insets = JBUI.insets(2);
+
+        // Section title
+        g.gridx = 0;
+        g.gridy = 0;
+        g.gridwidth = 4;
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.weightx = 1.0;
+        p.add(new TitledSeparator("Debug Connection"), g);
+
+        // Host
+        g.gridy = 1;
+        g.gridwidth = 1;
+        g.fill = GridBagConstraints.NONE;
+        g.weightx = 0;
+        g.insets = JBUI.insets(4, 4, 2, 4);
+        p.add(new JBLabel("Host:"), g);
+
+        g.gridx = 1;
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.weightx = 1.0;
+        g.insets = JBUI.insets(4, 4, 2, 16);
+        debugHostField = new JBTextField();
+        debugHostField.setText("localhost");
+        debugHostField.getEmptyText().setText("localhost");
+        p.add(debugHostField, g);
+
+        // Port
+        g.gridx = 2;
+        g.fill = GridBagConstraints.NONE;
+        g.weightx = 0;
+        g.insets = JBUI.insets(4, 4, 2, 4);
+        p.add(new JBLabel("Port:"), g);
+
+        g.gridx = 3;
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.weightx = 0.3;
+        g.insets = JBUI.insets(4, 4, 2, 4);
+        debugPortField = new JBTextField();
+        debugPortField.setText("5005");
+        debugPortField.getEmptyText().setText("5005");
+        p.add(debugPortField, g);
+
+        return p;
     }
 
     private JPanel createStartupSection() {
@@ -281,7 +399,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         // Computed defaults render in gray italic; user vars render normally
         envTable.setDefaultRenderer(Object.class, new ComputedVarCellRenderer());
 
-        // Double-click to edit (promotes computed → user-modified)
+        // Double-click to edit (promotes computed -> user-modified)
         envTable.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -374,24 +492,40 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     }
 
     // =========================================================================
-    // Remote Mode
+    // Mode Visibility
     // =========================================================================
 
     /**
+     * Updates section visibility based on current server mode (local/remote)
+     * and selected runner mode (Run/Debug/Cover/Profile).
+     *
+     * <ul>
+     *   <li><b>Local</b>: startup/shutdown scripts + env vars (all modes)</li>
+     *   <li><b>Remote + Debug</b>: debug connection (host/port) + env vars</li>
+     *   <li><b>Remote + Run/Cover/Profile</b>: env vars only</li>
+     * </ul>
+     */
+    private void updateModeVisibility() {
+        boolean showScripts = !remoteMode;
+        boolean showDebugConnection = remoteMode && DEBUG_MODE.equals(selectedMode);
+
+        if (startupSection != null) startupSection.setVisible(showScripts);
+        if (shutdownSection != null) shutdownSection.setVisible(showScripts);
+        if (debugConnectionSection != null) debugConnectionSection.setVisible(showDebugConnection);
+
+        if (contentPanel != null) {
+            contentPanel.revalidate();
+            contentPanel.repaint();
+        }
+    }
+
+    /**
      * Adjusts the tab content for remote vs local server mode.
-     * Remote mode hides startup/shutdown script sections because the remote
-     * server is already running — scripts are irrelevant.
-     * Environment variables are still shown (used for Manager API connection).
+     * Called by TomcatConfigurationEditor when the server mode changes.
      */
     public void setRemoteMode(boolean remote) {
-        if (startupSection != null) {
-            startupSection.setVisible(!remote);
-        }
-        if (shutdownSection != null) {
-            shutdownSection.setVisible(!remote);
-        }
-        revalidate();
-        repaint();
+        this.remoteMode = remote;
+        updateModeVisibility();
     }
 
     // =========================================================================
@@ -510,7 +644,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             envModel.setValueAt(newName, row, 0);
             envModel.setValueAt(v[1], row, 1);
 
-            // Editing promotes computed → user-modified (won't auto-refresh)
+            // Editing promotes computed -> user-modified (won't auto-refresh)
             UIState state = modeStates.get(selectedMode);
             if (state != null) {
                 state.computedKeys.remove(oldName);
@@ -649,13 +783,18 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
             state.passParentEnvs = runnerSettings.isPassParentEnvs();
 
+            // Remote debug connection settings
+            state.debugHost = runnerSettings.getDebugHost();
+            state.debugPort = runnerSettings.getDebugPort();
+
             initializeComputedEnvState(state, defaults, runnerSettings);
 
             modeStates.put(mode, state);
         }
 
         selectedMode = RUN_MODE;
-        modeList.setSelectedIndex(0);
+        modeButtons.get(RUN_MODE).setSelected(true);
+        updateModeVisibility();
         restoreCurrentState();
 
         LOG.debug("StartupConnectionTab reset: "
@@ -669,6 +808,18 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         state.useDefaultShutdown = useDefaultShutdownCB.isSelected();
         state.shutdownScript = shutdownScriptField.getText();
         state.passParentEnvs = passParentEnvsCB.isSelected();
+
+        // Save debug connection fields
+        if (debugHostField != null) {
+            state.debugHost = debugHostField.getText().trim();
+        }
+        if (debugPortField != null) {
+            try {
+                state.debugPort = Integer.parseInt(debugPortField.getText().trim());
+            } catch (NumberFormatException ignored) {
+                // Keep existing value
+            }
+        }
 
         state.envVars.clear();
         for (int i = 0; i < envModel.getRowCount(); i++) {
@@ -737,6 +888,14 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
         passParentEnvsCB.setSelected(state.passParentEnvs);
 
+        // Restore debug connection fields
+        if (debugHostField != null) {
+            debugHostField.setText(state.debugHost);
+        }
+        if (debugPortField != null) {
+            debugPortField.setText(String.valueOf(state.debugPort));
+        }
+
         envModel.setRowCount(0);
         state.envVars.forEach((k, v) -> envModel.addRow(new Object[]{k, v}));
     }
@@ -745,7 +904,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         saveCurrentState();
 
         // Scripts are only relevant for local mode — remote server is already running
-        boolean scriptsApplicable = startupSection != null && startupSection.isVisible();
+        boolean scriptsApplicable = !remoteMode;
 
         for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
             String mode = entry.getKey();
@@ -771,6 +930,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             } else {
                 runnerSettings.setShutdownScript(null);
             }
+
+            // Remote debug connection
+            runnerSettings.setDebugHost(state.debugHost);
+            runnerSettings.setDebugPort(state.debugPort);
 
             runnerSettings.setEnvironmentVariables(new LinkedHashMap<>(state.envVars));
             runnerSettings.setComputedEnvironmentKeys(new LinkedHashSet<>(state.computedKeys));

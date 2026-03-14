@@ -67,6 +67,8 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_STARTUP_SCRIPT = "startupScript";
     private static final String ATTR_USE_DEFAULT_SHUTDOWN = "useDefaultShutdown";
     private static final String ATTR_SHUTDOWN_SCRIPT = "shutdownScript";
+    private static final String ATTR_RUNNER_DEBUG_HOST = "debugHost";
+    private static final String ATTR_RUNNER_DEBUG_PORT = "debugPort_runner";
     private static final String TAG_COMPUTED_ENV_KEYS = "computedEnvKeys";
     private static final String TAG_DELETED_COMPUTED_ENV_KEYS = "deletedComputedEnvKeys";
     private static final String TAG_KEY = "key";
@@ -205,6 +207,8 @@ public class TomcatConfigurationSerializer {
         rsElem.setAttribute(ATTR_USE_DEFAULT_SHUTDOWN, String.valueOf(rs.isUseDefaultShutdown()));
         rsElem.setAttribute(ATTR_SHUTDOWN_SCRIPT, rs.getShutdownScript());
         rsElem.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(rs.isPassParentEnvs()));
+        rsElem.setAttribute(ATTR_RUNNER_DEBUG_HOST, rs.getDebugHost());
+        writeInt(rsElem, ATTR_RUNNER_DEBUG_PORT, rs.getDebugPort());
         writeEnvironmentVariables(rsElem, rs.getEnvironmentVariables());
         writeKeySet(rsElem, TAG_COMPUTED_ENV_KEYS, rs.getComputedEnvironmentKeys());
         writeKeySet(rsElem, TAG_DELETED_COMPUTED_ENV_KEYS, rs.getDeletedComputedEnvironmentKeys());
@@ -325,6 +329,9 @@ public class TomcatConfigurationSerializer {
             readBool(rsElem, ATTR_USE_DEFAULT_SHUTDOWN, rs::setUseDefaultShutdown);
             rs.setShutdownScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT)));
             readBool(rsElem, ATTR_PASS_PARENT_ENVS, rs::setPassParentEnvs);
+            String dbgHost = rsElem.getAttributeValue(ATTR_RUNNER_DEBUG_HOST);
+            if (dbgHost != null) rs.setDebugHost(dbgHost);
+            readInt(rsElem, ATTR_RUNNER_DEBUG_PORT, rs::setDebugPort);
             readEnvironmentVariables(rsElem, rs::setEnvironmentVariables);
             rs.setComputedEnvironmentKeys(readKeySet(rsElem, TAG_COMPUTED_ENV_KEYS));
             rs.setDeletedComputedEnvironmentKeys(readKeySet(rsElem, TAG_DELETED_COMPUTED_ENV_KEYS));

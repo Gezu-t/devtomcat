@@ -144,6 +144,15 @@ public final class TomcatOutputPipeline {
                 try {
                     long duration = Long.parseLong(m.group(1));
                     ctx.logger.logServerStartup(duration);
+
+                    // Mark all pending artifacts as deployed — if the server started
+                    // successfully, all artifacts that didn't explicitly fail are deployed.
+                    // This is resilient to Tomcat version differences in deployment log format.
+                    // Uses a Set to avoid duplicate notifications for multi-context artifacts.
+                    for (String artifactName : new java.util.LinkedHashSet<>(ctx.contextToArtifactName.values())) {
+                        ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
+                    }
+
                     ctx.lifecycleListener.onServerStarted(ctx.configName, duration);
                     ctx.onStartupDetected.accept(duration);
                     ctx.onPostStartup.run();

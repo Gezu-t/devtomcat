@@ -130,9 +130,6 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
             Project project = node.getProject();
             List<AbstractTreeNode<?>> children = new ArrayList<>();
 
-            // Server Configuration info node (expandable)
-            children.add(new TomcatServerInfoNode(project, tomcatConfig));
-
             // Deployment artifact nodes
             List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
                     .getDeploymentConfig().getArtifacts();
@@ -154,4 +151,5 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
             return null;
         }
     }
+
 }
