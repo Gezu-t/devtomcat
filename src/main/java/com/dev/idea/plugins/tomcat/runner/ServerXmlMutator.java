@@ -153,14 +153,21 @@ public final class ServerXmlMutator {
         for (int i = 0; i < connectors.getLength(); i++) {
             Element el = (Element) connectors.item(i);
             String protocol = el.getAttribute("protocol");
-            // HTTP/1.1 is the default protocol when no protocol attribute is specified
-            if (TomcatConstants.PROTOCOL_HTTP.equals(protocol) || protocol.isEmpty()) {
+            // Match HTTP connectors: explicit "HTTP/1.1", empty (default), or full
+            // class names like org.apache.coyote.http11.Http11NioProtocol / Http11Nio2Protocol
+            if (isHttpProtocol(protocol)) {
                 // Exclude connectors that are HTTPS (SSLEnabled or scheme=https)
                 if (isHttpsConnector(el)) continue;
                 return el;
             }
         }
         return null;
+    }
+
+    private static boolean isHttpProtocol(@NotNull String protocol) {
+        return protocol.isEmpty()
+                || TomcatConstants.PROTOCOL_HTTP.equals(protocol)
+                || protocol.startsWith("org.apache.coyote.http11.");
     }
 
     // --- HTTPS connector ---

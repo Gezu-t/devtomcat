@@ -237,15 +237,16 @@ class TomcatConfigPreparerTest {
         @DisplayName("returns warning when temp directory contains likely cache or lock state")
         void warnsWhenTempContainsPersistentState(@TempDir Path tempDir) throws IOException {
             Path catalinaBase = tempDir.resolve("base");
-            Path tempPath = catalinaBase.resolve("temp/wcc-local");
+            Path tempPath = catalinaBase.resolve("temp");
             Files.createDirectories(tempPath);
-            Files.writeString(tempPath.resolve("cache.lock"), "locked");
+            // Create an entry whose name matches a persistent-state pattern
+            Files.createDirectory(tempPath.resolve("ehcache-data"));
 
             List<String> warnings = TomcatConfigPreparer.inspectTempDirectory(catalinaBase);
 
             assertEquals(1, warnings.size());
             assertTrue(warnings.get(0).contains("possible persistent cache/state entries"));
-            assertTrue(warnings.get(0).contains("wcc-local"));
+            assertTrue(warnings.get(0).contains("ehcache-data"));
         }
 
         @Test

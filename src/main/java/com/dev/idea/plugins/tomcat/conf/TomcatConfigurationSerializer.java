@@ -97,9 +97,14 @@ public class TomcatConfigurationSerializer {
     private static final String TAG_COVERAGE = "coverageConfig";
     private static final String TAG_COVERAGE_INCLUDE = "include";
     private static final String TAG_COVERAGE_EXCLUDE = "exclude";
+    private static final String ATTR_DOC_BASE = "docBase";
+
     public static void write(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
         write(config.getConfigData(), element);
+        // docBase lives on TomcatRunConfiguration (not ConfigData) — used by
+        // TomcatRunConfigurationProducer to match configs to web roots.
+        element.setAttribute(ATTR_DOC_BASE, StringUtil.notNullize(config.getDocBase()));
     }
 
     public static void write(@NotNull TomcatConfigurationData data, @NotNull Element element) {
@@ -274,6 +279,11 @@ public class TomcatConfigurationSerializer {
     public static void read(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
         read(config.getConfigData(), element);
+        // Restore docBase (used by TomcatRunConfigurationProducer for config matching)
+        String docBase = element.getAttributeValue(ATTR_DOC_BASE);
+        if (docBase != null) {
+            config.setDocBase(docBase);
+        }
     }
 
     public static void read(@NotNull TomcatConfigurationData data, @NotNull Element element) {

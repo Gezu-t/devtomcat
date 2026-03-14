@@ -153,12 +153,15 @@ public final class TomcatConfigPreparer {
 
     private static boolean looksLikePersistentAppTempState(@NotNull Path path) {
         String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase() : "";
-        return Files.isDirectory(path)
-                || name.contains("lock")
+        // Only flag files/directories with names suggesting persistent state —
+        // not ALL directories, since Tomcat normally creates temp subdirectories.
+        return name.contains("lock")
                 || name.contains("cache")
                 || name.contains("ehcache")
                 || name.contains("liquibase")
-                || name.endsWith(".lck");
+                || name.contains("hazelcast")
+                || name.endsWith(".lck")
+                || name.endsWith(".pid");
     }
 
     @NotNull
