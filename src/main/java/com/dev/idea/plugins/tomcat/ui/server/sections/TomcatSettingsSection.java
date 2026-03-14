@@ -226,16 +226,19 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        Integer ajpPort = PortUtils.parsePort(ajpPortField.getText(), "AJP");
+        Integer httpPort = PortUtils.parsePort(httpPortField.getText(), "HTTP");
         Integer shutdownPort = PortUtils.parsePort(shutdownPortField.getText(), "Shutdown");
+        Integer httpsPort = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
+        Integer jmxPort = PortUtils.parsePort(jmxPortField.getText(), "JMX");
+        Integer ajpPort = PortUtils.parsePort(ajpPortField.getText(), "AJP");
 
         PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
-                .httpPort(PortUtils.parsePort(httpPortField.getText(), "HTTP"))
+                .httpPort(httpPort)
                 .shutdownPort(shutdownPort)
-                .httpsPort(PortUtils.parsePort(httpsPortField.getText(), "HTTPS"))
-                .httpsEnabled(PortUtils.parsePort(httpsPortField.getText(), "HTTPS") != null)
-                .jmxPort(PortUtils.parsePort(jmxPortField.getText(), "JMX"))
-                .jmxEnabled(PortUtils.parsePort(jmxPortField.getText(), "JMX") != null)
+                .httpsPort(httpsPort)
+                .httpsEnabled(httpsPort != null)
+                .jmxPort(jmxPort)
+                .jmxEnabled(jmxPort != null)
                 .ajpPort(ajpPort)
                 .ajpEnabled(ajpPort != null)
                 .build();

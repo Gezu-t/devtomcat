@@ -82,18 +82,9 @@ public class DeploymentTableManager {
     }
 
     private void fireSelectionChanged() {
-        updateDeployedFlags();
         if (selectionChangeListener != null) {
             DeploymentArtifact selected = deploymentList.getSelectedValue();
             selectionChangeListener.accept(selected != null ? selected.clone() : null);
-        }
-    }
-
-    private void updateDeployedFlags() {
-        // All artifacts in the deployment list are deployed at server startup.
-        // The selected row controls only which artifact's context path is shown in the editor.
-        for (int i = 0; i < listModel.getSize(); i++) {
-            listModel.getElementAt(i).setDeployed(true);
         }
     }
 
@@ -139,7 +130,8 @@ public class DeploymentTableManager {
             }
 
             // Auto-adjust context path if it collides with an existing artifact
-            String ctx = deployment.getApplicationContext();
+            String ctx = ContextPathUtils.normalizeContextPath(deployment.getApplicationContext());
+            deployment.setApplicationContext(ctx);
             if (isContextPathTaken(ctx, -1)) {
                 String base = ctx.endsWith("/") ? ctx.substring(0, ctx.length() - 1) : ctx;
                 for (int suffix = 2; suffix <= 99; suffix++) {

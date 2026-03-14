@@ -13,6 +13,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
@@ -133,11 +134,13 @@ public class TomcatJavaParametersBuilder {
             // Prepare catalina.base with directories and config files (after ports are resolved)
             prepareCatalinaBase(catalinaBase, catalinaHome, httpPort, shutdownPort, httpsPort, ajpPort);
 
+            Sdk jdk = resolveJdk();
+
             JavaParameters params = new JavaParameters();
-            setupBasicParameters(params, catalinaBase);
+            setupBasicParameters(params, catalinaBase, jdk);
             setupClasspath(params, catalinaHome);
             setupEnvironment(params);
-            setupVmOptions(params, catalinaBase, catalinaHome, httpPort, shutdownPort, jmxPort, httpsPort);
+            setupVmOptions(params, catalinaBase, catalinaHome, httpPort, shutdownPort, jmxPort, httpsPort, jdk);
             setupDeploymentArtifacts(params, catalinaBase);
 
             return params;
@@ -215,16 +218,30 @@ public class TomcatJavaParametersBuilder {
         }
     }
 
-    private void setupBasicParameters(@NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {
+    private void setupBasicParameters(@NotNull JavaParameters params, @NotNull Path catalinaBase, @NotNull Sdk jdk) {
         params.setDefaultCharset(project);
         params.setWorkingDirectory(catalinaBase.toFile());
-        params.setJdk(resolveJdk());
+        params.setJdk(jdk);
         params.setMainClass(TOMCAT_MAIN_CLASS);
         params.getProgramParametersList().add("start");
     }
 
     @NotNull
     private Sdk resolveJdk() throws ExecutionException {
+        Sdk sdk = resolveJdkOrNull(configuration, project);
+        if (sdk == null) {
+            throw new ExecutionException("No JDK configured for the project. Please configure a Project SDK in File → Project Structure.");
+        }
+        return sdk;
+    }
+
+    /**
+     * Resolves the JDK for a configuration, returning null if none is found.
+     * Shared between the builder (which throws on null) and
+     * {@link TomcatCommandLineState} (which passes null to the compatibility checker).
+     */
+    @Nullable
+    static Sdk resolveJdkOrNull(@NotNull TomcatRunConfiguration configuration, @NotNull Project project) {
         String jreSelection = configuration.getConfigData().getJreSelection();
         if (jreSelection != null
                 && !jreSelection.isEmpty()
@@ -236,11 +253,7 @@ public class TomcatJavaParametersBuilder {
             }
             LOG.warn("Configured JRE '" + jreSelection + "' not found, falling back to project SDK");
         }
-        Sdk sdk = ProjectRootManager.getInstance(project).getProjectSdk();
-        if (sdk == null) {
-            throw new ExecutionException("No JDK configured for the project. Please configure a Project SDK in File → Project Structure.");
-        }
-        return sdk;
+        return ProjectRootManager.getInstance(project).getProjectSdk();
     }
 
     private void setupClasspath(@NotNull JavaParameters params, @NotNull Path catalinaHome) {
@@ -273,7 +286,8 @@ public class TomcatJavaParametersBuilder {
                                 int httpPort,
                                 int shutdownPort,
                                 int jmxPort,
-                                int httpsPort) {
+                                int httpsPort,
+                                @NotNull Sdk jdk) {
         ParametersList vmParams = params.getVMParametersList();
 
         String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
@@ -301,13 +315,18 @@ public class TomcatJavaParametersBuilder {
             }
         }
 
-        // JDK 17+ module opens required by Tomcat (previously delivered via JDK_JAVA_OPTIONS env var)
-        configureModuleOpens(vmParams);
+        // JDK 9+ module opens required by Tomcat (previously delivered via JDK_JAVA_OPTIONS env var)
+        configureModuleOpens(vmParams, jdk);
 
         configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, httpPort, shutdownPort);
     }
 
-    private void configureModuleOpens(@NotNull ParametersList vmParams) {
+    private void configureModuleOpens(@NotNull ParametersList vmParams, @NotNull Sdk jdk) {
+        // --add-opens requires JDK 9+; passing these flags to JDK 8 crashes with "Unrecognized option"
+        JavaSdkVersion sdkVersion = JavaSdkVersion.fromVersionString(jdk.getVersionString());
+        if (sdkVersion == null || !sdkVersion.isAtLeast(JavaSdkVersion.JDK_1_9)) {
+            return;
+        }
         String[] moduleOpens = {
                 "--add-opens=java.base/java.lang=ALL-UNNAMED",
                 "--add-opens=java.base/java.io=ALL-UNNAMED",

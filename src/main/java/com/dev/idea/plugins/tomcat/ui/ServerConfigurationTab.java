@@ -262,6 +262,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         private final JPanel panel;
         private final JBTextField hostField;
         private final JBTextField portField;
+        private final JBCheckBox useHttpsCheck = new JBCheckBox("Use HTTPS");
         private final JBCheckBox useCredentialsCheck = new JBCheckBox("Use credentials");
         private final JBTextField usernameField;
         private final JPasswordField passwordField = new JPasswordField();
@@ -300,6 +301,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             panel.add(new JBLabel("Port:"), gbc);
             gbc.gridx = 1;
             panel.add(portField, gbc);
+
+            // HTTPS toggle
+            gbc.gridx = 0; gbc.gridy = ++y; gbc.gridwidth = 2;
+            panel.add(useHttpsCheck, gbc);
+            gbc.gridwidth = 1;
 
             // Credentials
             gbc.gridx = 0; gbc.gridy = ++y; gbc.gridwidth = 2;
@@ -358,10 +364,15 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             });
         }
 
-        private RemoteConfig buildCurrentRemoteConfig() {
+        private String buildManagerUrl() {
+            String protocol = useHttpsCheck.isSelected() ? "https" : "http";
             String host = hostField.getText().trim();
             String port = portField.getText().trim();
-            String managerUrl = "http://" + host + ":" + port + "/manager";
+            return protocol + "://" + host + ":" + port + "/manager";
+        }
+
+        private RemoteConfig buildCurrentRemoteConfig() {
+            String managerUrl = buildManagerUrl();
             return new RemoteConfig(
                     managerUrl,
                     usernameField.getText().trim(),
@@ -381,9 +392,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                         java.net.URL url = new java.net.URL(managerUrl);
                         hostField.setText(url.getHost());
                         portField.setText(String.valueOf(url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER));
+                        useHttpsCheck.setSelected("https".equalsIgnoreCase(url.getProtocol()));
                     } catch (Exception e) {
                         hostField.setText(TomcatConstants.DEFAULT_HOST);
                         portField.setText(TomcatConstants.DEFAULT_PORT);
+                        useHttpsCheck.setSelected(false);
                     }
                 }
                 useCredentialsCheck.setSelected(rc.isUseCredentials());
@@ -397,10 +410,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         void applyTo(TomcatRunConfiguration config) {
             RemoteConfig rc = config.getConfigData().getRemoteConfig();
             if (rc != null) {
-                String host = hostField.getText().trim();
-                String port = portField.getText().trim();
-                String managerUrl = "http://" + host + ":" + port + "/manager";
-                rc.setManagerUrl(managerUrl);
+                rc.setManagerUrl(buildManagerUrl());
                 rc.setUseCredentials(useCredentialsCheck.isSelected());
                 rc.setUsername(usernameField.getText().trim());
                 rc.setPassword(new String(passwordField.getPassword()));
@@ -427,6 +437,8 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 java.net.URL url = new java.net.URL(managerUrl);
                 String savedHost = url.getHost();
                 int savedPort = url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER;
+                boolean savedHttps = "https".equalsIgnoreCase(url.getProtocol());
+                if (useHttpsCheck.isSelected() != savedHttps) return true;
                 return !currentHost.equals(savedHost) || !currentPort.equals(String.valueOf(savedPort));
             } catch (Exception e) {
                 return true;

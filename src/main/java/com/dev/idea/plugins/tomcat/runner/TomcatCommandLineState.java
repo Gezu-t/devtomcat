@@ -24,9 +24,7 @@ import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NotNull;
@@ -178,13 +176,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     @Nullable
     private Sdk resolveJdk() {
-        String jreSelection = configuration.getConfigData().getJreSelection();
-        if (jreSelection != null && !jreSelection.isEmpty()
-                && !TomcatConstants.JRE_PROJECT_DEFAULT.equals(jreSelection)) {
-            Sdk sdk = ProjectJdkTable.getInstance().findJdk(jreSelection);
-            if (sdk != null) return sdk;
-        }
-        return ProjectRootManager.getInstance(configuration.getProject()).getProjectSdk();
+        return TomcatJavaParametersBuilder.resolveJdkOrNull(configuration, configuration.getProject());
     }
 
     private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {

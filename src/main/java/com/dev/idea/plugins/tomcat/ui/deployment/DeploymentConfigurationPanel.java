@@ -224,11 +224,32 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         config.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
     }
 
+    public boolean isModified(@NotNull TomcatRunConfiguration config) {
+        List<DeploymentArtifact> currentArtifacts = tableManager.getDeployments();
+        List<DeploymentArtifact> savedArtifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
+
+        if (currentArtifacts.size() != savedArtifacts.size()) return true;
+
+        for (int i = 0; i < currentArtifacts.size(); i++) {
+            DeploymentArtifact current = currentArtifacts.get(i);
+            DeploymentArtifact saved = savedArtifacts.get(i);
+            if (!java.util.Objects.equals(current.getName(), saved.getName())) return true;
+            if (!java.util.Objects.equals(current.getPath(), saved.getPath())) return true;
+            if (!java.util.Objects.equals(current.getContextPath(), saved.getContextPath())) return true;
+            if (!java.util.Objects.equals(current.getType(), saved.getType())) return true;
+        }
+        return false;
+    }
+
     public boolean isConfigurationValid() {
-        // Artifacts are optional, but if present they must have valid paths
+        java.util.Set<String> seenContextPaths = new java.util.HashSet<>();
         for (DeploymentArtifact d : tableManager.getDeployments()) {
             if (d.getPath() == null || d.getPath().trim().isEmpty()) {
                 return false;
+            }
+            String ctx = d.getContextPath();
+            if (ctx != null && !seenContextPaths.add(ctx)) {
+                return false; // duplicate context path
             }
         }
         return true;

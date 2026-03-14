@@ -231,7 +231,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
         List<DeploymentArtifact> artifacts = configuration.getConfigData()
                 .getDeploymentConfig().getDeployedArtifacts();
-        expectedArtifactCount = Math.max(artifacts.size(), 1);
+        expectedArtifactCount = artifacts.size();
         if (artifacts.isEmpty()) {
             deploymentLogger.logDeploymentStart(configurationName);
         } else {
