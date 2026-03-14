@@ -185,6 +185,44 @@
             <add-to-group group-id="ServiceViewItemPopup" anchor="first"/>
         </action>
 
+        <!-- Services tool window context menu: lifecycle actions -->
+        <group id="DevTomcat.ServiceLifecycleGroup">
+            <separator/>
+            <action id="DevTomcat.Service.Start"
+                    class="com.dev.idea.plugins.tomcat.action.StartTomcatAction"
+                    text="Start Tomcat"
+                    description="Start this Tomcat configuration"
+                    icon="AllIcons.Actions.Execute"/>
+            <action id="DevTomcat.Service.Stop"
+                    class="com.dev.idea.plugins.tomcat.action.StopTomcatAction"
+                    text="Stop Tomcat"
+                    description="Stop the running Tomcat server"
+                    icon="AllIcons.Actions.Suspend"/>
+            <action id="DevTomcat.Service.Restart"
+                    class="com.dev.idea.plugins.tomcat.action.RestartTomcatAction"
+                    text="Restart Tomcat"
+                    description="Restart the running Tomcat server"
+                    icon="AllIcons.Actions.Restart"/>
+            <action id="DevTomcat.Service.Redeploy"
+                    class="com.dev.idea.plugins.tomcat.action.RedeployTomcatAction"
+                    text="Redeploy"
+                    description="Build and redeploy artifacts to the running Tomcat"
+                    icon="AllIcons.Nodes.Deploy"/>
+            <separator/>
+            <action id="DevTomcat.Service.DeploymentHistory"
+                    class="com.dev.idea.plugins.tomcat.action.ServiceDeploymentHistoryAction"
+                    text="Deployment History"
+                    description="View deployment history and statistics"
+                    icon="AllIcons.Vcs.History"/>
+            <action id="DevTomcat.Service.StartupTrends"
+                    class="com.dev.idea.plugins.tomcat.action.ServiceStartupTrendsAction"
+                    text="Startup Time Trends"
+                    description="View startup time trends across configurations"
+                    icon="AllIcons.Actions.Profile"/>
+            <add-to-group group-id="ServiceViewItemPopup" anchor="last"/>
+        </group>
+
+        <!-- Tools menu group -->
         <group id="DevTomcat.ToolsMenu" text="DevTomcat" popup="true"
                icon="AllIcons.Nodes.Deploy">
             <add-to-group group-id="ToolsMenu" anchor="last"/>

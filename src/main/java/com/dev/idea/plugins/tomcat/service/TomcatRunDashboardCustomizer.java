@@ -127,23 +127,27 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
         }
 
         try {
+            Project project = node.getProject();
+            List<AbstractTreeNode<?>> children = new ArrayList<>();
+
+            // Server Configuration info node (expandable)
+            children.add(new TomcatServerInfoNode(project, tomcatConfig));
+
+            // Deployment artifact nodes
             List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
                     .getDeploymentConfig().getArtifacts();
-            if (artifacts == null || artifacts.isEmpty()) {
-                return null;
-            }
+            if (artifacts != null) {
+                Integer httpPort = tomcatConfig.getHttpPort();
+                int port = httpPort != null ? httpPort : 8080;
+                String configName = tomcatConfig.getName();
 
-            Project project = node.getProject();
-            Integer httpPort = tomcatConfig.getHttpPort();
-            int port = httpPort != null ? httpPort : 8080;
-            String configName = tomcatConfig.getName();
-
-            List<AbstractTreeNode<?>> children = new ArrayList<>(artifacts.size());
-            for (DeploymentArtifact artifact : artifacts) {
-                if (artifact != null) {
-                    children.add(new TomcatDeploymentNode(project, artifact, port, configName));
+                for (DeploymentArtifact artifact : artifacts) {
+                    if (artifact != null) {
+                        children.add(new TomcatDeploymentNode(project, artifact, port, configName));
+                    }
                 }
             }
+
             return children.isEmpty() ? null : children;
         } catch (Exception e) {
             LOG.debug("Error getting deployment children", e);
