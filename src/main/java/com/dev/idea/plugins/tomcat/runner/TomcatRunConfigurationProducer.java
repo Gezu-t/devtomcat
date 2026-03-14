@@ -279,8 +279,8 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             contextPath = "/" + contextPath;
         }
 
-        // Professional validation and cleaning
-        contextPath = contextPath.replaceAll("[^a-zA-Z0-9/_-]", "");
+        // Professional validation and cleaning (preserve dots for paths like /api.v2)
+        contextPath = contextPath.replaceAll("[^a-zA-Z0-9/_.~-]", "");
 
         if (contextPath.equals("/")) {
             LOG.debug("Tomcat: Using root context path for deployment");
@@ -475,23 +475,28 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     }
 
     /**
-     * Check for Spring Boot indicators in Java directory
+     * Check for Spring Boot indicators in Java directory.
+     * Limits recursion depth to avoid scanning very deep source trees on the EDT.
      */
     private boolean hasSpringBootIndicators(@NotNull VirtualFile directory) {
+        return hasSpringBootIndicators(directory, 0);
+    }
+
+    private static final int MAX_SPRING_SCAN_DEPTH = 5;
+
+    private boolean hasSpringBootIndicators(@NotNull VirtualFile directory, int depth) {
+        if (depth > MAX_SPRING_SCAN_DEPTH) return false;
         VirtualFile[] children = directory.getChildren();
 
         for (VirtualFile child : children) {
             if (child.isDirectory()) {
-                if (hasSpringBootIndicators(child)) {
+                if (hasSpringBootIndicators(child, depth + 1)) {
                     return true;
                 }
             } else if (child.getName().endsWith(".java")) {
-                // Professional Spring Boot class name patterns
                 String fileName = child.getName();
                 if (fileName.contains("Application") ||
-                        fileName.contains("SpringBoot") ||
-                        fileName.endsWith("App.java") ||
-                        fileName.endsWith("Main.java")) {
+                        fileName.contains("SpringBoot")) {
                     return true;
                 }
             }
