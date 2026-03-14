@@ -289,8 +289,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             deploymentTableManager = tableManager;
             LOG.info("DevTomcat: ArtifactSelectionHandler created");
 
-            // Wire deployment changes to update browser URL on Server tab
+            // Wire deployment changes to update browser URL on Server tab.
+            // Guard with isEventsSuppressed() so bulk resetFrom() loading does NOT
+            // overwrite the user's saved custom URL with auto-generated context paths.
             tableManager.setDeploymentChangeListener(contextPath -> {
+                if (isEventsSuppressed()) return;
                 if (serverTab != null) {
                     serverTab.updateBrowserUrlContext(contextPath);
                 }
