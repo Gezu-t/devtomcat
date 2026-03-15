@@ -176,6 +176,7 @@ public final class TomcatDeploymentStatusService {
     public void onServerStopped(@NotNull String configName, int exitCode) {
         ConfigStatus s = getOrCreate(configName);
         s.serverState = exitCode == 0 ? ServerState.STOPPED : ServerState.FAILED;
+        s.artifactStates.clear();
         refreshDashboard();
     }
 

@@ -4,13 +4,9 @@ import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.diagnostic.Logger;
-import org.jdom.Document;
+import com.intellij.openapi.util.JDOMUtil;
 import org.jdom.Element;
-import org.jdom.input.SAXBuilder;
-import org.jdom.output.Format;
-import org.jdom.output.XMLOutputter;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -166,9 +162,7 @@ public final class ConfigExportImport {
         // JRE selection
         root.addContent(createElement("jreSelection", data.getJreSelection()));
 
-        // Format output
-        XMLOutputter outputter = new XMLOutputter(Format.getPrettyFormat());
-        return outputter.outputString(new Document(root));
+        return JDOMUtil.writeElement(root);
     }
 
     /**
@@ -201,12 +195,7 @@ public final class ConfigExportImport {
      */
     @NotNull
     public static TomcatConfigurationData importFromXml(@NotNull String xml) throws Exception {
-        SAXBuilder builder = new SAXBuilder();
-        builder.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        builder.setFeature("http://xml.org/sax/features/external-general-entities", false);
-        builder.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-        Document doc = builder.build(new StringReader(xml));
-        Element root = doc.getRootElement();
+        Element root = JDOMUtil.load(new StringReader(xml));
 
         if (!ROOT_ELEMENT.equals(root.getName())) {
             throw new IllegalArgumentException(
