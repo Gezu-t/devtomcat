@@ -7,6 +7,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.openapi.progress.ProgressIndicator;
+
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -56,6 +58,15 @@ public final class TomcatManagerDeployer {
      * @return true if deployment succeeded
      */
     public boolean deploy(@NotNull DeploymentArtifact artifact, @Nullable TomcatDeploymentLogger logger) {
+        return deploy(artifact, logger, null);
+    }
+
+    /**
+     * Deploys with optional progress reporting for WAR uploads.
+     */
+    public boolean deploy(@NotNull DeploymentArtifact artifact,
+                          @Nullable TomcatDeploymentLogger logger,
+                          @Nullable ProgressIndicator indicator) {
         String contextPath = normalizeContextPath(artifact.getContextPath());
         log(logger, "Deploying '" + artifact.getDisplayName() + "' to " + contextPath + " ...");
 
@@ -64,7 +75,7 @@ public final class TomcatManagerDeployer {
             undeploy(contextPath, null);
 
             if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
-                return deployWarViaPut(artifact, contextPath, logger);
+                return deployWarViaPut(artifact, contextPath, logger, indicator);
             } else {
                 return deployExplodedViaPath(artifact, contextPath, logger);
             }
@@ -169,7 +180,8 @@ public final class TomcatManagerDeployer {
      */
     private boolean deployWarViaPut(@NotNull DeploymentArtifact artifact,
                                      @NotNull String contextPath,
-                                     @Nullable TomcatDeploymentLogger logger) throws IOException {
+                                     @Nullable TomcatDeploymentLogger logger,
+                                     @Nullable ProgressIndicator indicator) throws IOException {
         Path warFile = Path.of(artifact.getPath());
         if (!Files.exists(warFile)) {
             logError(logger, "WAR file not found: " + artifact.getPath());
@@ -178,6 +190,11 @@ public final class TomcatManagerDeployer {
 
         long fileSize = Files.size(warFile);
         log(logger, "Uploading WAR (" + formatSize(fileSize) + ") via PUT...");
+        if (indicator != null) {
+            indicator.setText("Uploading " + artifact.getDisplayName());
+            indicator.setIndeterminate(false);
+            indicator.setFraction(0.0);
+        }
 
         String url = getManagerUrl() + TEXT_ENDPOINT + "/deploy?path=" + contextPath + "&update=true";
         HttpURLConnection conn = openConnection(url);
@@ -190,11 +207,26 @@ public final class TomcatManagerDeployer {
             try (OutputStream out = conn.getOutputStream();
                  InputStream in = Files.newInputStream(warFile)) {
                 byte[] buffer = new byte[8192];
+                long uploaded = 0;
                 int read;
                 while ((read = in.read(buffer)) != -1) {
+                    if (indicator != null && indicator.isCanceled()) {
+                        logError(logger, "Upload cancelled by user");
+                        return false;
+                    }
                     out.write(buffer, 0, read);
+                    uploaded += read;
+                    if (indicator != null && fileSize > 0) {
+                        indicator.setFraction((double) uploaded / fileSize);
+                        indicator.setText2(formatSize(uploaded) + " / " + formatSize(fileSize));
+                    }
                 }
                 out.flush();
+            }
+
+            if (indicator != null) {
+                indicator.setText2("Waiting for server response...");
+                indicator.setIndeterminate(true);
             }
 
             String response = readResponse(conn);

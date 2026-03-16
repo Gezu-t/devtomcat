@@ -277,8 +277,6 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
         Path webappsDir = catalinaBase.resolve(DIR_WEBAPPS);
         Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
-        boolean hotDeploy = configuration.getConfigData()
-                .getDeploymentConfig().isHotDeploymentEnabled();
         boolean preserveSessions = configuration.getConfigData()
                 .getDeploymentConfig().isPreserveSessions();
 
@@ -296,7 +294,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     Path contextFile = contextXmlDir.resolve(contextName + ".xml");
                     String contextXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                             + "<Context docBase=\"" + escapeXmlAttribute(artifact.getPath())
-                            + "\" reloadable=\"" + hotDeploy + "\">"
+                            + "\" reloadable=\"false\">"
                             + (preserveSessions ? "\n  <Manager pathname=\"SESSIONS.ser\" />" : "")
                             + "\n</Context>\n";
                     Files.writeString(contextFile, contextXml);

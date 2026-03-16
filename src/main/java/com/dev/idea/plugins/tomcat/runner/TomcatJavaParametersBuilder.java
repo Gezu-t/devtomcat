@@ -58,6 +58,7 @@ public class TomcatJavaParametersBuilder {
     private final Project project;
     private final ExecutionEnvironment environment;
     private boolean debugMode = false;
+    private int resolvedDebugPort = -1;
     private PortConfig resolvedPorts;
     private TomcatDeploymentLogger deploymentLogger;
 
@@ -70,6 +71,11 @@ public class TomcatJavaParametersBuilder {
 
     public TomcatJavaParametersBuilder setDebugMode(boolean debugMode) {
         this.debugMode = debugMode;
+        return this;
+    }
+
+    public TomcatJavaParametersBuilder setResolvedDebugPort(int resolvedDebugPort) {
+        this.resolvedDebugPort = resolvedDebugPort;
         return this;
     }
 
@@ -303,15 +309,22 @@ public class TomcatJavaParametersBuilder {
             configureHttps(vmParams, httpsPort);
         }
 
-        if (debugMode) {
-            String existingVmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
-            if (existingVmOptions == null || !existingVmOptions.contains("-agentlib:jdwp")) {
-                var debugConfig = configuration.getConfigData().getDebugConfig();
-                if (debugConfig != null && debugConfig.isValid()) {
-                    String jdwpArg = debugConfig.getDebugVmArgument();
-                    vmParams.add(jdwpArg);
-                    LOG.info("Debug mode enabled: " + jdwpArg);
+        // In debug mode, add the JDWP agent so Tomcat listens for debugger connections.
+        // TomcatDebugger.doExecute() creates a matching RemoteConnection so IntelliJ
+        // knows where to attach. If the debug port was auto-resolved (conflict detected),
+        // we use the resolved port and update the config so TomcatDebugger reads the same value.
+        if (debugMode && !hasJdwpAgent(vmParams, configuration)) {
+            var debugConfig = configuration.getConfigData().getDebugConfig();
+            if (debugConfig != null && debugConfig.isValid()) {
+                if (resolvedDebugPort > 0 && resolvedDebugPort != debugConfig.getPort()) {
+                    debugConfig.setPort(resolvedDebugPort);
+                    LOG.info("Debug port updated to resolved port: " + resolvedDebugPort);
                 }
+                String jdwpArg = debugConfig.getDebugVmArgument();
+                vmParams.add(jdwpArg);
+                LOG.info("Debug mode: JDWP agent added — " + jdwpArg);
+            } else {
+                LOG.warn("Debug mode requested but no valid DebugConfig — debugger may not attach");
             }
         }
 
@@ -319,6 +332,20 @@ public class TomcatJavaParametersBuilder {
         configureModuleOpens(vmParams, jdk);
 
         configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, httpPort, shutdownPort);
+    }
+
+    /**
+     * Checks whether a JDWP agent is already present — either in the builder's
+     * VM parameters or in user-supplied VM options from the configuration.
+     */
+    private static boolean hasJdwpAgent(@NotNull ParametersList vmParams,
+                                         @NotNull TomcatRunConfiguration config) {
+        // Check params already added by the builder
+        String paramString = vmParams.getParametersString();
+        if (paramString.contains("-agentlib:jdwp")) return true;
+        // Check user-configured VM options
+        String userVmOptions = config.getConfigData().getVmConfig().getVmOptions();
+        return userVmOptions != null && userVmOptions.contains("-agentlib:jdwp");
     }
 
     private void configureModuleOpens(@NotNull ParametersList vmParams, @NotNull Sdk jdk) {

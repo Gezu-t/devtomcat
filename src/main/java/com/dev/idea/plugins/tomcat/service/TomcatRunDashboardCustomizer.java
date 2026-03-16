@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.service;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.utils.DashboardCompat;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.dashboard.RunDashboardCustomizer;
@@ -40,7 +41,7 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
     @Override
     public boolean updatePresentation(@NotNull PresentationData presentation,
                                       @NotNull RunDashboardRunConfigurationNode node) {
-        RunConfiguration config = node.getConfigurationSettings().getConfiguration();
+        RunConfiguration config = DashboardCompat.getConfiguration(node);
         if (!(config instanceof TomcatRunConfiguration tomcatConfig)) {
             return false;
         }
@@ -121,7 +122,7 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
     @Override
     public @Nullable Collection<? extends AbstractTreeNode<?>> getChildren(
             @NotNull RunDashboardRunConfigurationNode node) {
-        RunConfiguration config = node.getConfigurationSettings().getConfiguration();
+        RunConfiguration config = DashboardCompat.getConfiguration(node);
         if (!(config instanceof TomcatRunConfiguration tomcatConfig)) {
             return null;
         }

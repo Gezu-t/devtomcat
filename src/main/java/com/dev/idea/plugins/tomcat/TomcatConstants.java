@@ -28,7 +28,8 @@ public final class TomcatConstants {
     public static final String JDWP_TRANSPORT_SOCKET = "dt_socket";
     public static final String JDWP_TRANSPORT_SHMEM = "dt_shmem";
     /** JDWP connection format: transport, server mode, suspend policy, address. Args: transport name, port. */
-    public static final String JDWP_CONNECTION_FORMAT = "%s,server=y,suspend=n,address=%d";
+    /** JDK 9+ requires {@code *:port} to listen on all interfaces (not just localhost). */
+    public static final String JDWP_CONNECTION_FORMAT = "%s,server=y,suspend=n,address=*:%d";
     public static final String JDWP_AGENT_PREFIX = "-agentlib:jdwp=transport=";
 
     // --- Browser Defaults ---

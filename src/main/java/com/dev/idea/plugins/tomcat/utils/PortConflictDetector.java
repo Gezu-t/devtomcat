@@ -212,6 +212,52 @@ public final class PortConflictDetector {
     }
 
     /**
+     * Resolves port conflicts including the JDWP debug port.
+     * The debug port is checked for external conflicts and internal collisions
+     * with the Tomcat service ports. Returns the resolved debug port.
+     *
+     * @param portConfig the Tomcat port configuration
+     * @param debugPort  the configured JDWP debug port (e.g. 5005)
+     * @return resolution result; call {@link DebugPortResolution#getDebugPort()} for the resolved port
+     */
+    @NotNull
+    public static DebugPortResolution resolveConflictsWithDebug(@NotNull PortConfig portConfig, int debugPort) {
+        PortResolution baseResolution = resolveConflicts(portConfig);
+        PortConfig resolved = baseResolution.getResolvedConfig();
+        List<String> changes = new ArrayList<>(baseResolution.getChanges());
+
+        // Collect all allocated Tomcat ports so the debug port doesn't collide
+        Set<Integer> allocated = new LinkedHashSet<>();
+        allocated.add(resolved.getHttp());
+        allocated.add(resolved.getShutdown());
+        if (resolved.isHttpsEnabled()) allocated.add(resolved.getHttps());
+        if (resolved.isJmxEnabled()) allocated.add(resolved.getJmx());
+        if (resolved.isAjpEnabled()) allocated.add(resolved.getAjp());
+
+        int resolvedDebugPort = resolvePort("Debug (JDWP)", debugPort, allocated, changes);
+
+        return new DebugPortResolution(new PortResolution(resolved, changes), resolvedDebugPort);
+    }
+
+    /**
+     * Resolution result that includes both Tomcat ports and the debug port.
+     */
+    public static final class DebugPortResolution {
+        private final PortResolution base;
+        private final int debugPort;
+
+        DebugPortResolution(@NotNull PortResolution base, int debugPort) {
+            this.base = base;
+            this.debugPort = debugPort;
+        }
+
+        @NotNull public PortConfig getResolvedConfig() { return base.getResolvedConfig(); }
+        @NotNull public List<String> getChanges() { return base.getChanges(); }
+        public boolean hasChanges() { return base.hasChanges(); }
+        public int getDebugPort() { return debugPort; }
+    }
+
+    /**
      * Resolves a single port: checks for internal conflicts (duplicate among our own services)
      * and external conflicts (port in use by another process).
      */

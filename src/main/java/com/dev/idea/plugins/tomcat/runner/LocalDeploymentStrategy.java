@@ -136,7 +136,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.append("<Context docBase=\"").append(escapeXmlAttribute(artifactPath.toString()));
-        xml.append("\" reloadable=\"").append(hotDeploy).append("\">");
+        // Always set reloadable="false". Tomcat's background class-modification scanner
+        // (WebappLoader.backgroundProcess) runs every 10 seconds when reloadable="true" and
+        // throws NoSuchFileException for any JARs removed from ~/.m2/repository (e.g. after
+        // mvn clean or version upgrades), flooding catalina.log with stack traces.
+        // Updates are handled by TomcatApplicationUpdater (Ctrl+F10) which is more reliable.
+        xml.append("\" reloadable=\"false\">");
 
         if (preserveSessions) {
             xml.append("\n  <Manager pathname=\"SESSIONS.ser\" />");

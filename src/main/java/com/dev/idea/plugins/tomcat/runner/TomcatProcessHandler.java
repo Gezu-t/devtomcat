@@ -342,37 +342,49 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             return;
         }
 
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            // Belt-and-suspenders: resolve credentials again on pooled thread
-            // in case the pre-launch resolution in TomcatCommandLineState was skipped
-            CredentialResolver.ensureResolved(remoteConfig);
+        com.intellij.openapi.progress.ProgressManager.getInstance().run(
+            new com.intellij.openapi.progress.Task.Backgroundable(
+                    configuration.getProject(), "Deploying to Remote Tomcat", true) {
+                @Override
+                public void run(@NotNull com.intellij.openapi.progress.ProgressIndicator indicator) {
+                    CredentialResolver.ensureResolved(remoteConfig);
 
-            TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
+                    TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
 
-            // Test connectivity first
-            String error = deployer.testConnection();
-            if (error != null) {
-                deploymentLogger.logServerError("Remote connection failed: " + error);
-                return;
-            }
+                    indicator.setText("Testing remote connection...");
+                    String error = deployer.testConnection();
+                    if (error != null) {
+                        deploymentLogger.logServerError("Remote connection failed: " + error);
+                        return;
+                    }
 
-            List<DeploymentArtifact> artifacts = configuration.getConfigData()
-                    .getDeploymentConfig().getDeployedArtifacts();
-            int successCount = 0;
-            for (DeploymentArtifact artifact : artifacts) {
-                if (artifact == null || !artifact.isValid()) continue;
-                lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
-                boolean ok = deployer.deploy(artifact, deploymentLogger);
-                if (ok) {
-                    successCount++;
-                    lifecycleListener.onArtifactDeployed(configurationName, artifact.getDisplayName());
-                } else {
-                    lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
+                    List<DeploymentArtifact> artifacts = configuration.getConfigData()
+                            .getDeploymentConfig().getDeployedArtifacts();
+                    int successCount = 0;
+                    int total = artifacts.size();
+                    for (int i = 0; i < total; i++) {
+                        DeploymentArtifact artifact = artifacts.get(i);
+                        if (artifact == null || !artifact.isValid()) continue;
+                        if (indicator.isCanceled()) {
+                            deploymentLogger.logServerWarning("Remote deployment cancelled by user");
+                            return;
+                        }
+                        indicator.setText("Deploying " + artifact.getDisplayName() + " (" + (i + 1) + "/" + total + ")");
+                        indicator.setFraction((double) i / total);
+                        lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
+                        boolean ok = deployer.deploy(artifact, deploymentLogger, indicator);
+                        if (ok) {
+                            successCount++;
+                            lifecycleListener.onArtifactDeployed(configurationName, artifact.getDisplayName());
+                        } else {
+                            lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
+                        }
+                    }
+                    indicator.setFraction(1.0);
+                    deploymentLogger.logServerInfo("Remote deployment complete: " +
+                            successCount + "/" + total + " artifact(s) deployed");
                 }
-            }
-            deploymentLogger.logServerInfo("Remote deployment complete: " +
-                    successCount + "/" + artifacts.size() + " artifact(s) deployed");
-        });
+            });
     }
 
     private void launchBrowserIfEnabled() {

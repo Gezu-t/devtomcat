@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.utils.DashboardCompat;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.RunConfiguration;
@@ -103,7 +104,7 @@ final class ServiceActionUtils {
         if (obj == null) return null;
 
         if (obj instanceof RunDashboardRunConfigurationNode node) {
-            RunConfiguration rc = node.getConfigurationSettings().getConfiguration();
+            RunConfiguration rc = DashboardCompat.getConfiguration(node);
             if (rc instanceof TomcatRunConfiguration tomcat) return tomcat;
         }
 

@@ -44,6 +44,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private final TomcatRunConfiguration configuration;
     private final TomcatDeploymentLogger deploymentLogger;
     private volatile PortConfig resolvedPorts;
+    private volatile int resolvedDebugPort = -1;
     private final java.util.concurrent.atomic.AtomicBoolean preLaunchDone = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
@@ -66,6 +67,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 .setDeploymentLogger(deploymentLogger);
         if (resolvedPorts != null) {
             builder.setResolvedPorts(resolvedPorts);
+        }
+        if (resolvedDebugPort > 0) {
+            builder.setResolvedDebugPort(resolvedDebugPort);
         }
         return builder.build();
     }
@@ -105,21 +109,45 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     private void resolvePortConflicts() {
         PortConfig originalPorts = configuration.getConfigData().getPortConfig();
-        PortConflictDetector.PortResolution resolution =
-                PortConflictDetector.resolveConflicts(originalPorts);
 
-        this.resolvedPorts = resolution.getResolvedConfig();
+        boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
+                getEnvironment().getExecutor().getId());
 
-        if (resolution.hasChanges()) {
+        if (isDebug) {
+            var debugConfig = configuration.getConfigData().getDebugConfig();
+            int debugPort = debugConfig != null ? debugConfig.getPort()
+                    : com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT;
+
+            PortConflictDetector.DebugPortResolution resolution =
+                    PortConflictDetector.resolveConflictsWithDebug(originalPorts, debugPort);
+            this.resolvedPorts = resolution.getResolvedConfig();
+            this.resolvedDebugPort = resolution.getDebugPort();
+            logResolutionChanges(resolution.getChanges());
+        } else {
+            PortConflictDetector.PortResolution resolution =
+                    PortConflictDetector.resolveConflicts(originalPorts);
+            this.resolvedPorts = resolution.getResolvedConfig();
+            logResolutionChanges(resolution.getChanges());
+        }
+    }
+
+    private void logResolutionChanges(@NotNull java.util.List<String> changes) {
+        if (!changes.isEmpty()) {
             deploymentLogger.logServerWarning("Port conflicts detected and auto-resolved:");
-            for (String change : resolution.getChanges()) {
+            for (String change : changes) {
                 deploymentLogger.logServerWarning("  " + change);
             }
-            // Show balloon notification so user sees it even without console focus
             notifyUser("DevTomcat: Port Auto-Resolved",
-                    String.join("\n", resolution.getChanges()),
+                    String.join("\n", changes),
                     NotificationType.WARNING);
         }
+    }
+
+    /**
+     * Returns the resolved debug port after conflict detection, or -1 if not in debug mode.
+     */
+    public int getResolvedDebugPort() {
+        return resolvedDebugPort;
     }
 
     /**

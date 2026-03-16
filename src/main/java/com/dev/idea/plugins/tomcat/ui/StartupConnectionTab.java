@@ -313,63 +313,42 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     }
 
     private JPanel createStartupSection() {
-        JPanel p = new JPanel(new GridBagLayout());
-        GridBagConstraints g = new GridBagConstraints();
-        g.anchor = GridBagConstraints.WEST;
-        g.insets = JBUI.insets(2);
-
-        g.gridx = 0;
-        g.gridy = 0;
-        p.add(new JBLabel("Startup script:"), g);
-
-        g.gridx = 1;
-        g.weightx = 1.0;
-        g.fill = GridBagConstraints.HORIZONTAL;
-        g.insets = JBUI.insets(2, 15, 2, 10);
         startupScriptField = new TextFieldWithBrowseButton();
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
-                startupScriptField, "Select Startup Script",
-                "Choose a custom startup script for Tomcat", project, scriptFileDescriptor());
-        p.add(startupScriptField, g);
-
-        g.gridx = 2;
-        g.weightx = 0;
-        g.fill = GridBagConstraints.NONE;
-        g.insets = JBUI.insets(2);
         useDefaultStartupCB = new JBCheckBox("Use default", true);
         useDefaultStartupCB.addActionListener(e -> updateStartupState());
-        p.add(useDefaultStartupCB, g);
-
-        return p;
+        return createScriptSection("Startup script:", "Select Startup Script",
+                "Choose a custom startup script for Tomcat", startupScriptField, useDefaultStartupCB);
     }
 
     private JPanel createShutdownSection() {
+        shutdownScriptField = new TextFieldWithBrowseButton();
+        useDefaultShutdownCB = new JBCheckBox("Use default", true);
+        useDefaultShutdownCB.addActionListener(e -> updateShutdownState());
+        return createScriptSection("Shutdown script:", "Select Shutdown Script",
+                "Choose a custom shutdown script for Tomcat", shutdownScriptField, useDefaultShutdownCB);
+    }
+
+    private JPanel createScriptSection(@NotNull String label, @NotNull String browseTitle,
+                                        @NotNull String browseDescription,
+                                        @NotNull TextFieldWithBrowseButton field,
+                                        @NotNull JBCheckBox useDefaultCB) {
+        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+                field, browseTitle, browseDescription, project, scriptFileDescriptor());
+
         JPanel p = new JPanel(new GridBagLayout());
         GridBagConstraints g = new GridBagConstraints();
         g.anchor = GridBagConstraints.WEST;
         g.insets = JBUI.insets(2);
+        g.gridx = 0; g.gridy = 0;
+        p.add(new JBLabel(label), g);
 
-        g.gridx = 0;
-        g.gridy = 0;
-        p.add(new JBLabel("Shutdown script:"), g);
-
-        g.gridx = 1;
-        g.weightx = 1.0;
-        g.fill = GridBagConstraints.HORIZONTAL;
+        g.gridx = 1; g.weightx = 1.0; g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = JBUI.insets(2, 15, 2, 10);
-        shutdownScriptField = new TextFieldWithBrowseButton();
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
-                shutdownScriptField, "Select Shutdown Script",
-                "Choose a custom shutdown script for Tomcat", project, scriptFileDescriptor());
-        p.add(shutdownScriptField, g);
+        p.add(field, g);
 
-        g.gridx = 2;
-        g.weightx = 0;
-        g.fill = GridBagConstraints.NONE;
+        g.gridx = 2; g.weightx = 0; g.fill = GridBagConstraints.NONE;
         g.insets = JBUI.insets(2);
-        useDefaultShutdownCB = new JBCheckBox("Use default", true);
-        useDefaultShutdownCB.addActionListener(e -> updateShutdownState());
-        p.add(useDefaultShutdownCB, g);
+        p.add(useDefaultCB, g);
 
         return p;
     }

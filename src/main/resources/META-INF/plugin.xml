@@ -53,6 +53,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.0.6 — Resilience &amp; Debug Fixes</h3>
+    <ul>
+        <li>Fixed debug mode — debugger now reliably attaches with explicit JDWP/RemoteConnection wiring</li>
+        <li>Debug port (5005) included in pre-launch port conflict detection and auto-resolution</li>
+        <li>Eliminated Catalina log spam from Tomcat's background class scanner (reloadable=false)</li>
+        <li>Replaced all deprecated and internal IntelliJ Platform APIs for plugin verifier compliance</li>
+        <li>JDK 9+ JDWP address format (<code>*:port</code>) for cross-platform debugging</li>
+    </ul>
+
     <h3>Version 1.0.0 — Initial Release</h3>
     <ul>
         <li>Full Tomcat lifecycle — run, debug, and redeploy from the IDE</li>
@@ -203,6 +212,11 @@
                     text="Restart Tomcat"
                     description="Restart the running Tomcat server"
                     icon="AllIcons.Actions.Restart"/>
+            <action id="DevTomcat.Service.Debug"
+                    class="com.dev.idea.plugins.tomcat.action.DebugTomcatAction"
+                    text="Debug Tomcat"
+                    description="Restart in Debug mode to attach the debugger"
+                    icon="AllIcons.Actions.StartDebugger"/>
             <action id="DevTomcat.Service.Redeploy"
                     class="com.dev.idea.plugins.tomcat.action.RedeployTomcatAction"
                     text="Redeploy"

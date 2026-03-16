@@ -79,7 +79,7 @@ tasks {
     }
 
     buildSearchableOptions {
-        enabled = false
+        enabled = true
     }
 
     wrapper {

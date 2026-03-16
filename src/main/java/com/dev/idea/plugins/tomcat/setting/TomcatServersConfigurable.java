@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.MasterDetailsComponent;
 import com.intellij.openapi.ui.Messages;
@@ -21,15 +22,22 @@ import java.util.List;
  *
  * Main configuration panel for managing Tomcat servers in the IDE settings.
  */
-public class TomcatServersConfigurable extends MasterDetailsComponent {
+public class TomcatServersConfigurable extends MasterDetailsComponent implements SearchableConfigurable {
 
     private static final Logger LOG = Logger.getInstance(TomcatServersConfigurable.class);
+    private static final String CONFIGURABLE_ID = "DevTomcat.Settings";
     private static final String DISPLAY_NAME = "Dev Tomcat Servers";
     private static final String HELP_TOPIC = "dev.tomcat.servers";
 
     public TomcatServersConfigurable() {
         initTree();
         LOG.info("Initialized Dev Tomcat servers configuration panel");
+    }
+
+    @Override
+    @NotNull
+    public String getId() {
+        return CONFIGURABLE_ID;
     }
 
     @Override
