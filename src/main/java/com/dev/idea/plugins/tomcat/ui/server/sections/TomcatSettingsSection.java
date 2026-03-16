@@ -400,7 +400,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
             }
 
         } catch (ConfigurationException e) {
-            errors.add(new ValidationInfo(e.getMessage(), httpPortField));
+            errors.add(new ValidationInfo(e.getTitle(), httpPortField));
         }
 
         return errors;

@@ -415,7 +415,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
                 .setEditAction(button -> editSelectedEnvVar())
                 .disableUpDownActions();
 
-        decorator.addExtraAction(new com.intellij.ui.AnActionButton("Populate Defaults", AllIcons.Actions.Rollback) {
+        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction("Populate Defaults", "Populate default environment variables", AllIcons.Actions.Rollback) {
             @Override
             public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
                 populateDefaults();
@@ -427,24 +427,24 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             }
         });
 
-        decorator.addExtraAction(new com.intellij.ui.AnActionButton("Copy", AllIcons.Actions.Copy) {
+        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction("Copy", "Copy selected environment variable", AllIcons.Actions.Copy) {
             @Override
             public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
                 copyEnvVar();
             }
 
             @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
+            public void update(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+                e.getPresentation().setEnabled(envTable.getSelectedRow() >= 0);
             }
 
             @Override
-            public boolean isEnabled() {
-                return envTable.getSelectedRow() >= 0;
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
             }
         });
 
-        decorator.addExtraAction(new com.intellij.ui.AnActionButton("Paste", AllIcons.Actions.MenuPaste) {
+        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction("Paste", "Paste environment variable", AllIcons.Actions.MenuPaste) {
             @Override
             public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
                 pasteEnvVar();

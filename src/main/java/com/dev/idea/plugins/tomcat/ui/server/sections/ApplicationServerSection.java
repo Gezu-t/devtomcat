@@ -10,8 +10,8 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
-import com.intellij.util.SlowOperations;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.SlowOperations;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -144,8 +144,7 @@ public class ApplicationServerSection implements ConfigurationSection {
     private void openTomcatServerConfiguration() {
         try {
             TomcatServerConfigurationDialog dialog = new TomcatServerConfigurationDialog(project);
-            // File chooser inside the dialog triggers VFS refresh which is a slow operation;
-            // allow it here to avoid SlowOperations assertion on EDT
+            @SuppressWarnings("deprecation")
             boolean accepted = SlowOperations.allowSlowOperations(() -> dialog.showAndGet());
             if (accepted) {
                 loadConfiguration();

@@ -47,7 +47,7 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         saveToFileField = new TextFieldWithBrowseButton();
         com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
                 saveToFileField, "Save Console Output", "Choose file to save console output",
-                project, FileChooserDescriptorFactory.createSingleLocalFileDescriptor());
+                project, new com.intellij.openapi.fileChooser.FileChooserDescriptor(true, false, false, false, false, false));
 
         initializeUI();
         wireCheckboxConstraints();

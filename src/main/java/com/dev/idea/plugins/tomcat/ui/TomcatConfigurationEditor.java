@@ -15,15 +15,14 @@ import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.execution.impl.ConfigurationSettingsEditorWrapper;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileChooser.FileChooser;
+import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
-import com.intellij.openapi.fileChooser.FileChooserFactory;
-import com.intellij.openapi.fileChooser.FileSaverDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileWrapper;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
@@ -131,11 +130,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             // runs AFTER applyEditorTo() and would overwrite our changes.
             LOG.debug("DevTomcat: Configuration applied successfully - " + getConfigurationSummary(configuration));
         } catch (ConfigurationException e) {
-            LOG.debug("DevTomcat: Configuration validation failed: " + e.getMessage());
+            LOG.debug("DevTomcat: Configuration validation failed: " + e.getTitle());
             throw e;
         } catch (Exception e) {
             LOG.error("DevTomcat: Unexpected error applying configuration", e);
-            throw new ConfigurationException("Failed to apply configuration: " + e.getMessage());
+            throw new ConfigurationException("Failed to apply configuration: " + e.getLocalizedMessage());
         } finally {
             isApplying.set(false);
         }
@@ -669,13 +668,13 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             TomcatRunConfiguration tempConfig = (TomcatRunConfiguration) currentConfiguration.clone();
             applyAllTabs(tempConfig);
 
-            FileSaverDescriptor descriptor = new FileSaverDescriptor(
-                    "Export DevTomcat Configuration", "Save configuration as XML", "xml");
-            VirtualFileWrapper wrapper = FileChooserFactory.getInstance()
-                    .createSaveFileDialog(descriptor, project)
-                    .save(currentConfiguration.getName() + ".xml");
-            if (wrapper != null) {
-                File file = wrapper.getFile();
+            FileChooserDescriptor chooserDescriptor = new FileChooserDescriptor(false, true, false, false, false, false)
+                    .withTitle("Export DevTomcat Configuration")
+                    .withDescription("Choose directory to save configuration XML");
+            VirtualFile dir = FileChooser.chooseFile(chooserDescriptor, project, null);
+            if (dir != null) {
+                String fileName = currentConfiguration.getName() + ".xml";
+                File file = new File(dir.getPath(), fileName);
                 ConfigExportImport.exportToFile(tempConfig.getConfigData(), file);
                 Messages.showInfoMessage(project,
                         "Configuration exported to:\n" + file.getAbsolutePath(), "Export Successful");

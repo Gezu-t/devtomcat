@@ -3,12 +3,12 @@ package com.dev.idea.plugins.tomcat.setting;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.NamedConfigurable;
-import com.intellij.openapi.util.Comparing;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.util.Objects;
 
 /**
  * Tomcat Server Configurable
@@ -89,7 +89,7 @@ public class TomcatInfoConfigurable extends NamedConfigurable<TomcatInfo> {
 
     @Override
     public boolean isModified() {
-        boolean nameModified = !Comparing.equal(displayName, tomcatInfo.getName());
+        boolean nameModified = !Objects.equals(displayName, tomcatInfo.getName());
         boolean componentModified = tomcatInfoView.isModified();
 
         if (nameModified || componentModified) {

@@ -12,8 +12,8 @@ import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.executors.DefaultRunExecutor;
-import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
+import com.intellij.execution.process.ProcessListener;
 import com.intellij.execution.update.RunningApplicationUpdater;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -200,7 +200,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         // Capture the original executor (Run/Debug/Coverage) so restart uses the same mode
         String originalExecutorId = processHandler.getExecutorId();
 
-        processHandler.addProcessListener(new ProcessAdapter() {
+        processHandler.addProcessListener(new ProcessListener() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
                 ApplicationManager.getApplication().invokeLater(() -> {

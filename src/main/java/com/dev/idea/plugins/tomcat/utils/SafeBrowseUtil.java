@@ -11,20 +11,20 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Wraps file browse dialogs in {@link SlowOperations#allowSlowOperations}
- * to avoid SEVERE SlowOperations violations on EDT caused by IntelliJ's
- * internal VFS refresh in {@code PathChooserDialogHelper.fileToVirtualFile}.
+ * Wraps file browse dialogs in a slow-operations section to suppress
+ * the SEVERE SlowOperations assertion caused by IntelliJ's internal
+ * VFS refresh in {@code PathChooserDialogHelper.fileToVirtualFile} (IDEA-307666).
  */
 public final class SafeBrowseUtil {
 
     private SafeBrowseUtil() {}
 
     /**
-     * Drop-in replacement for {@code FileChooser.chooseFile} that wraps
-     * the call in {@link SlowOperations#allowSlowOperations}.
+     * Drop-in replacement for {@code FileChooser.chooseFile}.
      *
      * @return the chosen file, or {@code null} if cancelled
      */
+    @SuppressWarnings("deprecation")
     @Nullable
     public static VirtualFile chooseFile(@NotNull FileChooserDescriptor descriptor,
                                           @Nullable Project project,
@@ -35,7 +35,7 @@ public final class SafeBrowseUtil {
 
     /**
      * Drop-in replacement for {@code TextFieldWithBrowseButton.addBrowseFolderListener}
-     * that wraps the file chooser call to suppress EDT/VFS violations.
+     * that sets title/description on the descriptor and wires the action listener.
      */
     public static void addBrowseFolderListener(@NotNull TextFieldWithBrowseButton field,
                                                 @NotNull String title,
@@ -44,14 +44,14 @@ public final class SafeBrowseUtil {
                                                 @NotNull FileChooserDescriptor descriptor) {
         descriptor.setTitle(title);
         descriptor.setDescription(description);
-        field.addActionListener(e ->
-                SlowOperations.allowSlowOperations(() -> {
-                    VirtualFile chosen = FileChooser.chooseFile(descriptor, project, null);
-                    if (chosen != null) {
-                        field.setText(chosen.getPath());
-                    }
-                })
-        );
+        field.addActionListener(e -> {
+            @SuppressWarnings("deprecation")
+            VirtualFile chosen = SlowOperations.allowSlowOperations(
+                    () -> FileChooser.chooseFile(descriptor, project, null));
+            if (chosen != null) {
+                field.setText(chosen.getPath());
+            }
+        });
         FileChooserFactory.getInstance().installFileCompletion(
                 field.getTextField(), descriptor, true, null);
     }

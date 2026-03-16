@@ -7,9 +7,9 @@ import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.ProgramRunnerUtil;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.executors.DefaultRunExecutor;
-import com.intellij.execution.process.ProcessAdapter;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessListener;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -41,7 +41,7 @@ public class RestartTomcatAction extends AnAction {
                 ? tomcatHandler.getExecutorId()
                 : DefaultRunExecutor.EXECUTOR_ID;
 
-        handler.addProcessListener(new ProcessAdapter() {
+        handler.addProcessListener(new ProcessListener() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
                 ApplicationManager.getApplication().invokeLater(() -> {

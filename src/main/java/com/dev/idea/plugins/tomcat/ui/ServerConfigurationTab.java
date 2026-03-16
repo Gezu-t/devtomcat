@@ -389,7 +389,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 String managerUrl = rc.getManagerUrl();
                 if (managerUrl != null && !managerUrl.isEmpty()) {
                     try {
-                        java.net.URL url = new java.net.URL(managerUrl);
+                        java.net.URL url = java.net.URI.create(managerUrl).toURL();
                         hostField.setText(url.getHost());
                         portField.setText(String.valueOf(url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER));
                         useHttpsCheck.setSelected("https".equalsIgnoreCase(url.getProtocol()));
@@ -434,7 +434,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             }
 
             try {
-                java.net.URL url = new java.net.URL(managerUrl);
+                java.net.URL url = java.net.URI.create(managerUrl).toURL();
                 String savedHost = url.getHost();
                 int savedPort = url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER;
                 boolean savedHttps = "https".equalsIgnoreCase(url.getProtocol());
