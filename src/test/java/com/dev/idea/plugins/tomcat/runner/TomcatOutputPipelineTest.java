@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -27,6 +28,7 @@ class TomcatOutputPipelineTest {
     private Map<String, String> contextToArtifact;
     private AtomicLong capturedStartupTime;
     private AtomicBoolean postStartupCalled;
+    private AtomicReference<String> readyContext;
     private TomcatOutputPipeline.Context context;
 
     @BeforeEach
@@ -45,13 +47,15 @@ class TomcatOutputPipelineTest {
         contextToArtifact = new ConcurrentHashMap<>();
         capturedStartupTime = new AtomicLong(-1);
         postStartupCalled = new AtomicBoolean(false);
+        readyContext = new AtomicReference<>();
 
         context = new TomcatOutputPipeline.Context(
                 logger, new TomcatLifecycleListener() {}, "testConfig",
                 contextToArtifact, startupDetected, deployedCount,
                 errorCount, warningCount, true,
                 duration -> capturedStartupTime.set(duration),
-                () -> postStartupCalled.set(true)
+                () -> postStartupCalled.set(true),
+                readyContext::set
         );
     }
 
@@ -163,10 +167,35 @@ class TomcatOutputPipelineTest {
         }
 
         @Test
+        @DisplayName("reports ready context name")
+        void reportsReadyContext() {
+            analyzer.analyze(
+                    "Deployment of deployment descriptor [/conf/Catalina/localhost/myapp.xml] has finished in [100] ms",
+                    context);
+
+            assertEquals("myapp", readyContext.get());
+        }
+
+        @Test
         @DisplayName("ignores non-deployment lines")
         void ignoresOtherLines() {
             analyzer.analyze("INFO: Loading web.xml", context);
             assertEquals(0, deployedCount.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("ContextAnalyzer")
+    class ContextAnalyzerTests {
+
+        private final TomcatOutputPipeline.ContextAnalyzer analyzer = new TomcatOutputPipeline.ContextAnalyzer();
+
+        @Test
+        @DisplayName("reports initialized context name")
+        void reportsContextReady() {
+            analyzer.analyze("Context [/webapp-eight] initialized", context);
+
+            assertEquals("/webapp-eight", readyContext.get());
         }
     }
 

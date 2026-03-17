@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -60,6 +61,8 @@ public final class TomcatOutputPipeline {
         private final LongConsumer onStartupDetected;
         /** Called after startup detection for post-startup actions (remote deploy, browser). */
         private final Runnable onPostStartup;
+        /** Called when Tomcat reports a specific context as deployed/initialized. */
+        private final Consumer<String> onContextReady;
 
         public Context(@NotNull PipelineLogger logger,
                        @NotNull TomcatLifecycleListener lifecycleListener,
@@ -71,7 +74,8 @@ public final class TomcatOutputPipeline {
                        @NotNull AtomicInteger warningCount,
                        boolean jmxEnabled,
                        @NotNull LongConsumer onStartupDetected,
-                       @NotNull Runnable onPostStartup) {
+                       @NotNull Runnable onPostStartup,
+                       @NotNull Consumer<String> onContextReady) {
             this.logger = logger;
             this.lifecycleListener = lifecycleListener;
             this.configName = configName;
@@ -83,6 +87,7 @@ public final class TomcatOutputPipeline {
             this.jmxEnabled = jmxEnabled;
             this.onStartupDetected = onStartupDetected;
             this.onPostStartup = onPostStartup;
+            this.onContextReady = onContextReady;
         }
     }
 
@@ -183,6 +188,7 @@ public final class TomcatOutputPipeline {
                     ctx.logger.logDeploymentSuccess(artifactName, duration);
                     ctx.deployedArtifactCount.incrementAndGet();
                     ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
+                    ctx.onContextReady.accept(contextName);
                 } catch (NumberFormatException e) {
                     LOG.debug("Could not parse deployment duration from: " + m.group(2));
                 }
@@ -201,7 +207,9 @@ public final class TomcatOutputPipeline {
         public void analyze(@NotNull String text, @NotNull Context ctx) {
             Matcher m = CONTEXT_PATTERN.matcher(text);
             if (m.find()) {
-                ctx.logger.logServerInfo("Context deployed: " + m.group(1));
+                String contextName = m.group(1);
+                ctx.logger.logServerInfo("Context deployed: " + contextName);
+                ctx.onContextReady.accept(contextName);
             }
         }
     }

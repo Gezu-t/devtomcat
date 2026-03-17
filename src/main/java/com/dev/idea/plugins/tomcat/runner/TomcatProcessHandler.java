@@ -27,11 +27,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.OutputStream;
+import java.net.URI;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -71,6 +73,9 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final AtomicInteger warningCount = new AtomicInteger(0);
     private final TomcatOutputPipeline pipeline;
     private final TomcatOutputPipeline.Context pipelineContext;
+    private final AtomicBoolean browserLaunchTriggered = new AtomicBoolean(false);
+    private final Set<String> readyContexts = ConcurrentHashMap.newKeySet();
+    private volatile @Nullable String browserTargetContextName;
     private final boolean activateToolWindow;
     private final boolean showConsoleOnStdout;
     private final boolean showConsoleOnStderr;
@@ -111,7 +116,15 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 contextToArtifactName, serverStartupDetected, deployedArtifactCount,
                 errorCount, warningCount, jmxEnabled,
                 duration -> { this.serverStartupTimeMs = duration; },
-                () -> { triggerRemoteDeploymentIfNeeded(); launchBrowserIfEnabled(); }
+                () -> {
+                    triggerRemoteDeploymentIfNeeded();
+                    if (shouldWaitForContextBeforeOpeningBrowser()) {
+                        tryLaunchBrowserWhenReady();
+                    } else {
+                        launchBrowserIfEnabled();
+                    }
+                },
+                this::onContextReady
         );
         this.pipeline = TomcatOutputPipeline.create(pipelineContext);
 
@@ -242,6 +255,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
             }
         }
+        browserTargetContextName = resolveBrowserTargetContext(artifacts);
     }
 
     private static String resolveContextName(@Nullable String contextPath) {
@@ -294,6 +308,86 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         } else {
             pipeline.processLine(text, pipelineContext);
         }
+    }
+
+    private void onContextReady(@NotNull String rawContextName) {
+        readyContexts.add(resolveContextName(rawContextName));
+        tryLaunchBrowserWhenReady();
+    }
+
+    private boolean shouldWaitForContextBeforeOpeningBrowser() {
+        return configuration.isAfterLaunchEnabled()
+                && !TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())
+                && browserTargetContextName != null;
+    }
+
+    private void tryLaunchBrowserWhenReady() {
+        if (!configuration.isAfterLaunchEnabled() || !serverStartupDetected.get()) {
+            return;
+        }
+
+        if (!shouldWaitForContextBeforeOpeningBrowser()) {
+            launchBrowserIfEnabled();
+            return;
+        }
+
+        String targetContext = browserTargetContextName;
+        if (targetContext != null && readyContexts.contains(targetContext)) {
+            launchBrowserIfEnabled();
+        }
+    }
+
+    private @Nullable String resolveBrowserTargetContext(@NotNull List<DeploymentArtifact> artifacts) {
+        if (artifacts.isEmpty()) {
+            return null;
+        }
+
+        String configuredUrl = configuration.getBrowserUrl();
+        String contextFromUrl = extractContextNameFromBrowserUrl(configuredUrl);
+        if (contextFromUrl != null) {
+            for (DeploymentArtifact artifact : artifacts) {
+                if (contextFromUrl.equals(resolveContextName(artifact.getContextPath()))) {
+                    return contextFromUrl;
+                }
+            }
+        }
+
+        if (artifacts.size() == 1) {
+            return resolveContextName(artifacts.get(0).getContextPath());
+        }
+
+        String configuredContext = resolveContextName(configuration.getContextPath());
+        for (DeploymentArtifact artifact : artifacts) {
+            if (configuredContext.equals(resolveContextName(artifact.getContextPath()))) {
+                return configuredContext;
+            }
+        }
+
+        return null;
+    }
+
+    private static @Nullable String extractContextNameFromBrowserUrl(@Nullable String url) {
+        if (StringUtil.isEmptyOrSpaces(url)) {
+            return null;
+        }
+
+        try {
+            String path = URI.create(url.trim()).getPath();
+            if (path == null || path.isEmpty() || DEFAULT_CONTEXT_PATH.equals(path)) {
+                return ROOT_CONTEXT_NAME;
+            }
+
+            String[] segments = path.split("/");
+            for (String segment : segments) {
+                if (!segment.isBlank()) {
+                    return segment;
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Could not parse browser URL for context: " + url, e);
+        }
+
+        return null;
     }
 
     /**
@@ -398,6 +492,9 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private void launchBrowserIfEnabled() {
         try {
             if (!configuration.isAfterLaunchEnabled()) {
+                return;
+            }
+            if (!browserLaunchTriggered.compareAndSet(false, true)) {
                 return;
             }
 
