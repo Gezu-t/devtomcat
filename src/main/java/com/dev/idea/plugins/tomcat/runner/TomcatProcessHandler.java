@@ -372,12 +372,20 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                         indicator.setText("Deploying " + artifact.getDisplayName() + " (" + (i + 1) + "/" + total + ")");
                         indicator.setFraction((double) i / total);
                         lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
-                        boolean ok = deployer.deploy(artifact, deploymentLogger, indicator);
-                        if (ok) {
-                            successCount++;
-                            lifecycleListener.onArtifactDeployed(configurationName, artifact.getDisplayName());
-                        } else {
-                            lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
+                        TomcatManagerDeployer.DeployResult result =
+                                deployer.deployWithProgress(artifact, deploymentLogger, indicator);
+                        switch (result) {
+                            case SUCCESS -> {
+                                successCount++;
+                                lifecycleListener.onArtifactDeployed(configurationName, artifact.getDisplayName());
+                            }
+                            case CANCELLED -> {
+                                deploymentLogger.logServerWarning("Deployment cancelled: " + artifact.getDisplayName());
+                                // Don't mark as failed — user chose to cancel
+                                return;
+                            }
+                            case FAILED ->
+                                lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
                         }
                     }
                     indicator.setFraction(1.0);

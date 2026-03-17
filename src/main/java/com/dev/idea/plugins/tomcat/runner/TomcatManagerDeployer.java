@@ -35,6 +35,9 @@ import java.util.Base64;
  */
 public final class TomcatManagerDeployer {
 
+    /** Tri-state result distinguishing success, failure, and user cancellation. */
+    public enum DeployResult { SUCCESS, FAILED, CANCELLED }
+
     private static final Logger LOG = Logger.getInstance(TomcatManagerDeployer.class);
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
@@ -58,31 +61,33 @@ public final class TomcatManagerDeployer {
      * @return true if deployment succeeded
      */
     public boolean deploy(@NotNull DeploymentArtifact artifact, @Nullable TomcatDeploymentLogger logger) {
-        return deploy(artifact, logger, null);
+        return deployWithProgress(artifact, logger, null) == DeployResult.SUCCESS;
     }
 
     /**
      * Deploys with optional progress reporting for WAR uploads.
+     * Returns a tri-state result so callers can distinguish cancellation from failure.
      */
-    public boolean deploy(@NotNull DeploymentArtifact artifact,
-                          @Nullable TomcatDeploymentLogger logger,
-                          @Nullable ProgressIndicator indicator) {
+    @NotNull
+    public DeployResult deployWithProgress(@NotNull DeploymentArtifact artifact,
+                                            @Nullable TomcatDeploymentLogger logger,
+                                            @Nullable ProgressIndicator indicator) {
         String contextPath = normalizeContextPath(artifact.getContextPath());
         log(logger, "Deploying '" + artifact.getDisplayName() + "' to " + contextPath + " ...");
 
         try {
-            // Undeploy existing context first (ignore failures — may not exist)
             undeploy(contextPath, null);
 
             if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
                 return deployWarViaPut(artifact, contextPath, logger, indicator);
             } else {
-                return deployExplodedViaPath(artifact, contextPath, logger);
+                return deployExplodedViaPath(artifact, contextPath, logger)
+                        ? DeployResult.SUCCESS : DeployResult.FAILED;
             }
         } catch (Exception e) {
             LOG.warn("Remote deployment failed: " + artifact.getDisplayName(), e);
             logError(logger, "Deployment failed: " + e.getMessage());
-            return false;
+            return DeployResult.FAILED;
         }
     }
 
@@ -178,14 +183,14 @@ public final class TomcatManagerDeployer {
     /**
      * Deploys a WAR file by uploading it via HTTP PUT to the Manager API.
      */
-    private boolean deployWarViaPut(@NotNull DeploymentArtifact artifact,
-                                     @NotNull String contextPath,
-                                     @Nullable TomcatDeploymentLogger logger,
-                                     @Nullable ProgressIndicator indicator) throws IOException {
+    private DeployResult deployWarViaPut(@NotNull DeploymentArtifact artifact,
+                                         @NotNull String contextPath,
+                                         @Nullable TomcatDeploymentLogger logger,
+                                         @Nullable ProgressIndicator indicator) throws IOException {
         Path warFile = Path.of(artifact.getPath());
         if (!Files.exists(warFile)) {
             logError(logger, "WAR file not found: " + artifact.getPath());
-            return false;
+            return DeployResult.FAILED;
         }
 
         long fileSize = Files.size(warFile);
@@ -211,8 +216,8 @@ public final class TomcatManagerDeployer {
                 int read;
                 while ((read = in.read(buffer)) != -1) {
                     if (indicator != null && indicator.isCanceled()) {
-                        logError(logger, "Upload cancelled by user");
-                        return false;
+                        log(logger, "Upload cancelled by user");
+                        return DeployResult.CANCELLED;
                     }
                     out.write(buffer, 0, read);
                     uploaded += read;
@@ -236,7 +241,7 @@ public final class TomcatManagerDeployer {
             } else {
                 logError(logger, "Deploy failed: " + truncate(response, 300));
             }
-            return success;
+            return success ? DeployResult.SUCCESS : DeployResult.FAILED;
         } finally {
             conn.disconnect();
         }

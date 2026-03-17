@@ -151,20 +151,20 @@ public final class DynamicTomcatEnvironment {
         return opts.toString().trim();
     }
 
+    /**
+     * Builds CATALINA_OPTS for standalone Tomcat.
+     * Only includes properties that Tomcat's Catalina process actually uses.
+     * Spring Boot properties (-Dserver.port, -Dspring.profiles.active, etc.)
+     * are intentionally excluded — they have no effect on standalone Tomcat
+     * and mislead users into thinking they control Tomcat's port binding.
+     * Tomcat ports are configured via server.xml connectors.
+     */
     @NotNull
     public static String buildCatalinaOpts() {
         StringBuilder opts = new StringBuilder();
         EnvironmentMode mode = getCurrentMode();
 
         opts.append("-Dfile.encoding=UTF-8 ");
-        opts.append("-Dspring.profiles.active=").append(mode.getValue()).append(" ");
-
-        if (isHttpsEnabled()) {
-            opts.append("-Dserver.port=").append(getHttpsPort()).append(" ");
-            opts.append("-Dserver.ssl.enabled=true ");
-        } else {
-            opts.append("-Dserver.port=").append(getHttpPort()).append(" ");
-        }
 
         if (shouldShowTimestamps()) {
             opts.append("-Djava.util.logging.SimpleFormatter.format=")

@@ -151,17 +151,15 @@ class DynamicTomcatEnvironmentTest {
         }
 
         @Test
-        @DisplayName("includes spring profile")
-        void includesSpringProfile() {
+        @DisplayName("does not include Spring Boot properties")
+        void doesNotIncludeSpringBootProperties() {
             String opts = DynamicTomcatEnvironment.buildCatalinaOpts();
-            assertTrue(opts.contains("-Dspring.profiles.active="));
-        }
-
-        @Test
-        @DisplayName("includes server port")
-        void includesServerPort() {
-            String opts = DynamicTomcatEnvironment.buildCatalinaOpts();
-            assertTrue(opts.contains("-Dserver.port="));
+            assertFalse(opts.contains("-Dspring.profiles.active="),
+                    "Spring profiles should not be in standalone Tomcat CATALINA_OPTS");
+            assertFalse(opts.contains("-Dserver.port="),
+                    "Spring Boot server.port should not be in standalone Tomcat CATALINA_OPTS");
+            assertFalse(opts.contains("-Dserver.ssl.enabled="),
+                    "Spring Boot server.ssl.enabled should not be in standalone Tomcat CATALINA_OPTS");
         }
 
         @Test

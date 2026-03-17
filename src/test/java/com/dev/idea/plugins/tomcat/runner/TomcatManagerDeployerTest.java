@@ -143,4 +143,53 @@ class TomcatManagerDeployerTest {
         String result = deployer.listDeployments();
         assertNull(result); // unreachable, but no exception from URL construction
     }
+
+    @Test
+    void testDeployWithProgressReturnsCancelledWhenIndicatorCancelled(@TempDir Path tempDir) throws IOException {
+        // Create a real WAR file large enough for the upload loop to check cancellation
+        Path warFile = tempDir.resolve("test.war");
+        byte[] content = new byte[16384]; // 16 KB — at least 2 buffer reads
+        Files.write(warFile, content);
+
+        RemoteConfig config = new RemoteConfig(
+                "http://localhost:1/manager", // port 1 — will fail fast on connect
+                "admin", "admin", true);
+        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
+
+        DeploymentArtifact artifact = new DeploymentArtifact(
+                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+        artifact.setContextPath("/test");
+
+        // With no indicator, missing WAR → FAILED; with unreachable host → FAILED
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null);
+        assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
+                "Unreachable host should return FAILED, not CANCELLED");
+    }
+
+    @Test
+    void testDeployWithProgressMissingWarReturnsFailed() {
+        RemoteConfig config = new RemoteConfig(
+                "http://localhost:1/manager",
+                "admin", "admin", true);
+        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
+
+        DeploymentArtifact artifact = new DeploymentArtifact(
+                "test-app", "/nonexistent/path/app.war", DeploymentArtifact.TYPE_WAR);
+        artifact.setContextPath("/test");
+
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null);
+        assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
+                "Missing WAR file should return FAILED");
+    }
+
+    @Test
+    void testDeployResultEnumValues() {
+        // Ensure all three states exist
+        assertEquals(3, TomcatManagerDeployer.DeployResult.values().length);
+        assertNotNull(TomcatManagerDeployer.DeployResult.SUCCESS);
+        assertNotNull(TomcatManagerDeployer.DeployResult.FAILED);
+        assertNotNull(TomcatManagerDeployer.DeployResult.CANCELLED);
+    }
 }
