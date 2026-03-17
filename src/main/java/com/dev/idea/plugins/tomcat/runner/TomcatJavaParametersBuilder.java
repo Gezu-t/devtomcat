@@ -310,17 +310,17 @@ public class TomcatJavaParametersBuilder {
         }
 
         // In debug mode, add the JDWP agent so Tomcat listens for debugger connections.
-        // TomcatDebugger.doExecute() creates a matching RemoteConnection so IntelliJ
-        // knows where to attach. If the debug port was auto-resolved (conflict detected),
-        // we use the resolved port and update the config so TomcatDebugger reads the same value.
+        // The port comes from resolvedDebugPort (set by PortConflictDetector) if available,
+        // otherwise from DebugConfig. TomcatDebugger reads the same resolvedDebugPort
+        // from TomcatCommandLineState.getResolvedDebugPort() — no config mutation needed.
         if (debugMode && !hasJdwpAgent(vmParams, configuration)) {
             var debugConfig = configuration.getConfigData().getDebugConfig();
             if (debugConfig != null && debugConfig.isValid()) {
-                if (resolvedDebugPort > 0 && resolvedDebugPort != debugConfig.getPort()) {
-                    debugConfig.setPort(resolvedDebugPort);
-                    LOG.info("Debug port updated to resolved port: " + resolvedDebugPort);
-                }
-                String jdwpArg = debugConfig.getDebugVmArgument();
+                int port = resolvedDebugPort > 0 ? resolvedDebugPort : debugConfig.getPort();
+                String transportName = TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(debugConfig.getTransport())
+                        ? TomcatConstants.JDWP_TRANSPORT_SOCKET : TomcatConstants.JDWP_TRANSPORT_SHMEM;
+                String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
+                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, transportName, port);
                 vmParams.add(jdwpArg);
                 LOG.info("Debug mode: JDWP agent added — " + jdwpArg);
             } else {
