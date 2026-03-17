@@ -111,6 +111,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 getEnvironment().getExecutor().getId());
         if (!isDebug) return;
 
+        // Only warn for local debug — in remote mode the user must supply their
+        // own JDWP agent on the remote JVM, so a manual -agentlib:jdwp is expected.
+        if (TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) return;
+
         String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
         if (hasManualJdwpAgent(vmOptions)) {
             deploymentLogger.logServerWarning(
@@ -127,10 +131,19 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     /**
      * Returns true if the given VM options string contains a manual JDWP agent argument.
+     * Matches {@code -agentlib:jdwp} followed by {@code =} or end-of-string/whitespace,
+     * avoiding false positives on unrelated agents like {@code -agentlib:jdwp_other}.
      * Package-visible for testing.
      */
     static boolean hasManualJdwpAgent(@Nullable String vmOptions) {
-        return vmOptions != null && vmOptions.contains("-agentlib:jdwp");
+        if (vmOptions == null) return false;
+        int idx = vmOptions.indexOf("-agentlib:jdwp");
+        if (idx < 0) return false;
+        int end = idx + "-agentlib:jdwp".length();
+        // Must be followed by '=', whitespace, or end of string
+        return end >= vmOptions.length()
+                || vmOptions.charAt(end) == '='
+                || Character.isWhitespace(vmOptions.charAt(end));
     }
 
     /**

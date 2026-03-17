@@ -43,10 +43,20 @@ class TomcatCommandLineStateTest {
     }
 
     @Test
-    @DisplayName("returns false for partial match like -agentlib:jdwp_other")
-    void partialMatchStillDetects() {
-        // "-agentlib:jdwp" is a substring of "-agentlib:jdwp_other" — this is
-        // intentionally flagged because any jdwp-prefixed agent will conflict.
-        assertTrue(TomcatCommandLineState.hasManualJdwpAgent("-agentlib:jdwp_other"));
+    @DisplayName("returns false for unrelated agent like -agentlib:jdwp_other")
+    void unrelatedAgentDoesNotMatch() {
+        assertFalse(TomcatCommandLineState.hasManualJdwpAgent("-agentlib:jdwp_other"));
+    }
+
+    @Test
+    @DisplayName("detects -agentlib:jdwp without =")
+    void detectsJdwpAgentBare() {
+        assertTrue(TomcatCommandLineState.hasManualJdwpAgent("-agentlib:jdwp"));
+    }
+
+    @Test
+    @DisplayName("detects -agentlib:jdwp followed by space")
+    void detectsJdwpAgentWithSpace() {
+        assertTrue(TomcatCommandLineState.hasManualJdwpAgent("-agentlib:jdwp -Xmx512m"));
     }
 }
