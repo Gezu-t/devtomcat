@@ -145,14 +145,12 @@ class TomcatManagerDeployerTest {
     }
 
     @Test
-    void testDeployWithProgressReturnsCancelledWhenIndicatorCancelled(@TempDir Path tempDir) throws IOException {
-        // Create a real WAR file large enough for the upload loop to check cancellation
+    void testDeployWithProgressReturnsFailedForUnreachableHost(@TempDir Path tempDir) throws IOException {
         Path warFile = tempDir.resolve("test.war");
-        byte[] content = new byte[16384]; // 16 KB — at least 2 buffer reads
-        Files.write(warFile, content);
+        Files.write(warFile, new byte[16384]);
 
         RemoteConfig config = new RemoteConfig(
-                "http://localhost:1/manager", // port 1 — will fail fast on connect
+                "http://localhost:1/manager",
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
@@ -160,11 +158,35 @@ class TomcatManagerDeployerTest {
                 "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
         artifact.setContextPath("/test");
 
-        // With no indicator, missing WAR → FAILED; with unreachable host → FAILED
         TomcatManagerDeployer.DeployResult result =
                 deployer.deployWithProgress(artifact, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
                 "Unreachable host should return FAILED, not CANCELLED");
+    }
+
+    @Test
+    void testDeployWithProgressReturnsCancelledWhenIndicatorPreCancelled(@TempDir Path tempDir) throws IOException {
+        Path warFile = tempDir.resolve("test.war");
+        Files.write(warFile, new byte[1024]);
+
+        RemoteConfig config = new RemoteConfig(
+                "http://localhost:1/manager",
+                "admin", "admin", true);
+        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
+
+        DeploymentArtifact artifact = new DeploymentArtifact(
+                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+        artifact.setContextPath("/test");
+
+        // Simulate a pre-cancelled indicator using a simple stub
+        com.intellij.openapi.progress.ProgressIndicator indicator =
+                new com.intellij.openapi.progress.util.AbstractProgressIndicatorBase() {};
+        indicator.cancel();
+
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, indicator);
+        assertEquals(TomcatManagerDeployer.DeployResult.CANCELLED, result,
+                "Pre-cancelled indicator should return CANCELLED immediately");
     }
 
     @Test

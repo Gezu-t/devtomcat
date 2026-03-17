@@ -72,6 +72,11 @@ public final class TomcatManagerDeployer {
     public DeployResult deployWithProgress(@NotNull DeploymentArtifact artifact,
                                             @Nullable TomcatDeploymentLogger logger,
                                             @Nullable ProgressIndicator indicator) {
+        if (indicator != null && indicator.isCanceled()) {
+            log(logger, "Deployment skipped (cancelled): " + artifact.getDisplayName());
+            return DeployResult.CANCELLED;
+        }
+
         String contextPath = normalizeContextPath(artifact.getContextPath());
         log(logger, "Deploying '" + artifact.getDisplayName() + "' to " + contextPath + " ...");
 
