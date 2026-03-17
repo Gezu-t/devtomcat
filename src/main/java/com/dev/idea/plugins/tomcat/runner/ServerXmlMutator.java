@@ -99,6 +99,11 @@ public final class ServerXmlMutator {
                 setOrInjectAjpConnector(doc, ajpPort, httpsPort, httpsEnabled, warnings);
             }
 
+            // 6. Disable autoDeploy — DevTomcat manages deployments via context descriptors.
+            // Tomcat's background HostConfig scanner causes redeploy loops when the IDE
+            // modifies files in the exploded artifact output directory.
+            disableAutoDeploy(doc);
+
             String result = serialize(doc);
 
             // Verify critical ports made it into the output
@@ -119,6 +124,16 @@ public final class ServerXmlMutator {
     }
 
     // --- Shutdown port ---
+
+    private static void disableAutoDeploy(@NotNull Document doc) {
+        NodeList hosts = doc.getElementsByTagName("Host");
+        for (int i = 0; i < hosts.getLength(); i++) {
+            Node node = hosts.item(i);
+            if (node instanceof Element host) {
+                host.setAttribute("autoDeploy", "false");
+            }
+        }
+    }
 
     private static void setShutdownPort(@NotNull Document doc, int port, @NotNull List<String> warnings) {
         NodeList servers = doc.getElementsByTagName("Server");

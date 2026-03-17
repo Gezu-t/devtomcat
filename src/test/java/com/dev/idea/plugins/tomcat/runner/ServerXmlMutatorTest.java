@@ -287,7 +287,7 @@ class ServerXmlMutatorTest {
         }
 
         @Test
-        @DisplayName("preserves Engine and Host structure")
+        @DisplayName("preserves Engine and Host structure, disables autoDeploy")
         void preservesEngineHost() {
             var result = ServerXmlMutator.customize(STANDARD_SERVER_XML,
                     9005, 9080, 0, false, 0, false);
@@ -295,7 +295,8 @@ class ServerXmlMutatorTest {
             String xml = result.getXml();
             assertTrue(xml.contains("Engine"), "Engine element should be preserved");
             assertTrue(xml.contains("defaultHost=\"localhost\""), "Engine attributes should be preserved");
-            assertTrue(xml.contains("autoDeploy=\"true\""), "Host attributes should be preserved");
+            assertTrue(xml.contains("autoDeploy=\"false\""),
+                    "autoDeploy should be set to false — DevTomcat manages deployments");
         }
     }
 

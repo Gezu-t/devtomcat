@@ -441,7 +441,10 @@ public final class TomcatConfigPreparer {
 
         sb.append("    <Engine name=\"Catalina\" defaultHost=\"").append(DEFAULT_HOST).append("\">\n");
         sb.append("      <Host name=\"").append(DEFAULT_HOST).append("\" appBase=\"").append(DIR_WEBAPPS).append("\"\n");
-        sb.append("            unpackWARs=\"true\" autoDeploy=\"true\" />\n");
+        // autoDeploy=false: DevTomcat manages deployments via context XML descriptors.
+        // Tomcat's background HostConfig scanner is redundant and causes redeploy loops
+        // when the IDE/build modifies files in the exploded artifact output directory.
+        sb.append("            unpackWARs=\"true\" autoDeploy=\"false\" />\n");
         sb.append("    </Engine>\n");
         sb.append("  </Service>\n");
         sb.append("</Server>\n");
