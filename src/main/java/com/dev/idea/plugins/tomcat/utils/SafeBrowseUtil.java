@@ -5,6 +5,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.openapi.ui.TextBrowseFolderListener;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -43,7 +44,7 @@ public final class SafeBrowseUtil {
                                                 @NotNull FileChooserDescriptor descriptor) {
         descriptor.setTitle(title);
         descriptor.setDescription(description);
-        field.addBrowseFolderListener(title, description, project, descriptor);
+        field.addBrowseFolderListener(new TextBrowseFolderListener(descriptor, project));
         FileChooserFactory.getInstance().installFileCompletion(
                 field.getTextField(), descriptor, true, null);
     }
