@@ -311,7 +311,10 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private void onContextReady(@NotNull String rawContextName) {
-        readyContexts.add(resolveContextName(rawContextName));
+        String resolved = resolveContextName(rawContextName);
+        readyContexts.add(resolved);
+        LOG.info("Context ready: '" + resolved + "' (raw: '" + rawContextName +
+                "'), target: '" + browserTargetContextName + "', ready: " + readyContexts);
         tryLaunchBrowserWhenReady();
     }
 
@@ -322,18 +325,28 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private void tryLaunchBrowserWhenReady() {
-        if (!configuration.isAfterLaunchEnabled() || !serverStartupDetected.get()) {
+        if (!configuration.isAfterLaunchEnabled()) {
+            LOG.debug("Browser launch disabled (afterLaunch not enabled)");
+            return;
+        }
+        if (!serverStartupDetected.get()) {
+            LOG.debug("Browser launch deferred (server startup not yet detected)");
             return;
         }
 
         if (!shouldWaitForContextBeforeOpeningBrowser()) {
+            LOG.info("Browser launch: not waiting for context — launching immediately");
             launchBrowserIfEnabled();
             return;
         }
 
         String targetContext = browserTargetContextName;
         if (targetContext != null && readyContexts.contains(targetContext)) {
+            LOG.info("Browser launch: target context '" + targetContext + "' is ready — launching");
             launchBrowserIfEnabled();
+        } else {
+            LOG.debug("Browser launch waiting: target='" + targetContext +
+                    "', ready=" + readyContexts);
         }
     }
 

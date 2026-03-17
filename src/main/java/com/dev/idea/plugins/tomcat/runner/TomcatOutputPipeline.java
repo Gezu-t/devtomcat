@@ -139,15 +139,16 @@ public final class TomcatOutputPipeline {
      * Triggers startup time tracking and post-startup callbacks.
      */
     static final class StartupAnalyzer implements Analyzer {
+        // Tomcat may locale-format large numbers: [12,345] milliseconds
         private static final Pattern STARTUP_PATTERN = Pattern.compile(
-                "(?i).*server startup in \\[?(\\d+)\\]?\\s*(?:ms|milliseconds).*");
+                "(?i).*server startup in \\[?([\\d,._]+)\\]?\\s*(?:ms|milliseconds).*");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
             Matcher m = STARTUP_PATTERN.matcher(text);
             if (m.find() && ctx.serverStartupDetected.compareAndSet(false, true)) {
                 try {
-                    long duration = Long.parseLong(m.group(1));
+                    long duration = Long.parseLong(m.group(1).replaceAll("[,._]", ""));
                     ctx.logger.logServerStartup(duration);
 
                     // Mark all pending artifacts as deployed — if the server started
@@ -173,9 +174,10 @@ public final class TomcatOutputPipeline {
      * Maps Tomcat context names back to artifact display names.
      */
     static final class DeploymentAnalyzer implements Analyzer {
+        // Tomcat uses locale-formatted numbers: [2,404] ms or [2.404] ms
         private static final Pattern DESCRIPTOR_DEPLOYED_PATTERN = Pattern.compile(
                 "Deployment of (?:deployment descriptor|web application archive) " +
-                "\\[.*?([^/\\\\]+)\\.(?:xml|war)\\] has finished in \\[(\\d+)\\] ms");
+                "\\[.*?([^/\\\\]+)\\.(?:xml|war)\\] has finished in \\[([\\d,._]+)\\] ms");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
@@ -183,7 +185,8 @@ public final class TomcatOutputPipeline {
             if (m.find()) {
                 try {
                     String contextName = m.group(1);
-                    long duration = Long.parseLong(m.group(2));
+                    // Strip locale separators (commas, periods, underscores) before parsing
+                    long duration = Long.parseLong(m.group(2).replaceAll("[,._]", ""));
                     String artifactName = ctx.contextToArtifactName.getOrDefault(contextName, contextName);
                     ctx.logger.logDeploymentSuccess(artifactName, duration);
                     ctx.deployedArtifactCount.incrementAndGet();
