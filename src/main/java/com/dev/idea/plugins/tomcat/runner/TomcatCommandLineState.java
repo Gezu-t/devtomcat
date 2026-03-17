@@ -85,6 +85,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
         checkCompatibility();
         runPreflightValidation();
+        warnIfManualJdwpInDebugMode();
         resolvePortConflicts();
 
         DeploymentStrategy.create(configuration).resolveCredentials(configuration);
@@ -97,6 +98,39 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                         "Configure credentials in the Remote tab or store them in PasswordSafe.");
             }
         }
+    }
+
+    /**
+     * Warns if the user manually added {@code -agentlib:jdwp} in VM options while
+     * launching in Debug mode. GenericDebuggerRunner injects its own JDWP agent,
+     * so a manual one creates a duplicate — the JVM assigns the second agent a
+     * different port, causing the debugger to connect to the wrong one.
+     */
+    private void warnIfManualJdwpInDebugMode() {
+        boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
+                getEnvironment().getExecutor().getId());
+        if (!isDebug) return;
+
+        String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
+        if (hasManualJdwpAgent(vmOptions)) {
+            deploymentLogger.logServerWarning(
+                    "Manual -agentlib:jdwp detected in VM options. " +
+                    "In Debug mode, the IDE injects its own JDWP agent automatically. " +
+                    "Having two agents causes a port mismatch — remove the manual one " +
+                    "from VM options, or switch to Run mode if you want manual JDWP control.");
+            notifyUser("DevTomcat: Duplicate JDWP Agent",
+                    "Remove -agentlib:jdwp from VM options when using Debug mode.\n" +
+                    "The IDE injects its own agent automatically.",
+                    NotificationType.WARNING);
+        }
+    }
+
+    /**
+     * Returns true if the given VM options string contains a manual JDWP agent argument.
+     * Package-visible for testing.
+     */
+    static boolean hasManualJdwpAgent(@Nullable String vmOptions) {
+        return vmOptions != null && vmOptions.contains("-agentlib:jdwp");
     }
 
     /**
