@@ -503,6 +503,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 String context = configuration.getContextPath();
                 url = "http://" + DEFAULT_HOST + ":" + httpPort
                         + (context != null ? context : DEFAULT_CONTEXT_PATH);
+            } else {
+                // Rewrite the port in the saved URL to the resolved runtime port.
+                // The user's saved URL may reference the configured port (e.g. 8084)
+                // but the actual Tomcat started on an auto-resolved port (e.g. 8092).
+                url = rewritePortIfNeeded(url, httpPort);
             }
 
             boolean jsDebug = configuration.isWithJsDebugger();
@@ -538,6 +543,30 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         } catch (Exception e) {
             LOG.warn("Error launching browser", e);
         }
+    }
+
+    /**
+     * Rewrites the port in a URL to the resolved runtime port.
+     * If the URL contains a port that differs from {@code resolvedPort},
+     * it is replaced. This handles the case where the saved browser URL
+     * references the configured port but Tomcat started on an auto-resolved one.
+     */
+    @NotNull
+    private static String rewritePortIfNeeded(@NotNull String url, int resolvedPort) {
+        try {
+            URI uri = URI.create(url.trim());
+            int currentPort = uri.getPort();
+            if (currentPort > 0 && currentPort != resolvedPort) {
+                String rewritten = new URI(uri.getScheme(), uri.getUserInfo(),
+                        uri.getHost(), resolvedPort,
+                        uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
+                LOG.info("Browser URL port rewritten: " + currentPort + " → " + resolvedPort);
+                return rewritten;
+            }
+        } catch (Exception e) {
+            LOG.debug("Could not parse browser URL for port rewrite: " + url, e);
+        }
+        return url;
     }
 
     @Nullable
