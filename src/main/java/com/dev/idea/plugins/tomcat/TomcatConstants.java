@@ -59,6 +59,8 @@ public final class TomcatConstants {
     public static final String ENV_HTTPS_PORT = "TOMCAT_HTTPS_PORT";
     public static final String ENV_JMX_PORT = "TOMCAT_JMX_PORT";
     public static final String ENV_AJP_PORT = "TOMCAT_AJP_PORT";
+    public static final String ENV_DEBUG_PORT = "TOMCAT_DEBUG_PORT";
+    public static final String ENV_JDWP_OPTS = "TOMCAT_JDWP_OPTS";
 
     // --- Artifact Naming Suffixes (IntelliJ convention) ---
     public static final String ARTIFACT_SUFFIX_WAR_EXPLODED = ":war exploded";

@@ -1,5 +1,9 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
+import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.intellij.debugger.impl.GenericDebuggerRunner;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.RemoteConnection;
@@ -10,8 +14,6 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,9 +31,11 @@ import org.jetbrains.annotations.Nullable;
  *       connection succeeds (Tomcat may take a moment to start).</li>
  * </ol>
  *
- * <p>We create the {@link RemoteConnection} explicitly because our configuration
- * does not register {@code GenericDebuggerRunnerSettings}, so the default
- * {@code super.doExecute()} cannot determine the debug port.
+ * <h3>Remote mode</h3>
+ * In remote server mode, the debug host and port come from
+ * {@link RunnerSettings#getDebugHost()} and {@link RunnerSettings#getDebugPort()}
+ * (configured in the Startup/Connection tab), because the JDWP agent runs
+ * on the remote machine — not on localhost.
  */
 public class TomcatDebugger extends GenericDebuggerRunner {
 
@@ -57,41 +61,63 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         FileDocumentManager.getInstance().saveAllDocuments();
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
+        String debugHost = resolveDebugHost(config);
         int debugPort = resolveDebugPort(config);
 
         LOG.info("Starting Tomcat debug session: " + config.getName() +
-                " — debugger will attach to 127.0.0.1:" + debugPort);
+                " — debugger will attach to " + debugHost + ":" + debugPort);
 
         // useSockets=true  — we use dt_socket transport
-        // hostName          — connect to localhost
-        // address           — the JDWP port
-        // serverMode=false  — the DEBUGGER is the client (Tomcat JVM is the JDWP server)
+        // serverMode=false — the DEBUGGER is the client (Tomcat JVM is the JDWP server)
         RemoteConnection connection = new RemoteConnection(
-                true, "127.0.0.1", String.valueOf(debugPort), false);
+                true, debugHost, String.valueOf(debugPort), false);
 
         // pollConnection=true — keep retrying until Tomcat's JDWP agent is ready
         RunContentDescriptor descriptor = attachVirtualMachine(state, env, connection, true);
 
         if (descriptor != null) {
-            LOG.info("Debugger attached to Tomcat: " + config.getName() + " on port " + debugPort);
+            LOG.info("Debugger attached to Tomcat: " + config.getName() +
+                    " on " + debugHost + ":" + debugPort);
         } else {
-            LOG.warn("Failed to attach debugger to Tomcat: " + config.getName() + " on port " + debugPort);
+            LOG.warn("Failed to attach debugger to Tomcat: " + config.getName() +
+                    " on " + debugHost + ":" + debugPort);
         }
 
         return descriptor;
     }
 
     /**
-     * Resolves the debug port from the configuration, falling back to the default.
-     * This must return the same port that {@link TomcatJavaParametersBuilder} uses
-     * for the {@code -agentlib:jdwp} argument.
+     * Resolves the debug host. In remote mode, uses the host from the
+     * Startup/Connection tab's RunnerSettings. In local mode, defaults to localhost.
+     */
+    @NotNull
+    private static String resolveDebugHost(@NotNull TomcatRunConfiguration config) {
+        if (TomcatConstants.MODE_REMOTE.equals(config.getConfigData().getServerMode())) {
+            RunnerSettings rs = config.getConfigData()
+                    .getRunnerSettings(DefaultDebugExecutor.EXECUTOR_ID);
+            String host = rs.getDebugHost();
+            if (!host.isEmpty()) return host;
+        }
+        return "127.0.0.1";
+    }
+
+    /**
+     * Resolves the debug port. In remote mode, uses the port from RunnerSettings.
+     * In local mode, uses DebugConfig (which may have been auto-resolved by
+     * {@link TomcatCommandLineState#resolvePortConflicts()}).
      */
     private static int resolveDebugPort(@NotNull TomcatRunConfiguration config) {
+        if (TomcatConstants.MODE_REMOTE.equals(config.getConfigData().getServerMode())) {
+            RunnerSettings rs = config.getConfigData()
+                    .getRunnerSettings(DefaultDebugExecutor.EXECUTOR_ID);
+            int port = rs.getDebugPort();
+            if (port > 0) return port;
+        }
         DebugConfig debugConfig = config.getConfigData().getDebugConfig();
         if (debugConfig != null && debugConfig.isValid()) {
             return debugConfig.getPort();
         }
-        LOG.warn("No valid DebugConfig found, using default debug port " + DebugConfig.DEFAULT_DEBUG_PORT);
+        LOG.warn("No valid debug port found, using default " + DebugConfig.DEFAULT_DEBUG_PORT);
         return DebugConfig.DEFAULT_DEBUG_PORT;
     }
 }
