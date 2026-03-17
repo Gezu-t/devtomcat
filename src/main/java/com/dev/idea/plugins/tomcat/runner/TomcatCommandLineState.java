@@ -271,7 +271,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             if (!runnerSettings.isUseDefaultStartup()) {
                 LOG.warn("Custom startup enabled but no script configured, falling back to default startup");
             }
-            commandLine = createJavaParameters().toCommandLine();
+            commandLine = getJavaParameters().toCommandLine();
         }
         
         // Re-sync log files after catalina.base is prepared (log files now exist on disk)

@@ -309,43 +309,23 @@ public class TomcatJavaParametersBuilder {
             configureHttps(vmParams, httpsPort);
         }
 
-        // In debug mode, add the JDWP agent so Tomcat listens for debugger connections.
-        // The port comes from resolvedDebugPort (set by PortConflictDetector) if available,
-        // otherwise from DebugConfig. TomcatDebugger reads the same resolvedDebugPort
-        // from TomcatCommandLineState.getResolvedDebugPort() — no config mutation needed.
-        if (debugMode && !hasJdwpAgent(vmParams, configuration)) {
-            var debugConfig = configuration.getConfigData().getDebugConfig();
-            if (debugConfig != null && debugConfig.isValid()) {
-                int port = resolvedDebugPort > 0 ? resolvedDebugPort : debugConfig.getPort();
-                String transportName = TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(debugConfig.getTransport())
-                        ? TomcatConstants.JDWP_TRANSPORT_SOCKET : TomcatConstants.JDWP_TRANSPORT_SHMEM;
-                String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, transportName, port);
-                vmParams.add(jdwpArg);
-                LOG.info("Debug mode: JDWP agent added — " + jdwpArg);
-            } else {
-                LOG.warn("Debug mode requested but no valid DebugConfig — debugger may not attach");
-            }
+        // Do NOT add -agentlib:jdwp here. In debug mode, GenericDebuggerRunner's
+        // DebugProcessImpl patches the JavaParameters with the JDWP agent based on
+        // the RemoteConnection created by TomcatDebugger. Adding it here would create
+        // a DUPLICATE agent — the JVM assigns the second one a different port, causing
+        // a mismatch between what the debugger connects to and what Tomcat listens on.
+        // The resolved debug port flows: TomcatCommandLineState.resolvedDebugPort
+        //   → TomcatDebugger reads it → creates RemoteConnection
+        //   → GenericDebuggerRunner patches params with matching JDWP arg.
+        if (debugMode) {
+            LOG.info("Debug mode: JDWP agent will be injected by GenericDebuggerRunner " +
+                    "(resolved debug port: " + resolvedDebugPort + ")");
         }
 
         // JDK 9+ module opens required by Tomcat (previously delivered via JDK_JAVA_OPTIONS env var)
         configureModuleOpens(vmParams, jdk);
 
         configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, httpPort, shutdownPort);
-    }
-
-    /**
-     * Checks whether a JDWP agent is already present — either in the builder's
-     * VM parameters or in user-supplied VM options from the configuration.
-     */
-    private static boolean hasJdwpAgent(@NotNull ParametersList vmParams,
-                                         @NotNull TomcatRunConfiguration config) {
-        // Check params already added by the builder
-        String paramString = vmParams.getParametersString();
-        if (paramString.contains("-agentlib:jdwp")) return true;
-        // Check user-configured VM options
-        String userVmOptions = config.getConfigData().getVmConfig().getVmOptions();
-        return userVmOptions != null && userVmOptions.contains("-agentlib:jdwp");
     }
 
     private void configureModuleOpens(@NotNull ParametersList vmParams, @NotNull Sdk jdk) {
