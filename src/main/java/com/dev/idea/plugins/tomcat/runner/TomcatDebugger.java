@@ -61,6 +61,17 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         FileDocumentManager.getInstance().saveAllDocuments();
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
+
+        // Force pre-launch setup (port conflict resolution) BEFORE reading the debug port.
+        // TomcatCommandLineState.createJavaParameters() triggers ensurePreLaunchSetup()
+        // which may auto-resolve the debug port (e.g. 5005 → 5006 if in use).
+        // The resolved port is written back to DebugConfig, so we must trigger this first.
+        // JavaCommandLineState.getJavaParameters() caches the result, so the later
+        // state.execute() inside attachVirtualMachine reuses the same parameters.
+        if (state instanceof TomcatCommandLineState tomcatState) {
+            tomcatState.getJavaParameters();
+        }
+
         String debugHost = resolveDebugHost(config);
         int debugPort = resolveDebugPort(config);
 
