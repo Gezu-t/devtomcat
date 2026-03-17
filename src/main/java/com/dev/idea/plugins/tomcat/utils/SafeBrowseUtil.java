@@ -6,14 +6,15 @@ import com.intellij.openapi.fileChooser.FileChooserFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.SlowOperations;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Wraps file browse dialogs in a slow-operations section to suppress
- * the SEVERE SlowOperations assertion caused by IntelliJ's internal
- * VFS refresh in {@code PathChooserDialogHelper.fileToVirtualFile} (IDEA-307666).
+ * Centralizes browse-field wiring for the plugin.
+ *
+ * <p>The platform's built-in browse-folder listener is preferred over custom
+ * wrappers around {@code FileChooser.chooseFile()}, because modal chooser work
+ * can continue after the initial callback returns and still trip EDT assertions.
  */
 public final class SafeBrowseUtil {
 
@@ -24,18 +25,16 @@ public final class SafeBrowseUtil {
      *
      * @return the chosen file, or {@code null} if cancelled
      */
-    @SuppressWarnings("deprecation")
     @Nullable
     public static VirtualFile chooseFile(@NotNull FileChooserDescriptor descriptor,
                                           @Nullable Project project,
                                           @Nullable VirtualFile toSelect) {
-        return SlowOperations.allowSlowOperations(
-                () -> FileChooser.chooseFile(descriptor, project, toSelect));
+        return FileChooser.chooseFile(descriptor, project, toSelect);
     }
 
     /**
-     * Drop-in replacement for {@code TextFieldWithBrowseButton.addBrowseFolderListener}
-     * that sets title/description on the descriptor and wires the action listener.
+     * Configures the platform's built-in browse-folder listener with consistent
+     * title/description setup and file completion.
      */
     public static void addBrowseFolderListener(@NotNull TextFieldWithBrowseButton field,
                                                 @NotNull String title,
@@ -44,14 +43,7 @@ public final class SafeBrowseUtil {
                                                 @NotNull FileChooserDescriptor descriptor) {
         descriptor.setTitle(title);
         descriptor.setDescription(description);
-        field.addActionListener(e -> {
-            @SuppressWarnings("deprecation")
-            VirtualFile chosen = SlowOperations.allowSlowOperations(
-                    () -> FileChooser.chooseFile(descriptor, project, null));
-            if (chosen != null) {
-                field.setText(chosen.getPath());
-            }
-        });
+        field.addBrowseFolderListener(title, description, project, descriptor);
         FileChooserFactory.getInstance().installFileCompletion(
                 field.getTextField(), descriptor, true, null);
     }
