@@ -12,7 +12,8 @@ import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.artifacts.ArtifactType;
 
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Computable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -83,7 +84,7 @@ public final class ProjectArtifactDetector {
      */
     @NotNull
     public static List<DeploymentArtifact> detectIntelliJWebArtifacts(@NotNull Project project) {
-        return ReadAction.compute(() -> {
+        return ApplicationManager.getApplication().runReadAction((Computable<List<DeploymentArtifact>>) () -> {
             ArtifactManager artifactManager = getArtifactManager(project);
             if (artifactManager == null) return Collections.<DeploymentArtifact>emptyList();
 
@@ -114,7 +115,7 @@ public final class ProjectArtifactDetector {
      */
     @NotNull
     public static List<DeploymentArtifact> detectWebModules(@NotNull Project project) {
-        return ReadAction.compute(() -> {
+        return ApplicationManager.getApplication().runReadAction((Computable<List<DeploymentArtifact>>) () -> {
             List<DeploymentArtifact> results = new ArrayList<>();
 
             try {
@@ -177,7 +178,7 @@ public final class ProjectArtifactDetector {
 
         // Module-level build output (requires read access for ModuleManager)
         try {
-            List<String> modulePaths = ReadAction.compute(() -> {
+            List<String> modulePaths = ApplicationManager.getApplication().runReadAction((Computable<List<String>>) () -> {
                 List<String> paths = new ArrayList<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
