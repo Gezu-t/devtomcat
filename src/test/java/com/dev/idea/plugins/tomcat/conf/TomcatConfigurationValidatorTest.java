@@ -1,13 +1,18 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
+import com.intellij.execution.configurations.RuntimeConfigurationWarning;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -217,6 +222,50 @@ class TomcatConfigurationValidatorTest {
             data.getPortConfig().setHttpsEnabled(false);
             data.getPortConfig().setHttps(8080); // same as HTTP, but disabled
             assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
+        }
+    }
+
+    @Nested
+    @DisplayName("Deployment validation")
+    class DeploymentValidation {
+
+        @Test
+        @DisplayName("duplicate artifact output paths throw warning")
+        void duplicateArtifactPathsThrow() throws Exception {
+            Path exploded = Files.createTempDirectory("devtomcat-artifact");
+
+            DeploymentArtifact first = new DeploymentArtifact("webapp-one", exploded.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            first.setContextPath("/webapp-one");
+            DeploymentArtifact second = new DeploymentArtifact("webapp-other", exploded.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            second.setContextPath("/webapp-other");
+
+            data.getDeploymentConfig().addArtifact(first);
+            data.getDeploymentConfig().addArtifact(second);
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getMessage().contains("same artifact output"));
+        }
+
+        @Test
+        @DisplayName("duplicate base module names throw warning")
+        void duplicateBaseNamesThrow() throws Exception {
+            Path firstPath = Files.createTempDirectory("devtomcat-artifact-a");
+            Path secondPath = Files.createTempDirectory("devtomcat-artifact-b");
+
+            DeploymentArtifact first = new DeploymentArtifact("webapp-two", firstPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            first.setContextPath("/webapp-two");
+            DeploymentArtifact second = new DeploymentArtifact("webapp-two_war_exploded", secondPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            second.setContextPath("/webapp-two-2");
+
+            data.getDeploymentConfig().addArtifact(first);
+            data.getDeploymentConfig().addArtifact(second);
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getMessage().contains("Duplicate deployment for module"));
         }
     }
 

@@ -5,6 +5,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -138,6 +140,34 @@ class PortConflictDetectorTest {
             int next = PortConflictDetector.findNextAvailable(49152);
             assertTrue(next > 49152 || next == -1,
                     "Should find a port > 49152 or return -1");
+        }
+    }
+
+    @Nested
+    @DisplayName("Debug port resolution")
+    class DebugPortResolution {
+
+        @Test
+        @DisplayName("busy JDWP port is auto-resolved away from configured port")
+        void busyDebugPortIsAutoResolved() throws IOException {
+            PortConfig config = new PortConfig();
+            config.setHttp(59084);
+            config.setShutdown(59009);
+
+            try (ServerSocket occupied = new ServerSocket(0)) {
+                int busyPort = occupied.getLocalPort();
+                PortConflictDetector.DebugPortResolution resolution =
+                        PortConflictDetector.resolveConflictsWithDebug(config, busyPort);
+
+                assertEquals(59084, resolution.getResolvedConfig().getHttp());
+                assertEquals(59009, resolution.getResolvedConfig().getShutdown());
+                assertNotEquals(busyPort, resolution.getDebugPort());
+                assertTrue(resolution.getDebugPort() > 0,
+                        "Resolved debug port should move off the busy configured port");
+                assertTrue(resolution.getChanges().stream().anyMatch(change ->
+                                change.contains("Debug (JDWP)") && change.contains(String.valueOf(busyPort))),
+                        "Expected conflict message mentioning the original JDWP port");
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
         import com.dev.idea.plugins.tomcat.model.ValidationResult;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+        import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
         import com.intellij.execution.configurations.RuntimeConfigurationException;
         import com.intellij.execution.configurations.RuntimeConfigurationWarning;
@@ -146,6 +147,31 @@ package com.dev.idea.plugins.tomcat.conf;
                                 "of '" + artifact.getDisplayName() + "' in the Deployment tab.");
                     }
                 }
+
+                Map<String, DeploymentArtifact> seenByPath = new HashMap<>();
+                Set<String> seenBaseNames = new HashSet<>();
+                for (DeploymentArtifact artifact : artifacts) {
+                    if (artifact == null) continue;
+
+                    String baseName = ContextPathUtils.extractBaseModuleName(artifact.getName());
+                    if (!baseName.isEmpty() && !seenBaseNames.add(baseName)) {
+                        throw new RuntimeConfigurationWarning(
+                                "Duplicate deployment for module '" + baseName + "' — the same application " +
+                                "appears more than once in the Deployment tab. Remove the extra WAR/exploded " +
+                                "variant to avoid Tomcat redeploy loops and JSP scratchDir errors.");
+                    }
+
+                    String normalizedPath = normalizeArtifactPath(artifact.getPath());
+                    if (normalizedPath == null) continue;
+
+                    DeploymentArtifact existing = seenByPath.putIfAbsent(normalizedPath, artifact);
+                    if (existing != null) {
+                        throw new RuntimeConfigurationWarning(
+                                "Multiple deployments point to the same artifact output: " + normalizedPath +
+                                ". Remove either '" + existing.getDisplayName() + "' or '" +
+                                artifact.getDisplayName() + "' to avoid duplicate docBase deployment.");
+                    }
+                }
             }
 
             private static void validateContextPath(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
@@ -163,6 +189,13 @@ package com.dev.idea.plugins.tomcat.conf;
                 if (contextPath.contains("\\")) {
                     throw new RuntimeConfigurationException("Context path cannot contain backslashes: " + contextPath);
                 }
+            }
+
+            private static String normalizeArtifactPath(String path) {
+                if (StringUtil.isEmpty(path)) {
+                    return null;
+                }
+                return new File(path).getAbsoluteFile().toPath().normalize().toString();
             }
 
         public static String getValidationError(@NotNull TomcatRunConfiguration config) {

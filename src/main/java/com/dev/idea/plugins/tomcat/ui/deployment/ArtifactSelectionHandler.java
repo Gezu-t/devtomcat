@@ -80,11 +80,17 @@ public class ArtifactSelectionHandler {
         IntelliJArtifactSelectionDialog dialog = new IntelliJArtifactSelectionDialog(project, artifacts);
 
         if (dialog.showAndGet()) {
+            Set<String> existingBaseNames = tableManager.getDeployments().stream()
+                    .map(d -> extractBaseModuleName(d.getName()))
+                    .collect(Collectors.toSet());
+
             for (Artifact artifact : dialog.getSelectedArtifacts()) {
-                if (tableManager.hasDeployment(artifact.getName())) {
-                    LOG.debug("Skipping duplicate artifact: " + artifact.getName());
+                String baseName = extractBaseModuleName(artifact.getName());
+                if (existingBaseNames.contains(baseName)) {
+                    LOG.debug("Skipping duplicate artifact (base name match): " + artifact.getName());
                     continue;
                 }
+                existingBaseNames.add(baseName);
                 String context = getUniqueContext(generateContextPath(artifact));
                 addArtifactWithContext(artifact, context);
             }

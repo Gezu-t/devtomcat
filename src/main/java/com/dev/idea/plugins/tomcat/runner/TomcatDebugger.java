@@ -18,8 +18,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Tomcat Debug runner. Launches Tomcat with JDWP enabled and attaches
- * IntelliJ's debugger to the configured debug port.
+ * Tomcat Debug runner. Delegates JDWP agent injection to IntelliJ's debugger runner
+ * and attaches to the same resolved port via {@link RemoteConnection}.
  *
  * <h3>Data flow (local debug)</h3>
  * <pre>
@@ -27,14 +27,13 @@ import org.jetbrains.annotations.Nullable;
  *     → resolvePortConflicts()
  *       → stores resolvedDebugPort (e.g. 5006 if 5005 was busy)
  *
- *   TomcatCommandLineState.createJavaParameters()
- *     → TomcatJavaParametersBuilder adds -agentlib:jdwp with resolvedDebugPort
- *
  *   TomcatDebugger.doExecute()
- *     → calls state.getJavaParameters() to trigger the above
+ *     → calls state.getJavaParameters() to ensure pre-launch setup completed
  *     → reads resolvedDebugPort from state (NOT from config)
  *     → creates RemoteConnection with that port
- *     → attachVirtualMachine reuses cached parameters, starts process, connects
+ *     → attachVirtualMachine(...)
+ *         → GenericDebuggerRunner injects one matching -agentlib:jdwp arg
+ *         → starts process and attaches the debugger to the same port
  * </pre>
  *
  * <h3>Remote mode</h3>
