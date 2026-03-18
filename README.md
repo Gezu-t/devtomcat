@@ -421,4 +421,4 @@ DevTomcat automatically handles port conflicts at startup:
 
 DevTomcat is built and maintained by **Gezahegn Tsegaye**.
 
-If this plugin saves you time, consider leaving a review on the [JetBrains Marketplace](https://plugins.jetbrains.com) — it genuinely helps. Bug reports, feature requests, and contributions are always welcome.
+If this plugin saves you time, consider leaving a review on the [JetBrains Marketplace]([https://plugins.jetbrains.com](https://plugins.jetbrains.com/plugin/30721-devtomcat)) — it genuinely helps. Bug reports, feature requests, and contributions are always welcome.
