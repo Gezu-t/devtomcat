@@ -410,3 +410,11 @@ DevTomcat automatically handles port conflicts at startup:
 - Ensure the script path is correct and the file is executable
 - Scripts with arguments (e.g., `catalina.sh stop`) are automatically tokenized — no need to wrap in a shell script
 - Check console output for shutdown errors — DevTomcat falls back to default shutdown if the script fails
+
+---
+
+## About
+
+DevTomcat is built and maintained by **Gezahegn Tsegaye**.
+
+If this plugin saves you time, consider leaving a review on the [JetBrains Marketplace](https://plugins.jetbrains.com) — it genuinely helps. Bug reports, feature requests, and contributions are always welcome.
