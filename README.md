@@ -1,5 +1,3 @@
-# DevTomcat
-
 <!-- Plugin description -->
 # DevTomcat
 
