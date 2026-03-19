@@ -239,11 +239,21 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
         // Collect existing JARs in WEB-INF/lib to avoid duplicates
         Set<String> existingLibJars = new HashSet<>();
+        Set<String> coveredModuleNames = new HashSet<>();
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (Files.isDirectory(webInfLib)) {
             try (var stream = Files.list(webInfLib)) {
                 stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
-                      .forEach(p -> existingLibJars.add(p.getFileName().toString()));
+                      .forEach(p -> {
+                          String jarName = p.getFileName().toString();
+                          existingLibJars.add(jarName);
+                          // Track module names covered by packaged JARs so we can skip
+                          // their target/classes dirs and avoid duplicate class loading
+                          String moduleName = stripJarVersion(jarName);
+                          if (moduleName != null) {
+                              coveredModuleNames.add(moduleName.toLowerCase(Locale.ROOT));
+                          }
+                      });
             } catch (IOException e) {
                 LOG.debug("Could not list WEB-INF/lib: " + e.getMessage());
             }
@@ -284,6 +294,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (file.isDirectory()) {
                 // Class output directory — skip if it IS the artifact's WEB-INF/classes
                 if (rootPath.equals(webInfClassesPath)) continue;
+                // Skip if a JAR for this module is already packaged in WEB-INF/lib.
+                // e.g. target/classes of "foo-bar" should not be added when foo-bar-1.2.3.jar
+                // is already in WEB-INF/lib — loading both causes duplicate class issues.
+                String moduleName = extractModuleName(nativePath);
+                if (moduleName != null && coveredModuleNames.contains(moduleName.toLowerCase(Locale.ROOT))) {
+                    LOG.debug("Skipping class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
+                    continue;
+                }
                 extraDirs.add(nativePath);
             } else if (rootPath.endsWith(".jar")) {
                 // JAR file — skip container-provided libs and jars already packaged in WEB-INF/lib
@@ -313,6 +331,51 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         LOG.info("Added " + extraDirs.size() + " class dirs and " + extraJars.size() +
                 " JARs as extra resources for artifact '" + artifact.getName() + "'");
         return sb.toString();
+    }
+
+    /**
+     * Strips the version suffix from a JAR filename.
+     * e.g. "foo-bar-1.2.3.jar" → "foo-bar", "foo-bar-1.2.3-SNAPSHOT.jar" → "foo-bar"
+     * Returns null if the name cannot be parsed.
+     */
+    @Nullable
+    static String stripJarVersion(@NotNull String jarName) {
+        if (!jarName.endsWith(".jar")) return null;
+        String base = jarName.substring(0, jarName.length() - 4);
+        // Remove -<version> suffix where version starts with a digit
+        return base.replaceAll("-\\d+.*$", "");
+    }
+
+    /**
+     * Extracts the module/project name from a class output directory path.
+     * Supports Maven ({@code .../module/target/classes}) and common Gradle layouts
+     * ({@code .../module/build/classes/java/main} etc.).
+     * Returns null if the path does not match a known pattern.
+     */
+    @Nullable
+    static String extractModuleName(@NotNull String classesDir) {
+        String normalized = classesDir.replace('\\', '/');
+        // Maven
+        if (normalized.endsWith("/target/classes")) {
+            String parent = normalized.substring(0, normalized.length() - "/target/classes".length());
+            int slash = parent.lastIndexOf('/');
+            return slash >= 0 ? parent.substring(slash + 1) : parent;
+        }
+        // Gradle
+        String[] gradlePatterns = {
+                "/build/classes/java/main",
+                "/build/classes/kotlin/main",
+                "/build/classes/groovy/main",
+                "/build/classes/scala/main"
+        };
+        for (String pattern : gradlePatterns) {
+            if (normalized.endsWith(pattern)) {
+                String parent = normalized.substring(0, normalized.length() - pattern.length());
+                int slash = parent.lastIndexOf('/');
+                return slash >= 0 ? parent.substring(slash + 1) : parent;
+            }
+        }
+        return null;
     }
 
     static boolean isContainerProvidedJar(@NotNull String jarName) {
