@@ -176,6 +176,7 @@ Choose which JDK runs Tomcat. Defaults to the project SDK.
 | **JMX port** | JMX monitoring port (default: 1099) |
 | **AJP port** | AJP connector port (leave empty to disable) |
 | **Shutdown port** | Port for shutdown commands |
+| **Debug port** | JDWP debug port used when launching in Debug mode (default: 5005). Set a unique value per configuration when running multiple Tomcat instances simultaneously to avoid port conflicts |
 | **CATALINA_BASE** | Override the runtime instance directory (leave empty for auto-generated) |
 | **Deploy applications configured in Tomcat instance** | Enable hot deployment |
 | **Preserve sessions across restarts and redeploys** | Keep HTTP sessions alive during redeployment |
@@ -362,6 +363,8 @@ Click the **Debug** button (bug icon) or press **Shift+F9** to start Tomcat in d
 - Hot-swap classes with **Build → Recompile** (Ctrl+Shift+F9)
 - Evaluate expressions and modify variables at breakpoints
 
+**Running multiple debug configurations**: Each run configuration has its own **Debug port** field (Server tab → Port configuration). Set a different port for each configuration (e.g. 5005, 5006, 5007) to avoid JDWP conflicts. If you leave them all at the default 5005, DevTomcat's auto-port resolution will still find unique ports automatically, but setting them explicitly gives you predictable results.
+
 ### Update Running Application
 
 While Tomcat is running, press **Ctrl+F10** (Cmd+F10 on macOS) to update the running application.
@@ -435,13 +438,17 @@ Customize Tomcat configuration files that persist across runs:
 
 ### Auto-Port Resolution
 
-If a configured port is already in use, DevTomcat automatically finds an available port and logs a warning in the console:
+If a configured port is already in use when Tomcat starts, DevTomcat automatically finds the next available port and logs a warning in the console:
 
 ```
-[DevTomcat] Port 8080 in use, resolved to 8081
+[DevTomcat] Port conflicts detected and auto-resolved:
+  HTTP port 8080 in use, resolved to 8081
+  Debug (JDWP) port 5005 in use, resolved to 5006
 ```
 
-This prevents `BindException` errors when running multiple server instances.
+This covers all ports — HTTP, Shutdown, HTTPS, JMX, AJP, and the JDWP debug port.
+
+**Running multiple configurations simultaneously**: DevTomcat uses an atomic port registry to prevent race conditions when two configurations launch at the same time. Both instances see each other's claimed ports before any JVM has bound to them, so they are always assigned distinct ports even if they start within milliseconds of each other.
 
 ### Smart Diagnostics
 

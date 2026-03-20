@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.0.3]
+
+### Fixed
+- **Concurrent port notification gap**: `claimAndTrack()` now detects when `TomcatPortRegistry` bumps a port beyond `PortConflictDetector`'s resolution (race between two simultaneous launchers) and appends a warning for every affected port — HTTP, Shutdown, HTTPS, JMX, AJP, and JDWP debug port all covered
+
 ## [1.0.2]
 
 ### Fixed
