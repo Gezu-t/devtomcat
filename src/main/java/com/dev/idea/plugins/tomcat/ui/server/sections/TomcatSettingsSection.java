@@ -34,6 +34,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
     private JBTextField jmxPortField;
     private JBTextField ajpPortField;
     private JBTextField shutdownPortField;
+    private JBTextField debugPortField;
     private TextFieldWithBrowseButton catalinaBaseField;
     private JBCheckBox deployAppsCheckBox;
     private JBCheckBox preserveSessionsCheckBox;
@@ -147,7 +148,20 @@ public class TomcatSettingsSection implements ConfigurationSection {
             shutdownPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()), 8);
             formPanel.add(shutdownPortField, gbc);
 
-            // Row 5: CATALINA_BASE
+            // Row 5: Debug port
+            row++;
+            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = JBUI.insets(2, 0, 2, 4);
+            JBLabel debugPortLabel = new JBLabel("Debug port:");
+            debugPortLabel.setToolTipText("JDWP debug port. Each run configuration must use a unique port when running multiple Tomcat instances simultaneously.");
+            formPanel.add(debugPortLabel, gbc);
+
+            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
+            debugPortField = new JBTextField(String.valueOf(com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT), 8);
+            debugPortField.setToolTipText("JDWP debug port (default 5005). Use a different port for each Tomcat instance to avoid conflicts.");
+            formPanel.add(debugPortField, gbc);
+
+            // Row 6: CATALINA_BASE
             row++;
             gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 0, 2, 4);
@@ -181,6 +195,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
         jmxPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
         ajpPortField.setText("");
         shutdownPortField.setText(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()));
+        debugPortField.setText(String.valueOf(com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT));
         catalinaBaseField.setText("");
         deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(false);
@@ -208,6 +223,11 @@ public class TomcatSettingsSection implements ConfigurationSection {
         Integer shutdownPort = configuration.getShutdownPort();
         shutdownPortField.setText(shutdownPort != null ? shutdownPort.toString()
                 : String.valueOf(DynamicTomcatEnvironment.getShutdownPort()));
+
+        var debugConfig = configuration.getConfigData().getDebugConfig();
+        int debugPort = debugConfig != null ? debugConfig.getPort()
+                : com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT;
+        debugPortField.setText(String.valueOf(debugPort));
 
         String catalinaBase = configuration.getConfigData().getCatalinaBase();
         catalinaBaseField.setText(catalinaBase != null ? catalinaBase : "");
@@ -255,6 +275,13 @@ public class TomcatSettingsSection implements ConfigurationSection {
         configuration.getConfigData().getPortConfig().setAjpEnabled(portConfig.ajpEnabled);
         if (portConfig.ajpEnabled && portConfig.ajpPort != null) {
             configuration.getConfigData().getPortConfig().setAjp(portConfig.ajpPort);
+        }
+
+        try {
+            int dp = Integer.parseInt(debugPortField.getText().trim());
+            configuration.getConfigData().getDebugConfig().setPort(dp);
+        } catch (NumberFormatException ignored) {
+            // Keep existing debug port if field is empty or invalid
         }
 
         String catalinaBase = catalinaBaseField.getText().trim();

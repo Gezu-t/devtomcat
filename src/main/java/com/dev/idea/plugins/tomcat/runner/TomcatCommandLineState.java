@@ -148,14 +148,22 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     /**
      * Detects port conflicts before launch and auto-resolves them.
-     * Logs all resolutions to the deployment console so the user knows
-     * which ports changed and why.
+     *
+     * <p>Uses {@link com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry} to
+     * atomically claim all ports (Tomcat + JDWP) before the process starts.
+     * This closes the race window where two configurations start simultaneously,
+     * both observe a port as free before either JVM has bound to it, and both
+     * end up on the same port.
      *
      * <p>The resolved ports are stored in {@link #resolvedPorts} and used
-     * by the builder via {@link #createJavaParameters()}.
+     * by the builder via {@link #createJavaParameters()}. All claimed ports
+     * are released automatically when the process terminates.
      */
     private void resolvePortConflicts() {
         PortConfig originalPorts = configuration.getConfigData().getPortConfig();
+        String configName = configuration.getName();
+        com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry registry =
+                com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance();
 
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
@@ -167,13 +175,29 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
             PortConflictDetector.DebugPortResolution resolution =
                     PortConflictDetector.resolveConflictsWithDebug(originalPorts, debugPort);
-            this.resolvedPorts = resolution.getResolvedConfig();
-            this.resolvedDebugPort = resolution.getDebugPort();
+
+            // Atomically claim all resolved ports through the registry to prevent
+            // a second concurrent launcher from grabbing the same ports
+            PortConfig rp = resolution.getResolvedConfig();
+            rp.setHttp(registry.claimPort(rp.getHttp(), configName));
+            rp.setShutdown(registry.claimPort(rp.getShutdown(), configName));
+            if (rp.isHttpsEnabled()) rp.setHttps(registry.claimPort(rp.getHttps(), configName));
+            if (rp.isJmxEnabled())   rp.setJmx(registry.claimPort(rp.getJmx(), configName));
+            if (rp.isAjpEnabled())   rp.setAjp(registry.claimPort(rp.getAjp(), configName));
+            this.resolvedDebugPort = registry.claimPort(resolution.getDebugPort(), configName);
+            this.resolvedPorts = rp;
             logResolutionChanges(resolution.getChanges());
         } else {
             PortConflictDetector.PortResolution resolution =
                     PortConflictDetector.resolveConflicts(originalPorts);
-            this.resolvedPorts = resolution.getResolvedConfig();
+
+            PortConfig rp = resolution.getResolvedConfig();
+            rp.setHttp(registry.claimPort(rp.getHttp(), configName));
+            rp.setShutdown(registry.claimPort(rp.getShutdown(), configName));
+            if (rp.isHttpsEnabled()) rp.setHttps(registry.claimPort(rp.getHttps(), configName));
+            if (rp.isJmxEnabled())   rp.setJmx(registry.claimPort(rp.getJmx(), configName));
+            if (rp.isAjpEnabled())   rp.setAjp(registry.claimPort(rp.getAjp(), configName));
+            this.resolvedPorts = rp;
             logResolutionChanges(resolution.getChanges());
         }
     }

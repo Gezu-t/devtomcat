@@ -278,6 +278,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             deploymentLogger.logServerError("Tomcat terminated with exit code " + exitCode);
         }
 
+        // Release all ports claimed by this configuration so they become available
+        // to the next launch without waiting for the OS to reclaim them
+        com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+                .releaseAllFor(configurationName);
+
         lifecycleListener.onServerStopped(configurationName, exitCode, duration,
                 errorCount.get(), warningCount.get(), serverStartupTimeMs);
 
