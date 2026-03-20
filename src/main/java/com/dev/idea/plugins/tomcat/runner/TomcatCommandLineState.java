@@ -347,6 +347,11 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // Ensure pre-launch setup (compatibility, ports, credentials) runs exactly once.
         // This may already have been called by createJavaParameters() if the framework
         // invoked getJavaParameters() before startProcess().
+        //
+        // IMPORTANT: wrap the entire method body so that if anything fails after ports
+        // are claimed (resolvePortConflicts), we release them here. processTerminated()
+        // is only called if we successfully return a handler — if we throw, it never fires.
+        try {
         ensurePreLaunchSetup();
 
         String executorId = getEnvironment().getExecutor().getId();
@@ -414,6 +419,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         );
         ProcessTerminatedListener.attach(handler);
         return handler;
+        } catch (ExecutionException | RuntimeException e) {
+            // Release any ports claimed during resolvePortConflicts() since
+            // processTerminated() will never be called if we don't return a handler.
+            com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+                    .releaseAllFor(configuration.getName());
+            if (e instanceof ExecutionException) throw (ExecutionException) e;
+            throw new ExecutionException(e.getMessage(), e);
+        }
     }
 
     @Nullable

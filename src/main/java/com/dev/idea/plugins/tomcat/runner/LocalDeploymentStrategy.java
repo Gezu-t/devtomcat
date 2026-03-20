@@ -267,6 +267,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // Get all runtime classpath entries from the module (recursively includes dependencies)
         List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
+        List<String> skippedModules = new ArrayList<>();
 
         VirtualFile[] classesRoots = OrderEnumerator.orderEntries(module)
                 .recursively()
@@ -300,11 +301,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 String moduleName = extractModuleName(nativePath);
                 if (moduleName != null && coveredModuleNames.contains(moduleName.toLowerCase(Locale.ROOT))) {
                     LOG.debug("Skipping class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
-                    if (logger != null) {
-                        logger.logServerInfo(
-                                "Hot reload skipped for '" + moduleName + "' — already packaged as JAR in WEB-INF/lib. " +
-                                "Redeploy required to pick up changes in this module.");
-                    }
+                    skippedModules.add(moduleName);
                     continue;
                 }
                 extraDirs.add(nativePath);
@@ -335,6 +332,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
         LOG.info("Added " + extraDirs.size() + " class dirs and " + extraJars.size() +
                 " JARs as extra resources for artifact '" + artifact.getName() + "'");
+
+        // Single consolidated warning instead of one message per module to keep the console clean
+        if (!skippedModules.isEmpty() && logger != null) {
+            logger.logServerInfo(
+                    "Hot reload skipped for " + skippedModules.size() + " module(s) already packaged as JARs in WEB-INF/lib: "
+                    + skippedModules + ". Changes to these modules require Redeploy, not just Build.");
+        }
+
         return sb.toString();
     }
 
@@ -371,6 +376,15 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             int slash = parent.lastIndexOf('/');
             return slash >= 0 ? parent.substring(slash + 1) : parent;
         }
+        // IntelliJ IDEA default compiler output: .../out/production/ModuleName
+        int outIdx = normalized.lastIndexOf("/out/production/");
+        if (outIdx >= 0) {
+            String after = normalized.substring(outIdx + "/out/production/".length());
+            int slash = after.indexOf('/');
+            String candidate = slash >= 0 ? after.substring(0, slash) : after;
+            if (!candidate.isEmpty()) return candidate;
+        }
+
         // Gradle
         String[] gradlePatterns = {
                 "/build/classes/java/main",
