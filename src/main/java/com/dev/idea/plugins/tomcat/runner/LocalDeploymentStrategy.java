@@ -410,10 +410,27 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             ModuleManager moduleManager = ModuleManager.getInstance(project);
             String name = artifact.getName();
 
-            // NOTE: ArtifactManager is Ultimate-only and unavailable in Community Edition.
-            // Steps below cover all realistic Community Edition scenarios without it.
+            // 1. ArtifactManager lookup — works on Ultimate where users configure artifacts.
+            //    Wrapped in try/catch so it degrades silently on Community Edition where
+            //    the packaging plugin may not be loaded (NoClassDefFoundError).
+            try {
+                com.intellij.packaging.artifacts.ArtifactManager artifactManager =
+                        com.intellij.packaging.artifacts.ArtifactManager.getInstance(project);
+                if (artifactManager != null) {
+                    for (com.intellij.packaging.artifacts.Artifact a : artifactManager.getArtifacts()) {
+                        if (name.equals(a.getName())) {
+                            String moduleName = a.getName().replaceAll(":war.*$", "").trim();
+                            Module m = moduleManager.findModuleByName(moduleName);
+                            if (m != null) return m;
+                            break;
+                        }
+                    }
+                }
+            } catch (NoClassDefFoundError | Exception ignored) {
+                // ArtifactManager not available in this IDE edition — fall through
+            }
 
-            // 1. Direct name-based lookup (strip suffixes)
+            // 2. Direct name-based lookup (strip suffixes)
             String baseName = name.replaceAll(":war.*$", "")
                                   .replaceAll("\\.war$", "")
                                   .replaceAll("\\s*\\(.*\\)$", "")
@@ -421,7 +438,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             Module module = moduleManager.findModuleByName(baseName);
             if (module != null) return module;
 
-            // 2. Path-based: find module whose content root contains the deployment path
+            // 3. Path-based: find module whose content root contains the deployment path
             String deploymentPath = artifact.getPath();
             if (!deploymentPath.isEmpty()) {
                 for (Module m : moduleManager.getModules()) {
@@ -435,7 +452,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 }
             }
 
-            // 3. Single web module fallback
+            // 4. Single web module fallback
             List<Module> webModules = new ArrayList<>();
             for (Module m : moduleManager.getModules()) {
                 if (TomcatModuleUtils.isWebModule(m)) {
@@ -444,7 +461,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
             if (webModules.size() == 1) return webModules.get(0);
 
-            // 4. Partial name match against web modules
+            // 5. Partial name match against web modules
             for (Module m : webModules) {
                 String mName = m.getName().toLowerCase();
                 String lowerBase = baseName.toLowerCase();
