@@ -109,7 +109,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             try {
                 if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
                         || Files.isDirectory(artifactPath)) {
-                    String contextXml = buildContextXml(artifact, artifactPath, hotDeploy, preserveSessions, project);
+                    String contextXml = buildContextXml(artifact, artifactPath, hotDeploy, preserveSessions, project, logger);
                     Path contextFile = confCatalinaLocalhost.resolve(contextName + ".xml");
                     Files.writeString(contextFile, contextXml);
                     LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
@@ -129,8 +129,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                    @NotNull Path artifactPath,
                                    boolean hotDeploy,
                                    boolean preserveSessions,
-                                   @NotNull Project project) {
-        String extraResources = buildExtraResourcesXml(artifact, artifactPath, project);
+                                   @NotNull Project project,
+                                   @Nullable TomcatDeploymentLogger logger) {
+        String extraResources = buildExtraResourcesXml(artifact, artifactPath, project, logger);
         String jarScanFilter = buildJarScanFilter(artifactPath);
 
         StringBuilder xml = new StringBuilder();
@@ -230,7 +231,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     @NotNull
     private String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
                                           @NotNull Path artifactPath,
-                                          @NotNull Project project) {
+                                          @NotNull Project project,
+                                          @Nullable TomcatDeploymentLogger logger) {
         Module module = findModuleForArtifact(artifact, project);
         if (module == null) {
             LOG.info("No module found for artifact '" + artifact.getName() + "', skipping extra classpath");
@@ -300,6 +302,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 String moduleName = extractModuleName(nativePath);
                 if (moduleName != null && coveredModuleNames.contains(moduleName.toLowerCase(Locale.ROOT))) {
                     LOG.debug("Skipping class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
+                    if (logger != null) {
+                        logger.logServerInfo(
+                                "Hot reload skipped for '" + moduleName + "' — already packaged as JAR in WEB-INF/lib. " +
+                                "Redeploy required to pick up changes in this module.");
+                    }
                     continue;
                 }
                 extraDirs.add(nativePath);
@@ -342,8 +349,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     static String stripJarVersion(@NotNull String jarName) {
         if (!jarName.endsWith(".jar")) return null;
         String base = jarName.substring(0, jarName.length() - 4);
-        // Remove -<version> suffix where version starts with a digit
-        return base.replaceAll("-\\d+.*$", "");
+        // Remove -<version> suffix: version starts with a digit (1.2.3) or is a bare SNAPSHOT
+        return base.replaceAll("-(\\d+.*|SNAPSHOT)$", "");
     }
 
     /**
