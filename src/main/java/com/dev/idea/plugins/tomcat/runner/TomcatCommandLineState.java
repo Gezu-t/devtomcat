@@ -179,12 +179,13 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             // Atomically claim all resolved ports through the registry to prevent
             // a second concurrent launcher from grabbing the same ports
             PortConfig rp = resolution.getResolvedConfig();
-            rp.setHttp(registry.claimPort(rp.getHttp(), configName));
-            rp.setShutdown(registry.claimPort(rp.getShutdown(), configName));
-            if (rp.isHttpsEnabled()) rp.setHttps(registry.claimPort(rp.getHttps(), configName));
-            if (rp.isJmxEnabled())   rp.setJmx(registry.claimPort(rp.getJmx(), configName));
-            if (rp.isAjpEnabled())   rp.setAjp(registry.claimPort(rp.getAjp(), configName));
-            this.resolvedDebugPort = registry.claimPort(resolution.getDebugPort(), configName);
+            claimAndTrack(rp, registry, configName, resolution.getChanges());
+            int preClaimDebug = resolution.getDebugPort();
+            this.resolvedDebugPort = registry.claimPort(preClaimDebug, configName);
+            if (this.resolvedDebugPort != preClaimDebug) {
+                resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
+                        + " claimed by a concurrent instance, resolved to " + this.resolvedDebugPort);
+            }
             this.resolvedPorts = rp;
             logResolutionChanges(resolution.getChanges());
         } else {
@@ -192,13 +193,63 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     PortConflictDetector.resolveConflicts(originalPorts);
 
             PortConfig rp = resolution.getResolvedConfig();
-            rp.setHttp(registry.claimPort(rp.getHttp(), configName));
-            rp.setShutdown(registry.claimPort(rp.getShutdown(), configName));
-            if (rp.isHttpsEnabled()) rp.setHttps(registry.claimPort(rp.getHttps(), configName));
-            if (rp.isJmxEnabled())   rp.setJmx(registry.claimPort(rp.getJmx(), configName));
-            if (rp.isAjpEnabled())   rp.setAjp(registry.claimPort(rp.getAjp(), configName));
+            claimAndTrack(rp, registry, configName, resolution.getChanges());
             this.resolvedPorts = rp;
             logResolutionChanges(resolution.getChanges());
+        }
+    }
+
+    /**
+     * Claims all ports in the resolved {@link PortConfig} through the registry and
+     * appends a change entry for any port the registry bumped further (i.e., a
+     * concurrent instance already claimed the port that {@link PortConflictDetector}
+     * picked).
+     */
+    private void claimAndTrack(@NotNull PortConfig rp,
+                               @NotNull com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry registry,
+                               @NotNull String configName,
+                               @NotNull java.util.List<String> changes) {
+        int orig, claimed;
+
+        orig = rp.getHttp();
+        claimed = registry.claimPort(orig, configName);
+        if (claimed != orig) {
+            changes.add("HTTP port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
+            rp.setHttp(claimed);
+        }
+
+        orig = rp.getShutdown();
+        claimed = registry.claimPort(orig, configName);
+        if (claimed != orig) {
+            changes.add("Shutdown port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
+            rp.setShutdown(claimed);
+        }
+
+        if (rp.isHttpsEnabled()) {
+            orig = rp.getHttps();
+            claimed = registry.claimPort(orig, configName);
+            if (claimed != orig) {
+                changes.add("HTTPS port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
+                rp.setHttps(claimed);
+            }
+        }
+
+        if (rp.isJmxEnabled()) {
+            orig = rp.getJmx();
+            claimed = registry.claimPort(orig, configName);
+            if (claimed != orig) {
+                changes.add("JMX port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
+                rp.setJmx(claimed);
+            }
+        }
+
+        if (rp.isAjpEnabled()) {
+            orig = rp.getAjp();
+            claimed = registry.claimPort(orig, configName);
+            if (claimed != orig) {
+                changes.add("AJP port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
+                rp.setAjp(claimed);
+            }
         }
     }
 
