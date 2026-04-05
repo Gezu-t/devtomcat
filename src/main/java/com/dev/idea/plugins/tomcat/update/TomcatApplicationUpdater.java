@@ -117,8 +117,14 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         TomcatDeploymentLogger logger = processHandler.getDeploymentLogger();
         logger.logServerInfo("Update triggered: " + selectedAction);
 
-        ApplicationManager.getApplication().invokeAndWait(
-                () -> FileDocumentManager.getInstance().saveAllDocuments());
+        // Save documents — must run on EDT. invokeAndWait deadlocks if already on EDT
+        // (e.g. called from TomcatRunner.doExecute), so dispatch appropriately.
+        Runnable saveAll = () -> FileDocumentManager.getInstance().saveAllDocuments();
+        if (ApplicationManager.getApplication().isDispatchThread()) {
+            saveAll.run();
+        } else {
+            ApplicationManager.getApplication().invokeAndWait(saveAll);
+        }
 
         switch (selectedAction) {
             case UpdateConfig.UPDATE_RESOURCES ->

@@ -76,8 +76,11 @@ public class TomcatDebugger extends GenericDebuggerRunner {
             ProcessHandler handler = existing.getProcessHandler();
             if (handler instanceof TomcatProcessHandler tomcatHandler
                     && !tomcatHandler.isProcessTerminated()
-                    && !tomcatHandler.isProcessTerminating()
-                    && tomcatHandler.isServerStartupDetected()) {
+                    && !tomcatHandler.isProcessTerminating()) {
+
+                if (!tomcatHandler.isServerStartupDetected()) {
+                    return existing;
+                }
 
                 String defaultAction = config.getConfigData().getUpdateConfig().getOnUpdate();
                 TomcatUpdateDialog dialog = new TomcatUpdateDialog(
@@ -148,7 +151,7 @@ public class TomcatDebugger extends GenericDebuggerRunner {
     private RunContentDescriptor findRunningDescriptor(@NotNull TomcatRunConfiguration config,
                                                         @NotNull ExecutionEnvironment env) {
         for (RunContentDescriptor descriptor : ExecutionManager.getInstance(env.getProject())
-                .getRunningDescriptors(settings -> config.equals(settings.getConfiguration()))) {
+                .getRunningDescriptors(settings -> config == settings.getConfiguration())) {
             ProcessHandler handler = descriptor.getProcessHandler();
             if (handler != null && !handler.isProcessTerminated()) {
                 return descriptor;

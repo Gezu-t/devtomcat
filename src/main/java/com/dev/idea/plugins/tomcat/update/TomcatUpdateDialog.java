@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBRadioButton;
 import org.jetbrains.annotations.NotNull;
@@ -20,6 +21,7 @@ import java.awt.*;
  */
 public class TomcatUpdateDialog extends DialogWrapper {
 
+    private final String configName;
     private final JBRadioButton rbUpdateResources         = new JBRadioButton("Update resources");
     private final JBRadioButton rbUpdateClassesResources  = new JBRadioButton("Update classes and resources");
     private final JBRadioButton rbRedeploy                = new JBRadioButton("Redeploy");
@@ -29,6 +31,7 @@ public class TomcatUpdateDialog extends DialogWrapper {
                                @NotNull String configName,
                                @NotNull String defaultAction) {
         super(project, false);
+        this.configName = configName;
         setTitle("Update '" + configName + "'");
         setOKButtonText("OK");
 
@@ -50,12 +53,19 @@ public class TomcatUpdateDialog extends DialogWrapper {
         group.add(rbRedeploy);
         group.add(rbRestartServer);
 
-        JBPanel<JBPanel<?>> panel = new JBPanel<>(new GridLayout(4, 1, 0, 4));
-        panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 24));
-        panel.add(rbUpdateResources);
-        panel.add(rbUpdateClassesResources);
-        panel.add(rbRedeploy);
-        panel.add(rbRestartServer);
+        JBPanel<JBPanel<?>> panel = new JBPanel<>(new BorderLayout(0, 8));
+        panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 24));
+
+        panel.add(new JBLabel("Run configuration '" + configName + "' is running."),
+                BorderLayout.NORTH);
+
+        JBPanel<JBPanel<?>> buttons = new JBPanel<>(new GridLayout(4, 1, 0, 4));
+        buttons.add(rbUpdateResources);
+        buttons.add(rbUpdateClassesResources);
+        buttons.add(rbRedeploy);
+        buttons.add(rbRestartServer);
+        panel.add(buttons, BorderLayout.CENTER);
+
         return panel;
     }
 
