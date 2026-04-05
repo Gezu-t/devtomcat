@@ -27,10 +27,7 @@ public final class TomcatConsoleFilter implements Filter {
     private static final Pattern FILE_PATH_PATTERN = Pattern.compile(
             "(/[\\w./-]+\\.(?:xml|properties|war|jar|class|java|log))");
 
-    private final Project project;
-
-    TomcatConsoleFilter(@NotNull Project project) {
-        this.project = project;
+    TomcatConsoleFilter() {
     }
 
     @Override

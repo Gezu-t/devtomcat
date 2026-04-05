@@ -14,6 +14,6 @@ public final class TomcatConsoleFilterProvider implements ConsoleFilterProvider 
 
     @Override
     public Filter @NotNull [] getDefaultFilters(@NotNull Project project) {
-        return new Filter[]{new TomcatConsoleFilter(project)};
+        return new Filter[]{new TomcatConsoleFilter()};
     }
 }
