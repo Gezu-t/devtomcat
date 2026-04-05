@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
+import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
 import com.dev.idea.plugins.tomcat.update.TomcatUpdateDialog;
 import com.intellij.debugger.impl.GenericDebuggerRunner;
@@ -16,7 +17,6 @@ import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import org.jetbrains.annotations.NotNull;
@@ -83,20 +83,14 @@ public class TomcatDebugger extends GenericDebuggerRunner {
                 TomcatUpdateDialog dialog = new TomcatUpdateDialog(
                         env.getProject(), config.getName(), defaultAction);
 
-                boolean[] proceed = {false};
-                String[] selectedAction = {defaultAction};
-                ApplicationManager.getApplication().invokeAndWait(() -> {
-                    if (dialog.showAndGet()) {
-                        proceed[0] = true;
-                        selectedAction[0] = dialog.getSelectedAction();
-                    }
-                });
-
-                if (!proceed[0]) return null;
+                if (!dialog.showAndGet()) return null;
+                String selectedAction = dialog.getSelectedAction();
 
                 TomcatApplicationUpdater updater = new TomcatApplicationUpdater(
-                        env.getProject(), tomcatHandler, config, selectedAction[0]);
-                updater.executeUpdate(selectedAction[0]);
+                        env.getProject(), tomcatHandler, config, selectedAction);
+                updater.executeUpdate(selectedAction);
+
+                if (UpdateConfig.RESTART_SERVER.equals(selectedAction)) return null;
                 return existing;
             }
         }
