@@ -53,7 +53,7 @@ public final class TomcatConsoleFilter implements Filter {
             int start = lineStart + fileMatcher.start();
             int end = lineStart + fileMatcher.end();
             String filePath = fileMatcher.group();
-            items.add(new ResultItem(start, end, new FileHyperlinkInfo(project, filePath)));
+            items.add(new ResultItem(start, end, new FileHyperlinkInfo(filePath)));
         }
 
         return items.isEmpty() ? null : new Result(items);
@@ -66,7 +66,7 @@ public final class TomcatConsoleFilter implements Filter {
     private static final class FileHyperlinkInfo implements HyperlinkInfo {
         private final String filePath;
 
-        FileHyperlinkInfo(@NotNull Project project, @NotNull String filePath) {
+        FileHyperlinkInfo(@NotNull String filePath) {
             this.filePath = filePath;
         }
 

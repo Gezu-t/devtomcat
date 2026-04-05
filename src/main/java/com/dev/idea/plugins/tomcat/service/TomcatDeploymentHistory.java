@@ -28,6 +28,13 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
 
     private static final int MAX_ENTRIES = 50;
 
+    /**
+     * Dedicated lock for all history mutations and reads.
+     * Never use {@code synchronized(state)} — {@link #loadState(HistoryState)} replaces
+     * the {@code state} reference, which would silently change the monitor object
+     * mid-flight, breaking mutual exclusion between concurrent callers.
+     */
+    private final Object lock = new Object();
     private HistoryState state = new HistoryState();
 
     public static TomcatDeploymentHistory getInstance(@NotNull Project project) {
@@ -80,12 +87,16 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
 
     @Override
     public @Nullable HistoryState getState() {
-        return state;
+        synchronized (lock) {
+            return state;
+        }
     }
 
     @Override
     public void loadState(@NotNull HistoryState loaded) {
-        this.state = loaded;
+        synchronized (lock) {
+            this.state = loaded;
+        }
     }
 
     // --- Recording API (called from TomcatProcessHandler) ---
@@ -96,7 +107,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
     }
 
     public void recordCompleted(@NotNull HistoryEntry entry) {
-        synchronized (state) {
+        synchronized (lock) {
             state.entries.add(0, entry); // newest first
             while (state.entries.size() > MAX_ENTRIES) {
                 state.entries.remove(state.entries.size() - 1);
@@ -108,7 +119,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
 
     @NotNull
     public List<HistoryEntry> getEntries() {
-        synchronized (state) {
+        synchronized (lock) {
             return Collections.unmodifiableList(new ArrayList<>(state.entries));
         }
     }
@@ -116,7 +127,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
     @NotNull
     public List<HistoryEntry> getEntriesForConfig(@NotNull String configName) {
         List<HistoryEntry> result = new ArrayList<>();
-        synchronized (state) {
+        synchronized (lock) {
             for (HistoryEntry e : state.entries) {
                 if (configName.equals(e.configName)) {
                     result.add(e);
@@ -128,7 +139,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
 
     @Nullable
     public HistoryEntry getLastEntry(@NotNull String configName) {
-        synchronized (state) {
+        synchronized (lock) {
             for (HistoryEntry e : state.entries) {
                 if (configName.equals(e.configName)) {
                     return e;
@@ -139,14 +150,14 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
     }
 
     public void clearHistory() {
-        synchronized (state) {
+        synchronized (lock) {
             state.entries.clear();
         }
     }
 
     public int getConsecutiveFailures(@NotNull String configName) {
         int count = 0;
-        synchronized (state) {
+        synchronized (lock) {
             for (HistoryEntry e : state.entries) {
                 if (!configName.equals(e.configName)) continue;
                 if (!e.success) count++;

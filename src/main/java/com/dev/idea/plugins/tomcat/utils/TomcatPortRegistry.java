@@ -76,9 +76,12 @@ public final class TomcatPortRegistry {
                 return port;
             }
         }
-        // No port found in range — return original and let Tomcat fail with a clear error
-        LOG.warn("PortRegistry: '" + configName + "' could not claim any port near " + requestedPort);
-        return requestedPort;
+        // No port found in range — return -1 so callers can detect exhaustion cleanly.
+        // Returning requestedPort here would be wrong: the port is not in the registry,
+        // so two concurrent exhausted launchers would both receive the same unclaimed port.
+        LOG.warn("PortRegistry: '" + configName + "' could not claim any port near " + requestedPort
+                + " (searched " + requestedPort + "–" + limit + ")");
+        return -1;
     }
 
     /**

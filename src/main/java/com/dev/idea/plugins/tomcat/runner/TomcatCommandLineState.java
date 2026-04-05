@@ -186,7 +186,11 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             claimAndTrack(rp, registry, configName, resolution.getChanges());
             int preClaimDebug = resolution.getDebugPort();
             this.resolvedDebugPort = registry.claimPort(preClaimDebug, configName);
-            if (this.resolvedDebugPort != preClaimDebug) {
+            if (this.resolvedDebugPort == -1) {
+                resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
+                        + ": all ports in search range exhausted — debugger may fail to attach");
+                this.resolvedDebugPort = preClaimDebug; // keep original; JVM will fail with a clear error
+            } else if (this.resolvedDebugPort != preClaimDebug) {
                 resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
                         + " claimed by a concurrent instance, resolved to " + this.resolvedDebugPort);
             }
@@ -217,14 +221,18 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
         orig = rp.getHttp();
         claimed = registry.claimPort(orig, configName);
-        if (claimed != orig) {
+        if (claimed == -1) {
+            changes.add("HTTP port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
+        } else if (claimed != orig) {
             changes.add("HTTP port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
             rp.setHttp(claimed);
         }
 
         orig = rp.getShutdown();
         claimed = registry.claimPort(orig, configName);
-        if (claimed != orig) {
+        if (claimed == -1) {
+            changes.add("Shutdown port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
+        } else if (claimed != orig) {
             changes.add("Shutdown port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
             rp.setShutdown(claimed);
         }
@@ -232,7 +240,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (rp.isHttpsEnabled()) {
             orig = rp.getHttps();
             claimed = registry.claimPort(orig, configName);
-            if (claimed != orig) {
+            if (claimed == -1) {
+                changes.add("HTTPS port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
+            } else if (claimed != orig) {
                 changes.add("HTTPS port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
                 rp.setHttps(claimed);
             }
@@ -241,7 +251,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (rp.isJmxEnabled()) {
             orig = rp.getJmx();
             claimed = registry.claimPort(orig, configName);
-            if (claimed != orig) {
+            if (claimed == -1) {
+                changes.add("JMX port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
+            } else if (claimed != orig) {
                 changes.add("JMX port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
                 rp.setJmx(claimed);
             }
@@ -250,7 +262,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (rp.isAjpEnabled()) {
             orig = rp.getAjp();
             claimed = registry.claimPort(orig, configName);
-            if (claimed != orig) {
+            if (claimed == -1) {
+                changes.add("AJP port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
+            } else if (claimed != orig) {
                 changes.add("AJP port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
                 rp.setAjp(claimed);
             }

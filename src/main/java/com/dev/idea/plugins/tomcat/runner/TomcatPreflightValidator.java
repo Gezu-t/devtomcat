@@ -4,13 +4,10 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
-import com.dev.idea.plugins.tomcat.model.VmConfig;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
