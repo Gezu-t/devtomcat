@@ -14,6 +14,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
@@ -41,24 +42,27 @@ public class RestartTomcatAction extends AnAction {
                 ? tomcatHandler.getExecutorId()
                 : DefaultRunExecutor.EXECUTOR_ID;
 
-        handler.addProcessListener(new ProcessListener() {
-            @Override
-            public void processTerminated(@NotNull ProcessEvent event) {
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    try {
-                        Executor executor = ExecutorRegistry.getInstance().getExecutorById(executorId);
-                        if (executor == null) {
-                            executor = DefaultRunExecutor.getRunExecutorInstance();
-                        }
-                        ProgramRunnerUtil.executeConfiguration(settings, executor);
-                    } catch (Exception ex) {
-                        LOG.warn("Failed to restart Tomcat: " + config.getName(), ex);
-                    }
-                });
-            }
-        });
+        // Compile first so the restarted Tomcat picks up the latest class files
+        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
+            if (aborted || errors > 0) return;
 
-        handler.destroyProcess();
+            handler.addProcessListener(new ProcessListener() {
+                @Override
+                public void processTerminated(@NotNull ProcessEvent event) {
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            Executor executor = ExecutorRegistry.getInstance().getExecutorById(executorId);
+                            if (executor == null) executor = DefaultRunExecutor.getRunExecutorInstance();
+                            ProgramRunnerUtil.executeConfiguration(settings, executor);
+                        } catch (Exception ex) {
+                            LOG.warn("Failed to restart Tomcat: " + config.getName(), ex);
+                        }
+                    });
+                }
+            });
+
+            handler.destroyProcess();
+        });
     }
 
     @Override

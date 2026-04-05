@@ -22,7 +22,6 @@ import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.Messages;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -93,17 +92,12 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     public void performUpdate(@NotNull AnActionEvent event) {
         UpdateConfig updateConfig = configuration.getConfigData().getUpdateConfig();
         if (updateConfig.isShowUpdateDialog()) {
-            int result = Messages.showYesNoDialog(
-                    project,
-                    "Apply '" + getDescription() + "' to " + configuration.getName() + "?",
-                    "DevTomcat — Update Application",
-                    "Update", "Cancel",
-                    Messages.getQuestionIcon());
-            if (result != Messages.YES) {
-                return;
-            }
+            TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, configuration.getName(), action);
+            if (!dialog.showAndGet()) return;
+            executeUpdate(dialog.getSelectedAction());
+        } else {
+            executeUpdate(action);
         }
-        executeUpdate();
     }
 
     /**
@@ -112,13 +106,17 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * without needing an {@link AnActionEvent}.
      */
     void executeUpdate() {
+        executeUpdate(action);
+    }
+
+    void executeUpdate(@NotNull String selectedAction) {
         TomcatDeploymentLogger logger = processHandler.getDeploymentLogger();
-        logger.logServerInfo("Update triggered: " + getDescription());
+        logger.logServerInfo("Update triggered: " + selectedAction);
 
         ApplicationManager.getApplication().invokeAndWait(
                 () -> FileDocumentManager.getInstance().saveAllDocuments());
 
-        switch (action) {
+        switch (selectedAction) {
             case UpdateConfig.UPDATE_RESOURCES ->
                     doUpdateResourcesOnly(logger);
             case UpdateConfig.UPDATE_CLASSES_AND_RESOURCES ->
@@ -128,7 +126,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             case UpdateConfig.RESTART_SERVER ->
                     doRestart(logger);
             default ->
-                    logger.logServerWarning("Unknown update action: " + action);
+                    logger.logServerWarning("Unknown update action: " + selectedAction);
         }
     }
 
@@ -191,41 +189,49 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     }
 
     /**
-     * Destroys the current Tomcat process and re-executes the run configuration
-     * once the process has fully terminated.
+     * Compiles the project, then stops and re-executes the run configuration so
+     * the restarted Tomcat picks up the latest class files.
      */
     private void doRestart(@NotNull TomcatDeploymentLogger logger) {
-        logger.logServerInfo("Restarting Tomcat server...");
-
-        // Capture the original executor (Run/Debug/Coverage) so restart uses the same mode
+        logger.logServerInfo("Compiling before restart...");
         String originalExecutorId = processHandler.getExecutorId();
 
-        processHandler.addProcessListener(new ProcessListener() {
-            @Override
-            public void processTerminated(@NotNull ProcessEvent event) {
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    try {
-                        RunnerAndConfigurationSettings settings =
-                                RunManager.getInstance(project).findSettings(configuration);
-                        if (settings != null) {
-                            Executor executor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
-                            if (executor == null) {
-                                executor = DefaultRunExecutor.getRunExecutorInstance();
-                            }
-                            ProgramRunnerUtil.executeConfiguration(settings, executor);
-                            logger.logServerInfo("Tomcat restart initiated (" + executor.getActionName() + " mode)");
-                        } else {
-                            logger.logServerError("Could not find run configuration settings for restart");
-                        }
-                    } catch (Exception e) {
-                        LOG.warn("Failed to restart Tomcat", e);
-                        logger.logServerError("Failed to restart: " + e.getMessage());
-                    }
-                });
+        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
+            if (aborted) {
+                logger.logServerWarning("Compilation aborted — restart cancelled");
+                return;
             }
-        });
+            if (errors > 0) {
+                logger.logServerError("Compilation failed with " + errors + " error(s) — restart cancelled");
+                return;
+            }
+            logger.logServerInfo("Compilation successful, restarting Tomcat...");
 
-        processHandler.destroyProcess();
+            processHandler.addProcessListener(new ProcessListener() {
+                @Override
+                public void processTerminated(@NotNull ProcessEvent event) {
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            RunnerAndConfigurationSettings settings =
+                                    RunManager.getInstance(project).findSettings(configuration);
+                            if (settings != null) {
+                                Executor executor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
+                                if (executor == null) executor = DefaultRunExecutor.getRunExecutorInstance();
+                                ProgramRunnerUtil.executeConfiguration(settings, executor);
+                                logger.logServerInfo("Tomcat restarted (" + executor.getActionName() + " mode)");
+                            } else {
+                                logger.logServerError("Could not find run configuration settings for restart");
+                            }
+                        } catch (Exception e) {
+                            LOG.warn("Failed to restart Tomcat", e);
+                            logger.logServerError("Failed to restart: " + e.getMessage());
+                        }
+                    });
+                }
+            });
+
+            processHandler.destroyProcess();
+        });
     }
 
     /**
