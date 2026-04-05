@@ -19,23 +19,11 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.RunManagerEx;
-import com.intellij.openapi.application.WriteAction;
-import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
-import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.roots.OrderEnumerator;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
-import com.intellij.packaging.artifacts.ArtifactType;
-import com.intellij.packaging.artifacts.ModifiableArtifactModel;
-import com.intellij.packaging.elements.CompositePackagingElement;
-import com.intellij.packaging.elements.PackagingElementFactory;
-import com.intellij.packaging.impl.artifacts.PlainArtifactType;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
 
 import java.nio.file.Path;
@@ -54,6 +42,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     private final TomcatConfigurationData configData = new TomcatConfigurationData();
     public TomcatRunConfiguration(@NotNull Project project, @NotNull ConfigurationFactory factory, String name) {
         super(project, factory, name);
+        // Allow parallel execution so IntelliJ skips "Stop and Rerun" dialog and calls
+        // doExecute() while the old process is still alive — TomcatRunner/TomcatDebugger
+        // intercept that call and show the Update dialog instead of starting a second instance.
+        setAllowRunningInParallel(true);
         try {
             TomcatConfigurationInitializer.initialize(this);
             syncTomcatLogFiles();
