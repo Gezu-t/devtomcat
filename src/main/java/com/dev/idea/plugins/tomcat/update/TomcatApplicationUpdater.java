@@ -85,7 +85,11 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     @Nullable
     @Override
     public Icon getIcon() {
-        return AllIcons.Actions.Compile;
+        return switch (action) {
+            case UpdateConfig.RESTART_SERVER -> AllIcons.Actions.Restart;
+            case UpdateConfig.REDEPLOY       -> AllIcons.Actions.Rerun;
+            default                          -> AllIcons.Actions.Compile;
+        };
     }
 
     @Override
@@ -147,7 +151,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
     /**
      * Triggers incremental compilation then updates resources.
-     * For exploded artifacts Tomcat auto-reloads (reloadable="true").
+     * For exploded artifacts the updated classes are served directly from the output directory;
+     * Tomcat picks up JSP and static resource changes on the next request.
      * For WAR artifacts the WAR file is re-copied to webapps after compilation succeeds.
      */
     private void doUpdateClassesAndResources(@NotNull TomcatDeploymentLogger logger) {

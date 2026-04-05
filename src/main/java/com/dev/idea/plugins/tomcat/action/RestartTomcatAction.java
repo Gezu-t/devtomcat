@@ -44,7 +44,14 @@ public class RestartTomcatAction extends AnAction {
 
         // Compile first so the restarted Tomcat picks up the latest class files
         CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
-            if (aborted || errors > 0) return;
+            if (aborted) {
+                LOG.info("Restart cancelled — compilation was aborted for: " + config.getName());
+                return;
+            }
+            if (errors > 0) {
+                LOG.warn("Restart cancelled — compilation failed with " + errors + " error(s) for: " + config.getName());
+                return;
+            }
 
             handler.addProcessListener(new ProcessListener() {
                 @Override
