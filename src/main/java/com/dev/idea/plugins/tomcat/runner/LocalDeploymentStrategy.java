@@ -40,12 +40,21 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     private static final Logger LOG = Logger.getInstance(LocalDeploymentStrategy.class);
 
-    // --- Tomcat PostResources (context.xml overlay) ---
+    // --- Tomcat extra resources (context.xml overlay) ---
     private static final String RESOURCE_CLASS_DIR = "org.apache.catalina.webresources.DirResourceSet";
     private static final String RESOURCE_CLASS_FILE = "org.apache.catalina.webresources.FileResourceSet";
     private static final String WEBAPP_MOUNT_CLASSES = "/WEB-INF/classes";
     private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
 
+    // Class output dirs are PreResources so they shadow the (potentially stale) WEB-INF/classes
+    // inside the exploded artifact's docBase. Tomcat resolves: Pre → docBase → Post.
+    // If we used PostResources here, docBase's WEB-INF/classes would always win and freshly
+    // compiled target/classes/ would never be seen by the classloader.
+    private static final String PRE_RESOURCE_TEMPLATE =
+            "\n    <PreResources className=\"%s\"\n                   base=\"%s\" webAppMount=\"%s\" />";
+
+    // JAR files go to PostResources — they extend WEB-INF/lib with entries not already packaged
+    // in the artifact, so there is no shadowing conflict with docBase content.
     private static final String POST_RESOURCE_TEMPLATE =
             "\n    <PostResources className=\"%s\"\n                    base=\"%s\" webAppMount=\"%s\" />";
 
@@ -221,10 +230,18 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Builds extra {@code <PostResources>} XML entries for an exploded artifact's context XML.
-     * This adds module classpath entries (class output dirs and dependency JARs) that are not
-     * already present in the artifact's WEB-INF/lib or WEB-INF/classes, matching how IntelliJ
-     * Ultimate enriches the webapp classloader for multi-module projects.
+     * Builds extra resource entries for an exploded artifact's context XML:
+     * <ul>
+     *   <li>Class output directories → {@code <PreResources>} so freshly compiled classes
+     *       shadow the (potentially stale) {@code WEB-INF/classes} inside the artifact.</li>
+     *   <li>Dependency JARs → {@code <PostResources>} extending {@code WEB-INF/lib} with
+     *       entries not already packaged in the artifact.</li>
+     * </ul>
+     *
+     * <p>Project module output directories are identified via {@link com.intellij.openapi.roots.ProjectFileIndex}
+     * and are always included — this prevents a name-collision false positive where a
+     * third-party {@code api-1.0.jar} in WEB-INF/lib would otherwise suppress
+     * a project module also named {@code api}.
      */
     @NotNull
     private String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
@@ -264,6 +281,20 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         String webInfClassesPath = artifactPath.resolve(WEB_INF).resolve(WEB_INF_CLASSES)
                 .toAbsolutePath().toString().replace('\\', '/');
 
+        // Precompute project module output paths using OrderEnumerator (no file-index access).
+        // This replaces the ProjectFileIndex.getModuleForFile() lookup that was triggering
+        // SlowOperations violations on EDT — module output paths are in the workspace model,
+        // not the file index, so they can be read without an expensive index traversal.
+        Set<String> moduleOutputPaths = new HashSet<>();
+        for (VirtualFile moduleRoot : OrderEnumerator.orderEntries(module)
+                .recursively()
+                .withoutSdk()
+                .withoutLibraries()
+                .classes()
+                .getRoots()) {
+            moduleOutputPaths.add(moduleRoot.getPath());
+        }
+
         // Get all runtime classpath entries from the module (recursively includes dependencies)
         List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
@@ -295,12 +326,22 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (file.isDirectory()) {
                 // Class output directory — skip if it IS the artifact's WEB-INF/classes
                 if (rootPath.equals(webInfClassesPath)) continue;
-                // Skip if a JAR for this module is already packaged in WEB-INF/lib.
-                // e.g. target/classes of "foo-bar" should not be added when foo-bar-1.2.3.jar
-                // is already in WEB-INF/lib — loading both causes duplicate class issues.
+
+                // For project module output directories, always include as PreResources.
+                // PreResources take priority over the artifact's docBase (WEB-INF/classes),
+                // so even if a same-named JAR is in WEB-INF/lib the freshly compiled classes win.
+                // Skipping based on JAR name alone triggers false positives: a module named "api"
+                // would be incorrectly blocked by a third-party "api-1.0.jar" in WEB-INF/lib.
+                if (moduleOutputPaths.contains(root.getPath())) {
+                    extraDirs.add(nativePath);
+                    continue;
+                }
+
+                // Not a recognised project module directory — apply name-based duplicate guard
+                // as a safety net for unusual classpath layouts.
                 String moduleName = extractModuleName(nativePath);
                 if (moduleName != null && coveredModuleNames.contains(moduleName.toLowerCase(Locale.ROOT))) {
-                    LOG.debug("Skipping class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
+                    LOG.debug("Skipping non-module class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
                     skippedModules.add(moduleName);
                     continue;
                 }
@@ -320,7 +361,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
         StringBuilder sb = new StringBuilder();
         for (String dir : extraDirs) {
-            sb.append(String.format(POST_RESOURCE_TEMPLATE,
+            sb.append(String.format(PRE_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_DIR, escapeXmlAttribute(dir), WEBAPP_MOUNT_CLASSES));
         }
         for (String jar : extraJars) {
@@ -362,10 +403,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * ({@code .../module/build/classes/java/main} etc.).
      * Returns null if the path does not match a known pattern.
      *
-     * <p><b>Known limitation</b>: returns only the last path component (e.g. {@code "core"},
-     * {@code "utils"}). Generic names may false-match unrelated WEB-INF/lib JARs —
-     * e.g. {@code spring-core-6.0.jar} would block {@code .../core/target/classes}.
-     * A full fix requires a module-to-JAR registry. Deferred.
+     * <p>Used only as a fallback guard for non-module class directories.
+     * Project module output directories are identified directly via
+     * {@link com.intellij.openapi.roots.ProjectFileIndex} in the caller.
      */
     @Nullable
     static String extractModuleName(@NotNull String classesDir) {

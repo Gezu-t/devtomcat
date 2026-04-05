@@ -9,6 +9,7 @@ import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.RunConfiguration;
+import com.intellij.execution.configurations.RunConfigurationSingletonPolicy;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -136,6 +137,20 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         @Override
         public boolean isApplicable(@NotNull Project project) {
             return true;
+        }
+
+        /**
+         * Declare this configuration type as always allowing multiple running instances.
+         * This bypasses IntelliJ's "Stop and Rerun" dialog (which fires when the policy
+         * is {@code SINGLE_INSTANCE}, the platform default) and instead calls
+         * {@code doExecute()} directly on {@link com.dev.idea.plugins.tomcat.runner.TomcatRunner}
+         * / {@link com.dev.idea.plugins.tomcat.runner.TomcatDebugger}, where we detect
+         * the existing process and show our own Update dialog.
+         */
+        @Override
+        @NotNull
+        public RunConfigurationSingletonPolicy getSingletonPolicy() {
+            return RunConfigurationSingletonPolicy.MULTIPLE_INSTANCE_ONLY;
         }
 
         @SuppressWarnings("rawtypes")

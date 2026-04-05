@@ -86,7 +86,11 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         checkCompatibility();
         runPreflightValidation();
         warnIfManualJdwpInDebugMode();
-        resolvePortConflicts();
+        // Port conflict detection is only meaningful for local mode — remote ports
+        // are on the remote machine and not claimable or detectable from here.
+        if (!TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+            resolvePortConflicts();
+        }
 
         DeploymentStrategy.create(configuration).resolveCredentials(configuration);
 

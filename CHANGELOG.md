@@ -18,10 +18,15 @@
 - **Duplicate JDWP warning**: Pre-launch detection warns if user manually adds `-agentlib:jdwp` in VM options during local debug (scoped to local mode only, precise matching)
 - **Duplicate deployment guard**: Validator warns on duplicate module variants or multiple entries pointing to the same artifact output path
 - **Remote deploy cancel vs failure**: `DeployResult` tri-state enum (SUCCESS/FAILED/CANCELLED) — user cancellation no longer recorded as deployment failure in status/history
+- **Port leak on failed launch**: Ports claimed during `resolvePortConflicts()` are now released if `startProcess()` throws before returning a process handler — `processTerminated()` is never called in that path so the registry would otherwise hold those ports until IDE restart
+- **IntelliJ compiler output paths**: `extractModuleName()` now recognizes `out/production/ModuleName/` — projects built with IntelliJ's built-in compiler (not Maven/Gradle) now correctly skip duplicate `target/classes` entries when the module JAR is already in `WEB-INF/lib`
+- **ArtifactManager in Community Edition**: Removed `ArtifactManager` lookup from `findModuleForArtifact()` — it is an Ultimate-only API that silently returns nothing in Community Edition; the existing name/path/web-module fallback chain covers all Community scenarios
 - **Deprecated API cleanup**: Replaced `ProcessAdapter`, `Comparing.equal`, `new URL(String)`, `ConfigurationException.getMessage()`, `RawCommandLineEditor`, `FileSaverDescriptor`, `createSingleLocalFileDescriptor`, `ReadAction.compute`, `addBrowseFolderListener`
 - **Internal API removal**: Replaced `SlowOperations.knownIssue` (internal), removed all `SlowOperations` workarounds
 
 ### Added
+- **Atomic port registry**: `TomcatPortRegistry` application service claims all resolved ports in a single synchronized operation — closes the race window when multiple Tomcat instances launch simultaneously and would otherwise grab the same ports
+- **Debug port field**: Per-configuration JDWP debug port field in Server Settings — each Tomcat instance gets its own debug port instead of all defaulting to 5005
 - **Debug Tomcat action**: Services tool window context menu action to restart a running Tomcat in Debug mode
 - **Remote WAR upload progress**: `ProgressIndicator` with per-chunk progress, file size display, and cancel support
 - **Searchable settings**: `TomcatServersConfigurable` implements `SearchableConfigurable` — Tomcat settings discoverable via IDE search

@@ -42,10 +42,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     private final TomcatConfigurationData configData = new TomcatConfigurationData();
     public TomcatRunConfiguration(@NotNull Project project, @NotNull ConfigurationFactory factory, String name) {
         super(project, factory, name);
-        // Allow parallel execution so IntelliJ skips "Stop and Rerun" dialog and calls
-        // doExecute() while the old process is still alive — TomcatRunner/TomcatDebugger
-        // intercept that call and show the Update dialog instead of starting a second instance.
-        setAllowRunningInParallel(true);
         try {
             TomcatConfigurationInitializer.initialize(this);
             syncTomcatLogFiles();
@@ -274,60 +270,81 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 LOG.info("DevTomcat: Added default Build (Make) task to Before Launch");
             }
 
-            // 2. Sync Build Artifact tasks with deployment artifacts
-            currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
-
-            ArtifactManager artifactManager;
-            try {
-                artifactManager = ArtifactManager.getInstance(project);
-            } catch (Exception e) {
-                LOG.info("DevTomcat: ArtifactManager not available, skipping artifact sync");
-                runManager.setBeforeRunTasks(this, currentTasks);
-                return;
-            }
-
-            Artifact[] allArtifacts = artifactManager.getArtifacts();
-            LOG.info("DevTomcat: IntelliJ ArtifactManager has " + allArtifacts.length + " artifacts: " +
-                    java.util.Arrays.stream(allArtifacts).map(Artifact::getName)
-                            .collect(java.util.stream.Collectors.joining(", ")));
-
             List<DeploymentArtifact> deploymentArtifacts = configData.getDeploymentConfig().getDeployedArtifacts();
-            LOG.info("DevTomcat: Deployment config has " +
-                    (deploymentArtifacts != null ? deploymentArtifacts.size() : 0) + " artifacts" +
-                    (deploymentArtifacts != null ? ": " + deploymentArtifacts.stream()
-                            .map(DeploymentArtifact::getName)
-                            .collect(java.util.stream.Collectors.joining(", ")) : ""));
+            List<String> artifactDisplayNames = deploymentArtifacts == null
+                    ? java.util.Collections.emptyList()
+                    : deploymentArtifacts.stream()
+                            .filter(a -> a != null && !a.getDisplayName().isBlank())
+                            .map(DeploymentArtifact::getDisplayName)
+                            .collect(java.util.stream.Collectors.toList());
 
-            if (deploymentArtifacts != null && !deploymentArtifacts.isEmpty()) {
-                // Consolidate all deployment artifacts into a single BuildArtifactsBeforeRunTask
-                // so the Before Launch list shows "Build N artifacts" instead of separate entries
-                BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
-                for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
-                    Artifact matchedArtifact = findMatchingArtifact(artifactManager, deploymentArtifact);
+            // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager
+            boolean ultimateArtifactTaskAdded = false;
+            try {
+                ArtifactManager artifactManager = ArtifactManager.getInstance(project);
+                currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
 
-                    if (matchedArtifact != null) {
-                        buildTask.addArtifact(matchedArtifact);
-                        LOG.info("DevTomcat: Added artifact to Build task: " + matchedArtifact.getName());
-                    } else {
-                        LOG.info("DevTomcat: No matching IntelliJ artifact for deployment '" +
-                                deploymentArtifact.getName() + "'; skipping Build Artifact linkage");
+                if (deploymentArtifacts != null && !deploymentArtifacts.isEmpty()) {
+                    BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
+                    for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
+                        Artifact matched = findMatchingArtifact(artifactManager, deploymentArtifact);
+                        if (matched != null) {
+                            buildTask.addArtifact(matched);
+                            LOG.info("DevTomcat: Linked artifact '" + matched.getName() + "' to Build task");
+                        }
+                    }
+                    if (!buildTask.getArtifactPointers().isEmpty()) {
+                        buildTask.setEnabled(true);
+                        currentTasks.add(buildTask);
+                        ultimateArtifactTaskAdded = true;
                     }
                 }
-                if (!buildTask.getArtifactPointers().isEmpty()) {
-                    buildTask.setEnabled(true);
-                    currentTasks.add(buildTask);
-                }
+            } catch (NoClassDefFoundError | Exception ignored) {
+                // ArtifactManager not available on Community Edition — fall through
+            }
+
+            // 2b. On Community (no ArtifactManager), add our task for visibility and validation.
+            //     On Ultimate, BuildArtifactsBeforeRunTask already covers this — skip ours
+            //     to avoid duplicate entries in the Before Launch panel.
+            if (!ultimateArtifactTaskAdded) {
+                syncTomcatBuildArtifactsTask(currentTasks, artifactDisplayNames);
+            } else {
+                currentTasks.removeIf(t -> t instanceof TomcatBuildArtifactsTask);
             }
 
             // Set via RunManagerEx — BeforeRunStepsPanel.doReset() reads from here
             runManager.setBeforeRunTasks(this, currentTasks);
             // Also set directly on the config object for platforms that read from it
             setBeforeRunTasks((List) new ArrayList<>(currentTasks));
-            LOG.info("DevTomcat: Before Launch sync complete — " + currentTasks.size() + " total tasks");
+            LOG.info("DevTomcat: Before Launch sync complete — " + currentTasks.size() + " task(s)"
+                    + (ultimateArtifactTaskAdded ? " (Ultimate BuildArtifacts included)" : ""));
 
         } catch (Exception e) {
             LOG.warn("DevTomcat: Error syncing Before Launch tasks: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Adds or refreshes the {@link TomcatBuildArtifactsTask} in the Before Launch list.
+     * If a task already exists its artifact names are updated in place; otherwise a new
+     * task is appended. This keeps the "Build N artifact(s)" label current whenever the
+     * Deployment tab is saved.
+     */
+    @SuppressWarnings("rawtypes")
+    private void syncTomcatBuildArtifactsTask(@NotNull List<BeforeRunTask> tasks,
+                                               @NotNull java.util.List<String> artifactNames) {
+        for (BeforeRunTask task : tasks) {
+            if (task instanceof TomcatBuildArtifactsTask buildTask) {
+                buildTask.setArtifactNames(artifactNames);
+                buildTask.setEnabled(true);
+                return;
+            }
+        }
+        // Not present yet — create and append
+        TomcatBuildArtifactsTask newTask = new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
+        newTask.setArtifactNames(artifactNames);
+        newTask.setEnabled(true);
+        tasks.add(newTask);
     }
 
     /**
@@ -405,12 +422,28 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     public void setShowLogsPage(boolean show)              { configData.getUiConfig().setShowLogsPage(show); }
 
     public boolean isAllowMultipleInstances()              { return configData.isAllowMultipleInstances(); }
-    public void setAllowMultipleInstances(boolean allow)   { configData.setAllowMultipleInstances(allow); syncPlatformFlags(); }
+    public void setAllowMultipleInstances(boolean allow)   { configData.setAllowMultipleInstances(allow); }
 
 
     // =====================================================================
     // Log file tabs for Run tool window
     // =====================================================================
+
+    /**
+     * Always calls {@code setAllowRunningInParallel(true)} so IntelliJ skips the
+     * "Stop and Rerun" dialog and calls {@code doExecute()} while the old process
+     * is still alive. {@link com.dev.idea.plugins.tomcat.runner.TomcatRunner} and
+     * {@link com.dev.idea.plugins.tomcat.runner.TomcatDebugger} intercept that call
+     * and show the Update dialog instead of launching a parallel instance.
+     *
+     * <p>Called from the constructor and {@code readExternal()} to ensure the flag
+     * is always set regardless of serialization or clone order.
+     * {@code isAllowRunningInParallel()} is {@code final} in {@link RunConfigurationBase}
+     * so it cannot be overridden — this setter approach is the only valid way.
+     */
+    void syncPlatformFlags() {
+        setAllowRunningInParallel(true);
+    }
 
     /**
      * Syncs Tomcat log file entries into the parent's internal log file list.
@@ -421,14 +454,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
      * accumulation across repeated calls. The {@link #getAllLogFiles()} override
      * ensures correct path/enabled state regardless of what's in myLogFiles.
      */
-    /**
-     * Syncs our config data flags to the platform's built-in fields
-     * (e.g. allowRunningInParallel, which is final and can't be overridden).
-     */
-    void syncPlatformFlags() {
-        setAllowRunningInParallel(configData.isAllowMultipleInstances());
-    }
-
     public void syncTomcatLogFiles() {
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
         if (logsDir == null) return;

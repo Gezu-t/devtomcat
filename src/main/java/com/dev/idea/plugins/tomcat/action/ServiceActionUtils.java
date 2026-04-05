@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.DashboardCompat;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
@@ -82,6 +83,16 @@ final class ServiceActionUtils {
             }
         }
         return null;
+    }
+
+    /**
+     * Returns the active {@link TomcatProcessHandler} for a Tomcat configuration, or
+     * {@code null} if the process handler is absent or not a Tomcat handler.
+     */
+    @Nullable
+    static TomcatProcessHandler findTomcatProcessHandler(@NotNull AnActionEvent e) {
+        ProcessHandler handler = findProcessHandler(e);
+        return handler instanceof TomcatProcessHandler tomcatHandler ? tomcatHandler : null;
     }
 
     /**

@@ -7,6 +7,8 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.util.Set;
+import org.jetbrains.annotations.NotNull;
 
 public final class PortUtils {
     private static final Logger LOG = Logger.getInstance(PortUtils.class);
@@ -76,6 +78,18 @@ public final class PortUtils {
     public static int findNextAvailable(int preferredPort) {
         if (isAvailable(preferredPort)) return preferredPort;
         return findAvailable(preferredPort + 1, MAX_PORT);
+    }
+
+    /**
+     * Finds the next available port starting from {@code preferredPort + 1},
+     * skipping any ports already in {@code excluded}. Used during fallback port
+     * resolution to avoid assigning the same port to two sibling services.
+     */
+    public static int findNextAvailableExcluding(int preferredPort, @NotNull Set<Integer> excluded) {
+        for (int port = preferredPort + 1; port <= MAX_PORT; port++) {
+            if (!excluded.contains(port) && isAvailable(port)) return port;
+        }
+        return -1;
     }
 
     @Nullable

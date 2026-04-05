@@ -92,5 +92,12 @@ tasks {
 }
 
 tasks.withType<org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask>().configureEach {
+    doFirst {
+        delete(
+            fileTree(layout.buildDirectory.dir("idea-sandbox")) {
+                include("**/config/app-internal-state.db")
+            }
+        )
+    }
     systemProperty("idea.diagnostic.opentelemetry.file", "false")
 }

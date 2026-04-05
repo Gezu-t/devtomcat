@@ -493,12 +493,15 @@ package com.dev.idea.plugins.tomcat.logging;
                  // Format message with timestamp if enabled
                  String formattedMessage = formatMessage(message);
 
-                 // Output to console view if available
-                 if (consoleView != null && !project.isDisposed()) {
+                 // Capture consoleView into a local before the null check so the lambda holds
+                 // a stable reference. Without this, another thread can null the field between
+                 // the outer check and the actual print call (TOCTOU race -> NPE).
+                 ConsoleView cv = consoleView;
+                 if (cv != null && !project.isDisposed()) {
                      ApplicationManager.getApplication().invokeLater(() -> {
                          try {
-                             if (!disposed.get() && consoleView != null && !project.isDisposed()) {
-                                 consoleView.print(formattedMessage + "\n", contentType);
+                             if (!disposed.get() && !project.isDisposed()) {
+                                 cv.print(formattedMessage + "\n", contentType);
                              }
                          } catch (Exception e) {
                              LOG.warn("Failed to print to console", e);

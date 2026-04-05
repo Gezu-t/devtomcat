@@ -96,7 +96,9 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     public void performUpdate(@NotNull AnActionEvent event) {
         UpdateConfig updateConfig = configuration.getConfigData().getUpdateConfig();
         if (updateConfig.isShowUpdateDialog()) {
-            TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, configuration.getName(), action);
+            boolean isLocal = !com.dev.idea.plugins.tomcat.TomcatConstants.MODE_REMOTE
+                    .equals(configuration.getConfigData().getServerMode());
+            TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, configuration.getName(), action, isLocal);
             if (!dialog.showAndGet()) return;
             executeUpdate(dialog.getSelectedAction());
         } else {
@@ -141,18 +143,32 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     }
 
     /**
-     * Updates only static resources (JSPs, HTML, CSS, XML, etc.) without compilation.
-     * Copies resource files from source to the deployed artifact location.
-     * For exploded artifacts Tomcat detects the changes automatically.
-     * For WAR artifacts the WAR is re-copied to webapps.
+     * Syncs static resources (JSPs, HTML, CSS, XML, etc.) to the deployed artifact.
+     *
+     * <p>Triggers an incremental build via {@link CompilerManager#make} so IntelliJ
+     * copies changed resource files from the source tree to the artifact output directory.
+     * If only resource files changed (no Java), the compiler finds nothing to recompile
+     * and the build completes in milliseconds.
+     *
+     * <p>For exploded artifacts Tomcat serves files directly from {@code docBase}, so
+     * once the resource is in the artifact output directory it is live on the next request.
+     * For WAR artifacts the WAR is re-copied to webapps after the build.
      */
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
-        logger.logServerInfo("Updating resources (no compilation)...");
-
-        // Save all documents to disk so resource files are up-to-date
-        // (already done in executeUpdate, but ensure it's complete)
-        redeployWarArtifacts(logger);
-        logger.logServerInfo("Resources updated — exploded artifacts reload automatically");
+        logger.logServerInfo("Syncing resources...");
+        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
+            if (aborted) {
+                logger.logServerWarning("Build aborted — resource sync cancelled");
+                return;
+            }
+            if (errors > 0) {
+                logger.logServerError("Build failed with " + errors + " error(s) — resource sync cancelled");
+                return;
+            }
+            logger.logServerInfo("Resources synced" +
+                    (warnings > 0 ? " (" + warnings + " warning(s))" : ""));
+            redeployWarArtifacts(logger);
+        });
     }
 
     /**
@@ -218,18 +234,50 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             }
             logger.logServerInfo("Compilation successful, restarting Tomcat...");
 
+            // Capture the executor and descriptor NOW — before destroyProcess() — so the
+            // callback holds a stable reference. Querying ExecutionManager inside
+            // processTerminated/invokeLater is a race: the entry may already be deregistered
+            // from ExecutionManager's runningConfigurations by the time the callback runs.
+            Executor resolvedExecutor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
+            if (resolvedExecutor == null) {
+                LOG.warn("Executor '" + originalExecutorId + "' not found in registry — falling back to Run mode");
+                logger.logServerWarning("Could not restore executor '" + originalExecutorId + "' — restarting in Run mode");
+                resolvedExecutor = DefaultRunExecutor.getRunExecutorInstance();
+            }
+            com.intellij.execution.ui.RunContentDescriptor capturedDescriptor = null;
+            for (com.intellij.execution.ui.RunContentDescriptor d :
+                    com.intellij.execution.ExecutionManager.getInstance(project)
+                            .getRunningDescriptors(s -> s != null
+                                    && s.getConfiguration() == configuration)) {
+                if (d.getProcessHandler() == processHandler) {
+                    capturedDescriptor = d;
+                    break;
+                }
+            }
+            final Executor capturedExecutor = resolvedExecutor;
+            final com.intellij.execution.ui.RunContentDescriptor descriptorToRemove = capturedDescriptor;
+
             processHandler.addProcessListener(new ProcessListener() {
                 @Override
                 public void processTerminated(@NotNull ProcessEvent event) {
                     ApplicationManager.getApplication().invokeLater(() -> {
                         try {
+                            // Remove the old entry using the pre-captured descriptor reference.
+                            if (descriptorToRemove != null) {
+                                com.intellij.execution.ui.RunContentManager
+                                        .getInstance(project)
+                                        .removeRunContent(capturedExecutor, descriptorToRemove);
+                                if (!project.isDisposed()) {
+                                    com.intellij.execution.dashboard.RunDashboardManager
+                                            .getInstance(project).updateDashboard(true);
+                                }
+                            }
+
                             RunnerAndConfigurationSettings settings =
                                     RunManager.getInstance(project).findSettings(configuration);
                             if (settings != null) {
-                                Executor executor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
-                                if (executor == null) executor = DefaultRunExecutor.getRunExecutorInstance();
-                                ProgramRunnerUtil.executeConfiguration(settings, executor);
-                                logger.logServerInfo("Tomcat restarted (" + executor.getActionName() + " mode)");
+                                ProgramRunnerUtil.executeConfiguration(settings, capturedExecutor);
+                                logger.logServerInfo("Tomcat restarted (" + capturedExecutor.getActionName() + " mode)");
                             } else {
                                 logger.logServerError("Could not find run configuration settings for restart");
                             }

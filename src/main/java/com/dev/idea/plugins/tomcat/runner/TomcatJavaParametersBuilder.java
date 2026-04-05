@@ -110,18 +110,28 @@ public class TomcatJavaParametersBuilder {
                 ajpPort = resolvedPorts.getAjp();
                 LOG.info("Using pre-resolved ports: HTTP=" + httpPort + ", shutdown=" + shutdownPort);
             } else {
-                // Fallback: resolve ports here (e.g., when called without TomcatCommandLineState)
+                // Fallback: resolve ports here (e.g., when called without TomcatCommandLineState).
+                // NOTE: this path is non-atomic — two simultaneous launches can still observe the
+                // same port as free. The preferred path goes through TomcatCommandLineState which
+                // uses TomcatPortRegistry for atomic claiming.
                 httpPort = getConfigPort(configuration.getHttpPort(), PortUtils.DEFAULT_HTTP);
                 shutdownPort = getConfigPort(configuration.getShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
                 jmxPort = getConfigPort(configuration.getJmxPort(), PortUtils.DEFAULT_JMX);
                 httpsPort = getConfigPort(configuration.getHttpsPort(), PortUtils.DEFAULT_HTTPS);
                 ajpPort = getConfigPort(configuration.getAjpPort(), PortUtils.DEFAULT_AJP);
 
-                // Resolve internal conflicts (same port used by multiple services)
-                if (shutdownPort == httpPort) shutdownPort = PortUtils.findNextAvailable(shutdownPort);
-                if (jmxPort == httpPort || jmxPort == shutdownPort) jmxPort = PortUtils.findNextAvailable(jmxPort);
-                if (httpsPort == httpPort || httpsPort == shutdownPort || httpsPort == jmxPort) httpsPort = PortUtils.findNextAvailable(httpsPort);
-                if (ajpPort == httpPort || ajpPort == shutdownPort || ajpPort == jmxPort || ajpPort == httpsPort) ajpPort = PortUtils.findNextAvailable(ajpPort);
+                // Resolve internal conflicts (same port used by multiple services).
+                // Track already-assigned ports so each findNextAvailable skips ports already in use
+                // by sibling services resolved in this same pass.
+                java.util.Set<Integer> assigned = new java.util.HashSet<>();
+                assigned.add(httpPort);
+                if (assigned.contains(shutdownPort)) { shutdownPort = PortUtils.findNextAvailableExcluding(shutdownPort, assigned); }
+                assigned.add(shutdownPort);
+                if (assigned.contains(jmxPort)) { jmxPort = PortUtils.findNextAvailableExcluding(jmxPort, assigned); }
+                assigned.add(jmxPort);
+                if (assigned.contains(httpsPort)) { httpsPort = PortUtils.findNextAvailableExcluding(httpsPort, assigned); }
+                assigned.add(httpsPort);
+                if (assigned.contains(ajpPort)) { ajpPort = PortUtils.findNextAvailableExcluding(ajpPort, assigned); }
 
                 // Resolve external conflicts (port in use by another process)
                 httpPort = resolvePortWithLogging("HTTP", httpPort, true);
@@ -176,7 +186,14 @@ public class TomcatJavaParametersBuilder {
             }
             return resolved;
         }
-        return port;
+        // No available port found — return -1 so the port guard (httpPort <= 0 check) catches it
+        // and throws a clear ExecutionException instead of passing a conflicted port to Tomcat.
+        String msg = serviceName + " port " + port + " in use and no available port could be found";
+        LOG.warn(msg);
+        if (deploymentLogger != null) {
+            deploymentLogger.logServerError(msg);
+        }
+        return -1;
     }
 
     @NotNull
@@ -347,11 +364,13 @@ public class TomcatJavaParametersBuilder {
     }
 
     private void configureJmx(@NotNull ParametersList vmParams, int jmxPort) {
-        vmParams.addProperty(JMX_REMOTE_PROP, "");
-        vmParams.addProperty(JMX_PORT_PROP, String.valueOf(jmxPort));
-        vmParams.addProperty(JMX_SSL_PROP, "false");
-        vmParams.addProperty(JMX_AUTH_PROP, "false");
-        vmParams.addProperty(JMX_LOCAL_PROP, "false");
+        // Use defineProperty (set-or-replace) so that user VM options containing these
+        // properties are overridden rather than duplicated.
+        vmParams.defineProperty(JMX_REMOTE_PROP, "");
+        vmParams.defineProperty(JMX_PORT_PROP, String.valueOf(jmxPort));
+        vmParams.defineProperty(JMX_SSL_PROP, "false");
+        vmParams.defineProperty(JMX_AUTH_PROP, "false");
+        vmParams.defineProperty(JMX_LOCAL_PROP, "false");
     }
 
     private void configureHttps(@NotNull ParametersList vmParams, int httpsPort) {

@@ -2,14 +2,18 @@ package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
+import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.ProgramRunnerUtil;
 import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessListener;
+import com.intellij.execution.ui.RunContentDescriptor;
+import com.intellij.execution.ui.RunContentManager;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -39,17 +43,50 @@ public class DebugTomcatAction extends AnAction {
 
         LOG.info("Restarting Tomcat in Debug mode: " + config.getName());
 
+        // Capture the executor and descriptor NOW, before the process terminates.
+        // Querying ExecutionManager inside processTerminated/invokeLater is a race:
+        // the entry may already be deregistered by the time the callback runs.
+        String originalExecutorId = handler instanceof TomcatProcessHandler tomcatHandler
+                ? tomcatHandler.getExecutorId()
+                : null;
+        Executor originalExecutor = originalExecutorId != null
+                ? ExecutorRegistry.getInstance().getExecutorById(originalExecutorId)
+                : null;
+        RunContentDescriptor descriptorToRemove = null;
+        if (originalExecutor != null) {
+            for (RunContentDescriptor d : ExecutionManager.getInstance(project)
+                    .getRunningDescriptors(s -> s != null && s.getConfiguration() == config)) {
+                if (d.getProcessHandler() == handler) {
+                    descriptorToRemove = d;
+                    break;
+                }
+            }
+        }
+        final Executor capturedExecutor = originalExecutor;
+        final RunContentDescriptor capturedDescriptor = descriptorToRemove;
+
         handler.addProcessListener(new ProcessListener() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
                 ApplicationManager.getApplication().invokeLater(() -> {
                     try {
-                        Executor executor = ExecutorRegistry.getInstance()
-                                .getExecutorById(DefaultDebugExecutor.EXECUTOR_ID);
-                        if (executor == null) {
-                            executor = DefaultDebugExecutor.getDebugExecutorInstance();
+                        // Remove the old descriptor using the pre-captured reference —
+                        // avoids the race where the entry is deregistered from
+                        // ExecutionManager before this invokeLater callback runs.
+                        if (capturedDescriptor != null && capturedExecutor != null) {
+                            RunContentManager.getInstance(project)
+                                    .removeRunContent(capturedExecutor, capturedDescriptor);
+                            if (!project.isDisposed()) {
+                                RunDashboardManager.getInstance(project).updateDashboard(true);
+                            }
                         }
-                        ProgramRunnerUtil.executeConfiguration(settings, executor);
+
+                        Executor debugExecutor = ExecutorRegistry.getInstance()
+                                .getExecutorById(DefaultDebugExecutor.EXECUTOR_ID);
+                        if (debugExecutor == null) {
+                            debugExecutor = DefaultDebugExecutor.getDebugExecutorInstance();
+                        }
+                        ProgramRunnerUtil.executeConfiguration(settings, debugExecutor);
                     } catch (Exception ex) {
                         LOG.warn("Failed to restart Tomcat in Debug mode: " + config.getName(), ex);
                     }
