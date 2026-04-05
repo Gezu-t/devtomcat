@@ -4,14 +4,19 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
+import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
+import com.dev.idea.plugins.tomcat.update.TomcatUpdateDialog;
 import com.intellij.debugger.impl.GenericDebuggerRunner;
 import com.intellij.execution.ExecutionException;
+import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.configurations.RemoteConnection;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.executors.DefaultDebugExecutor;
+import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import org.jetbrains.annotations.NotNull;
@@ -64,6 +69,38 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         FileDocumentManager.getInstance().saveAllDocuments();
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
+
+        // Intercept re-run while already running — show Update dialog instead of "Stop and Rerun"
+        RunContentDescriptor existing = findRunningDescriptor(config, env);
+        if (existing != null) {
+            ProcessHandler handler = existing.getProcessHandler();
+            if (handler instanceof TomcatProcessHandler tomcatHandler
+                    && !tomcatHandler.isProcessTerminated()
+                    && !tomcatHandler.isProcessTerminating()
+                    && tomcatHandler.isServerStartupDetected()) {
+
+                String defaultAction = config.getConfigData().getUpdateConfig().getOnUpdate();
+                TomcatUpdateDialog dialog = new TomcatUpdateDialog(
+                        env.getProject(), config.getName(), defaultAction);
+
+                boolean[] proceed = {false};
+                String[] selectedAction = {defaultAction};
+                ApplicationManager.getApplication().invokeAndWait(() -> {
+                    if (dialog.showAndGet()) {
+                        proceed[0] = true;
+                        selectedAction[0] = dialog.getSelectedAction();
+                    }
+                });
+
+                if (!proceed[0]) return null;
+
+                TomcatApplicationUpdater updater = new TomcatApplicationUpdater(
+                        env.getProject(), tomcatHandler, config, selectedAction[0]);
+                updater.executeUpdate(selectedAction[0]);
+                return existing;
+            }
+        }
+
         boolean isRemote = TomcatConstants.MODE_REMOTE.equals(config.getConfigData().getServerMode());
 
         String debugHost;
@@ -111,5 +148,18 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         }
 
         return descriptor;
+    }
+
+    @Nullable
+    private RunContentDescriptor findRunningDescriptor(@NotNull TomcatRunConfiguration config,
+                                                        @NotNull ExecutionEnvironment env) {
+        for (RunContentDescriptor descriptor : ExecutionManager.getInstance(env.getProject())
+                .getRunningDescriptors(settings -> config.equals(settings.getConfiguration()))) {
+            ProcessHandler handler = descriptor.getProcessHandler();
+            if (handler != null && !handler.isProcessTerminated()) {
+                return descriptor;
+            }
+        }
+        return null;
     }
 }

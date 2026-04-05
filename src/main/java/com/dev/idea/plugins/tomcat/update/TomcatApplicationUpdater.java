@@ -113,7 +113,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         executeUpdate(action);
     }
 
-    void executeUpdate(@NotNull String selectedAction) {
+    public void executeUpdate(@NotNull String selectedAction) {
         TomcatDeploymentLogger logger = processHandler.getDeploymentLogger();
         logger.logServerInfo("Update triggered: " + selectedAction);
 
