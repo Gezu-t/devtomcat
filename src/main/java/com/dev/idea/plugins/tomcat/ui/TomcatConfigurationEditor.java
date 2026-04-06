@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.conf.ArtifactReferenceRefresher;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
@@ -77,6 +78,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         try {
             LOG.debug("DevTomcat: Resetting editor from configuration: " + configuration.getName());
             this.currentConfiguration = (TomcatRunConfiguration) configuration.clone();
+            // Refresh stale artifact references before UI population — catches renames
+            // that occurred since the configuration was last serialized or the dialog was
+            // last opened. Must run before syncBeforeLaunchWithDeployments() so the
+            // Before Launch task matcher sees current artifact names.
+            refreshArtifactReferences(currentConfiguration);
             // Sync on the clone, not the live config, to avoid side-effects during reset
             currentConfiguration.syncBeforeLaunchWithDeployments();
             if (editorInitialized.get() && tabbedPane != null) {
@@ -380,6 +386,32 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         label.setHorizontalAlignment(SwingConstants.CENTER);
         panel.add(label, BorderLayout.CENTER);
         return panel;
+    }
+
+    /**
+     * Reconciles stored deployment artifact references against the current project state.
+     * Detects artifacts/modules that were renamed since the configuration was last saved
+     * and updates the stored name/path to match. This prevents the Deployment tab from
+     * showing orphaned references and ensures Before Launch tasks resolve correctly.
+     *
+     * <p>Runs inside {@code resetEditorFrom()} before tabs are populated, so the user
+     * sees current artifact names from the moment the dialog opens. Failures are logged
+     * and swallowed — a failed refresh must never block the editor from opening.
+     */
+    private void refreshArtifactReferences(@NotNull TomcatRunConfiguration config) {
+        try {
+            ArtifactReferenceRefresher.RefreshResult result =
+                    ArtifactReferenceRefresher.refresh(config);
+            if (result.hasUpdates()) {
+                LOG.info("DevTomcat: Refreshed " + result.getUpdateCount() +
+                        " stale artifact reference(s) in editor");
+                for (ArtifactReferenceRefresher.RefreshAction action : result.getUpdatedActions()) {
+                    LOG.info("DevTomcat:   " + action);
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("DevTomcat: Artifact reference refresh skipped in editor: " + e.getMessage());
+        }
     }
 
     public boolean isEventsSuppressed() {

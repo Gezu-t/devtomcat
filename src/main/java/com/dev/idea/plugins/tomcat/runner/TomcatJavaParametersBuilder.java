@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
@@ -280,9 +281,24 @@ public class TomcatJavaParametersBuilder {
         return ProjectRootManager.getInstance(project).getProjectSdk();
     }
 
-    private void setupClasspath(@NotNull JavaParameters params, @NotNull Path catalinaHome) {
-        params.getClassPath().add(catalinaHome.resolve(JAR_BOOTSTRAP).toFile());
-        params.getClassPath().add(catalinaHome.resolve(JAR_TOMCAT_JULI).toFile());
+    private void setupClasspath(@NotNull JavaParameters params,
+                                @NotNull Path catalinaHome) throws ExecutionException {
+        Path bootstrap = catalinaHome.resolve(JAR_BOOTSTRAP);
+        Path tomcatJuli = catalinaHome.resolve(JAR_TOMCAT_JULI);
+
+        if (!Files.isRegularFile(bootstrap)) {
+            throw new ExecutionException(
+                    "Required Tomcat JAR not found: " + bootstrap +
+                    ". Verify that the configured Tomcat home directory is a valid Tomcat installation.");
+        }
+        if (!Files.isRegularFile(tomcatJuli)) {
+            throw new ExecutionException(
+                    "Required Tomcat JAR not found: " + tomcatJuli +
+                    ". Verify that the configured Tomcat home directory is a valid Tomcat installation.");
+        }
+
+        params.getClassPath().add(bootstrap.toFile());
+        params.getClassPath().add(tomcatJuli.toFile());
     }
 
     private void setupEnvironment(@NotNull JavaParameters params) {

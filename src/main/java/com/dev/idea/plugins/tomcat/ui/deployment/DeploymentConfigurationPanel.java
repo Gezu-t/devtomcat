@@ -225,9 +225,6 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
 
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
         List<DeploymentArtifact> artifacts = tableManager.getDeployments();
-        for (DeploymentArtifact artifact : artifacts) {
-            artifact.setDeployed(true);
-        }
         config.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
     }
 

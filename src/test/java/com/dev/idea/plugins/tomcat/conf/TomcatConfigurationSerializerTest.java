@@ -99,10 +99,8 @@ class TomcatConfigurationSerializerTest {
         TomcatConfigurationData original = new TomcatConfigurationData();
         DeploymentArtifact art1 = new DeploymentArtifact("myapp", "/path/to/myapp.war", "war");
         art1.setContextPath("/myapp");
-        art1.setDeployed(true);
         DeploymentArtifact art2 = new DeploymentArtifact("api", "/path/to/api.war", "war");
         art2.setContextPath("/api");
-        art2.setDeployed(false);
         original.getDeploymentConfig().addArtifact(art1);
         original.getDeploymentConfig().addArtifact(art2);
 
@@ -116,10 +114,8 @@ class TomcatConfigurationSerializerTest {
         assertEquals(2, artifacts.size());
         assertEquals("myapp", artifacts.get(0).getName());
         assertEquals("/myapp", artifacts.get(0).getContextPath());
-        assertTrue(artifacts.get(0).isDeployed());
         assertEquals("api", artifacts.get(1).getName());
         assertEquals("/api", artifacts.get(1).getContextPath());
-        assertFalse(artifacts.get(1).isDeployed());
     }
 
     @Test

@@ -149,16 +149,13 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return new ArrayList<>(artifacts);
     }
 
+    /**
+     * Returns all non-null artifacts configured for deployment.
+     * Every artifact in the list is deployed — to exclude an artifact,
+     * remove it from the configuration.
+     */
     @NotNull
     public List<DeploymentArtifact> getDeployedArtifacts() {
-        List<DeploymentArtifact> deployedArtifacts = artifacts.stream()
-                .filter(Objects::nonNull)
-                .filter(DeploymentArtifact::isDeployed)
-                .collect(Collectors.toCollection(ArrayList::new));
-        if (!deployedArtifacts.isEmpty()) {
-            return deployedArtifacts;
-        }
-
         return artifacts.stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(ArrayList::new));

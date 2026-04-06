@@ -94,7 +94,6 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_ARTIFACT_PATH = "path";
     private static final String ATTR_ARTIFACT_TYPE = "type";
     private static final String ATTR_ARTIFACT_CONTEXT = "contextPath";
-    private static final String ATTR_ARTIFACT_DEPLOYED = "deployed";
 
     private static final String TAG_COVERAGE = "coverageConfig";
     private static final String TAG_COVERAGE_INCLUDE = "include";
@@ -262,7 +261,6 @@ public class TomcatConfigurationSerializer {
             art.setAttribute(ATTR_ARTIFACT_PATH, StringUtil.notNullize(artifact.getPath()));
             art.setAttribute(ATTR_ARTIFACT_TYPE, StringUtil.notNullize(artifact.getType()));
             art.setAttribute(ATTR_ARTIFACT_CONTEXT, StringUtil.notNullize(artifact.getContextPath(), TomcatConstants.DEFAULT_CONTEXT_PATH));
-            art.setAttribute(ATTR_ARTIFACT_DEPLOYED, String.valueOf(artifact.isDeployed()));
             deployments.addContent(art);
         }
         if (!deployments.getChildren(TAG_ARTIFACT).isEmpty()) {
@@ -539,10 +537,8 @@ public class TomcatConfigurationSerializer {
                 artifact.setPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_PATH)));
                 artifact.setType(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_TYPE), DeploymentArtifact.TYPE_WAR));
                 artifact.setContextPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), TomcatConstants.DEFAULT_CONTEXT_PATH));
-                String deployedAttr = art.getAttributeValue(ATTR_ARTIFACT_DEPLOYED);
-                if (deployedAttr != null) {
-                    artifact.setDeployed(Boolean.parseBoolean(deployedAttr));
-                }
+                // Note: legacy "deployed" attribute is intentionally ignored on read.
+                // All artifacts in the list are deployed; to exclude one, remove it.
                 artifacts.add(artifact);
             }
         }

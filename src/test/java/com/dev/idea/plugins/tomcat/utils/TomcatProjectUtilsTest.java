@@ -16,7 +16,7 @@ class TomcatProjectUtilsTest {
 
     // Helper: compute the expected hash suffix the same way sanitizeFileName does.
     private static String hash(String trimmed) {
-        return Integer.toHexString(trimmed.hashCode() & 0xffff);
+        return String.format("%08x", trimmed.hashCode());
     }
 
     @Nested

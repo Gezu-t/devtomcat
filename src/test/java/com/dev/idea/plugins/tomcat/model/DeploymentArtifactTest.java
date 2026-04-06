@@ -16,7 +16,6 @@ class DeploymentArtifactTest {
         assertEquals("", art.getPath());
         assertEquals("war", art.getType());
         assertEquals("/", art.getContextPath());
-        assertTrue(art.isDeployed());
     }
 
     @Test
@@ -93,7 +92,6 @@ class DeploymentArtifactTest {
     void cloneIsIndependent() {
         DeploymentArtifact original = new DeploymentArtifact("app", "/path", "war");
         original.setContextPath("/app");
-        original.setDeployed(false);
 
         DeploymentArtifact cloned = original.clone();
         assertEquals(original, cloned);

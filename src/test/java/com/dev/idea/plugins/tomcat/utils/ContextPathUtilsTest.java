@@ -287,6 +287,80 @@ class ContextPathUtilsTest {
     }
 
     @Nested
+    @DisplayName("resolveContextName")
+    class ResolveContextName {
+
+        @Test
+        @DisplayName("null returns ROOT")
+        void nullReturnsRoot() {
+            assertEquals("ROOT", ContextPathUtils.resolveContextName(null));
+        }
+
+        @Test
+        @DisplayName("empty string returns ROOT")
+        void emptyReturnsRoot() {
+            assertEquals("ROOT", ContextPathUtils.resolveContextName(""));
+        }
+
+        @Test
+        @DisplayName("/ returns ROOT")
+        void slashReturnsRoot() {
+            assertEquals("ROOT", ContextPathUtils.resolveContextName("/"));
+        }
+
+        @Test
+        @DisplayName("/myapp returns myapp")
+        void stripsLeadingSlash() {
+            assertEquals("myapp", ContextPathUtils.resolveContextName("/myapp"));
+        }
+
+        @Test
+        @DisplayName("myapp without slash returns myapp")
+        void noLeadingSlash() {
+            assertEquals("myapp", ContextPathUtils.resolveContextName("myapp"));
+        }
+
+        @Test
+        @DisplayName("trailing slashes are stripped")
+        void stripsTrailingSlashes() {
+            assertEquals("myapp", ContextPathUtils.resolveContextName("/myapp///"));
+        }
+
+        @Test
+        @DisplayName("nested context path preserved")
+        void nestedContextPath() {
+            assertEquals("api/v2", ContextPathUtils.resolveContextName("/api/v2"));
+        }
+
+        @Test
+        @DisplayName("path traversal (..) throws IllegalArgumentException")
+        void pathTraversalThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> ContextPathUtils.resolveContextName("/../evil"));
+        }
+
+        @Test
+        @DisplayName("backslash throws IllegalArgumentException")
+        void backslashThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> ContextPathUtils.resolveContextName("/my\\app"));
+        }
+
+        @Test
+        @DisplayName("colon throws IllegalArgumentException")
+        void colonThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> ContextPathUtils.resolveContextName("/C:/bad"));
+        }
+
+        @Test
+        @DisplayName("only trailing slashes returns ROOT")
+        void onlyTrailingSlashes() {
+            assertEquals("ROOT", ContextPathUtils.resolveContextName("///"));
+        }
+    }
+
+    @Nested
     @DisplayName("formatArtifactDisplayName")
     class FormatArtifactDisplayName {
 

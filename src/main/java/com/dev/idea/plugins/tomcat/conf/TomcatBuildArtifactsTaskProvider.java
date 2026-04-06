@@ -12,8 +12,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -103,17 +101,17 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
                 .getDeploymentConfig().getDeployedArtifacts();
 
-        boolean allExist = true;
+        boolean allValid = true;
         for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null || !artifact.isValid()) continue;
-            Path path = Path.of(artifact.getPath());
-            if (!Files.exists(path)) {
-                LOG.error("DevTomcat: artifact not found before launch — " + artifact.getPath()
-                        + " ('" + artifact.getDisplayName() + "'). Run the build first.");
-                allExist = false;
+            if (artifact == null) continue;
+            if (!artifact.isValid()) {
+                LOG.error("DevTomcat: artifact not ready before launch — '" +
+                        artifact.getDisplayName() + "' (path: " + artifact.getPath() +
+                        "). Build the project first (Build → Build Artifacts).");
+                allValid = false;
             }
         }
-        return allExist;
+        return allValid;
     }
 
     @Override

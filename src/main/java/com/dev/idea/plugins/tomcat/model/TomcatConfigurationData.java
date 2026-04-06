@@ -140,9 +140,22 @@ package com.dev.idea.plugins.tomcat.model;
             }
 
             /**
-             * Copies portable fields from another data instance (used by Config Import).
-             * Only overwrites fields that ConfigExportImport serializes — leaves
-             * UI config, debug config, coverage config, and log config untouched.
+             * Copies portable configuration fields from the given source.
+             * Used by Config Import to merge an external file into the current config.
+             *
+             * <p>The following fields are intentionally excluded because they are
+             * local/machine-specific and should not travel with shared configs:
+             * <ul>
+             *   <li>{@code logFileConfig} — log file paths are machine-specific</li>
+             *   <li>{@code debugConfig} — debug ports depend on the local environment</li>
+             *   <li>{@code uiConfig} — tool window preferences are per-user</li>
+             *   <li>{@code coverageConfig} — coverage patterns are project-specific</li>
+             *   <li>{@code allowMultipleInstances} — local IDE preference</li>
+             *   <li>{@code storeAsProjectFile} — IDE storage preference</li>
+             * </ul>
+             *
+             * <p><b>Maintainer note:</b> when adding a new field to this class, decide
+             * whether it should be included here (portable) or excluded (machine-local).
              */
             public void copyFrom(@NotNull TomcatConfigurationData source) {
                 this.tomcatInfo = source.tomcatInfo != null ? source.tomcatInfo.clone() : null;

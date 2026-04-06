@@ -149,6 +149,43 @@ public final class ContextPathUtils {
         return name;
     }
 
+    /**
+     * Resolves a context path (e.g. {@code "/myapp"}) to the Tomcat context name
+     * used for deployment descriptors and WAR filenames (e.g. {@code "myapp"}).
+     *
+     * <p>Handles:
+     * <ul>
+     *   <li>Null, empty, or {@code "/"} → {@code "ROOT"}</li>
+     *   <li>Leading slash stripping</li>
+     *   <li>Trailing slash stripping (prevents {@code "app/.xml"} on disk)</li>
+     *   <li>Path traversal rejection ({@code ".."}, {@code "\"}, {@code ":"})</li>
+     * </ul>
+     *
+     * @param contextPath the context path from a deployment artifact (may be null)
+     * @return the resolved context name, never null or empty
+     * @throws IllegalArgumentException if the context path contains traversal components
+     */
+    @NotNull
+    public static String resolveContextName(@Nullable String contextPath) {
+        if (contextPath == null || contextPath.isEmpty() || DEFAULT_CONTEXT_PATH.equals(contextPath)) {
+            return ROOT_CONTEXT_NAME;
+        }
+
+        String contextName = contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
+        contextName = contextName.replaceAll("/+$", "");
+
+        if (contextName.isEmpty()) {
+            return ROOT_CONTEXT_NAME;
+        }
+
+        if (contextName.contains("..") || contextName.contains("\\") || contextName.contains(":")) {
+            throw new IllegalArgumentException(
+                    "Invalid context path '" + contextPath + "': must not contain '..', '\\', or ':'");
+        }
+
+        return contextName;
+    }
+
     public static boolean isValidContextPath(@Nullable String context) {
         if (context == null || context.isEmpty()) {
             return false;

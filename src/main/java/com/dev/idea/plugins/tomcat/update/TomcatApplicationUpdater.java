@@ -6,6 +6,7 @@ import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ProgramRunnerUtil;
 import com.intellij.execution.RunManager;
@@ -31,7 +32,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+
 import java.util.List;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
@@ -321,7 +322,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 String contextName = resolveContextName(artifact.getContextPath());
                 Path source = Path.of(artifact.getPath());
                 Path target = webappsDir.resolve(contextName + ".war");
-                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                TomcatProjectUtils.atomicCopy(source, target);
                 logger.logServerInfo("Re-deployed WAR: " + artifact.getDisplayName());
             } catch (IOException e) {
                 LOG.warn("Failed to re-deploy WAR: " + artifact.getPath(), e);
@@ -406,7 +407,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 } else {
                     Path source = Path.of(artifact.getPath());
                     Path target = webappsDir.resolve(contextName + ".war");
-                    Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                    TomcatProjectUtils.atomicCopy(source, target);
                     logger.logServerInfo("Redeployed WAR: " + artifact.getDisplayName());
                 }
             } catch (IOException e) {
@@ -419,10 +420,14 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
     @NotNull
     private static String resolveContextName(@Nullable String contextPath) {
-        if (contextPath == null || contextPath.isEmpty() || DEFAULT_CONTEXT_PATH.equals(contextPath)) {
+        try {
+            return ContextPathUtils.resolveContextName(contextPath);
+        } catch (IllegalArgumentException e) {
+            // In the updater context, log and fall back — the deployment strategy
+            // already validated at launch time.
+            LOG.warn("Invalid context path during update: " + e.getMessage());
             return ROOT_CONTEXT_NAME;
         }
-        return contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
     }
 
     /**

@@ -3,7 +3,9 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.openapi.diagnostic.Logger;
@@ -99,22 +101,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         for (DeploymentArtifact artifact : configuration.getConfigData().getDeploymentConfig().getDeployedArtifacts()) {
             if (artifact == null || !artifact.isValid()) continue;
 
-            String contextPath = artifact.getContextPath();
             String contextName;
-            if (contextPath == null || contextPath.isEmpty() || DEFAULT_CONTEXT_PATH.equals(contextPath)) {
-                contextName = ROOT_CONTEXT_NAME;
-            } else {
-                // Strip leading slash, then strip any trailing slashes to prevent
-                // contextName like "app/" which would create "app/.xml" on disk.
-                contextName = contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
-                contextName = contextName.replaceAll("/+$", "");
-                // Reject path traversal components — a context name like "../evil" could
-                // escape the catalina/localhost conf directory via Path.resolve().
-                if (contextName.contains("..") || contextName.contains("\\")
-                        || contextName.contains(":") || contextName.isEmpty()) {
-                    throw new ExecutionException(
-                            "Invalid context path '" + contextPath + "': must not contain '..', '\\', or ':'");
-                }
+            try {
+                contextName = ContextPathUtils.resolveContextName(artifact.getContextPath());
+            } catch (IllegalArgumentException e) {
+                throw new ExecutionException(e.getMessage());
             }
 
             Path artifactPath = Paths.get(artifact.getPath());
@@ -131,7 +122,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
                 } else {
                     Path targetWar = webappsDir.resolve(contextName + ".war");
-                    Files.copy(artifactPath, targetWar, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    TomcatProjectUtils.atomicCopy(artifactPath, targetWar);
                     LOG.info("Deployed WAR artifact: " + targetWar);
                 }
             } catch (IOException e) {

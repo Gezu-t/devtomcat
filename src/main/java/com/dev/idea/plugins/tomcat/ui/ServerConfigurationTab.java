@@ -404,7 +404,19 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 }
                 useCredentialsCheck.setSelected(rc.isUseCredentials());
                 usernameField.setText(rc.getUsername());
-                passwordField.setText(rc.getPassword());
+                // Only populate the password field if PasswordSafe resolution has completed.
+                // The deserializer loads passwords asynchronously from PasswordSafe on a pooled
+                // thread (TomcatConfigurationSerializer, line 418). If we read rc.getPassword()
+                // before that thread finishes, we'd get an empty string and the user would see
+                // an empty field. On applyTo(), that empty string would overwrite the real
+                // password in PasswordSafe. Instead, show the password only when it's resolved,
+                // and leave the field empty with a placeholder hint otherwise.
+                if (rc.isCredentialsResolved() || !rc.getPassword().isEmpty()) {
+                    passwordField.setText(rc.getPassword());
+                } else {
+                    passwordField.setText("");
+                    passwordField.setToolTipText("Password loading from secure storage...");
+                }
                 updateCredentialFieldsState();
             }
             statusLabel.setText("");
@@ -416,7 +428,14 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 rc.setManagerUrl(buildManagerUrl());
                 rc.setUseCredentials(useCredentialsCheck.isSelected());
                 rc.setUsername(usernameField.getText().trim());
-                rc.setPassword(new String(passwordField.getPassword()));
+                // Only overwrite the password if the user actually typed something, or if
+                // PasswordSafe has resolved (meaning the field was populated from storage).
+                // An empty field when credentials haven't resolved yet means PasswordSafe
+                // is still loading — writing empty would destroy the stored password.
+                String uiPassword = new String(passwordField.getPassword());
+                if (!uiPassword.isEmpty() || rc.isCredentialsResolved()) {
+                    rc.setPassword(uiPassword);
+                }
             }
         }
 
@@ -426,7 +445,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
             if (useCredentialsCheck.isSelected() != rc.isUseCredentials()) return true;
             if (!usernameField.getText().trim().equals(rc.getUsername())) return true;
-            if (!new String(passwordField.getPassword()).equals(rc.getPassword())) return true;
+            // Skip password comparison if PasswordSafe hasn't resolved yet — the UI field
+            // is empty (loading), so it would falsely report "modified" against a stored password.
+            if (rc.isCredentialsResolved()) {
+                if (!new String(passwordField.getPassword()).equals(rc.getPassword())) return true;
+            }
 
             String currentHost = hostField.getText().trim();
             String currentPort = portField.getText().trim();

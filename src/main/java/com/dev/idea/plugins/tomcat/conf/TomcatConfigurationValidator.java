@@ -35,6 +35,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     validateConfigurationName(config);
                     TomcatConfigurationData data = config.getConfigData();
                     validate(data);
+                    validateArtifactReferences(config);
 
                     LOG.debug("Configuration validation passed: " + config.getName());
                 } catch (RuntimeConfigurationException e) {
@@ -197,6 +198,58 @@ package com.dev.idea.plugins.tomcat.conf;
                 }
                 return new File(path).getAbsoluteFile().toPath().normalize().toString();
             }
+
+        /**
+         * Warns when non-external deployment artifacts cannot be resolved to any
+         * IntelliJ artifact. This is a safety net: the {@link ArtifactReferenceRefresher}
+         * runs first and fixes what it can, but if an artifact was deleted (not just renamed)
+         * or renamed beyond recognition, this validation catches it.
+         *
+         * <p>Only runs when ArtifactManager is available (Ultimate and some CE configurations).
+         * Silently skips on environments where the packaging module is not loaded.
+         */
+        private static void validateArtifactReferences(@NotNull TomcatRunConfiguration config)
+                throws RuntimeConfigurationException {
+            List<DeploymentArtifact> artifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
+            if (artifacts.isEmpty()) return;
+
+            com.intellij.packaging.artifacts.Artifact[] platformArtifacts;
+            try {
+                com.intellij.packaging.artifacts.ArtifactManager artifactManager =
+                        com.intellij.packaging.artifacts.ArtifactManager.getInstance(config.getProject());
+                platformArtifacts = artifactManager.getArtifacts();
+            } catch (NoClassDefFoundError | Exception e) {
+                // ArtifactManager not available — skip this validation
+                return;
+            }
+
+            if (platformArtifacts.length == 0) return;
+
+            for (DeploymentArtifact artifact : artifacts) {
+                if (artifact == null) continue;
+                if (DeploymentArtifact.TYPE_EXTERNAL.equals(artifact.getType())) continue;
+
+                String name = artifact.getName();
+                if (name.isEmpty()) continue;
+
+                // Check if any IntelliJ artifact matches by exact name
+                boolean found = false;
+                for (com.intellij.packaging.artifacts.Artifact pa : platformArtifacts) {
+                    if (name.equals(pa.getName())) {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) {
+                    // The refresher already ran and couldn't resolve this — it's truly orphaned
+                    throw new RuntimeConfigurationWarning(
+                            "Deployment artifact '" + artifact.getDisplayName() +
+                            "' does not match any IntelliJ artifact. It may have been renamed or " +
+                            "removed. Reconfigure it in the Deployment tab, or remove and re-add it.");
+                }
+            }
+        }
 
         public static String getValidationError(@NotNull TomcatRunConfiguration config) {
             try {

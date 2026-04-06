@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
@@ -68,6 +69,12 @@ final class RemoteDeploymentStrategy implements DeploymentStrategy {
                 VirtualFile artifactFile = VfsUtil.findFileByIoFile(new java.io.File(artifact.getPath()), true);
 
                 if (artifactFile != null) {
+                    // Validate context path before sending to remote Tomcat Manager
+                    try {
+                        ContextPathUtils.resolveContextName(artifact.getContextPath());
+                    } catch (IllegalArgumentException e) {
+                        throw new ExecutionException(e.getMessage());
+                    }
                     String contextPath = artifact.getContextPath();
                     vmParams.addProperty(PARAM_WEBAPP_PATH + "." + index, artifactFile.getPath());
                     vmParams.addProperty(PARAM_WEBAPP_CONTEXT + "." + index, contextPath);

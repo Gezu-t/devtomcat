@@ -26,6 +26,30 @@ public class TomcatConfigurationInitializer {
 
     public static void refresh(@NotNull TomcatRunConfiguration config) {
         initialize(config);
+        refreshArtifactReferences(config);
+    }
+
+    /**
+     * Reconciles stored deployment artifact references against the current state of
+     * IntelliJ's ArtifactManager. Detects and repairs stale name/path strings caused
+     * by artifact or module renames in Project Structure.
+     *
+     * <p>Runs after deserialization so that downstream consumers (validator, deployment
+     * strategy, Before Launch sync) see current artifact metadata. Gracefully degrades
+     * when ArtifactManager is unavailable (Community Edition, early project init).
+     */
+    private static void refreshArtifactReferences(@NotNull TomcatRunConfiguration config) {
+        try {
+            ArtifactReferenceRefresher.RefreshResult result =
+                    ArtifactReferenceRefresher.refresh(config);
+            if (result.hasUpdates()) {
+                LOG.info("Refreshed " + result.getUpdateCount() +
+                        " stale artifact reference(s) in configuration: " + config.getName());
+            }
+        } catch (Exception e) {
+            // Never let refresh failure block configuration loading
+            LOG.debug("Artifact reference refresh skipped: " + e.getMessage());
+        }
     }
 
     private static void applyDynamicDefaults(@NotNull TomcatRunConfiguration config) {

@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.intellij.ide.browsers.BrowserLauncher;
 import com.intellij.ide.browsers.WebBrowser;
@@ -264,12 +265,14 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private static String resolveContextName(@Nullable String contextPath) {
-        if (contextPath == null) return ROOT_CONTEXT_NAME;
-        String trimmed = contextPath.trim();
-        if (trimmed.isEmpty() || DEFAULT_CONTEXT_PATH.equals(trimmed)) {
+        try {
+            return ContextPathUtils.resolveContextName(contextPath);
+        } catch (IllegalArgumentException e) {
+            // In the process handler context, we log and fall back rather than
+            // crashing — the deployment strategy already validated at launch time.
+            LOG.warn("Invalid context path in process handler: " + e.getMessage());
             return ROOT_CONTEXT_NAME;
         }
-        return trimmed.startsWith("/") ? trimmed.substring(1) : trimmed;
     }
 
     @Override
@@ -368,6 +371,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             return null;
         }
 
+        // 1. Try matching the browser URL's context to a deployed artifact
         String configuredUrl = configuration.getBrowserUrl();
         String contextFromUrl = extractContextNameFromBrowserUrl(configuredUrl);
         if (contextFromUrl != null) {
@@ -378,10 +382,12 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             }
         }
 
+        // 2. Single artifact — use it directly
         if (artifacts.size() == 1) {
             return resolveContextName(artifacts.get(0).getContextPath());
         }
 
+        // 3. Try matching the global context path to a deployed artifact
         String configuredContext = resolveContextName(configuration.getContextPath());
         for (DeploymentArtifact artifact : artifacts) {
             if (configuredContext.equals(resolveContextName(artifact.getContextPath()))) {
@@ -389,7 +395,12 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             }
         }
 
-        return null;
+        // 4. Fall back to the first artifact rather than returning null (which
+        //    silently prevents the browser from opening with no indication why)
+        String fallback = resolveContextName(artifacts.get(0).getContextPath());
+        LOG.warn("Browser URL context does not match any deployed artifact; " +
+                "falling back to first artifact's context: " + fallback);
+        return fallback;
     }
 
     private static @Nullable String extractContextNameFromBrowserUrl(@Nullable String url) {

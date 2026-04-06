@@ -9,10 +9,14 @@ package com.dev.idea.plugins.tomcat.utils;
     import org.jetbrains.annotations.NotNull;
     import org.jetbrains.annotations.Nullable;
 
+    import java.io.IOException;
+    import java.nio.file.AtomicMoveNotSupportedException;
     import java.nio.file.Files;
+    import java.nio.file.StandardCopyOption;
 
     import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
     import java.nio.file.Path;
+    import java.nio.file.Paths;
     import java.nio.file.Paths;
     import java.util.Objects;
 
@@ -153,6 +157,36 @@ package com.dev.idea.plugins.tomcat.utils;
             return Paths.get(projectBasePath, ".devtomcat", sanitizeFileName(configName), "conf");
         }
 
+        /**
+         * Copies a file to a target path atomically: writes to a temporary file in the
+         * target's directory, then renames. This ensures the target is never in a
+         * half-written state if the copy is interrupted (disk full, permission error).
+         *
+         * <p>Falls back to {@link StandardCopyOption#REPLACE_EXISTING} if the filesystem
+         * does not support atomic moves (e.g. cross-device).
+         *
+         * @param source the source file to copy
+         * @param target the destination path (will be replaced atomically)
+         * @throws IOException if the copy or rename fails
+         */
+        public static void atomicCopy(@NotNull Path source, @NotNull Path target) throws IOException {
+            Path tempFile = Files.createTempFile(target.getParent(), ".devtomcat-", ".tmp");
+            try {
+                Files.copy(source, tempFile, StandardCopyOption.REPLACE_EXISTING);
+                try {
+                    Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING,
+                            StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException e) {
+                    // Filesystem doesn't support atomic move — fall back to non-atomic
+                    Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException e) {
+                // Clean up temp file on failure — don't leave orphans
+                try { Files.deleteIfExists(tempFile); } catch (IOException ignored) {}
+                throw e;
+            }
+        }
+
         @NotNull
         static String sanitizeFileName(@Nullable String name) {
             if (StringUtil.isEmpty(name)) return "unnamed";
@@ -163,10 +197,12 @@ package com.dev.idea.plugins.tomcat.utils;
                 .replaceAll("_{2,}", "_")
                 .replaceAll("^_|_$", "");
             if (sanitized.isEmpty()) return "unnamed";
-            // Append a short hash of the original name so that two configs whose names
-            // differ only in special characters (e.g. "my-tomcat" vs "my_tomcat") don't
-            // resolve to the same sanitized string and share the same CATALINA_BASE dir.
-            String hash = Integer.toHexString(trimmed.hashCode() & 0xffff);
+            // Append a hash of the original name so that two configs whose names differ
+            // only in special characters (e.g. "my-tomcat" vs "my_tomcat") don't resolve
+            // to the same sanitized string and share the same CATALINA_BASE dir.
+            // Full 32-bit hex avoids collisions that the previous 16-bit truncation was
+            // susceptible to across many configurations.
+            String hash = String.format("%08x", trimmed.hashCode());
             return sanitized + "_" + hash;
         }
     }

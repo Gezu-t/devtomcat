@@ -31,7 +31,6 @@ public class DeploymentArtifact implements Serializable, Cloneable {
     @NotNull private String path = "";
     @NotNull private String type = TYPE_WAR;
     @NotNull private String contextPath = "/";
-    private boolean deployed = true; // Whether this artifact should be deployed
 
     public DeploymentArtifact() {}
 
@@ -119,14 +118,6 @@ public class DeploymentArtifact implements Serializable, Cloneable {
         return contextPath.isEmpty() || contextPath.equals("/");
     }
 
-            public boolean isDeployed() {
-        return deployed;
-    }
-
-            public void setDeployed(boolean deployed) {
-        this.deployed = deployed;
-    }
-
     public boolean isValid() {
         if (name.isEmpty() || path.isEmpty()) return false;
         File file = new File(path);
@@ -144,7 +135,6 @@ public class DeploymentArtifact implements Serializable, Cloneable {
             copy.path = this.path;
             copy.type = this.type;
             copy.contextPath = this.contextPath;
-            copy.deployed = this.deployed;
             return copy;
         }
     }
