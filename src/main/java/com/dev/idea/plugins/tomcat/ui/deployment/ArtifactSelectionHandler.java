@@ -151,6 +151,19 @@ public class ArtifactSelectionHandler {
             combined.removeIf(item -> pomModuleNames.contains(extractBaseModuleName(item.getName())));
         }
 
+        // Filter out stale artifacts from renamed/removed modules.
+        // The out/artifacts/ directory and IntelliJ's ArtifactManager can retain entries
+        // for modules that no longer exist after a rename. Without this filter, the user
+        // sees old module names in the selection dialog alongside current ones.
+        Set<String> activeModules = getActiveModuleNames();
+        int beforeFilter = combined.size();
+        combined.removeIf(item -> !hasActiveSourceModule(item.getName(), activeModules));
+        int filtered = beforeFilter - combined.size();
+        if (filtered > 0) {
+            LOG.info("Auto-detection: filtered " + filtered +
+                    " stale artifact(s) from renamed/removed modules");
+        }
+
         LOG.info("Auto-detection: " + combined.size() + " deployable item(s) available");
         return combined;
     }
@@ -248,12 +261,15 @@ public class ArtifactSelectionHandler {
         }
 
         try {
+            Set<String> activeModules = getActiveModuleNames();
+
             // Show ALL IntelliJ artifacts (not just web-typed), because Community Edition
             // only has PlainArtifactType (ID: "plain") and JarArtifactType (ID: "jar") —
             // neither passes isWebArtifact(). Users must be able to select any artifact.
             // Sort web artifacts first (exploded → WAR), then others alphabetically.
             List<Artifact> allArtifacts = Stream.of(artifactManager.getArtifacts())
                     .filter(artifact -> !tableManager.hasDeployment(artifact.getName()))
+                    .filter(artifact -> hasActiveSourceModule(artifact.getName(), activeModules))
                     .collect(Collectors.toList());
 
             return sortByTypeCategory(allArtifacts);
@@ -406,23 +422,41 @@ public class ArtifactSelectionHandler {
         addArtifactWithContext(artifact, contextPath);
     }
 
-    public List<Artifact> detectWebArtifacts() {
-        if (artifactManager == null) {
-            return new ArrayList<>();
-        }
-
-        try {
-            return Stream.of(artifactManager.getArtifacts())
-                    .filter(ProjectArtifactDetector::isWebArtifact)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            LOG.warn("Error detecting web artifacts", e);
-            return new ArrayList<>();
-        }
-    }
-
     public String generateContextPath(@NotNull Artifact artifact) {
         return ContextPathUtils.generateContextPath(artifact.getName());
+    }
+
+    /**
+     * Returns the lowercase names of all modules currently in the project.
+     * Used to detect orphaned artifacts whose source module was renamed or removed.
+     */
+    @NotNull
+    private Set<String> getActiveModuleNames() {
+        Set<String> names = new HashSet<>();
+        try {
+            for (Module module : ModuleManager.getInstance(project).getModules()) {
+                names.add(module.getName().toLowerCase());
+            }
+        } catch (Exception e) {
+            LOG.debug("Error getting active module names", e);
+        }
+        return names;
+    }
+
+    /**
+     * Checks whether an artifact's base module name corresponds to a module that
+     * currently exists in the project. Returns {@code true} (keep) when:
+     * <ul>
+     *   <li>The base name is empty (can't determine module — keep to be safe)</li>
+     *   <li>The base name matches a current module name</li>
+     * </ul>
+     * Returns {@code false} (filter out) when the base name resolves to a module
+     * that no longer exists — i.e. the artifact is orphaned from a rename/delete.
+     */
+    private static boolean hasActiveSourceModule(@NotNull String artifactName,
+                                                 @NotNull Set<String> activeModuleNames) {
+        String baseName = extractBaseModuleName(artifactName).toLowerCase();
+        return baseName.isEmpty() || activeModuleNames.contains(baseName);
     }
 
     @Nullable

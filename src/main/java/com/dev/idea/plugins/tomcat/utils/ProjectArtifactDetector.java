@@ -81,6 +81,7 @@ public final class ProjectArtifactDetector {
 
     /**
      * Detects IntelliJ-configured web artifacts (war, exploded-war, web-application).
+     * Filters out artifacts whose source module no longer exists (stale after rename).
      */
     @NotNull
     public static List<DeploymentArtifact> detectIntelliJWebArtifacts(@NotNull Project project) {
@@ -88,9 +89,12 @@ public final class ProjectArtifactDetector {
             ArtifactManager artifactManager = getArtifactManager(project);
             if (artifactManager == null) return Collections.<DeploymentArtifact>emptyList();
 
+            Set<String> activeModules = getActiveModuleNames(project);
+
             List<DeploymentArtifact> results = new ArrayList<>();
             for (Artifact artifact : artifactManager.getArtifacts()) {
                 if (!isWebArtifact(artifact)) continue;
+                if (!hasActiveSourceModule(artifact.getName(), activeModules)) continue;
 
                 String typeId = artifact.getArtifactType().getId().toLowerCase();
                 String type = typeId.contains("exploded")
@@ -261,6 +265,32 @@ public final class ProjectArtifactDetector {
     // =====================================================================
     // Private helpers
     // =====================================================================
+
+    /**
+     * Returns the lowercase names of all modules currently in the project.
+     */
+    @NotNull
+    private static Set<String> getActiveModuleNames(@NotNull Project project) {
+        Set<String> names = new HashSet<>();
+        try {
+            for (Module module : ModuleManager.getInstance(project).getModules()) {
+                names.add(module.getName().toLowerCase());
+            }
+        } catch (Exception e) {
+            LOG.debug("DevTomcat: Error getting active module names", e);
+        }
+        return names;
+    }
+
+    /**
+     * Checks whether an artifact name corresponds to a module that currently exists.
+     * Returns true (keep) when the base name is empty or matches a current module.
+     */
+    private static boolean hasActiveSourceModule(@NotNull String artifactName,
+                                                 @NotNull Set<String> activeModuleNames) {
+        String baseName = ContextPathUtils.extractBaseModuleName(artifactName).toLowerCase();
+        return baseName.isEmpty() || activeModuleNames.contains(baseName);
+    }
 
     @Nullable
     private static ArtifactManager getArtifactManager(@NotNull Project project) {

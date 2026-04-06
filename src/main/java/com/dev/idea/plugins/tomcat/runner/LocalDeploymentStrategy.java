@@ -12,7 +12,10 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.CompilerModuleExtension;
+import com.intellij.openapi.roots.ModuleOrderEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
@@ -24,9 +27,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
@@ -237,10 +242,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      *       entries not already packaged in the artifact.</li>
      * </ul>
      *
-     * <p>Project module output directories are identified via {@link com.intellij.openapi.roots.ProjectFileIndex}
-     * and are always included — this prevents a name-collision false positive where a
-     * third-party {@code api-1.0.jar} in WEB-INF/lib would otherwise suppress
-     * a project module also named {@code api}.
+     * <p>Project module output directories are identified via {@link #buildModuleOutputToArtifactName},
+     * which walks the IntelliJ module dependency graph and uses the Maven artifactId (when
+     * available) for reliable JAR-name matching. This prevents false positives where a
+     * third-party {@code api-1.0.jar} in WEB-INF/lib would suppress a project module also
+     * named {@code api}, and correctly handles modules whose directory name differs from
+     * their Maven artifactId.
      */
     @NotNull
     private static String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
@@ -280,24 +287,22 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         String webInfClassesPath = artifactPath.resolve(WEB_INF).resolve(WEB_INF_CLASSES)
                 .toAbsolutePath().toString().replace('\\', '/');
 
-        // Precompute project module output paths using OrderEnumerator (no file-index access).
-        // This replaces the ProjectFileIndex.getModuleForFile() lookup that was triggering
-        // SlowOperations violations on EDT — module output paths are in the workspace model,
-        // not the file index, so they can be read without an expensive index traversal.
-        Set<String> moduleOutputPaths = new HashSet<>();
-        for (VirtualFile moduleRoot : OrderEnumerator.orderEntries(module)
-                .recursively()
-                .withoutSdk()
-                .withoutLibraries()
-                .classes()
-                .getRoots()) {
-            moduleOutputPaths.add(moduleRoot.getPath());
-        }
+        // Build a map from each dependency module's output path to its artifact name.
+        // Uses the module dependency graph (ModuleRootManager) rather than file-path heuristics,
+        // and prefers the Maven artifactId so the name matches WEB-INF/lib JAR filenames reliably
+        // even when the IntelliJ module name or directory name differs from the Maven artifactId.
+        Map<String, String> moduleOutputToArtifactName = buildModuleOutputToArtifactName(module, project);
 
         // Get all runtime classpath entries from the module (recursively includes dependencies)
         List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
         List<String> skippedModules = new ArrayList<>();
+
+        // Track module names whose target/classes dirs are injected as PreResources.
+        // Their JARs must NOT be added as PostResources — otherwise Tomcat's classloader
+        // sees the same classes/resources in both the PreResources overlay AND the JAR,
+        // causing duplicate-classpath errors in Liquibase, CDI, and similar scanners.
+        Set<String> preResourceModuleNames = new HashSet<>();
 
         VirtualFile[] classesRoots = OrderEnumerator.orderEntries(module)
                 .recursively()
@@ -326,18 +331,33 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 // Class output directory — skip if it IS the artifact's WEB-INF/classes
                 if (rootPath.equals(webInfClassesPath)) continue;
 
-                // For project module output directories, always include as PreResources.
-                // PreResources take priority over the artifact's docBase (WEB-INF/classes),
-                // so even if a same-named JAR is in WEB-INF/lib the freshly compiled classes win.
-                // Skipping based on JAR name alone triggers false positives: a module named "api"
-                // would be incorrectly blocked by a third-party "api-1.0.jar" in WEB-INF/lib.
-                if (moduleOutputPaths.contains(root.getPath())) {
+                // For project module output directories, include as PreResources so
+                // freshly compiled classes shadow the (potentially stale) WEB-INF/classes.
+                // Record the artifact name so we can skip its JAR in the PostResources pass.
+                if (moduleOutputToArtifactName.containsKey(root.getPath())) {
+                    // Artifact name comes from the module graph (Maven artifactId preferred),
+                    // not from file-path extraction — reliable even when directory name ≠ artifactId.
+                    String moduleDirName = moduleOutputToArtifactName.get(root.getPath());
+                    // If this module's JAR is already packaged in WEB-INF/lib, skip the PreResources
+                    // overlay — having both target/classes AND the JAR on the classpath creates
+                    // duplicate resource entries that break scanners like Liquibase (same XML found
+                    // twice) and CDI (duplicate bean descriptors). Changes to this module require
+                    // Redeploy rather than incremental Build.
+                    if (moduleDirName != null && coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
+                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — already packaged as JAR in WEB-INF/lib");
+                        skippedModules.add(moduleDirName);
+                        continue;
+                    }
                     extraDirs.add(nativePath);
+                    if (moduleDirName != null) {
+                        preResourceModuleNames.add(moduleDirName.toLowerCase(Locale.ROOT));
+                    }
                     continue;
                 }
 
-                // Not a recognised project module directory — apply name-based duplicate guard
-                // as a safety net for unusual classpath layouts.
+                // Not a known dependency module output — apply name-based duplicate guard
+                // as a safety net for unusual classpath layouts (e.g. the webapp's own
+                // target/classes, or output dirs from modules not in the dependency graph).
                 String moduleName = extractModuleName(nativePath);
                 if (moduleName != null && coveredModuleNames.contains(moduleName.toLowerCase(Locale.ROOT))) {
                     LOG.debug("Skipping non-module class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
@@ -350,6 +370,17 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 String jarName = file.getName();
                 if (isContainerProvidedJar(jarName)) continue;
                 if (existingLibJars.contains(jarName)) continue;
+
+                // Skip JARs whose classes are already provided via PreResources from
+                // their module's target/classes. Adding both the classes dir AND the JAR
+                // causes duplicate classpath entries that break Liquibase, CDI, etc.
+                String jarBase = stripJarVersion(jarName);
+                if (jarBase != null && preResourceModuleNames.contains(jarBase.toLowerCase(Locale.ROOT))) {
+                    LOG.info("Skipping PostResources for '" + jarName +
+                            "' — classes already served via PreResources");
+                    continue;
+                }
+
                 extraJars.add(nativePath);
             }
         }
@@ -449,6 +480,69 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
         return false;
+    }
+
+    /**
+     * Builds a map from each dependency module's compiler output path to its artifact name.
+     *
+     * <p>Walks the module dependency graph via {@link ModuleRootManager#getOrderEntries()}
+     * rather than enumerating classpath roots and guessing names from paths. For Maven
+     * projects the Maven artifactId is used; otherwise the IntelliJ module name is used.
+     * Both are authoritative — unlike {@link #extractModuleName} which parses the directory
+     * path and fails when the Maven artifactId differs from the module directory name.
+     *
+     * <p>The webModule itself is intentionally excluded: its own {@code target/classes} is
+     * handled separately (always added as PreResources for hot-reload of the webapp's code).
+     */
+    @NotNull
+    private static Map<String, String> buildModuleOutputToArtifactName(
+            @NotNull Module webModule, @NotNull Project project) {
+        Map<String, String> result = new HashMap<>();
+        collectModuleDependencyNames(webModule, project, result, new HashSet<>());
+        return result;
+    }
+
+    private static void collectModuleDependencyNames(
+            @NotNull Module module,
+            @NotNull Project project,
+            @NotNull Map<String, String> result,
+            @NotNull Set<String> visited) {
+        if (!visited.add(module.getName())) return;
+        for (OrderEntry entry : ModuleRootManager.getInstance(module).getOrderEntries()) {
+            if (!(entry instanceof ModuleOrderEntry)) continue;
+            Module dep = ((ModuleOrderEntry) entry).getModule();
+            if (dep == null) continue;
+            CompilerModuleExtension ext =
+                    ModuleRootManager.getInstance(dep).getModuleExtension(CompilerModuleExtension.class);
+            if (ext != null) {
+                VirtualFile outputRoot = ext.getCompilerOutputPath();
+                if (outputRoot != null) {
+                    String artifactName = getMavenArtifactId(dep, project);
+                    if (artifactName == null) artifactName = dep.getName();
+                    result.put(outputRoot.getPath(), artifactName);
+                }
+            }
+            collectModuleDependencyNames(dep, project, result, visited);
+        }
+    }
+
+    /**
+     * Returns the Maven artifactId for the given module, or {@code null} if the Maven
+     * plugin is unavailable or the module is not part of a Maven project.
+     * Wrapped defensively so that missing Maven plugin classes never break deployment.
+     */
+    @Nullable
+    private static String getMavenArtifactId(@NotNull Module module, @NotNull Project project) {
+        try {
+            org.jetbrains.idea.maven.project.MavenProjectsManager manager =
+                    org.jetbrains.idea.maven.project.MavenProjectsManager.getInstance(project);
+            if (manager == null) return null;
+            org.jetbrains.idea.maven.project.MavenProject mavenProject = manager.findProject(module);
+            if (mavenProject == null) return null;
+            return mavenProject.getMavenId().getArtifactId();
+        } catch (NoClassDefFoundError | Exception e) {
+            return null;
+        }
     }
 
     /**

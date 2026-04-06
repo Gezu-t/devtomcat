@@ -120,10 +120,41 @@ public final class ArtifactReferenceRefresher {
             if (platformArtifacts.length == 0) {
                 return RefreshResult.EMPTY;
             }
-            snapshots = new PlatformArtifactSnapshot[platformArtifacts.length];
-            for (int i = 0; i < platformArtifacts.length; i++) {
-                snapshots[i] = PlatformArtifactSnapshot.fromPlatform(platformArtifacts[i]);
+
+            // Collect active module names so we can exclude orphaned IntelliJ artifacts
+            // from matching. When a user renames a module, IntelliJ may keep the OLD
+            // artifact definition alongside the new one. Without this filter, Strategy 1
+            // (exact name match) would match the orphaned artifact and stop looking,
+            // leaving the deployment pointing at stale/empty build output.
+            java.util.Set<String> activeModules = new java.util.HashSet<>();
+            try {
+                for (com.intellij.openapi.module.Module m :
+                        com.intellij.openapi.module.ModuleManager.getInstance(config.getProject()).getModules()) {
+                    activeModules.add(m.getName().toLowerCase());
+                }
+            } catch (Exception e) {
+                LOG.debug("ArtifactReferenceRefresher: Could not read modules, skipping orphan filter");
             }
+
+            List<PlatformArtifactSnapshot> filtered = new ArrayList<>();
+            for (Artifact pa : platformArtifacts) {
+                PlatformArtifactSnapshot snap = PlatformArtifactSnapshot.fromPlatform(pa);
+                // Keep the artifact if we can't determine its module (empty base name)
+                // or if the module still exists in the project
+                String baseName = com.dev.idea.plugins.tomcat.utils.ContextPathUtils
+                        .extractBaseModuleName(snap.name()).toLowerCase();
+                if (activeModules.isEmpty() || baseName.isEmpty() || activeModules.contains(baseName)) {
+                    filtered.add(snap);
+                } else {
+                    LOG.debug("ArtifactReferenceRefresher: Excluding orphaned artifact '" +
+                            snap.name() + "' (module '" + baseName + "' no longer exists)");
+                }
+            }
+
+            if (filtered.isEmpty()) {
+                return RefreshResult.EMPTY;
+            }
+            snapshots = filtered.toArray(new PlatformArtifactSnapshot[0]);
         } catch (NoClassDefFoundError | Exception e) {
             LOG.debug("ArtifactReferenceRefresher: ArtifactManager unavailable, skipping refresh");
             return RefreshResult.EMPTY;
