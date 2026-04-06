@@ -14,38 +14,54 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("TomcatProjectUtils")
 class TomcatProjectUtilsTest {
 
+    // Helper: compute the expected hash suffix the same way sanitizeFileName does.
+    private static String hash(String trimmed) {
+        return Integer.toHexString(trimmed.hashCode() & 0xffff);
+    }
+
     @Nested
     @DisplayName("sanitizeFileName")
     class SanitizeFileName {
 
         @Test
-        @DisplayName("passes through simple alphanumeric names unchanged")
+        @DisplayName("passes through simple alphanumeric names unchanged (plus hash suffix)")
         void simpleNames() {
-            assertEquals("MyTomcat", TomcatProjectUtils.sanitizeFileName("MyTomcat"));
-            assertEquals("tomcat-9.0", TomcatProjectUtils.sanitizeFileName("tomcat-9.0"));
-            assertEquals("local_dev", TomcatProjectUtils.sanitizeFileName("local_dev"));
+            assertEquals("MyTomcat_" + hash("MyTomcat"),       TomcatProjectUtils.sanitizeFileName("MyTomcat"));
+            assertEquals("tomcat-9.0_" + hash("tomcat-9.0"),   TomcatProjectUtils.sanitizeFileName("tomcat-9.0"));
+            assertEquals("local_dev_" + hash("local_dev"),     TomcatProjectUtils.sanitizeFileName("local_dev"));
         }
 
         @Test
         @DisplayName("replaces spaces and special characters with underscores")
         void specialChars() {
-            assertEquals("My_Tomcat_Config", TomcatProjectUtils.sanitizeFileName("My Tomcat Config"));
-            assertEquals("config_1", TomcatProjectUtils.sanitizeFileName("config (1)"));
-            assertEquals("dev_staging", TomcatProjectUtils.sanitizeFileName("dev/staging"));
+            String s1 = TomcatProjectUtils.sanitizeFileName("My Tomcat Config");
+            assertTrue(s1.startsWith("My_Tomcat_Config_"), s1);
+
+            String s2 = TomcatProjectUtils.sanitizeFileName("config (1)");
+            assertTrue(s2.startsWith("config_1_"), s2);
+
+            String s3 = TomcatProjectUtils.sanitizeFileName("dev/staging");
+            assertTrue(s3.startsWith("dev_staging_"), s3);
         }
 
         @Test
         @DisplayName("collapses consecutive underscores")
         void collapsesUnderscores() {
-            assertEquals("a_b", TomcatProjectUtils.sanitizeFileName("a   b"));
-            assertEquals("x_y", TomcatProjectUtils.sanitizeFileName("x///y"));
+            String s1 = TomcatProjectUtils.sanitizeFileName("a   b");
+            assertTrue(s1.startsWith("a_b_"), s1);
+
+            String s2 = TomcatProjectUtils.sanitizeFileName("x///y");
+            assertTrue(s2.startsWith("x_y_"), s2);
         }
 
         @Test
-        @DisplayName("strips leading and trailing underscores")
+        @DisplayName("strips leading and trailing underscores from sanitized part")
         void stripsEdgeUnderscores() {
-            assertEquals("name", TomcatProjectUtils.sanitizeFileName(" name "));
-            assertEquals("name", TomcatProjectUtils.sanitizeFileName("(name)"));
+            String s1 = TomcatProjectUtils.sanitizeFileName(" name ");
+            assertTrue(s1.startsWith("name_"), s1);
+
+            String s2 = TomcatProjectUtils.sanitizeFileName("(name)");
+            assertTrue(s2.startsWith("name_"), s2);
         }
 
         @ParameterizedTest
@@ -70,9 +86,20 @@ class TomcatProjectUtilsTest {
                 "'  spaced  ', spaced",
                 "'dots.and-dashes', dots.and-dashes"
         })
-        @DisplayName("handles realistic config names")
-        void realisticNames(String input, String expected) {
-            assertEquals(expected, TomcatProjectUtils.sanitizeFileName(input));
+        @DisplayName("sanitized prefix matches expected slug")
+        void realisticNames(String input, String expectedPrefix) {
+            String result = TomcatProjectUtils.sanitizeFileName(input);
+            assertTrue(result.startsWith(expectedPrefix + "_"),
+                    "Expected '" + result + "' to start with '" + expectedPrefix + "_'");
+        }
+
+        @Test
+        @DisplayName("two names differing only in special chars produce different results")
+        void collisionPrevention() {
+            String a = TomcatProjectUtils.sanitizeFileName("my-tomcat");
+            String b = TomcatProjectUtils.sanitizeFileName("my_tomcat");
+            assertNotEquals(a, b,
+                    "Names that differ only in special chars must not map to the same directory name");
         }
     }
 
@@ -85,7 +112,9 @@ class TomcatProjectUtilsTest {
         void correctStructure() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/home/user/project", "My Config");
 
-            assertEquals(Path.of("/home/user/project/.devtomcat/My_Config/conf"), result);
+            assertTrue(result.toString().startsWith("/home/user/project/.devtomcat/My_Config_"),
+                    "Unexpected path: " + result);
+            assertEquals("conf", result.getFileName().toString());
         }
 
         @Test
@@ -93,7 +122,8 @@ class TomcatProjectUtilsTest {
         void sanitizesConfigName() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/proj", "Tomcat 10.1 (local)");
 
-            assertEquals(Path.of("/proj/.devtomcat/Tomcat_10.1_local/conf"), result);
+            assertTrue(result.toString().contains("/.devtomcat/Tomcat_10.1_local_"),
+                    "Unexpected path: " + result);
         }
 
         @Test
@@ -127,6 +157,14 @@ class TomcatProjectUtilsTest {
 
             assertTrue(result.toString().contains(".devtomcat"),
                     "Path should contain .devtomcat: " + result);
+        }
+
+        @Test
+        @DisplayName("two configs with same slug but different names produce different paths")
+        void collisionPrevention() {
+            Path a = TomcatProjectUtils.resolveConfOverlayPath("/proj", "my-tomcat");
+            Path b = TomcatProjectUtils.resolveConfOverlayPath("/proj", "my_tomcat");
+            assertNotEquals(a, b, "Different config names must not collide on the same path");
         }
     }
 }

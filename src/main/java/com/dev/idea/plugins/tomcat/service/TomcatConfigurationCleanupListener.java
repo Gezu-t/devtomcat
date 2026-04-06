@@ -37,6 +37,10 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
                 TomcatDeploymentStatusService.getInstance(project);
         statusService.remove(configName);
 
+        // Remove deployment history for this configuration so deleted configs
+        // don't leave stale entries in the history UI indefinitely.
+        TomcatDeploymentHistory.getInstance(project).removeEntriesFor(configName);
+
         // Force the Services tool window to refresh so the stale node disappears
         if (!project.isDisposed()) {
             RunDashboardManager.getInstance(project).updateDashboard(true);

@@ -149,6 +149,17 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
         return null;
     }
 
+    /**
+     * Removes all history entries for the given configuration name.
+     * Call this when a run configuration is deleted so stale entries don't
+     * accumulate and clutter the history UI.
+     */
+    public void removeEntriesFor(@NotNull String configName) {
+        synchronized (lock) {
+            state.entries.removeIf(e -> configName.equals(e.configName));
+        }
+    }
+
     public void clearHistory() {
         synchronized (lock) {
             state.entries.clear();

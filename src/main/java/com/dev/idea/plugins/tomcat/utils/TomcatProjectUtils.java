@@ -156,10 +156,17 @@ package com.dev.idea.plugins.tomcat.utils;
         @NotNull
         static String sanitizeFileName(@Nullable String name) {
             if (StringUtil.isEmpty(name)) return "unnamed";
-            String sanitized = name.trim()
+            String trimmed = name.trim();
+            if (trimmed.isEmpty()) return "unnamed";
+            String sanitized = trimmed
                 .replaceAll("[^a-zA-Z0-9._-]", "_")
                 .replaceAll("_{2,}", "_")
                 .replaceAll("^_|_$", "");
-            return sanitized.isEmpty() ? "unnamed" : sanitized;
+            if (sanitized.isEmpty()) return "unnamed";
+            // Append a short hash of the original name so that two configs whose names
+            // differ only in special characters (e.g. "my-tomcat" vs "my_tomcat") don't
+            // resolve to the same sanitized string and share the same CATALINA_BASE dir.
+            String hash = Integer.toHexString(trimmed.hashCode() & 0xffff);
+            return sanitized + "_" + hash;
         }
     }
