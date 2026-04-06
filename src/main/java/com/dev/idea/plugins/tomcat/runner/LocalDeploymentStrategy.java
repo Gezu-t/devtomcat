@@ -12,7 +12,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.CompilerModuleExtension;
 import com.intellij.openapi.roots.ModuleOrderEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEntry;
@@ -512,16 +511,31 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (!(entry instanceof ModuleOrderEntry)) continue;
             Module dep = ((ModuleOrderEntry) entry).getModule();
             if (dep == null) continue;
-            CompilerModuleExtension ext =
-                    ModuleRootManager.getInstance(dep).getModuleExtension(CompilerModuleExtension.class);
-            if (ext != null) {
-                VirtualFile outputRoot = ext.getCompilerOutputPath();
-                if (outputRoot != null) {
-                    String artifactName = getMavenArtifactId(dep, project);
-                    if (artifactName == null) artifactName = dep.getName();
-                    result.put(outputRoot.getPath(), artifactName);
-                }
+
+            // Resolve the artifact name: Maven artifactId is authoritative; fall back to
+            // the IntelliJ module name stripped of any compound project prefix
+            // (e.g. "myapp.common" → "common") so it matches the JAR filename in WEB-INF/lib
+            // for both Gradle and Maven projects regardless of how IntelliJ names modules.
+            String artifactName = getMavenArtifactId(dep, project);
+            if (artifactName == null) {
+                String moduleName = dep.getName();
+                int dot = moduleName.lastIndexOf('.');
+                artifactName = dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
             }
+
+            // Use OrderEnumerator (same API as classesRoots in the caller) to get the
+            // output paths for this single module — more reliable than CompilerModuleExtension
+            // because it returns the actual paths the IDE uses, covering Maven (target/classes),
+            // Gradle (build/classes/java/main), and IntelliJ default (out/production/...).
+            for (VirtualFile outputRoot : OrderEnumerator.orderEntries(dep)
+                    .productionOnly()
+                    .withoutSdk()
+                    .withoutLibraries()
+                    .classes()
+                    .getRoots()) {
+                result.put(outputRoot.getPath(), artifactName);
+            }
+
             collectModuleDependencyNames(dep, project, result, visited);
         }
     }
