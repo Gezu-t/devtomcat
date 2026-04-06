@@ -9,6 +9,7 @@ import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
 import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
+import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
@@ -62,16 +63,26 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
-        TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
-                .setDebugMode(isDebug)
-                .setDeploymentLogger(deploymentLogger);
-        if (resolvedPorts != null) {
-            builder.setResolvedPorts(resolvedPorts);
+        try {
+            TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
+                    .setDebugMode(isDebug)
+                    .setDeploymentLogger(deploymentLogger);
+            if (resolvedPorts != null) {
+                builder.setResolvedPorts(resolvedPorts);
+            }
+            if (resolvedDebugPort > 0) {
+                builder.setResolvedDebugPort(resolvedDebugPort);
+            }
+            return builder.build();
+        } catch (ExecutionException | RuntimeException e) {
+            // Release ports claimed by ensurePreLaunchSetup() since the process
+            // will never start and processTerminated() will never fire.
+            // releaseAllFor() is idempotent, so double-release from startProcess() is safe.
+            TomcatPortRegistry.getInstance()
+                    .releaseAllFor(configuration.getName());
+            if (e instanceof ExecutionException) throw (ExecutionException) e;
+            throw new ExecutionException(e.getMessage(), e);
         }
-        if (resolvedDebugPort > 0) {
-            builder.setResolvedDebugPort(resolvedDebugPort);
-        }
-        return builder.build();
     }
 
     /**
@@ -109,7 +120,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             // Release any ports we already claimed — processTerminated() won't fire
             // because the process was never started.
             if (portsReserved) {
-                com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+                TomcatPortRegistry.getInstance()
                         .releaseAllFor(configuration.getName());
             }
             throw e;
@@ -165,7 +176,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     /**
      * Detects port conflicts before launch and auto-resolves them.
      *
-     * <p>Uses {@link com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry} to
+     * <p>Uses {@link TomcatPortRegistry} to
      * atomically claim all ports (Tomcat + JDWP) before the process starts.
      * This closes the race window where two configurations start simultaneously,
      * both observe a port as free before either JVM has bound to it, and both
@@ -178,8 +189,8 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private void resolvePortConflicts() {
         PortConfig originalPorts = configuration.getConfigData().getPortConfig();
         String configName = configuration.getName();
-        com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry registry =
-                com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance();
+        TomcatPortRegistry registry =
+                TomcatPortRegistry.getInstance();
 
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
@@ -226,7 +237,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      * picked).
      */
     private void claimAndTrack(@NotNull PortConfig rp,
-                               @NotNull com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry registry,
+                               @NotNull TomcatPortRegistry registry,
                                @NotNull String configName,
                                @NotNull java.util.List<String> changes) {
         int orig, claimed;
@@ -452,7 +463,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         } catch (ExecutionException | RuntimeException e) {
             // Release any ports claimed during resolvePortConflicts() since
             // processTerminated() will never be called if we don't return a handler.
-            com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+            TomcatPortRegistry.getInstance()
                     .releaseAllFor(configuration.getName());
             if (e instanceof ExecutionException) throw (ExecutionException) e;
             throw new ExecutionException(e.getMessage(), e);

@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.action;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
-import com.dev.idea.plugins.tomcat.update.TomcatUpdateDialog;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -37,16 +36,7 @@ public class UpdateApplicationAction extends AnAction {
         if (project == null || config == null || handler == null
                 || handler.isProcessTerminated() || handler.isProcessTerminating()) return;
 
-        String defaultAction = config.getConfigData().getUpdateConfig().getOnUpdate();
-        boolean isLocal = !com.dev.idea.plugins.tomcat.TomcatConstants.MODE_REMOTE
-                .equals(config.getConfigData().getServerMode());
-        TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, config.getName(), defaultAction, isLocal);
-        if (!dialog.showAndGet()) return;
-
-        String selectedAction = dialog.getSelectedAction();
-        TomcatApplicationUpdater updater = new TomcatApplicationUpdater(
-                project, handler, config, selectedAction);
-        updater.executeUpdate(selectedAction);
+        TomcatApplicationUpdater.showDialogAndExecute(project, handler, config);
     }
 
     @Override

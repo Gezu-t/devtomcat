@@ -68,17 +68,18 @@ public class DebugTomcatAction extends AnAction {
         handler.addProcessListener(new ProcessListener() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
+                handler.removeProcessListener(this);
                 ApplicationManager.getApplication().invokeLater(() -> {
                     try {
+                        if (project.isDisposed()) return;
+
                         // Remove the old descriptor using the pre-captured reference —
                         // avoids the race where the entry is deregistered from
                         // ExecutionManager before this invokeLater callback runs.
                         if (capturedDescriptor != null && capturedExecutor != null) {
                             RunContentManager.getInstance(project)
                                     .removeRunContent(capturedExecutor, capturedDescriptor);
-                            if (!project.isDisposed()) {
-                                RunDashboardManager.getInstance(project).updateDashboard(true);
-                            }
+                            RunDashboardManager.getInstance(project).updateDashboard(true);
                         }
 
                         Executor debugExecutor = ExecutorRegistry.getInstance()

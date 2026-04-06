@@ -35,6 +35,10 @@ public final class CredentialResolver {
         if (!remoteConfig.isUseCredentials()) {
             return;
         }
+        // Already resolved by the async deserializer thread — skip redundant PasswordSafe lookup
+        if (remoteConfig.isCredentialsResolved()) {
+            return;
+        }
 
         String managerUrl = remoteConfig.getManagerUrl();
         try {
@@ -49,5 +53,6 @@ public final class CredentialResolver {
             LOG.warn("Failed to resolve credential for: " + managerUrl, e);
             // Fall through — whatever password is on the config (legacy or empty) will be used
         }
+        remoteConfig.setCredentialsResolved(true);
     }
 }

@@ -94,7 +94,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             throw new ExecutionException("Failed to create deployment directories", e);
         }
 
-        boolean hotDeploy = configuration.getConfigData().getDeploymentConfig().isHotDeploymentEnabled();
         boolean preserveSessions = configuration.getConfigData().getDeploymentConfig().isPreserveSessions();
 
         for (DeploymentArtifact artifact : configuration.getConfigData().getDeploymentConfig().getDeployedArtifacts()) {
@@ -126,7 +125,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             try {
                 if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
                         || Files.isDirectory(artifactPath)) {
-                    String contextXml = buildContextXml(artifact, artifactPath, hotDeploy, preserveSessions, project, logger);
+                    String contextXml = buildContextXml(artifact, artifactPath, preserveSessions, project, logger);
                     Path contextFile = confCatalinaLocalhost.resolve(contextName + ".xml");
                     Files.writeString(contextFile, contextXml);
                     LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
@@ -142,12 +141,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     @NotNull
-    private String buildContextXml(@NotNull DeploymentArtifact artifact,
-                                   @NotNull Path artifactPath,
-                                   boolean hotDeploy,
-                                   boolean preserveSessions,
-                                   @NotNull Project project,
-                                   @Nullable TomcatDeploymentLogger logger) {
+    static String buildContextXml(@NotNull DeploymentArtifact artifact,
+                                  @NotNull Path artifactPath,
+                                  boolean preserveSessions,
+                                  @NotNull Project project,
+                                  @Nullable TomcatDeploymentLogger logger) {
         String extraResources = buildExtraResourcesXml(artifact, artifactPath, project, logger);
         String jarScanFilter = buildJarScanFilter(artifactPath);
 
@@ -185,7 +183,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * org_apache_jasper). Returns a comma-separated skip pattern for JarScanFilter.
      */
     @NotNull
-    private String buildJarScanFilter(@NotNull Path artifactPath) {
+    private static String buildJarScanFilter(@NotNull Path artifactPath) {
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (!Files.isDirectory(webInfLib)) return "";
 
@@ -254,7 +252,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * a project module also named {@code api}.
      */
     @NotNull
-    private String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
+    private static String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
                                           @NotNull Path artifactPath,
                                           @NotNull Project project,
                                           @Nullable TomcatDeploymentLogger logger) {
@@ -468,8 +466,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * path-based matching, and web module fallback.
      */
     @Nullable
-    private Module findModuleForArtifact(@NotNull DeploymentArtifact artifact,
-                                         @NotNull Project project) {
+    private static Module findModuleForArtifact(@NotNull DeploymentArtifact artifact,
+                                                @NotNull Project project) {
         try {
             ModuleManager moduleManager = ModuleManager.getInstance(project);
             String name = artifact.getName();

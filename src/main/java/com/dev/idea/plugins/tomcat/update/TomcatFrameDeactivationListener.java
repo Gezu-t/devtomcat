@@ -13,6 +13,8 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.wm.IdeFrame;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Listens for IDE frame deactivation (user switches away from IntelliJ)
  * and triggers the configured "On frame deactivation" update action
@@ -24,6 +26,10 @@ import org.jetbrains.annotations.NotNull;
 public class TomcatFrameDeactivationListener implements ApplicationActivationListener {
 
     private static final Logger LOG = Logger.getInstance(TomcatFrameDeactivationListener.class);
+
+    /** Guards against re-entrant dialog display: showing the confirmation dialog
+     *  activates the frame, and dismissing it may fire another deactivation event. */
+    private final AtomicBoolean updating = new AtomicBoolean(false);
 
     @Override
     public void applicationDeactivated(@NotNull IdeFrame ideFrame) {
@@ -43,16 +49,22 @@ public class TomcatFrameDeactivationListener implements ApplicationActivationLis
 
             UpdateConfig updateConfig = config.getConfigData().getUpdateConfig();
             if (updateConfig.isShowFrameDeactivationDialog()) {
+                if (!updating.compareAndSet(false, true)) continue;
                 ApplicationManager.getApplication().invokeLater(() -> {
-                    int result = Messages.showYesNoDialog(
-                            project,
-                            "Apply '" + mapActionToDisplay(action) + "' to " + config.getName() + "?",
-                            "DevTomcat — Frame Deactivation",
-                            "Update", "Skip",
-                            Messages.getQuestionIcon());
-                    if (result == Messages.YES) {
-                        LOG.info("Frame deactivated — user confirmed update for: " + config.getName());
-                        new TomcatApplicationUpdater(project, tomcatHandler, config, action).executeUpdate();
+                    try {
+                        int result = Messages.showYesNoDialog(
+                                project,
+                                "Apply '" + TomcatApplicationUpdater.mapActionToDisplay(action)
+                                        + "' to " + config.getName() + "?",
+                                "DevTomcat — Frame Deactivation",
+                                "Update", "Skip",
+                                Messages.getQuestionIcon());
+                        if (result == Messages.YES) {
+                            LOG.info("Frame deactivated — user confirmed update for: " + config.getName());
+                            new TomcatApplicationUpdater(project, tomcatHandler, config, action).executeUpdate();
+                        }
+                    } finally {
+                        updating.set(false);
                     }
                 });
             } else {
@@ -61,16 +73,5 @@ public class TomcatFrameDeactivationListener implements ApplicationActivationLis
                         new TomcatApplicationUpdater(project, tomcatHandler, config, action).executeUpdate());
             }
         }
-    }
-
-    @NotNull
-    private static String mapActionToDisplay(@NotNull String action) {
-        return switch (action) {
-            case UpdateConfig.UPDATE_RESOURCES -> "Update resources";
-            case UpdateConfig.UPDATE_CLASSES_AND_RESOURCES -> "Update classes and resources";
-            case UpdateConfig.REDEPLOY -> "Redeploy";
-            case UpdateConfig.RESTART_SERVER -> "Restart server";
-            default -> action;
-        };
     }
 }

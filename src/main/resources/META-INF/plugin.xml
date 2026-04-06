@@ -55,31 +55,24 @@
     <change-notes><![CDATA[
     <h3>Version 1.0.2</h3>
     <ul>
-        <li><b>Update dialog on re-run</b> — clicking Run or Debug while Tomcat is already running now shows the Update Application dialog (Update Resources, Redeploy, Restart) instead of starting a second process</li>
-        <li><b>Single toolbar/Services entry</b> — switching between Run and Debug mode automatically stops the old process, removes its entry, and launches in the new mode; no duplicate entries accumulate</li>
-        <li><b>Services panel refresh</b> — stale entries are removed immediately after process termination instead of lingering until the next organic repaint</li>
-        <li><b>Console NPE fix</b> — eliminated a race condition that caused a NullPointerException when logging during process startup or mode switch</li>
+        <li><b>Update Application on re-run</b> — Run/Debug while Tomcat is running shows the Update dialog (Update Resources, Redeploy, Restart) instead of starting a duplicate process</li>
+        <li><b>Services toolbar actions</b> — Update, Redeploy, and Restart are now one-click toolbar buttons in the Services panel</li>
+        <li><b>Redeploy preserves multi-module classpath</b> — Redeploy now generates full context XML with PreResources/PostResources, matching initial deployment</li>
+        <li><b>Thread safety hardening</b> — fixed race conditions in deployment notification, artifact count tracking, console debounce, and lifecycle history</li>
+        <li><b>Security improvements</b> — URL scheme validation, path traversal protection on remote deploy, file size limit on config import</li>
+        <li><b>Resource leak fixes</b> — listener cleanup on editor disposal, ProcessListener self-removal, port release on build failure</li>
     </ul>
 
     <h3>Version 1.0.0 — Initial Release</h3>
     <ul>
-        <li>Full Tomcat lifecycle — run, debug, and redeploy from the IDE</li>
+        <li>Full Tomcat lifecycle — run, debug, coverage, and redeploy from the IDE</li>
         <li>Multi-artifact deployment with independent context paths</li>
-        <li>Smart Diagnostics Engine — auto-detects 16+ Tomcat errors with actionable suggestions</li>
-        <li>Tomcat/JDK version compatibility checker (Tomcat 7–11 matrix)</li>
-        <li>Auto-port conflict resolution at startup</li>
-        <li>Live deployment status tracking in Services tool window</li>
-        <li>Deployment history with persistent storage</li>
-        <li>Startup time trends and performance tracking</li>
-        <li>Smart console filter with clickable URLs and file paths</li>
-        <li>Configuration export/import for team sharing</li>
-        <li>Code coverage runner with JaCoCo support</li>
-        <li>Update Running Application (Ctrl+F10) support</li>
+        <li>Smart Diagnostics — auto-detects 16+ Tomcat errors with actionable suggestions</li>
+        <li>Auto-port conflict resolution and CATALINA_BASE isolation</li>
+        <li>Live deployment status, history, and startup trends in Services panel</li>
+        <li>Update Running Application (Ctrl+F10) with frame deactivation support</li>
         <li>Remote deployment via Tomcat Manager API</li>
-        <li>Per-mode runner settings (Run, Debug, Coverage)</li>
-        <li>Multi-log monitoring with dedicated console tabs</li>
-        <li>CATALINA_BASE isolation per run configuration</li>
-        <li>JMX monitoring support</li>
+        <li>Configuration export/import for team sharing</li>
     </ul>
     ]]></change-notes>
 
@@ -246,6 +239,17 @@
                     description="View startup time trends across configurations"
                     icon="AllIcons.Actions.Profile"/>
             <add-to-group group-id="ServiceViewItemPopup" anchor="last"/>
+        </group>
+
+        <!-- Services tool window toolbar: one-click lifecycle actions.
+             Visibility is controlled by each action's update() method so these
+             only appear when a DevTomcat configuration node is selected. -->
+        <group id="DevTomcat.ServiceToolbarGroup">
+            <separator/>
+            <reference ref="DevTomcat.Service.UpdateApplication"/>
+            <reference ref="DevTomcat.Service.Redeploy"/>
+            <reference ref="DevTomcat.Service.Restart"/>
+            <add-to-group group-id="ServiceViewItemToolbar" anchor="last"/>
         </group>
 
         <!-- Tools menu group -->

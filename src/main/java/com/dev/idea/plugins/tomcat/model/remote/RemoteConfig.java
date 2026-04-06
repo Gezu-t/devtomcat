@@ -34,6 +34,8 @@ public class RemoteConfig {
     private String username;
     private String password;
     private boolean useCredentials;
+    /** Set after PasswordSafe or legacy password has been resolved by the deserializer. */
+    private volatile boolean credentialsResolved;
 
     public RemoteConfig() {
         this.managerUrl = DEFAULT_MANAGER_URL;
@@ -111,6 +113,14 @@ public class RemoteConfig {
         this.useCredentials = use;
     }
 
+    public boolean isCredentialsResolved() {
+        return credentialsResolved;
+    }
+
+    public void setCredentialsResolved(boolean resolved) {
+        this.credentialsResolved = resolved;
+    }
+
     /**
      * Validates whether the given URL matches the expected Tomcat Manager format
      * and has a valid port number (1-65535) if specified.
@@ -183,6 +193,7 @@ public class RemoteConfig {
         clone.username = this.username;
         clone.password = this.password;
         clone.useCredentials = this.useCredentials;
+        clone.credentialsResolved = this.credentialsResolved;
         return clone;
     }
 

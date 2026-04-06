@@ -26,17 +26,20 @@ public class RedeployTomcatAction extends AnAction {
         if (project == null || config == null || tomcatHandler == null
                 || tomcatHandler.isProcessTerminated() || tomcatHandler.isProcessTerminating()) return;
 
-        TomcatApplicationUpdater updater = new TomcatApplicationUpdater(
-                project, tomcatHandler, config, UpdateConfig.REDEPLOY);
-        updater.executeUpdate(UpdateConfig.REDEPLOY);
+        new TomcatApplicationUpdater(project, tomcatHandler, config, UpdateConfig.REDEPLOY)
+                .executeUpdate();
     }
 
     @Override
     public void update(@NotNull AnActionEvent e) {
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler handler = ServiceActionUtils.findTomcatProcessHandler(e);
-        e.getPresentation().setEnabledAndVisible(
-                config != null && handler != null && !handler.isProcessTerminated());
+        boolean running = config != null
+                && handler != null
+                && !handler.isProcessTerminated()
+                && !handler.isProcessTerminating()
+                && handler.isServerStartupDetected();
+        e.getPresentation().setEnabledAndVisible(running);
     }
 
     @Override

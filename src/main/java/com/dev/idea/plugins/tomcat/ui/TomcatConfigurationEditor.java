@@ -7,17 +7,22 @@ import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.ConfigExportImport;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentTableManager;
+import com.intellij.compiler.options.CompileStepBeforeRun;
+import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.execution.impl.ConfigurationSettingsEditorWrapper;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.ui.Messages;
@@ -29,13 +34,17 @@ import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTabbedPane;
+import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.HierarchyEvent;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfiguration> {
@@ -367,7 +376,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private JPanel createErrorPanel(String errorMessage) {
         JPanel panel = new JPanel(new BorderLayout());
-        com.intellij.ui.components.JBLabel label = new com.intellij.ui.components.JBLabel("<html><b>Error:</b> " + errorMessage + "</html>");
+        JBLabel label = new JBLabel("<html><b>Error:</b> " + errorMessage + "</html>");
         label.setHorizontalAlignment(SwingConstants.CENTER);
         panel.add(label, BorderLayout.CENTER);
         return panel;
@@ -431,7 +440,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
      */
     private void scheduleBeforeLaunchSync(@NotNull ArtifactManager artifactManager) {
         if (!syncScheduled.compareAndSet(false, true)) return;
-        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+        ApplicationManager.getApplication().invokeLater(() -> {
             syncScheduled.set(false);
             if (!isEventsSuppressed() && tabbedPane != null) {
                 syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
@@ -451,7 +460,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 // Wrapper unavailable — editor not yet attached to dialog hierarchy.
                 // Defer one retry on the next EDT cycle when the component tree is realized.
                 LOG.debug("DevTomcat: EditorWrapper not found, deferring sync");
-                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                ApplicationManager.getApplication().invokeLater(() -> {
                     if (isEventsSuppressed() || tabbedPane == null) return;
                     ConfigurationSettingsEditorWrapper retryWrapper = findEditorWrapper();
                     if (retryWrapper != null) {
@@ -471,10 +480,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void doSyncBeforeLaunch(@NotNull ConfigurationSettingsEditorWrapper wrapper,
                                      @NotNull ArtifactManager artifactManager) {
-        java.util.List<com.intellij.execution.BeforeRunTask<?>> existingSteps =
-                new java.util.ArrayList<>(wrapper.getStepsBeforeLaunch());
-        java.util.List<com.intellij.execution.BeforeRunTask<?>> updatedSteps = new java.util.ArrayList<>();
-        for (com.intellij.execution.BeforeRunTask<?> task : existingSteps) {
+        List<BeforeRunTask<?>> existingSteps = new ArrayList<>(wrapper.getStepsBeforeLaunch());
+        List<BeforeRunTask<?>> updatedSteps = new ArrayList<>();
+        for (BeforeRunTask<?> task : existingSteps) {
             if (!(task instanceof BuildArtifactsBeforeRunTask)) {
                 updatedSteps.add(task);
             }
@@ -483,10 +491,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         // Ensure a "Build" (Make) task is always present — matches IntelliJ Ultimate's
         // Tomcat behaviour where the Before Launch list always starts with "Build".
         boolean hasMake = updatedSteps.stream()
-                .anyMatch(t -> t instanceof com.intellij.compiler.options.CompileStepBeforeRun.MakeBeforeRunTask);
+                .anyMatch(t -> t instanceof CompileStepBeforeRun.MakeBeforeRunTask);
         if (!hasMake) {
-            com.intellij.compiler.options.CompileStepBeforeRun.MakeBeforeRunTask makeTask =
-                    new com.intellij.compiler.options.CompileStepBeforeRun.MakeBeforeRunTask();
+            CompileStepBeforeRun.MakeBeforeRunTask makeTask =
+                    new CompileStepBeforeRun.MakeBeforeRunTask();
             makeTask.setEnabled(true);
             updatedSteps.add(0, makeTask);
             LOG.info("DevTomcat: Added default Build (Make) task to Before Launch panel");
@@ -573,7 +581,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     }
 
     private static String extractBaseModuleName(String name) {
-        return com.dev.idea.plugins.tomcat.utils.ContextPathUtils.extractBaseModuleName(name);
+        return ContextPathUtils.extractBaseModuleName(name);
     }
 
     /**
@@ -632,8 +640,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         return null;
     }
     private void notifyError(String message) {
-        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(
-                () -> Messages.showErrorDialog(project, message, "Configuration Error"));
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (isDisposing.get()) return;
+            Messages.showErrorDialog(project, message, "Configuration Error");
+        });
     }
 
     // =========================================================================
@@ -645,12 +655,12 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), JBUI.scale(2)));
         toolbar.setBorder(JBUI.Borders.empty(0, 0, 2, 4));
 
-        com.intellij.ui.components.labels.LinkLabel<Void> exportLink =
-                new com.intellij.ui.components.labels.LinkLabel<>("Export", com.intellij.icons.AllIcons.ToolbarDecorator.Export, (label, data) -> exportConfiguration());
+        LinkLabel<Void> exportLink =
+                new LinkLabel<>("Export", AllIcons.ToolbarDecorator.Export, (label, data) -> exportConfiguration());
         exportLink.setToolTipText("Export this configuration to an XML file for sharing");
 
-        com.intellij.ui.components.labels.LinkLabel<Void> importLink =
-                new com.intellij.ui.components.labels.LinkLabel<>("Import", com.intellij.icons.AllIcons.ToolbarDecorator.Import, (label, data) -> importConfiguration());
+        LinkLabel<Void> importLink =
+                new LinkLabel<>("Import", AllIcons.ToolbarDecorator.Import, (label, data) -> importConfiguration());
         importLink.setToolTipText("Import configuration from an XML file");
 
         toolbar.add(exportLink);
@@ -725,6 +735,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (serverTab != null) {
             serverTab.dispose();
             serverTab = null;
+        }
+        if (deploymentTab != null) {
+            deploymentTab.dispose();
         }
         deploymentTab = null;
         logsTab = null;

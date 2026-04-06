@@ -424,6 +424,7 @@ public class TomcatConfigurationSerializer {
                         // Migrate legacy plain-text password to PasswordSafe
                         RemoteCredentialStore.storePassword(credentialKey, legacyPassword);
                     }
+                    rc.setCredentialsResolved(true);
                 } catch (Exception e) {
                     LOG.debug("Deferred credential retrieval failed", e);
                 }

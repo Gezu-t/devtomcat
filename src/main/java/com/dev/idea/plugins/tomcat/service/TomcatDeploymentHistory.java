@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.service;
 
 import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.Service;
+
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.project.Project;
@@ -22,7 +22,6 @@ import java.util.List;
  * <p>Records: configuration name, timestamp, duration, artifact names,
  * success/failure, error count, startup time.
  */
-@Service(Service.Level.PROJECT)
 @State(name = "TomcatDeploymentHistory", storages = @Storage("devtomcat-history.xml"))
 public final class TomcatDeploymentHistory implements PersistentStateComponent<TomcatDeploymentHistory.HistoryState> {
 

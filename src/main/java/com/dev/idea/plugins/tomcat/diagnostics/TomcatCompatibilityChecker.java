@@ -69,9 +69,13 @@ public final class TomcatCompatibilityChecker {
             return issues;
         }
 
-        JavaSdkVersion sdkVersion = JavaSdkVersion.fromVersionString(jdk.getVersionString());
-        if (sdkVersion == null) {
+        String versionString = jdk.getVersionString();
+        if (versionString == null || versionString.isEmpty()) {
             return issues; // Can't determine JDK version — skip check
+        }
+        JavaSdkVersion sdkVersion = JavaSdkVersion.fromVersionString(versionString);
+        if (sdkVersion == null) {
+            return issues;
         }
 
         int javaFeature = getJavaFeatureVersion(sdkVersion);

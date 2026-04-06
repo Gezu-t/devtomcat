@@ -26,3 +26,18 @@ gradle.properties
 release-notes.txt
 .claude
 /com/
+
+# Extracted IntelliJ platform dependency artifacts (class files, native libs)
+/net/
+/META-INF/
+/_COROUTINE/
+/io/
+/it/
+/kotlin/
+/kotlinx/
+/messages/
+/misc/
+/mozilla/
+/org/
+/win32-x86-64/
+/win32-x86/

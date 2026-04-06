@@ -272,6 +272,10 @@ public final class TomcatConfigPreparer {
         Files.walkFileTree(sourceConf, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (attrs.isSymbolicLink()) {
+                    LOG.warn("Skipping symlink directory in CATALINA_HOME conf: " + dir);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
                 Path relative = sourceConf.relativize(dir);
                 Files.createDirectories(targetConf.resolve(relative));
                 return FileVisitResult.CONTINUE;
@@ -279,6 +283,10 @@ public final class TomcatConfigPreparer {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (attrs.isSymbolicLink()) {
+                    LOG.warn("Skipping symlink file in CATALINA_HOME conf: " + file);
+                    return FileVisitResult.CONTINUE;
+                }
                 Path relative = sourceConf.relativize(file);
                 Path target = targetConf.resolve(relative);
                 Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
@@ -298,6 +306,16 @@ public final class TomcatConfigPreparer {
 
     private static void deleteRecursively(@NotNull Path dir) throws IOException {
         Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path currentDir, BasicFileAttributes attrs) throws IOException {
+                if (!currentDir.equals(dir) && attrs.isSymbolicLink()) {
+                    Files.deleteIfExists(currentDir);
+                    LOG.warn("Symlink directory removed without following: " + currentDir);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 Files.deleteIfExists(file);
@@ -323,6 +341,17 @@ public final class TomcatConfigPreparer {
         if (Files.isDirectory(workDir)) {
             AtomicInteger count = new AtomicInteger();
             Files.walkFileTree(workDir, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                    if (!dir.equals(workDir) && attrs.isSymbolicLink()) {
+                        Files.deleteIfExists(dir);
+                        count.incrementAndGet();
+                        LOG.warn("Symlink directory removed from work/: " + dir);
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     Files.deleteIfExists(file);
@@ -369,6 +398,10 @@ public final class TomcatConfigPreparer {
         Files.walkFileTree(overlayDir, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (attrs.isSymbolicLink()) {
+                    LOG.warn("Skipping symlink directory in conf overlay: " + dir);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
                 Path relative = overlayDir.relativize(dir);
                 Files.createDirectories(targetConf.resolve(relative));
                 return FileVisitResult.CONTINUE;
@@ -376,6 +409,10 @@ public final class TomcatConfigPreparer {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (attrs.isSymbolicLink()) {
+                    LOG.warn("Skipping symlink file in conf overlay: " + file);
+                    return FileVisitResult.CONTINUE;
+                }
                 Path relative = overlayDir.relativize(file);
                 Path target = targetConf.resolve(relative);
                 Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);

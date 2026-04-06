@@ -47,6 +47,8 @@ public final class TomcatDeploymentStatusService {
 
     /** Snapshot of a configuration's live status. */
     public static final class ConfigStatus {
+        /** Synchronizes compound mutations (e.g., clearing all fields in onServerStarting). */
+        final Object lock = new Object();
         private volatile ServerState serverState = ServerState.STOPPED;
         private final Map<String, ArtifactState> artifactStates = new ConcurrentHashMap<>();
         private volatile int errorCount;
@@ -104,11 +106,13 @@ public final class TomcatDeploymentStatusService {
 
     public void onServerStarting(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
-        s.serverState = ServerState.STARTING;
-        s.errorCount = 0;
-        s.warningCount = 0;
-        s.startupTimeMs = 0;
-        s.artifactStates.clear();
+        synchronized (s.lock) {
+            s.serverState = ServerState.STARTING;
+            s.errorCount = 0;
+            s.warningCount = 0;
+            s.startupTimeMs = 0;
+            s.artifactStates.clear();
+        }
         refreshDashboard();
     }
 
@@ -141,8 +145,10 @@ public final class TomcatDeploymentStatusService {
 
     public void onServerStarted(@NotNull String configName, long startupTimeMs) {
         ConfigStatus s = getOrCreate(configName);
-        s.serverState = ServerState.RUNNING;
-        s.startupTimeMs = startupTimeMs;
+        synchronized (s.lock) {
+            s.serverState = ServerState.RUNNING;
+            s.startupTimeMs = startupTimeMs;
+        }
         refreshDashboard();
     }
 

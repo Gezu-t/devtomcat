@@ -298,7 +298,7 @@ public final class ConfigExportImport {
         if (remoteEl != null) {
             RemoteConfig remote = data.getRemoteConfig();
             String managerUrl = getChildText(remoteEl, "managerUrl", "");
-            if (!managerUrl.isEmpty()) {
+            if (!managerUrl.isEmpty() && RemoteConfig.isValidManagerUrl(managerUrl)) {
                 remote.setManagerUrl(managerUrl);
             }
             remote.setUsername(getChildText(remoteEl, "username", "admin"));
@@ -326,8 +326,14 @@ public final class ConfigExportImport {
      * @return the imported configuration data
      * @throws Exception if reading or parsing fails
      */
+    private static final long MAX_IMPORT_FILE_SIZE = 1024 * 1024; // 1 MB
+
     @NotNull
     public static TomcatConfigurationData importFromFile(@NotNull File file) throws Exception {
+        if (file.length() > MAX_IMPORT_FILE_SIZE) {
+            throw new IOException("Configuration file too large (" + file.length()
+                    + " bytes). Maximum allowed: " + MAX_IMPORT_FILE_SIZE + " bytes.");
+        }
         try (Reader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
             StringBuilder sb = new StringBuilder();

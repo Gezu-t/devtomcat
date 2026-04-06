@@ -40,6 +40,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
+import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
+import com.intellij.util.execution.ParametersListUtil;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -63,7 +68,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
     private final AtomicBoolean serverStartupDetected = new AtomicBoolean(false);
     private final AtomicInteger deployedArtifactCount = new AtomicInteger(0);
-    private volatile int expectedArtifactCount;
+    private final AtomicInteger expectedArtifactCount = new AtomicInteger(0);
     private final Map<String, String> contextToArtifactName = new ConcurrentHashMap<>();
     private final boolean jmxEnabled;
     private final TomcatLifecycleListener lifecycleListener;
@@ -152,7 +157,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (!runnerSettings.isUseDefaultShutdown() && !StringUtil.isEmptyOrSpaces(runnerSettings.getShutdownScript())) {
             LOG.info("Executing custom shutdown script: " + runnerSettings.getShutdownScript());
             try {
-                List<String> tokens = com.intellij.util.execution.ParametersListUtil.parse(
+                List<String> tokens = ParametersListUtil.parse(
                         runnerSettings.getShutdownScript());
                 GeneralCommandLine shutdownCmd = new GeneralCommandLine(tokens);
                 shutdownCmd.withEnvironment(runnerSettings.getEnvironmentVariables());
@@ -244,7 +249,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
         List<DeploymentArtifact> artifacts = configuration.getConfigData()
                 .getDeploymentConfig().getDeployedArtifacts();
-        expectedArtifactCount = artifacts.size();
+        expectedArtifactCount.set(artifacts.size());
         if (artifacts.isEmpty()) {
             deploymentLogger.logDeploymentStart(configurationName);
         } else {
@@ -280,7 +285,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
         // Release all ports claimed by this configuration so they become available
         // to the next launch without waiting for the OS to reclaim them
-        com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+        TomcatPortRegistry.getInstance()
                 .releaseAllFor(configurationName);
 
         try {
@@ -425,9 +430,8 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (!shouldActivate) return;
 
         long now = System.currentTimeMillis();
-        long last = lastConsoleActivation.get();
+        long last = lastConsoleActivation.getAndSet(now);
         if (now - last < CONSOLE_ACTIVATION_DEBOUNCE_MS) return;
-        if (!lastConsoleActivation.compareAndSet(last, now)) return;
 
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
@@ -457,11 +461,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             return;
         }
 
-        com.intellij.openapi.progress.ProgressManager.getInstance().run(
-            new com.intellij.openapi.progress.Task.Backgroundable(
+        ProgressManager.getInstance().run(
+            new Task.Backgroundable(
                     configuration.getProject(), "Deploying to Remote Tomcat", true) {
                 @Override
-                public void run(@NotNull com.intellij.openapi.progress.ProgressIndicator indicator) {
+                public void run(@NotNull ProgressIndicator indicator) {
                     CredentialResolver.ensureResolved(remoteConfig);
 
                     TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
@@ -608,7 +612,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         String summary = String.format(
                 "Session summary: config=%s, duration=%dms, exit=%d, started=%s, deployed=%d/%d, errors=%d, warnings=%d",
                 configurationName, duration, exitCode,
-                serverStartupDetected.get(), deployedArtifactCount.get(), expectedArtifactCount, errorCount.get(), warningCount.get());
+                serverStartupDetected.get(), deployedArtifactCount.get(), expectedArtifactCount.get(), errorCount.get(), warningCount.get());
         deploymentLogger.logServerInfo(summary);
         LOG.info(summary);
     }
@@ -618,7 +622,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     public boolean isDeploymentCompleted() {
-        return deployedArtifactCount.get() >= expectedArtifactCount;
+        return deployedArtifactCount.get() >= expectedArtifactCount.get();
     }
 
     public int getErrorCount() {

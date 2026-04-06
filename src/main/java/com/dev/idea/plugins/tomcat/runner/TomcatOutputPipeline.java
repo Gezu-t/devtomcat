@@ -197,11 +197,14 @@ public final class TomcatOutputPipeline {
                     // Strip locale separators (commas, periods, underscores) before parsing
                     long duration = Long.parseLong(m.group(2).replaceAll("[,._]", ""));
                     String artifactName = ctx.contextToArtifactName.getOrDefault(contextName, contextName);
-                    ctx.logger.logDeploymentSuccess(artifactName, duration);
-                    ctx.deployedArtifactCount.incrementAndGet();
-                    ctx.notifiedArtifacts.add(artifactName);
-                    ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
-                    ctx.onContextReady.accept(contextName);
+                    // Guard with atomic add() — prevents duplicate notifications if two
+                    // threads process the same context name concurrently
+                    if (ctx.notifiedArtifacts.add(artifactName)) {
+                        ctx.logger.logDeploymentSuccess(artifactName, duration);
+                        ctx.deployedArtifactCount.incrementAndGet();
+                        ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
+                        ctx.onContextReady.accept(contextName);
+                    }
                 } catch (NumberFormatException e) {
                     LOG.debug("Could not parse deployment duration from: " + m.group(2));
                 }

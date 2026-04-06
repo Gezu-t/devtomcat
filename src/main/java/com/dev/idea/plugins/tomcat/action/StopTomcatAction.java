@@ -16,7 +16,7 @@ public class StopTomcatAction extends AnAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
         ProcessHandler handler = ServiceActionUtils.findProcessHandler(e);
-        if (ServiceActionUtils.isRunning(handler)) {
+        if (handler != null && ServiceActionUtils.isRunning(handler)) {
             handler.destroyProcess();
         }
     }

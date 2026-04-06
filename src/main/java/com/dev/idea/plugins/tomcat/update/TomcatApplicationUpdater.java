@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
+import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ProgramRunnerUtil;
@@ -28,6 +29,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
@@ -107,11 +109,9 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     }
 
     /**
-     * Executes the configured update action.
-     * Package-visible so {@link TomcatFrameDeactivationListener} can invoke it
-     * without needing an {@link AnActionEvent}.
+     * Executes the configured update action using the action passed at construction.
      */
-    void executeUpdate() {
+    public void executeUpdate() {
         executeUpdate(action);
     }
 
@@ -152,7 +152,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      *
      * <p>For exploded artifacts Tomcat serves files directly from {@code docBase}, so
      * once the resource is in the artifact output directory it is live on the next request.
-     * For WAR artifacts the WAR is re-copied to webapps after the build.
+     * WAR artifacts are not re-copied since the incremental build does not repackage them;
+     * use "Redeploy" for WAR-based deployments.
      */
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
         logger.logServerInfo("Syncing resources...");
@@ -167,15 +168,18 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             }
             logger.logServerInfo("Resources synced" +
                     (warnings > 0 ? " (" + warnings + " warning(s))" : ""));
-            redeployWarArtifacts(logger);
         });
     }
 
     /**
-     * Triggers incremental compilation then updates resources.
-     * For exploded artifacts the updated classes are served directly from the output directory;
-     * Tomcat picks up JSP and static resource changes on the next request.
-     * For WAR artifacts the WAR file is re-copied to webapps after compilation succeeds.
+     * Triggers incremental compilation then applies changes to the running server.
+     *
+     * <p>For exploded artifacts, resource changes (JSP, HTML, CSS) are served directly
+     * from {@code docBase} on the next request. Java class changes require a classloader
+     * reload — achieved by touching the context XML descriptor, which Tomcat's deployer
+     * watches and triggers an undeploy/redeploy cycle with a fresh classloader.
+     *
+     * <p>For WAR artifacts the WAR file is re-copied to webapps after compilation.
      */
     private void doUpdateClassesAndResources(@NotNull TomcatDeploymentLogger logger) {
         logger.logServerInfo("Compiling project...");
@@ -192,6 +196,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     (warnings > 0 ? " (" + warnings + " warning(s))" : ""));
 
             redeployWarArtifacts(logger);
+            touchExplodedContextXml(logger);
         });
     }
 
@@ -277,7 +282,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                     RunManager.getInstance(project).findSettings(configuration);
                             if (settings != null) {
                                 ProgramRunnerUtil.executeConfiguration(settings, capturedExecutor);
-                                logger.logServerInfo("Tomcat restarted (" + capturedExecutor.getActionName() + " mode)");
+                                LOG.info("Tomcat restarted in " + capturedExecutor.getActionName() + " mode");
                             } else {
                                 logger.logServerError("Could not find run configuration settings for restart");
                             }
@@ -327,6 +332,41 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     }
 
     /**
+     * Touches context XML descriptors for exploded artifacts, triggering Tomcat's
+     * deployer to undeploy and redeploy with a fresh classloader. This makes
+     * compiled Java class changes visible without a full server restart.
+     *
+     * <p>WAR artifacts are skipped — their reload is handled by {@link #redeployWarArtifacts}.
+     */
+    private void touchExplodedContextXml(@NotNull TomcatDeploymentLogger logger) {
+        Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration);
+        if (catalinaBase == null) return;
+
+        Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
+        List<DeploymentArtifact> artifacts = configuration.getConfigData()
+                .getDeploymentConfig().getDeployedArtifacts();
+
+        for (DeploymentArtifact artifact : artifacts) {
+            if (artifact == null || !artifact.isValid()) continue;
+            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
+
+            String contextName = resolveContextName(artifact.getContextPath());
+            Path contextFile = contextXmlDir.resolve(contextName + ".xml");
+            if (Files.exists(contextFile)) {
+                try {
+                    Files.setLastModifiedTime(contextFile,
+                            FileTime.fromMillis(System.currentTimeMillis()));
+                    logger.logServerInfo("Context reload triggered: " + artifact.getDisplayName());
+                } catch (IOException e) {
+                    LOG.warn("Failed to touch context XML: " + contextFile, e);
+                    logger.logServerWarning("Could not trigger context reload for " +
+                            artifact.getDisplayName());
+                }
+            }
+        }
+    }
+
+    /**
      * Forces redeployment of all artifacts.
      * <ul>
      *   <li>Exploded: rewrites context.xml to force Tomcat undeploy + redeploy</li>
@@ -355,13 +395,12 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
             try {
                 if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
-                    // Rewrite context.xml → Tomcat detects the change and redeploys
+                    // Generate full context XML with PreResources/PostResources,
+                    // matching initial deployment so multi-module classpath is preserved
+                    Path artifactPath = Path.of(artifact.getPath());
                     Path contextFile = contextXmlDir.resolve(contextName + ".xml");
-                    String contextXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                            + "<Context docBase=\"" + escapeXmlAttribute(artifact.getPath())
-                            + "\" reloadable=\"false\">"
-                            + (preserveSessions ? "\n  <Manager pathname=\"SESSIONS.ser\" />" : "")
-                            + "\n</Context>\n";
+                    String contextXml = DeploymentStrategy.buildContextXml(
+                            artifact, artifactPath, preserveSessions, project, logger);
                     Files.writeString(contextFile, contextXml);
                     logger.logServerInfo("Redeployed (context rewrite): " + artifact.getDisplayName());
                 } else {
@@ -386,12 +425,31 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         return contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
     }
 
+    /**
+     * Shows the Update dialog and executes the selected action.
+     * Shared entry point for Services panel actions and re-run interception in runners.
+     */
+    public static void showDialogAndExecute(@NotNull Project project,
+                                             @NotNull TomcatProcessHandler handler,
+                                             @NotNull TomcatRunConfiguration config) {
+        String defaultAction = config.getConfigData().getUpdateConfig().getOnUpdate();
+        boolean isLocal = !MODE_REMOTE.equals(config.getConfigData().getServerMode());
+        TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, config.getName(), defaultAction, isLocal);
+        if (!dialog.showAndGet()) return;
+        new TomcatApplicationUpdater(project, handler, config, dialog.getSelectedAction()).executeUpdate();
+    }
+
+    /**
+     * Maps an {@link UpdateConfig} action constant to a user-visible display string.
+     */
     @NotNull
-    private static String escapeXmlAttribute(@NotNull String value) {
-        return value.replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                    .replace("\"", "&quot;")
-                    .replace("'", "&apos;");
+    public static String mapActionToDisplay(@NotNull String action) {
+        return switch (action) {
+            case UpdateConfig.UPDATE_RESOURCES -> "Update resources";
+            case UpdateConfig.UPDATE_CLASSES_AND_RESOURCES -> "Update classes and resources";
+            case UpdateConfig.REDEPLOY -> "Redeploy";
+            case UpdateConfig.RESTART_SERVER -> "Restart server";
+            default -> action;
+        };
     }
 }

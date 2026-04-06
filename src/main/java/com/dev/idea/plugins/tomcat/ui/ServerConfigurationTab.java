@@ -255,6 +255,9 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     public void dispose() {
+        for (ConfigurationSection section : sharedSections) {
+            section.dispose();
+        }
         remoteConnectionSection = null;
     }
 

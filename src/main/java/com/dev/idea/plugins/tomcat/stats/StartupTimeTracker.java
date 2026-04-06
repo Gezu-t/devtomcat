@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.stats;
 
 import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.Service;
+
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
@@ -21,7 +21,6 @@ import java.util.*;
  *
  * @author Gezahegn Lemma (Gezu)
  */
-@Service(Service.Level.APP)
 @State(
         name = "DevTomcatStartupTimeTracker",
         storages = @Storage("devtomcat-startup-stats.xml")
@@ -68,8 +67,8 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
         times.add(startupTimeMs);
 
         // Keep only the most recent entries
-        while (times.size() > MAX_HISTORY_SIZE) {
-            times.remove(0);
+        if (times.size() > MAX_HISTORY_SIZE) {
+            times.subList(0, times.size() - MAX_HISTORY_SIZE).clear();
         }
 
         LOG.info("Recorded startup time for '" + configName + "': " + startupTimeMs + "ms");

@@ -20,6 +20,9 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.event.ListSelectionListener;
 import java.awt.*;
 import java.util.Arrays;
 import java.util.List;
@@ -38,6 +41,8 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
 
     private JBTextField contextTextField;
     private boolean isUpdatingContextField = false;
+    private DocumentListener contextDocListener;
+    private ListSelectionListener listSelectionListener;
 
     public DeploymentConfigurationPanel(@NotNull Project project,
                                         @NotNull DeploymentTableManager tableManager,
@@ -56,13 +61,13 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         contextTextField = new JBTextField();
         contextTextField.setEnabled(false);
 
-        contextTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+        contextDocListener = new DocumentListener() {
             @Override
-            public void insertUpdate(javax.swing.event.DocumentEvent e) { updateContext(); }
+            public void insertUpdate(DocumentEvent e) { updateContext(); }
             @Override
-            public void removeUpdate(javax.swing.event.DocumentEvent e) { updateContext(); }
+            public void removeUpdate(DocumentEvent e) { updateContext(); }
             @Override
-            public void changedUpdate(javax.swing.event.DocumentEvent e) { updateContext(); }
+            public void changedUpdate(DocumentEvent e) { updateContext(); }
 
             private void updateContext() {
                 if (isUpdatingContextField) return;
@@ -80,11 +85,12 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
                     contextTextField.setToolTipText(null);
                 }
             }
-        });
+        };
+        contextTextField.getDocument().addDocumentListener(contextDocListener);
 
         @SuppressWarnings("unchecked")
         JList<DeploymentArtifact> list = (JList<DeploymentArtifact>) tableManager.getComponent();
-        list.addListSelectionListener(e -> {
+        listSelectionListener = e -> {
             if (!e.getValueIsAdjusting()) {
                 DeploymentArtifact selected = tableManager.getSelectedDeployment();
                 isUpdatingContextField = true;
@@ -98,7 +104,8 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
                 contextTextField.setForeground(JBColor.foreground());
                 isUpdatingContextField = false;
             }
-        });
+        };
+        list.addListSelectionListener(listSelectionListener);
     }
 
     private void setupLayout() {
@@ -253,5 +260,18 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             }
         }
         return true;
+    }
+
+    @SuppressWarnings("unchecked")
+    public void dispose() {
+        if (contextTextField != null && contextDocListener != null) {
+            contextTextField.getDocument().removeDocumentListener(contextDocListener);
+            contextDocListener = null;
+        }
+        if (tableManager != null && listSelectionListener != null) {
+            JList<DeploymentArtifact> list = (JList<DeploymentArtifact>) tableManager.getComponent();
+            list.removeListSelectionListener(listSelectionListener);
+            listSelectionListener = null;
+        }
     }
 }

@@ -260,6 +260,9 @@ public final class TomcatManagerDeployer {
                                            @NotNull String contextPath,
                                            @Nullable TomcatDeploymentLogger logger) throws IOException {
         String docBase = artifact.getPath().replace('\\', '/');
+        if (docBase.contains("..")) {
+            throw new IOException("Deployment path must not contain '..': " + docBase);
+        }
         String url = getManagerUrl() + TEXT_ENDPOINT + "/deploy?path=" + contextPath
                 + "&war=" + encodeUrl("file:" + docBase) + "&update=true";
 
@@ -279,7 +282,12 @@ public final class TomcatManagerDeployer {
 
     @NotNull
     private HttpURLConnection openConnection(@NotNull String urlStr) throws IOException {
-        URL url = URI.create(urlStr).toURL();
+        URI uri = URI.create(urlStr);
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new IOException("Unsupported URL scheme: " + scheme + " (only http/https allowed)");
+        }
+        URL url = uri.toURL();
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
         conn.setReadTimeout(READ_TIMEOUT_MS);

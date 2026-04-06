@@ -55,4 +55,7 @@ public interface ConfigurationSection {
     default boolean shouldFillVertically() {
         return false;
     }
+
+    /** Releases listeners and other resources when the configuration editor is disposed. */
+    default void dispose() {}
 }

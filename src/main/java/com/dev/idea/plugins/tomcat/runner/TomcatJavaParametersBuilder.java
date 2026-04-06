@@ -10,6 +10,7 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -290,7 +291,7 @@ public class TomcatJavaParametersBuilder {
 
         // Ensure computed env vars (JAVA_OPTS from VM options) are present
         // even if the Startup/Connection tab was never visited
-        com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver.ensureComputedEnvVars(
+        RuntimeEnvResolver.ensureComputedEnvVars(
                 configuration.getConfigData(), executorId);
 
         RunnerSettings rs = configuration.getConfigData().getRunnerSettings(executorId);

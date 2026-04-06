@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.openapi.project.Project;
@@ -68,5 +69,19 @@ public interface DeploymentStrategy {
         return TomcatConstants.MODE_REMOTE.equals(mode)
                 ? new RemoteDeploymentStrategy()
                 : new LocalDeploymentStrategy();
+    }
+
+    /**
+     * Generates a context XML descriptor for an exploded artifact, including
+     * {@code <PreResources>} / {@code <PostResources>} for multi-module classpath support.
+     * Used by both initial deployment and redeploy to ensure consistent context configuration.
+     */
+    @NotNull
+    static String buildContextXml(@NotNull DeploymentArtifact artifact,
+                                  @NotNull Path artifactPath,
+                                  boolean preserveSessions,
+                                  @NotNull Project project,
+                                  @Nullable TomcatDeploymentLogger logger) {
+        return LocalDeploymentStrategy.buildContextXml(artifact, artifactPath, preserveSessions, project, logger);
     }
 }

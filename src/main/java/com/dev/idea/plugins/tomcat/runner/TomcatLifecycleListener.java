@@ -87,17 +87,22 @@ public interface TomcatLifecycleListener {
     static TomcatLifecycleListener historyConsumer(@NotNull TomcatDeploymentHistory service) {
         return new TomcatLifecycleListener() {
             private volatile TomcatDeploymentHistory.HistoryEntry entry;
+            private final Object entryLock = new Object();
 
             @Override
             public void onServerStarting(@NotNull String configName) {
-                entry = service.startEntry(configName);
+                synchronized (entryLock) {
+                    entry = service.startEntry(configName);
+                }
             }
 
             @Override
             public void onArtifactDeploying(@NotNull String configName, @NotNull String artifactName) {
-                TomcatDeploymentHistory.HistoryEntry e = entry;
-                if (e != null && !e.artifactNames.contains(artifactName)) {
-                    e.artifactNames.add(artifactName);
+                synchronized (entryLock) {
+                    TomcatDeploymentHistory.HistoryEntry e = entry;
+                    if (e != null && !e.artifactNames.contains(artifactName)) {
+                        e.artifactNames.add(artifactName);
+                    }
                 }
             }
 
@@ -105,16 +110,18 @@ public interface TomcatLifecycleListener {
             public void onServerStopped(@NotNull String configName, int exitCode,
                                          long durationMs, int errorCount,
                                          int warningCount, long startupTimeMs) {
-                TomcatDeploymentHistory.HistoryEntry e = entry;
-                if (e != null) {
-                    e.durationMs = durationMs;
-                    e.exitCode = exitCode;
-                    e.success = exitCode == 0;
-                    e.errorCount = errorCount;
-                    e.warningCount = warningCount;
-                    e.startupTimeMs = startupTimeMs;
-                    service.recordCompleted(e);
-                    entry = null;
+                synchronized (entryLock) {
+                    TomcatDeploymentHistory.HistoryEntry e = entry;
+                    if (e != null) {
+                        e.durationMs = durationMs;
+                        e.exitCode = exitCode;
+                        e.success = exitCode == 0;
+                        e.errorCount = errorCount;
+                        e.warningCount = warningCount;
+                        e.startupTimeMs = startupTimeMs;
+                        service.recordCompleted(e);
+                        entry = null;
+                    }
                 }
             }
         };

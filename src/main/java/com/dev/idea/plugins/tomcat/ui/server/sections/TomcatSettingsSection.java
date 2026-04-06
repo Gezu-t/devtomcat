@@ -20,6 +20,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +46,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
     private Consumer<String> portChangeListener;
     /** Guard to distinguish programmatic setText() from user typing. */
     private boolean isSettingPort = false;
+    private DocumentListener httpPortDocListener;
 
     public TomcatSettingsSection() {
         this(null);
@@ -78,16 +81,17 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
             gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             httpPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpPort()), 8);
-            httpPortField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { onPortChange(); }
-                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { onPortChange(); }
-                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { onPortChange(); }
+            httpPortDocListener = new DocumentListener() {
+                @Override public void insertUpdate(DocumentEvent e) { onPortChange(); }
+                @Override public void removeUpdate(DocumentEvent e) { onPortChange(); }
+                @Override public void changedUpdate(DocumentEvent e) { onPortChange(); }
                 private void onPortChange() {
                     if (!isSettingPort && portChangeListener != null) {
                         portChangeListener.accept(httpPortField.getText().trim());
                     }
                 }
-            });
+            };
+            httpPortField.getDocument().addDocumentListener(httpPortDocListener);
             formPanel.add(httpPortField, gbc);
 
             gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
@@ -473,4 +477,12 @@ public class TomcatSettingsSection implements ConfigurationSection {
         return preserveSessionsCheckBox.isSelected();
     }
 
+    @Override
+    public void dispose() {
+        if (httpPortField != null && httpPortDocListener != null) {
+            httpPortField.getDocument().removeDocumentListener(httpPortDocListener);
+            httpPortDocListener = null;
+        }
+        portChangeListener = null;
+    }
 }
