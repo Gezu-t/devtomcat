@@ -351,5 +351,63 @@ class TomcatOutputPipelineTest {
             assertEquals(1, captured.size());
             assertEquals("hello", captured.get(0));
         }
+
+        /**
+         * Regression test for the double onArtifactDeployed bug.
+         *
+         * <p>Bug: when Tomcat logs an individual deployment-completion message (matched by
+         * DeploymentAnalyzer) AND subsequently logs the global "Server startup in N ms"
+         * message (matched by StartupAnalyzer), StartupAnalyzer iterated all artifacts in
+         * contextToArtifactName and fired onArtifactDeployed for each — including those
+         * already notified by DeploymentAnalyzer — producing a duplicate notification.
+         *
+         * <p>Fix: DeploymentAnalyzer adds each notified artifact to {@code notifiedArtifacts};
+         * StartupAnalyzer skips any artifact already present in that set.
+         */
+        @Test
+        @DisplayName("onArtifactDeployed fires exactly once per artifact when deployment line precedes startup line")
+        void noDoubleFireOnArtifactDeployed() {
+            // Set up a single artifact mapping
+            contextToArtifact.put("myapp", "My Web App");
+
+            // Track every onArtifactDeployed invocation
+            List<String> deployedNotifications = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactDeployed(@NotNull String configName,
+                                                       @NotNull String artifactName) {
+                            deployedNotifications.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    false, // jmxEnabled
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            TomcatOutputPipeline pipeline = TomcatOutputPipeline.create(testContext);
+
+            // Step 1 — DeploymentAnalyzer fires and adds "My Web App" to notifiedArtifacts
+            pipeline.processLine(
+                    "Deployment of deployment descriptor [/conf/Catalina/localhost/myapp.xml]" +
+                    " has finished in [456] ms",
+                    testContext);
+
+            // Step 2 — StartupAnalyzer fires; must skip "My Web App" (already notified)
+            pipeline.processLine("Server startup in 1234 ms", testContext);
+
+            assertEquals(1, deployedNotifications.size(),
+                    "onArtifactDeployed must fire exactly once per artifact; " +
+                    "got: " + deployedNotifications);
+            assertEquals("My Web App", deployedNotifications.get(0));
+        }
     }
 }

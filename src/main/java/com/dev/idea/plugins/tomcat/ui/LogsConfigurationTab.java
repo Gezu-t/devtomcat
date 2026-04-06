@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
