@@ -13,6 +13,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
 import java.util.List;
@@ -79,7 +80,10 @@ public final class TomcatModuleUtils {
 
     @NotNull
     public static List<VirtualFile> findWebRoots(@NotNull Module module) {
-        List<VirtualFile> webRoots = new ArrayList<>();
+        // Use LinkedHashSet to deduplicate: WEB_ROOT_PATHS and WEB_ROOT_NAMES share
+        // entries like "webapp", "web", "WebContent", so a single directory can be
+        // matched by both loops and added twice without deduplication.
+        LinkedHashSet<VirtualFile> webRoots = new LinkedHashSet<>();
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
         for (VirtualFile contentRoot : contentRoots) {
@@ -101,7 +105,7 @@ public final class TomcatModuleUtils {
             }
         }
 
-        return webRoots;
+        return new ArrayList<>(webRoots);
     }
 
     @NotNull
