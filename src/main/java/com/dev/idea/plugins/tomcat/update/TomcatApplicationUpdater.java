@@ -262,15 +262,15 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 public void processTerminated(@NotNull ProcessEvent event) {
                     ApplicationManager.getApplication().invokeLater(() -> {
                         try {
+                            if (project.isDisposed()) return;
+
                             // Remove the old entry using the pre-captured descriptor reference.
                             if (descriptorToRemove != null) {
                                 com.intellij.execution.ui.RunContentManager
                                         .getInstance(project)
                                         .removeRunContent(capturedExecutor, descriptorToRemove);
-                                if (!project.isDisposed()) {
-                                    com.intellij.execution.dashboard.RunDashboardManager
-                                            .getInstance(project).updateDashboard(true);
-                                }
+                                com.intellij.execution.dashboard.RunDashboardManager
+                                        .getInstance(project).updateDashboard(true);
                             }
 
                             RunnerAndConfigurationSettings settings =

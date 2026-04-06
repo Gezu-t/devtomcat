@@ -88,19 +88,31 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         warnIfManualJdwpInDebugMode();
         // Port conflict detection is only meaningful for local mode — remote ports
         // are on the remote machine and not claimable or detectable from here.
-        if (!TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
-            resolvePortConflicts();
-        }
-
-        DeploymentStrategy.create(configuration).resolveCredentials(configuration);
-
-        if (TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
-            RemoteConfig rc = configuration.getConfigData().getRemoteConfig();
-            if (rc != null && rc.isUseCredentials() && rc.getPassword().isEmpty()) {
-                throw new ExecutionException(
-                        "Remote deployment requires credentials but no password was found. " +
-                        "Configure credentials in the Remote tab or store them in PasswordSafe.");
+        boolean portsReserved = false;
+        try {
+            if (!TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+                resolvePortConflicts();
+                portsReserved = true;
             }
+
+            DeploymentStrategy.create(configuration).resolveCredentials(configuration);
+
+            if (TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+                RemoteConfig rc = configuration.getConfigData().getRemoteConfig();
+                if (rc != null && rc.isUseCredentials() && rc.getPassword().isEmpty()) {
+                    throw new ExecutionException(
+                            "Remote deployment requires credentials but no password was found. " +
+                            "Configure credentials in the Remote tab or store them in PasswordSafe.");
+                }
+            }
+        } catch (ExecutionException e) {
+            // Release any ports we already claimed — processTerminated() won't fire
+            // because the process was never started.
+            if (portsReserved) {
+                com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+                        .releaseAllFor(configuration.getName());
+            }
+            throw e;
         }
     }
 

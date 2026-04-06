@@ -206,12 +206,16 @@ public final class TomcatErrorDiagnostics {
         m = UNSUPPORTED_CLASS_VERSION.matcher(text);
         if (m.find()) {
             int classVersion = Integer.parseInt(m.group(1));
-            int javaVersion = classVersion - 44; // class file 52 = Java 8, 55 = Java 11, etc.
-            results.add(new Diagnostic(Severity.CRITICAL, "Java Version Mismatch",
-                    "Class compiled with Java " + javaVersion + " but running on an older JVM",
-                    "Your application requires Java " + javaVersion + "+. "
-                            + "Change the JRE in Server tab → JRE Configuration, or recompile with a lower target.",
-                    "FIX_JRE"));
+            // class file version 45 = Java 1.1, 52 = Java 8, 55 = Java 11, 61 = Java 17.
+            // Skip the diagnostic for nonsensically small values from malformed output.
+            if (classVersion >= 45) {
+                int javaVersion = classVersion - 44;
+                results.add(new Diagnostic(Severity.CRITICAL, "Java Version Mismatch",
+                        "Class compiled with Java " + javaVersion + " but running on an older JVM",
+                        "Your application requires Java " + javaVersion + "+. "
+                                + "Change the JRE in Server tab → JRE Configuration, or recompile with a lower target.",
+                        "FIX_JRE"));
+            }
         }
 
         // Duplicate context path

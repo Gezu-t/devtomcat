@@ -207,6 +207,12 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         }
     }
 
+    public boolean isModified(@NotNull TomcatRunConfiguration configuration) {
+        CoverageConfig cc = configuration.getConfigData().getCoverageConfig();
+        return !includePatterns.equals(cc.getIncludePatterns())
+                || !excludePatterns.equals(cc.getExcludePatterns());
+    }
+
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
         try {
             CoverageConfig cc = configuration.getConfigData().getCoverageConfig();

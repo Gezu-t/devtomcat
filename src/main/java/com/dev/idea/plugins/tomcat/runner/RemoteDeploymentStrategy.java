@@ -32,8 +32,6 @@ final class RemoteDeploymentStrategy implements DeploymentStrategy {
     private static final Logger LOG = Logger.getInstance(RemoteDeploymentStrategy.class);
 
     private static final String PARAM_REMOTE_MANAGER_URL = "tomcat.remote.manager.url";
-    private static final String PARAM_REMOTE_USERNAME = "tomcat.remote.username";
-    private static final String PARAM_REMOTE_PASSWORD = "tomcat.remote.password";
     private static final String PARAM_WEBAPP_PATH = "tomcat.webapp.path";
     private static final String PARAM_WEBAPP_CONTEXT = "tomcat.webapp.context";
     private static final String PARAM_WEBAPP_COUNT = "tomcat.webapp.count";
@@ -58,10 +56,10 @@ final class RemoteDeploymentStrategy implements DeploymentStrategy {
         ParametersList vmParams = params.getVMParametersList();
         vmParams.addProperty(PARAM_REMOTE_MANAGER_URL, managerUrl);
 
-        if (remoteConfig.isUseCredentials()) {
-            vmParams.addProperty(PARAM_REMOTE_USERNAME, remoteConfig.getUsername());
-            vmParams.addProperty(PARAM_REMOTE_PASSWORD, remoteConfig.getPassword());
-        }
+        // Credentials are NOT injected as JVM system properties — doing so would expose
+        // them verbatim in the process command line (visible in `ps aux`, IDE diagnostics,
+        // and log dumps). TomcatProcessHandler reads credentials at deployment time directly
+        // from configuration.getConfigData().getRemoteConfig(), which holds them in-process.
 
         List<DeploymentArtifact> artifacts = configuration.getConfigData().getDeploymentConfig().getDeployedArtifacts();
         int index = 0;

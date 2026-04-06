@@ -64,6 +64,7 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
 
             // Live deployment status from the status service
             Project project = config.getProject();
+            if (project == null || project.isDisposed()) return false;
             TomcatDeploymentStatusService statusService =
                     TomcatDeploymentStatusService.getInstance(project);
             TomcatDeploymentStatusService.ConfigStatus liveStatus =
@@ -129,6 +130,7 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
 
         try {
             Project project = config.getProject();
+            if (project == null || project.isDisposed()) return null;
             List<AbstractTreeNode<?>> children = new ArrayList<>();
 
             // Deployment artifact nodes

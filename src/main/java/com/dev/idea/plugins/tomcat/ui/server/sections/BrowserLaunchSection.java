@@ -278,7 +278,8 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
             String configUrl = config.getBrowserUrl();
             String currentUrl = urlField != null ? urlField.getText().trim() : "";
-            if (!Objects.equals(currentUrl, configUrl != null ? configUrl : "")) {
+            // applyTo() trims before saving, so compare against trimmed config value too
+            if (!Objects.equals(currentUrl, configUrl != null ? configUrl.trim() : "")) {
                 return true;
             }
 
