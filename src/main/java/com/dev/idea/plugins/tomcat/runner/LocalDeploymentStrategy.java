@@ -529,17 +529,25 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     /**
      * Returns the Maven artifactId for the given module, or {@code null} if the Maven
      * plugin is unavailable or the module is not part of a Maven project.
-     * Wrapped defensively so that missing Maven plugin classes never break deployment.
+     *
+     * <p>Uses reflection so there is no compile-time dependency on the Maven plugin —
+     * the method degrades gracefully to {@code null} on Community Edition or Gradle-only
+     * projects where {@code MavenProjectsManager} is absent.
      */
     @Nullable
     private static String getMavenArtifactId(@NotNull Module module, @NotNull Project project) {
         try {
-            org.jetbrains.idea.maven.project.MavenProjectsManager manager =
-                    org.jetbrains.idea.maven.project.MavenProjectsManager.getInstance(project);
+            Class<?> managerClass =
+                    Class.forName("org.jetbrains.idea.maven.project.MavenProjectsManager");
+            Object manager = managerClass.getMethod("getInstance", Project.class)
+                    .invoke(null, project);
             if (manager == null) return null;
-            org.jetbrains.idea.maven.project.MavenProject mavenProject = manager.findProject(module);
+            Object mavenProject = managerClass.getMethod("findProject", Module.class)
+                    .invoke(manager, module);
             if (mavenProject == null) return null;
-            return mavenProject.getMavenId().getArtifactId();
+            Object mavenId = mavenProject.getClass().getMethod("getMavenId").invoke(mavenProject);
+            if (mavenId == null) return null;
+            return (String) mavenId.getClass().getMethod("getArtifactId").invoke(mavenId);
         } catch (NoClassDefFoundError | Exception e) {
             return null;
         }
