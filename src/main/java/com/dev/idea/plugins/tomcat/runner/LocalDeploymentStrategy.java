@@ -337,14 +337,19 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     // Artifact name comes from the module graph (Maven artifactId preferred),
                     // not from file-path extraction — reliable even when directory name ≠ artifactId.
                     String moduleDirName = moduleOutputToArtifactName.get(root.getPath());
-                    // If this module's JAR is already packaged in WEB-INF/lib, skip the PreResources
-                    // overlay — having both target/classes AND the JAR on the classpath creates
-                    // duplicate resource entries that break scanners like Liquibase (same XML found
-                    // twice) and CDI (duplicate bean descriptors). Changes to this module require
-                    // Redeploy rather than incremental Build.
+                    // Guard 1 — name-based: fast, covers Maven and standard Gradle naming.
                     if (moduleDirName != null && coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
-                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — already packaged as JAR in WEB-INF/lib");
+                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — name-matched JAR in WEB-INF/lib");
                         skippedModules.add(moduleDirName);
+                        continue;
+                    }
+                    // Guard 2 — content-based: build-tool-agnostic fallback for custom JAR naming
+                    // (e.g. Gradle archivesBaseName, Ant custom jar task). Samples a few file paths
+                    // from the module output and checks whether any WEB-INF/lib JAR contains them.
+                    String coveringJar = findCoveringJarByContent(nativePath, webInfLib);
+                    if (coveringJar != null) {
+                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — content-matched by '" + coveringJar + "' in WEB-INF/lib");
+                        skippedModules.add(moduleDirName != null ? moduleDirName : coveringJar);
                         continue;
                     }
                     extraDirs.add(nativePath);
@@ -479,6 +484,61 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
         return false;
+    }
+
+    /** Max number of file paths sampled from a module output for content-based JAR matching. */
+    private static final int CONTENT_SAMPLE_SIZE = 5;
+
+    /**
+     * Content-based fallback for detecting whether a module's output is already packaged
+     * inside a JAR in {@code WEB-INF/lib}.
+     *
+     * <p>Name-based matching (Maven artifactId / module name) covers the common case but
+     * fails when the JAR has a custom name — e.g. Gradle {@code archivesBaseName}, Ant
+     * custom jar tasks, or any build tool that names the output differently from the module.
+     * This method samples up to {@value #CONTENT_SAMPLE_SIZE} regular file paths from the
+     * module output directory and checks whether any {@code WEB-INF/lib} JAR contains those
+     * same paths as ZIP entries. A single match is treated as sufficient evidence — two
+     * independent JARs are very unlikely to share the same internal resource path.
+     *
+     * @return the base JAR name (version stripped) if a covering JAR is found, else {@code null}
+     */
+    @Nullable
+    private static String findCoveringJarByContent(@NotNull String moduleOutputNativePath,
+                                                   @NotNull Path webInfLib) {
+        if (!Files.isDirectory(webInfLib)) return null;
+
+        // Collect a small sample of relative file paths from the module output
+        Path outputDir = Paths.get(moduleOutputNativePath);
+        List<String> sample = new ArrayList<>();
+        try (var walk = Files.walk(outputDir)) {
+            walk.filter(Files::isRegularFile)
+                .limit(CONTENT_SAMPLE_SIZE)
+                .forEach(p -> sample.add(
+                        outputDir.relativize(p).toString().replace(File.separatorChar, '/')));
+        } catch (IOException e) {
+            LOG.debug("Content check: could not walk module output '" + moduleOutputNativePath + "': " + e.getMessage());
+            return null;
+        }
+        if (sample.isEmpty()) return null;
+
+        // Scan WEB-INF/lib JARs for a match
+        try (var stream = Files.list(webInfLib)) {
+            for (Path jarPath : (Iterable<Path>) stream
+                    .filter(p -> p.getFileName().toString().endsWith(".jar"))::iterator) {
+                try (var zf = new java.util.zip.ZipFile(jarPath.toFile())) {
+                    boolean matched = sample.stream().anyMatch(s -> zf.getEntry(s) != null);
+                    if (matched) {
+                        return stripJarVersion(jarPath.getFileName().toString());
+                    }
+                } catch (IOException e) {
+                    LOG.debug("Content check: could not inspect JAR '" + jarPath.getFileName() + "': " + e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            LOG.debug("Content check: could not list WEB-INF/lib: " + e.getMessage());
+        }
+        return null;
     }
 
     /**
