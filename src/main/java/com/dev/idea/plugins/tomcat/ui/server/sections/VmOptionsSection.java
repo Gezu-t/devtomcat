@@ -76,7 +76,10 @@ public class VmOptionsSection implements ConfigurationSection {
 
     @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
-        return !Objects.equals(config.getVmOptions(), vmOptionsEditor.getText().trim().replaceAll("\\s+", " "));
+        // applyTo() saves null when the field is empty, so treat null and "" as equivalent.
+        String saved  = config.getVmOptions() != null ? config.getVmOptions() : "";
+        String current = vmOptionsEditor.getText().trim().replaceAll("\\s+", " ");
+        return !saved.equals(current);
     }
 
     @Override

@@ -7,6 +7,8 @@ import org.jetbrains.annotations.NotNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -53,6 +55,11 @@ public final class TomcatOutputPipeline {
         private final Map<String, String> contextToArtifactName;
         private final AtomicBoolean serverStartupDetected;
         private final AtomicInteger deployedArtifactCount;
+        /**
+         * Artifact display names already notified via {@link TomcatLifecycleListener#onArtifactDeployed}
+         * by {@link DeploymentAnalyzer}. {@link StartupAnalyzer} skips these to avoid double-firing.
+         */
+        final Set<String> notifiedArtifacts = ConcurrentHashMap.newKeySet();
         private final AtomicInteger errorCount;
         private final AtomicInteger warningCount;
         private final boolean jmxEnabled;
@@ -151,12 +158,14 @@ public final class TomcatOutputPipeline {
                     long duration = Long.parseLong(m.group(1).replaceAll("[,._]", ""));
                     ctx.logger.logServerStartup(duration);
 
-                    // Mark all pending artifacts as deployed — if the server started
-                    // successfully, all artifacts that didn't explicitly fail are deployed.
+                    // Mark remaining artifacts as deployed. DeploymentAnalyzer already fired
+                    // onArtifactDeployed for each artifact whose individual completion message
+                    // was logged; skip those to avoid double-firing the same notification.
                     // This is resilient to Tomcat version differences in deployment log format.
-                    // Uses a Set to avoid duplicate notifications for multi-context artifacts.
                     for (String artifactName : new java.util.LinkedHashSet<>(ctx.contextToArtifactName.values())) {
-                        ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
+                        if (ctx.notifiedArtifacts.add(artifactName)) {
+                            ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
+                        }
                     }
 
                     ctx.lifecycleListener.onServerStarted(ctx.configName, duration);
@@ -190,6 +199,7 @@ public final class TomcatOutputPipeline {
                     String artifactName = ctx.contextToArtifactName.getOrDefault(contextName, contextName);
                     ctx.logger.logDeploymentSuccess(artifactName, duration);
                     ctx.deployedArtifactCount.incrementAndGet();
+                    ctx.notifiedArtifacts.add(artifactName);
                     ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
                     ctx.onContextReady.accept(contextName);
                 } catch (NumberFormatException e) {

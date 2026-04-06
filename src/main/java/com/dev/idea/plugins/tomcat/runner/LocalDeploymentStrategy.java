@@ -105,7 +105,17 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (contextPath == null || contextPath.isEmpty() || DEFAULT_CONTEXT_PATH.equals(contextPath)) {
                 contextName = ROOT_CONTEXT_NAME;
             } else {
+                // Strip leading slash, then strip any trailing slashes to prevent
+                // contextName like "app/" which would create "app/.xml" on disk.
                 contextName = contextPath.startsWith("/") ? contextPath.substring(1) : contextPath;
+                contextName = contextName.replaceAll("/+$", "");
+                // Reject path traversal components — a context name like "../evil" could
+                // escape the catalina/localhost conf directory via Path.resolve().
+                if (contextName.contains("..") || contextName.contains("\\")
+                        || contextName.contains(":") || contextName.isEmpty()) {
+                    throw new ExecutionException(
+                            "Invalid context path '" + contextPath + "': must not contain '..', '\\', or ':'");
+                }
             }
 
             Path artifactPath = Paths.get(artifact.getPath());
@@ -161,7 +171,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         }
         if (!jarScanFilter.isEmpty()) {
             xml.append("\n  <JarScanner>");
-            xml.append("\n    <JarScanFilter pluggabilitySkip=\"").append(jarScanFilter).append("\" />");
+            xml.append("\n    <JarScanFilter pluggabilitySkip=\"").append(escapeXmlAttribute(jarScanFilter)).append("\" />");
             xml.append("\n  </JarScanner>");
         }
 

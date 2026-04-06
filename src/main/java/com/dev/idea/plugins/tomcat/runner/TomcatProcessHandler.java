@@ -283,11 +283,14 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
                 .releaseAllFor(configurationName);
 
-        lifecycleListener.onServerStopped(configurationName, exitCode, duration,
-                errorCount.get(), warningCount.get(), serverStartupTimeMs);
-
-        generateSessionSummary(duration, exitCode);
-        deploymentLogger.dispose();
+        try {
+            lifecycleListener.onServerStopped(configurationName, exitCode, duration,
+                    errorCount.get(), warningCount.get(), serverStartupTimeMs);
+            generateSessionSummary(duration, exitCode);
+        } finally {
+            // Always dispose the logger, even if the lifecycle callbacks throw.
+            deploymentLogger.dispose();
+        }
     }
 
     @Override
