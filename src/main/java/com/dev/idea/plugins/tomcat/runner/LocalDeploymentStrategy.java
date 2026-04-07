@@ -242,7 +242,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      *       entries not already packaged in the artifact.</li>
      * </ul>
      *
-     * <p>Project module output directories are identified via {@link #buildModuleOutputToArtifactName},
+     * <p>Project module output directories are identified via {@link #collectModelSnapshot},
      * which walks the IntelliJ module dependency graph and uses the Maven artifactId (when
      * available) for reliable JAR-name matching. This prevents false positives where a
      * third-party {@code api-1.0.jar} in WEB-INF/lib would suppress a project module also
@@ -254,15 +254,19 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                           @NotNull Path artifactPath,
                                           @NotNull Project project,
                                           @Nullable TomcatDeploymentLogger logger) {
-        Module module = findModuleForArtifact(artifact, project);
-        if (module == null) {
+        // Phase 1 — Model access: collect all IntelliJ project model data under a single
+        // read action so the snapshot is internally consistent. After this call every value
+        // is a plain Java object (Module reference + String maps/lists); no further model
+        // access is needed and no threading constraint applies to the rest of this method.
+        ArtifactModelSnapshot snapshot = ReadAction.compute(
+                () -> collectModelSnapshot(artifact, project));
+        if (snapshot == null) {
             LOG.info("No module found for artifact '" + artifact.getName() + "', skipping extra classpath");
             return "";
         }
 
-        // Scan WEB-INF/lib once: collect JAR names for Guard 1 (name-based) and build a
-        // JarMeta index for Guard 2 (content + metadata). Opening each JAR exactly once here
-        // avoids repeated ZipFile opens per module later in the loop.
+        // Phase 2 — File I/O: scan WEB-INF/lib once to build the JAR name index (Guard 1)
+        // and the pre-scanned JarMeta index (Guard 2). No model access — pure filesystem I/O.
         Set<String> existingLibJars = new HashSet<>();
         Set<String> coveredModuleNames = new HashSet<>();
         List<JarMeta> jarIndex = new ArrayList<>();
@@ -284,43 +288,26 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
 
+        // Phase 3 — Processing: use the snapshot to drive the context XML build.
+        // All values below are plain Java objects — no IntelliJ model access, no threading constraint.
+
         // Normalize artifact paths for cross-platform comparison
         String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
         String webInfClassesPath = artifactPath.resolve(WEB_INF).resolve(WEB_INF_CLASSES)
                 .toAbsolutePath().toString().replace('\\', '/');
 
-        // Build a map from each dependency module's output path to its artifact name.
-        // Uses the module dependency graph (ModuleRootManager) rather than file-path heuristics,
-        // and prefers the Maven artifactId so the name matches WEB-INF/lib JAR filenames reliably
-        // even when the IntelliJ module name or directory name differs from the Maven artifactId.
-        Map<String, String> moduleOutputToArtifactName = buildModuleOutputToArtifactName(module, project);
-
-        // Get all runtime classpath entries from the module (recursively includes dependencies)
         List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
         List<String> skippedModules = new ArrayList<>();
 
-        // Track module names whose target/classes dirs are injected as PreResources.
-        // Their JARs must NOT be added as PostResources — otherwise Tomcat's classloader
-        // sees the same classes/resources in both the PreResources overlay AND the JAR,
-        // causing duplicate-classpath errors in Liquibase, CDI, and similar scanners.
+        // Track artifact names whose output dirs are injected as PreResources.
+        // Their JARs must NOT be added as PostResources — having both the dir AND the JAR
+        // on the classpath causes duplicate resource entries that break Liquibase, CDI, etc.
         Set<String> preResourceModuleNames = new HashSet<>();
 
-        // OrderEnumerator traverses the live module dependency graph and requires a read action.
-        VirtualFile[] classesRoots = ReadAction.compute(() ->
-                OrderEnumerator.orderEntries(module)
-                        .recursively()
-                        .withoutSdk()
-                        .classes()
-                        .getRoots());
-
-        for (VirtualFile root : classesRoots) {
-            String rootPath = root.getPath();
-            // Strip trailing !/ from JAR URLs
-            if (rootPath.endsWith("!/")) {
-                rootPath = rootPath.substring(0, rootPath.length() - 2);
-            }
-
+        // snapshot.rootPaths: classpath roots from the full module dependency tree.
+        // Paths are plain strings with trailing !/ already stripped (done in collectModelSnapshot).
+        for (String rootPath : snapshot.rootPaths) {
             // Skip entries already under the artifact's docBase
             if (rootPath.startsWith(artifactAbsPath)) {
                 continue;
@@ -338,10 +325,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 // For project module output directories, include as PreResources so
                 // freshly compiled classes shadow the (potentially stale) WEB-INF/classes.
                 // Record the artifact name so we can skip its JAR in the PostResources pass.
-                if (moduleOutputToArtifactName.containsKey(root.getPath())) {
+                if (snapshot.outputToArtifactName.containsKey(rootPath)) {
                     // Artifact name comes from the module graph (Maven artifactId preferred),
                     // not from file-path extraction — reliable even when directory name ≠ artifactId.
-                    String moduleDirName = moduleOutputToArtifactName.get(root.getPath());
+                    String moduleDirName = snapshot.outputToArtifactName.get(rootPath);
                     // Guard 1 — name-based: fast, covers Maven and standard Gradle naming.
                     if (moduleDirName != null && coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
                         LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — name-matched JAR in WEB-INF/lib");
@@ -594,26 +581,71 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Builds a map from each dependency module's compiler output path to its artifact name.
+     * Snapshot of all IntelliJ project model data needed for context XML generation.
      *
-     * <p>Walks the module dependency graph via {@link ModuleRootManager#getOrderEntries()}
-     * rather than enumerating classpath roots and guessing names from paths. For Maven
-     * projects the Maven artifactId is used; otherwise the IntelliJ module name is used.
-     * Both are authoritative — unlike {@link #extractModuleName} which parses the directory
-     * path and fails when the Maven artifactId differs from the module directory name.
-     *
-     * <p>The webModule itself is intentionally excluded: its own {@code target/classes} is
-     * handled separately (always added as PreResources for hot-reload of the webapp's code).
+     * <p>Collected atomically under a single read action in {@link #collectModelSnapshot}.
+     * After collection every field is a plain Java object — no IntelliJ model APIs are
+     * accessed subsequently, so there are no threading constraints on their use.
      */
-    @NotNull
-    private static Map<String, String> buildModuleOutputToArtifactName(
-            @NotNull Module webModule, @NotNull Project project) {
-        // OrderEnumerator and ModuleRootManager require a read action.
-        return ReadAction.compute(() -> {
-            Map<String, String> result = new HashMap<>();
-            collectModuleDependencyNames(webModule, project, result, new HashSet<>());
-            return result;
-        });
+    private static final class ArtifactModelSnapshot {
+        /** The IntelliJ module that owns the deployed artifact. */
+        final Module module;
+        /**
+         * Maps each dependency module's production output path to its artifact name
+         * (Maven artifactId when available, otherwise stripped IntelliJ module name).
+         * Keys are plain path strings — no trailing {@code !/} on JAR roots.
+         */
+        final Map<String, String> outputToArtifactName;
+        /**
+         * Full recursive classpath of the module (module outputs + library JARs).
+         * Paths are plain strings with any trailing {@code !/} already stripped.
+         */
+        final List<String> rootPaths;
+
+        ArtifactModelSnapshot(@NotNull Module module,
+                              @NotNull Map<String, String> outputToArtifactName,
+                              @NotNull List<String> rootPaths) {
+            this.module = module;
+            this.outputToArtifactName = outputToArtifactName;
+            this.rootPaths = rootPaths;
+        }
+    }
+
+    /**
+     * Collects all IntelliJ project model data needed to build the context XML extra resources.
+     * <strong>Must be called under a read action.</strong>
+     *
+     * <p>This is the single point of contact with IntelliJ model APIs in the classpath-building
+     * pipeline. After this method returns the caller holds only plain Java values and may operate
+     * on any thread without further read-action constraints.
+     *
+     * @return a fully populated snapshot, or {@code null} if no module can be found for the artifact
+     */
+    @Nullable
+    private static ArtifactModelSnapshot collectModelSnapshot(@NotNull DeploymentArtifact artifact,
+                                                              @NotNull Project project) {
+        Module module = resolveModuleForArtifact(artifact, project);
+        if (module == null) return null;
+
+        // Build dependency module output path → artifact name map
+        Map<String, String> outputToArtifactName = new HashMap<>();
+        collectModuleDependencyNames(module, project, outputToArtifactName, new HashSet<>());
+
+        // Collect full classpath root paths, converting VirtualFile to String while the
+        // read action is still held. Trailing !/ on JAR content roots is stripped here
+        // so callers always work with clean filesystem-style paths.
+        List<String> rootPaths = new ArrayList<>();
+        for (VirtualFile root : OrderEnumerator.orderEntries(module)
+                .recursively()
+                .withoutSdk()
+                .classes()
+                .getRoots()) {
+            String path = root.getPath();
+            if (path.endsWith("!/")) path = path.substring(0, path.length() - 2);
+            rootPaths.add(path);
+        }
+
+        return new ArtifactModelSnapshot(module, outputToArtifactName, rootPaths);
     }
 
     private static void collectModuleDependencyNames(
@@ -686,19 +718,15 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * Finds the IntelliJ Module associated with a deployment artifact.
      * Tries: artifact name match via ArtifactManager, name-based module lookup,
      * path-based matching, and web module fallback.
+     *
+     * <p><strong>Must be called under a read action</strong> — all accessed APIs
+     * (ArtifactManager, ModuleManager, ModuleRootManager) require one.
+     * The sole caller is {@link #collectModelSnapshot}, which is always invoked
+     * inside {@code ReadAction.compute()}.
      */
     @Nullable
-    private static Module findModuleForArtifact(@NotNull DeploymentArtifact artifact,
-                                                @NotNull Project project) {
-        // All model access (ArtifactManager, ModuleManager, ModuleRootManager) requires a
-        // read action. The method is called both from background threads and from the EDT
-        // (e.g. compiler-completion callbacks), so we always acquire one explicitly.
-        return ReadAction.compute(() -> findModuleForArtifactUnderReadAction(artifact, project));
-    }
-
-    @Nullable
-    private static Module findModuleForArtifactUnderReadAction(@NotNull DeploymentArtifact artifact,
-                                                               @NotNull Project project) {
+    private static Module resolveModuleForArtifact(@NotNull DeploymentArtifact artifact,
+                                                   @NotNull Project project) {
         try {
             ModuleManager moduleManager = ModuleManager.getInstance(project);
             String name = artifact.getName();
