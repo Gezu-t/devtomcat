@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.intellij.openapi.application.ApplicationManager;
-
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * @author Gezahegn Lemma (Gezu)
  */
+@Service(Service.Level.APP)
 public final class TomcatPortRegistry {
 
     private static final Logger LOG = Logger.getInstance(TomcatPortRegistry.class);

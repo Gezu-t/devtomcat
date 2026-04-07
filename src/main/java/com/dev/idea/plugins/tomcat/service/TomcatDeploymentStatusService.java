@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.service;
 
 import com.intellij.execution.dashboard.RunDashboardManager;
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.Alarm;
 import org.jetbrains.annotations.NotNull;
@@ -15,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * lifecycle events; read by {@link TomcatRunDashboardCustomizer} and {@link TomcatDeploymentNode}
  * to display real-time status in the Services tool window.
  */
+@Service(Service.Level.PROJECT)
 public final class TomcatDeploymentStatusService {
 
     public enum ServerState {

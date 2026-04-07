@@ -1,5 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatPreflightValidator.PreflightIssue;
 import com.dev.idea.plugins.tomcat.runner.TomcatPreflightValidator.PreflightResult;
 import org.junit.jupiter.api.DisplayName;
@@ -626,6 +628,102 @@ class TomcatPreflightValidatorTest {
         void toStringFormat() {
             PreflightIssue issue = new PreflightIssue(PreflightIssue.Severity.ERROR, "bad path");
             assertEquals("[ERROR] bad path", issue.toString());
+        }
+    }
+
+    // =========================================================================
+    // checkDuplicateDeployments — duplicate context path / deployment path guard
+    // =========================================================================
+
+    @Nested
+    @DisplayName("checkDuplicateDeployments")
+    class CheckDuplicateDeploymentsTests {
+
+        private static DeploymentArtifact artifact(String name, String path, String ctx) {
+            DeploymentArtifact a = new DeploymentArtifact(name, path, DeploymentArtifact.TYPE_EXPLODED);
+            a.setContextPath(ctx);
+            return a;
+        }
+
+        private static DeploymentConfig config(DeploymentArtifact... artifacts) {
+            DeploymentConfig cfg = new DeploymentConfig();
+            for (DeploymentArtifact a : artifacts) cfg.addArtifact(a);
+            return cfg;
+        }
+
+        @Test
+        @DisplayName("no issues when all artifacts have distinct context and deployment paths")
+        void distinctPaths() {
+            DeploymentConfig cfg = config(
+                    artifact("portal", "/opt/portal", "/portal"),
+                    artifact("api",    "/opt/api",    "/api"));
+            List<PreflightIssue> issues = new ArrayList<>();
+            TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues);
+            assertTrue(issues.isEmpty());
+        }
+
+        @Test
+        @DisplayName("warns on duplicate context path")
+        void duplicateContextPath() {
+            DeploymentConfig cfg = config(
+                    artifact("portal",  "/opt/portal",  "/app"),
+                    artifact("portal2", "/opt/portal2", "/app"));
+            List<PreflightIssue> issues = new ArrayList<>();
+            TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues);
+            assertEquals(1, issues.size());
+            assertEquals(PreflightIssue.Severity.WARNING, issues.get(0).getSeverity());
+            assertTrue(issues.get(0).getMessage().contains("/app"));
+        }
+
+        @Test
+        @DisplayName("context path comparison is case-insensitive")
+        void contextPathCaseInsensitive() {
+            DeploymentConfig cfg = config(
+                    artifact("a", "/opt/a", "/Portal"),
+                    artifact("b", "/opt/b", "/portal"));
+            List<PreflightIssue> issues = new ArrayList<>();
+            TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues);
+            assertEquals(1, issues.size());
+        }
+
+        @Test
+        @DisplayName("warns on duplicate deployment path")
+        void duplicateDeploymentPath(@TempDir java.nio.file.Path tmp) {
+            String same = tmp.toString();
+            DeploymentConfig cfg = config(
+                    artifact("a", same, "/a"),
+                    artifact("b", same, "/b"));
+            List<PreflightIssue> issues = new ArrayList<>();
+            TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues);
+            assertEquals(1, issues.size());
+            assertEquals(PreflightIssue.Severity.WARNING, issues.get(0).getSeverity());
+            assertTrue(issues.get(0).getMessage().contains("twice"));
+        }
+
+        @Test
+        @DisplayName("skips artifacts with empty paths without throwing")
+        void skipsEmptyPaths() {
+            DeploymentConfig cfg = config(
+                    artifact("a", "", ""),
+                    artifact("b", "", ""));
+            List<PreflightIssue> issues = new ArrayList<>();
+            assertDoesNotThrow(() ->
+                    TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues));
+            assertTrue(issues.isEmpty());
+        }
+
+        @Test
+        @DisplayName("tolerates invalid path string without throwing")
+        void toleratesInvalidPath() {
+            // NUL is invalid on Windows; on macOS this may or may not throw — either way
+            // checkDuplicateDeployments must not propagate InvalidPathException
+            DeploymentConfig cfg = config(
+                    artifact("a", "\0invalid", "/a"),
+                    artifact("b", "\0invalid", "/b"));
+            assertDoesNotThrow(() -> {
+                List<PreflightIssue> issues = new ArrayList<>();
+                TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues);
+            });
         }
     }
 }

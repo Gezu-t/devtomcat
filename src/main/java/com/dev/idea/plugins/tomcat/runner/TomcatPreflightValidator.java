@@ -251,7 +251,9 @@ public final class TomcatPreflightValidator {
         Map<String, String> deployPaths = new LinkedHashMap<>();
 
         for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null || !artifact.isValid()) continue;
+            // Use a lightweight check here — isValid() requires the path to exist on disk,
+            // but duplicate detection only needs the configured name and path strings.
+            if (artifact == null || artifact.getName().isEmpty()) continue;
 
             String ctx = artifact.getContextPath();
             if (ctx != null && !ctx.isEmpty()) {
@@ -270,8 +272,14 @@ public final class TomcatPreflightValidator {
 
             String path = artifact.getPath();
             if (path != null && !path.isEmpty()) {
-                String normalPath = Paths.get(path).toAbsolutePath()
-                        .normalize().toString().toLowerCase(Locale.ROOT);
+                String normalPath;
+                try {
+                    normalPath = Paths.get(path).toAbsolutePath()
+                            .normalize().toString().toLowerCase(Locale.ROOT);
+                } catch (java.nio.file.InvalidPathException e) {
+                    LOG.debug("checkDuplicateDeployments: invalid path skipped: " + path);
+                    continue;
+                }
                 if (deployPaths.containsKey(normalPath)) {
                     issues.add(new PreflightIssue(
                             PreflightIssue.Severity.WARNING,
