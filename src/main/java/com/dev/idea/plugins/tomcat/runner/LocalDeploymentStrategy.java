@@ -306,11 +306,13 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // causing duplicate-classpath errors in Liquibase, CDI, and similar scanners.
         Set<String> preResourceModuleNames = new HashSet<>();
 
-        VirtualFile[] classesRoots = OrderEnumerator.orderEntries(module)
-                .recursively()
-                .withoutSdk()
-                .classes()
-                .getRoots();
+        // OrderEnumerator traverses the live module dependency graph and requires a read action.
+        VirtualFile[] classesRoots = ReadAction.compute(() ->
+                OrderEnumerator.orderEntries(module)
+                        .recursively()
+                        .withoutSdk()
+                        .classes()
+                        .getRoots());
 
         for (VirtualFile root : classesRoots) {
             String rootPath = root.getPath();
