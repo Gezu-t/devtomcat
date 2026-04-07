@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.intellij.execution.ProgramRunnerUtil;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.process.ProcessHandler;
@@ -9,6 +9,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -16,6 +17,8 @@ import org.jetbrains.annotations.NotNull;
  * Only visible when the server is not currently running.
  */
 public class StartTomcatAction extends AnAction {
+
+    private static final Logger LOG = Logger.getInstance(StartTomcatAction.class);
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
@@ -25,7 +28,12 @@ public class StartTomcatAction extends AnAction {
 
         RunnerAndConfigurationSettings settings = ServiceActionUtils.findSettings(project, config);
         if (settings != null) {
-            ProgramRunnerUtil.executeConfiguration(settings, DefaultRunExecutor.getRunExecutorInstance());
+            try {
+                ExecutionEnvironmentBuilder.create(DefaultRunExecutor.getRunExecutorInstance(), settings)
+                        .buildAndExecute();
+            } catch (com.intellij.execution.ExecutionException ex) {
+                LOG.warn("Failed to start Tomcat configuration: " + config.getName(), ex);
+            }
         }
     }
 

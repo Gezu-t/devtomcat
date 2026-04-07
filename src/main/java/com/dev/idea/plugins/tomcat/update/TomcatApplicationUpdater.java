@@ -8,7 +8,6 @@ import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
-import com.intellij.execution.ProgramRunnerUtil;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.Executor;
@@ -281,7 +280,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                             RunnerAndConfigurationSettings settings =
                                     RunManager.getInstance(project).findSettings(configuration);
                             if (settings != null) {
-                                ProgramRunnerUtil.executeConfiguration(settings, capturedExecutor);
+                                com.intellij.execution.runners.ExecutionEnvironmentBuilder
+                                        .create(capturedExecutor, settings).buildAndExecute();
                                 LOG.info("Tomcat restarted in " + capturedExecutor.getActionName() + " mode");
                             } else {
                                 logger.logServerError("Could not find run configuration settings for restart");

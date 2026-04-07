@@ -53,6 +53,14 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.0.3</h3>
+    <ul>
+        <li><b>Multi-module Maven/Gradle deployment</b> — Plugin now understands the IntelliJ module dependency graph. When a shared module is already packaged as a JAR in WEB-INF/lib, the plugin no longer adds a conflicting PreResources overlay. Eliminates Liquibase, CDI, and similar duplicate-classpath errors in multi-module projects. Detection uses three tiers: Maven artifactId name matching, file-content sampling, and Maven pom.properties metadata (works even for empty/uncompiled module outputs).</li>
+        <li><b>Duplicate deployment guard</b> — Pre-launch validator now warns when two artifacts share the same context path or the same physical deployment path, preventing silent 404s and double-startup overhead.</li>
+        <li><b>API compatibility (IntelliJ 2025.x)</b> — Replaced internal <code>ExecutionManager.getRunningDescriptors()</code> with the public <code>RunContentManager.getAllDescriptors()</code>, replaced deprecated <code>UIUtil.getContextHelpForeground()</code> with <code>JBUI.CurrentTheme.ContextHelp.FOREGROUND</code>, and replaced <code>ProgramRunnerUtil.executeConfiguration()</code> with <code>ExecutionEnvironmentBuilder</code>.</li>
+        <li><b>Stale artifact filtering</b> — Artifacts left over from renamed or deleted modules are no longer shown in the artifact selector or auto-detected for deployment.</li>
+    </ul>
+
     <h3>Version 1.0.2</h3>
     <ul>
         <li><b>Update Application on re-run</b> — Run/Debug while Tomcat is running shows the Update dialog (Update Resources, Redeploy, Restart) instead of starting a duplicate process</li>

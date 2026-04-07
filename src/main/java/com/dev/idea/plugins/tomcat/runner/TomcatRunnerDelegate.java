@@ -4,7 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
-import com.intellij.execution.ProgramRunnerUtil;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.process.ProcessEvent;
@@ -188,9 +188,13 @@ public final class TomcatRunnerDelegate {
                     RunnerAndConfigurationSettings settings =
                             RunManager.getInstance(project).findSettings(config);
                     if (settings != null) {
-                        ProgramRunnerUtil.executeConfiguration(settings, currentExecutor);
-                        LOG.info("Relaunched " + config.getName()
-                                + " in " + currentExecutor.getActionName() + " mode");
+                        try {
+                            ExecutionEnvironmentBuilder.create(currentExecutor, settings).buildAndExecute();
+                            LOG.info("Relaunched " + config.getName()
+                                    + " in " + currentExecutor.getActionName() + " mode");
+                        } catch (com.intellij.execution.ExecutionException ex) {
+                            LOG.warn("Failed to relaunch " + config.getName(), ex);
+                        }
                     } else {
                         LOG.warn("Could not find run settings for relaunch: " + config.getName());
                     }

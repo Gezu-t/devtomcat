@@ -4,7 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
-import com.intellij.execution.ProgramRunnerUtil;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.executors.DefaultDebugExecutor;
@@ -86,7 +86,7 @@ public class DebugTomcatAction extends AnAction {
                         if (debugExecutor == null) {
                             debugExecutor = DefaultDebugExecutor.getDebugExecutorInstance();
                         }
-                        ProgramRunnerUtil.executeConfiguration(settings, debugExecutor);
+                        ExecutionEnvironmentBuilder.create(debugExecutor, settings).buildAndExecute();
                     } catch (Exception ex) {
                         LOG.warn("Failed to restart Tomcat in Debug mode: " + config.getName(), ex);
                     }

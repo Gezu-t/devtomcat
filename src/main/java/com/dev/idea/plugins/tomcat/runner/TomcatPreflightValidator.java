@@ -102,6 +102,7 @@ public final class TomcatPreflightValidator {
         Map<String, String> parsedProperties = parseSystemProperties(vmOptions);
 
         checkRequiredSystemProperties(parsedProperties, issues);
+        checkDuplicateDeployments(configuration.getConfigData().getDeploymentConfig(), issues);
         checkDuplicateJars(configuration.getConfigData().getDeploymentConfig(), issues);
         checkLockedPaths(configuration, parsedProperties, issues);
 
@@ -224,7 +225,69 @@ public final class TomcatPreflightValidator {
     }
 
     // =========================================================================
-    // Check 2: Duplicate/conflicting JARs in WEB-INF/lib
+    // Check 2: Duplicate context paths and deployment paths
+    // =========================================================================
+
+    /**
+     * Warns when two or more deployment artifacts share the same context path or
+     * the same physical deployment path.
+     *
+     * <ul>
+     *   <li><b>Duplicate context path</b> — Tomcat will deploy only one of them;
+     *       the second silently shadows or replaces the first, causing confusing 404s.</li>
+     *   <li><b>Duplicate deployment path</b> — both entries point at the same WAR/directory
+     *       on disk, which means the same app is deployed twice under different context names,
+     *       doubling startup time and memory with no benefit.</li>
+     * </ul>
+     */
+    static void checkDuplicateDeployments(@NotNull DeploymentConfig deploymentConfig,
+                                          @NotNull List<PreflightIssue> issues) {
+        List<DeploymentArtifact> artifacts = deploymentConfig.getDeployedArtifacts();
+        if (artifacts.size() < 2) return;
+
+        // context path → first artifact name that claimed it
+        Map<String, String> contextPaths = new LinkedHashMap<>();
+        // normalised deployment path → first artifact name that used it
+        Map<String, String> deployPaths = new LinkedHashMap<>();
+
+        for (DeploymentArtifact artifact : artifacts) {
+            if (artifact == null || !artifact.isValid()) continue;
+
+            String ctx = artifact.getContextPath();
+            if (ctx != null && !ctx.isEmpty()) {
+                String normalCtx = ctx.toLowerCase(Locale.ROOT);
+                if (contextPaths.containsKey(normalCtx)) {
+                    issues.add(new PreflightIssue(
+                            PreflightIssue.Severity.WARNING,
+                            String.format(
+                                    "Duplicate context path '%s': used by both '%s' and '%s'. " +
+                                    "Tomcat will only deploy one of them.",
+                                    ctx, contextPaths.get(normalCtx), artifact.getName())));
+                } else {
+                    contextPaths.put(normalCtx, artifact.getName());
+                }
+            }
+
+            String path = artifact.getPath();
+            if (path != null && !path.isEmpty()) {
+                String normalPath = Paths.get(path).toAbsolutePath()
+                        .normalize().toString().toLowerCase(Locale.ROOT);
+                if (deployPaths.containsKey(normalPath)) {
+                    issues.add(new PreflightIssue(
+                            PreflightIssue.Severity.WARNING,
+                            String.format(
+                                    "Duplicate deployment path: '%s' and '%s' both point to '%s'. " +
+                                    "The same application will be deployed twice.",
+                                    deployPaths.get(normalPath), artifact.getName(), path)));
+                } else {
+                    deployPaths.put(normalPath, artifact.getName());
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Check 3: Duplicate/conflicting JARs in WEB-INF/lib
     // =========================================================================
 
     /**
