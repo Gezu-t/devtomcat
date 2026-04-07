@@ -30,11 +30,11 @@ final class ServiceActionUtils {
     /**
      * Extracts a {@link TomcatRunConfiguration} from a Services tree action event.
      *
-     * <p>Uses only BGT-safe data keys ({@link CommonDataKeys#NAVIGATABLE} and
-     * {@link PlatformCoreDataKeys#SELECTED_ITEMS}) so this method is safe to call from
-     * an action's {@code update()} method running on {@link ActionUpdateThread#BGT}.
-     * {@link PlatformCoreDataKeys#CONTEXT_COMPONENT} / {@code JTree.getSelectionPath()}
-     * requires the EDT and must NOT be called from a BGT update path.
+     * <p>Must be called on the EDT. In IntelliJ 2024.x the Services panel data providers
+     * for {@link CommonDataKeys#NAVIGATABLE} and {@link PlatformCoreDataKeys#SELECTED_ITEMS}
+     * are computed lazily from the tree selection and are not snapshot-captured before BGT
+     * dispatch. All callers (action {@code update()} and {@code actionPerformed()}) run on
+     * the EDT via {@link ActionUpdateThread#EDT}.
      */
     @Nullable
     static TomcatRunConfiguration findTomcatConfiguration(@NotNull AnActionEvent e) {
@@ -57,9 +57,7 @@ final class ServiceActionUtils {
 
     /**
      * Finds the active {@link ProcessHandler} for a Tomcat configuration, if running.
-     *
-     * <p>BGT-safe — uses only {@link CommonDataKeys#NAVIGATABLE} and
-     * {@link PlatformCoreDataKeys#SELECTED_ITEMS}.
+     * Must be called on the EDT — see {@link #findTomcatConfiguration(AnActionEvent)}.
      */
     @Nullable
     static ProcessHandler findProcessHandler(@NotNull AnActionEvent e) {
