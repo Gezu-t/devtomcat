@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
@@ -113,19 +114,40 @@ public final class ArtifactReferenceRefresher {
     public static RefreshResult refresh(@NotNull TomcatRunConfiguration config) {
         Objects.requireNonNull(config, "Configuration cannot be null");
 
-        PlatformArtifactSnapshot[] snapshots;
+        // Collect all IntelliJ model data under a single read action and convert to
+        // plain PlatformArtifactSnapshot records immediately. ArtifactManager.getArtifacts()
+        // and ModuleManager.getModules() both require a read action; refresh() is called
+        // from TomcatRunConfiguration.readExternal() on a background coroutine thread
+        // (ProjectRunConfigurationInitializer) where no read action is held by default.
+        PlatformArtifactSnapshot[] snapshots = ReadAction.compute(
+                () -> collectArtifactSnapshots(config));
+
+        if (snapshots == null || snapshots.length == 0) {
+            return RefreshResult.EMPTY;
+        }
+
+        return refreshArtifacts(config.getConfigData().getDeploymentConfig(), snapshots);
+    }
+
+    /**
+     * Collects the current IntelliJ artifact state into plain snapshots.
+     * <strong>Must be called under a read action.</strong>
+     *
+     * @return filtered snapshot array, or {@code null} / empty if ArtifactManager is
+     *         unavailable or no artifacts are configured
+     */
+    @Nullable
+    private static PlatformArtifactSnapshot[] collectArtifactSnapshots(
+            @NotNull TomcatRunConfiguration config) {
         try {
             ArtifactManager artifactManager = ArtifactManager.getInstance(config.getProject());
             Artifact[] platformArtifacts = artifactManager.getArtifacts();
-            if (platformArtifacts.length == 0) {
-                return RefreshResult.EMPTY;
-            }
+            if (platformArtifacts.length == 0) return null;
 
-            // Collect active module names so we can exclude orphaned IntelliJ artifacts
-            // from matching. When a user renames a module, IntelliJ may keep the OLD
-            // artifact definition alongside the new one. Without this filter, Strategy 1
-            // (exact name match) would match the orphaned artifact and stop looking,
-            // leaving the deployment pointing at stale/empty build output.
+            // Collect active module names to exclude orphaned IntelliJ artifacts.
+            // When a user renames a module, IntelliJ may keep the OLD artifact definition
+            // alongside the new one. Without this filter, Strategy 1 (exact name match)
+            // would match the orphaned artifact, leaving deployment pointing at stale output.
             java.util.Set<String> activeModules = new java.util.HashSet<>();
             try {
                 for (com.intellij.openapi.module.Module m :
@@ -139,10 +161,7 @@ public final class ArtifactReferenceRefresher {
             List<PlatformArtifactSnapshot> filtered = new ArrayList<>();
             for (Artifact pa : platformArtifacts) {
                 PlatformArtifactSnapshot snap = PlatformArtifactSnapshot.fromPlatform(pa);
-                // Keep the artifact if we can't determine its module (empty base name)
-                // or if the module still exists in the project
-                String baseName = com.dev.idea.plugins.tomcat.utils.ContextPathUtils
-                        .extractBaseModuleName(snap.name()).toLowerCase();
+                String baseName = ContextPathUtils.extractBaseModuleName(snap.name()).toLowerCase();
                 if (activeModules.isEmpty() || baseName.isEmpty() || activeModules.contains(baseName)) {
                     filtered.add(snap);
                 } else {
@@ -151,16 +170,11 @@ public final class ArtifactReferenceRefresher {
                 }
             }
 
-            if (filtered.isEmpty()) {
-                return RefreshResult.EMPTY;
-            }
-            snapshots = filtered.toArray(new PlatformArtifactSnapshot[0]);
+            return filtered.isEmpty() ? null : filtered.toArray(new PlatformArtifactSnapshot[0]);
         } catch (NoClassDefFoundError | Exception e) {
             LOG.debug("ArtifactReferenceRefresher: ArtifactManager unavailable, skipping refresh");
-            return RefreshResult.EMPTY;
+            return null;
         }
-
-        return refreshArtifacts(config.getConfigData().getDeploymentConfig(), snapshots);
     }
 
     // =========================================================================
