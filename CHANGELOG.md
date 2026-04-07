@@ -1,5 +1,24 @@
 # DevTomcat Changelog
 
+## [1.0.3]
+
+### Added
+- **Multi-module Maven/Gradle deployment** — Plugin understands the IntelliJ module dependency graph. When a shared module (e.g. `common`) is already packaged as a JAR in `WEB-INF/lib`, the plugin no longer adds a conflicting `<PreResources>` overlay. Eliminates Liquibase, CDI, and similar duplicate-classpath errors in multi-module projects.
+- **Duplicate deployment guard** — Pre-launch validator warns when two artifacts share the same context path or the same physical deployment path, preventing silent 404s and double-startup overhead.
+- **Restart/relaunch failure notification** — When a restart or cross-executor relaunch fails after the old process has already been stopped, a prominent balloon notification is shown so the user knows Tomcat is no longer running and must be restarted manually.
+
+### Fixed
+- **Context path normalization** — `setContextPath("")` now correctly stores `"/"` instead of an empty string. `StringUtil.notNullize("", "/")` only substitutes `null`; empty strings were silently stored as `""`, causing incorrect duplicate detection and browser URL generation.
+- **Threading violations (multiple call sites)** — Fixed `Read access is allowed from inside read-action only` errors thrown on background coroutine threads during project load and post-build redeploy:
+  - `ArtifactReferenceRefresher.refresh()` — called from `readExternal()` during project initialization
+  - `LocalDeploymentStrategy.buildExtraResourcesXml()` — called from compiler-completion callbacks; all model access (module graph, OrderEnumerator, ArtifactManager) now collected atomically under a single `ReadAction.compute()` via `ArtifactModelSnapshot`
+  - `TomcatRunConfiguration.syncBeforeLaunchWithDeployments()` — `ArtifactManager.getInstance()` wrapped in `ReadAction`
+- **API compatibility (IntelliJ 2025.x)** — Replaced internal `ExecutionManager.getRunningDescriptors()` with `RunContentManager.getAllDescriptors()`, deprecated `UIUtil.getContextHelpForeground()` with `JBUI.CurrentTheme.ContextHelp.FOREGROUND`, and `ProgramRunnerUtil.executeConfiguration()` with `ExecutionEnvironmentBuilder`
+- **Service annotations** — Added `@Service(Level.PROJECT)` to `TomcatDeploymentStatusService` and `@Service(Level.APP)` to `TomcatPortRegistry`
+
+### Changed
+- Stale artifact filtering — artifacts from renamed or deleted modules are no longer shown in the artifact selector or auto-detected for deployment
+
 ## [1.0.2]
 
 ### Added

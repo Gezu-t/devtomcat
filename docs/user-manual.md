@@ -32,6 +32,7 @@ Free, full-featured Apache Tomcat integration for IntelliJ IDEA — Community an
     - [Run](#run)
     - [Debug](#debug)
     - [Update Running Application](#update-running-application)
+    - [Services Toolbar Actions](#services-toolbar-actions)
 12. [Remote Deployment](#remote-deployment)
 13. [Advanced Features](#advanced-features)
     - [CATALINA_BASE Isolation](#catalina_base-isolation)
@@ -225,18 +226,30 @@ Each deployed artifact has its own **Application context** — the URL path pref
 
 ### Multi-Module Projects
 
-For projects with multiple modules (e.g., frontend + backend API):
+DevTomcat understands the IntelliJ module dependency graph and handles multi-module Maven/Gradle projects correctly.
 
-1. Add each module as a separate deployment
+**Deploying multiple web applications from one project:**
+
+1. Add each web module as a separate deployment
 2. Each gets its own context path (e.g., `/web`, `/api`)
 3. Set the browser URL on the Server tab to your preferred landing page (e.g., `http://localhost:8080/web/login`)
-4. Use the toolbar arrows to reorder deployments — the first deployment is considered the primary
+4. Use the toolbar arrows to reorder deployments — the first deployment is used for the browser URL auto-generation
 
 | Deployment | Context | Description |
 |------------|---------|-------------|
 | web-frontend:war exploded | `/web` | Frontend application |
 | api-backend:war exploded | `/api` | REST API |
 | admin-panel:war exploded | `/admin` | Administration interface |
+
+**Shared library modules (Maven/Gradle):**
+
+When a web application depends on a shared module (e.g., `common`) that is packaged as a JAR dependency:
+
+- **Maven-built artifacts** (`mvn package`): `common-1.0-SNAPSHOT.jar` appears in `WEB-INF/lib`. DevTomcat detects this and does **not** add a duplicate classpath overlay for `common/target/classes`. This prevents `ChangeLogParseException: Found 2 files` errors from Liquibase, duplicate bean errors from CDI, and similar duplicate-classpath problems.
+- **IntelliJ-built artifacts** (exploded): `common`'s classes are merged into `WEB-INF/classes` by the artifact builder. DevTomcat adds `<PreResources>` for `common/target/classes` only when the JAR is not already present in `WEB-INF/lib`.
+- **Hot reload**: Changes to the web module itself (`webapp/target/classes`) are reflected immediately via `<PreResources>`. Changes to shared modules packaged as JARs require a **Redeploy** (not just Build).
+
+> **Note:** If you see `Liquibase: Found 2 files with the path 'classpath:...'` or similar duplicate-resource errors, it means a module's output is on the classpath twice. Trigger a **Redeploy** from the Services toolbar to regenerate `context.xml` with the correct classpath configuration.
 
 ---
 
@@ -367,16 +380,50 @@ Click the **Debug** button (bug icon) or press **Shift+F9** to start Tomcat in d
 
 ### Update Running Application
 
-While Tomcat is running, press **Ctrl+F10** (Cmd+F10 on macOS) to update the running application.
+While Tomcat is running, press **Ctrl+F10** (Cmd+F10 on macOS) to update the running application without a full restart.
 
-The action performed depends on your **On 'Update' action** setting:
+If **Show dialog** is enabled (Server tab → Update Actions), a dialog appears letting you choose an action on the fly. Otherwise the action configured in **On 'Update' action** runs immediately.
 
-| Action | What It Does |
-|--------|-------------|
-| **Update resources** | Copies changed static resources (HTML, CSS, JS, images) |
-| **Update classes and resources** | Recompiles changed classes and copies resources |
-| **Redeploy** | Undeploys and redeploys the artifact |
-| **Restart server** | Stops and restarts the entire Tomcat process |
+| Action | What It Does | Best For |
+|--------|-------------|----------|
+| **Update resources** | Copies changed static resources (HTML, CSS, JS, images) to the artifact output directory | Frontend-only changes — fastest |
+| **Update classes and resources** | Recompiles changed classes and copies static resources | Java + static changes without full redeploy |
+| **Redeploy** | Regenerates `context.xml`, undeploys the old context, and deploys the new one | Structural changes, new dependencies |
+| **Restart server** | Stops the Tomcat process and starts a fresh one | JVM option changes, server.xml changes, stubborn class loading issues |
+
+**On frame deactivation** — the same options apply automatically when you switch from IntelliJ to another application (e.g., switch to a browser to test). Set it to a lightweight action so your browser always sees fresh content without manual intervention.
+
+> **Tip:** For day-to-day development, set **On 'Update' action** to **Update classes and resources** and **On frame deactivation** to **Update resources**. This gives you hot class reloading on demand and instant static-resource refresh every time you switch to the browser.
+
+### Services Toolbar Actions
+
+Open the **Services** tool window (**View → Tool Windows → Services**) to access lifecycle actions directly without touching the keyboard shortcut or the run configuration.
+
+![Services toolbar buttons](images/services-toolbar.png)
+*Figure 20 — Services toolbar showing Update, Redeploy, and Restart buttons*
+
+When a DevTomcat configuration node is selected, three one-click buttons appear in the toolbar:
+
+| Button | Action | Equivalent |
+|--------|--------|-----------|
+| **Update Application** | Shows the Update dialog and executes the chosen strategy | Ctrl+F10 |
+| **Redeploy** | Redeploys all artifacts (regenerates context XML for exploded, re-copies WARs) | Redeploy action |
+| **Restart** | Stops and restarts the entire Tomcat process | Restart server action |
+
+The context menu (right-click on the configuration node) also provides:
+
+| Menu Item | Description |
+|-----------|-------------|
+| **Start Tomcat** | Starts the configuration if not running |
+| **Stop Tomcat** | Gracefully shuts down the running server |
+| **Update Application** | Opens the update strategy dialog |
+| **Redeploy** | Redeploys all artifacts |
+| **Restart Tomcat** | Full process restart |
+| **Debug Tomcat** | Stops a running Run-mode server and relaunches it in Debug mode — attach the debugger without editing the run configuration |
+| **Deployment History** | Opens the deployment history for this configuration |
+| **Startup Time Trends** | Opens the startup performance graph |
+
+> **Debug Tomcat from Services:** If Tomcat is already running in Run mode and you need to set a breakpoint, right-click the configuration node and choose **Debug Tomcat**. DevTomcat stops the running process and immediately relaunches it with JDWP enabled — no need to stop and manually switch executor.
 
 ---
 
@@ -527,6 +574,26 @@ The browser URL is on the **Server tab** under "Open browser". If it shows the w
    ```
 3. Click **Test Connection** to verify connectivity before deploying
 4. Check firewall rules — the Manager API port must be accessible
+
+### Duplicate-classpath errors (Liquibase, CDI, Spring) in multi-module projects
+
+If you see errors like:
+```
+ChangeLogParseException: Found 2 files with the path 'classpath:db/changelog/...'
+```
+or CDI deployment errors about duplicate bean descriptors, the same module's classes are appearing on the classpath twice — once from `target/classes` and once from its JAR in `WEB-INF/lib`.
+
+**Fix:** Trigger a **Redeploy** from the Services toolbar. DevTomcat will regenerate `context.xml` with the correct classpath — shared modules already packaged as JARs will be served from the JAR only, without an additional `<PreResources>` overlay.
+
+If the error persists after Redeploy, ensure the artifact was built fresh (`mvn clean package` or **Build → Rebuild Project**) so `WEB-INF/lib` contains the latest version of the shared module JAR.
+
+### Tomcat stops after restart and does not relaunch
+
+If a balloon notification appears saying **"Restart Failed"** or **"Relaunch Failed"**, Tomcat stopped successfully but the new process could not start. Common causes:
+
+1. **Run configuration deleted or renamed** — check that the configuration still exists in Run → Edit Configurations
+2. **JDK not found** — verify the Project SDK is configured (File → Project Structure → Project)
+3. **Port still in use** — the old process may not have released its port yet; wait a few seconds and click **Start** in the Services toolbar manually
 
 ---
 
