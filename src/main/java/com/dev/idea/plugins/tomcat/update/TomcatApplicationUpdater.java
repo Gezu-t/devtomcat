@@ -275,8 +275,10 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                 com.intellij.execution.ui.RunContentManager
                                         .getInstance(project)
                                         .removeRunContent(capturedExecutor, descriptorToRemove);
-                                com.intellij.execution.dashboard.RunDashboardManager
-                                        .getInstance(project).updateDashboard(true);
+                                // Do NOT call updateDashboard() here — IntelliJ's ServiceModel
+                                // updates automatically when RunContentManager removes the descriptor,
+                                // and calling it manually causes ArrayIndexOutOfBoundsException in
+                                // ServiceModel.reset() when the list is transiently empty.
                             }
 
                             RunnerAndConfigurationSettings settings =

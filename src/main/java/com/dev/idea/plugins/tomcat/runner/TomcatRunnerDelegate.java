@@ -13,7 +13,6 @@ import com.intellij.execution.process.ProcessListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManager;
-import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
@@ -182,9 +181,7 @@ public final class TomcatRunnerDelegate {
                         if (oldExecutor != null) {
                             RunContentManager.getInstance(project)
                                     .removeRunContent(oldExecutor, oldDescriptor);
-                            if (!project.isDisposed()) {
-                                RunDashboardManager.getInstance(project).updateDashboard(true);
-                            }
+                            // updateDashboard() omitted — see TomcatApplicationUpdater for rationale.
                         }
                     }
 

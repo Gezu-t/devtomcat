@@ -65,9 +65,11 @@ package com.dev.idea.plugins.tomcat.utils;
                 return null;
             }
 
-            // Create a project-specific CATALINA_BASE
+            // Create a project-specific CATALINA_BASE outside .idea/ so IntelliJ does not
+            // index the Tomcat work directory (JSP compilations, session files, etc.).
+            // .devtomcat/ is excluded from VCS by the plugin's default .gitignore guidance.
             String configName = sanitizeFileName(config.getName());
-            Path projectCatalinaBase = Paths.get(project.getBasePath(), ".idea", "tomcat", configName);
+            Path projectCatalinaBase = Paths.get(project.getBasePath(), ".devtomcat", configName);
 
             LOG.debug("Using project CATALINA_BASE: " + projectCatalinaBase);
             return projectCatalinaBase;

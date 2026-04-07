@@ -78,7 +78,7 @@ public class DebugTomcatAction extends AnAction {
                         if (capturedDescriptor != null && capturedExecutor != null) {
                             RunContentManager.getInstance(project)
                                     .removeRunContent(capturedExecutor, capturedDescriptor);
-                            RunDashboardManager.getInstance(project).updateDashboard(true);
+                            // updateDashboard() omitted — see TomcatApplicationUpdater for rationale.
                         }
 
                         Executor debugExecutor = ExecutorRegistry.getInstance()
