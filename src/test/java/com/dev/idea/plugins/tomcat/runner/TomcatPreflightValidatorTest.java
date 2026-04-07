@@ -701,15 +701,30 @@ class TomcatPreflightValidatorTest {
         }
 
         @Test
-        @DisplayName("skips artifacts with empty paths without throwing")
-        void skipsEmptyPaths() {
+        @DisplayName("empty deployment paths do not throw; empty context path normalizes to root /")
+        void emptyDeploymentPathsDoNotThrow() {
+            // Empty deployment paths are skipped (no duplicate path warning).
+            // Empty context paths normalize to "/" so two of them ARE a duplicate context.
             DeploymentConfig cfg = config(
                     artifact("a", "", ""),
                     artifact("b", "", ""));
             List<PreflightIssue> issues = new ArrayList<>();
             assertDoesNotThrow(() ->
                     TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues));
-            assertTrue(issues.isEmpty());
+            // Both have context "/" — correct to warn
+            assertEquals(1, issues.size());
+            assertEquals(PreflightIssue.Severity.WARNING, issues.get(0).getSeverity());
+        }
+
+        @Test
+        @DisplayName("skips empty deployment paths without issuing a path-duplicate warning")
+        void emptyDeploymentPathsSkipped() {
+            DeploymentConfig cfg = config(
+                    artifact("a", "", "/app-a"),
+                    artifact("b", "", "/app-b"));
+            List<PreflightIssue> issues = new ArrayList<>();
+            TomcatPreflightValidator.checkDuplicateDeployments(cfg, issues);
+            assertTrue(issues.isEmpty(), "Different context paths with empty deployment paths → no issues");
         }
 
         @Test

@@ -65,7 +65,10 @@ public class DeploymentArtifact implements Serializable, Cloneable {
     public String getContextPath() { return contextPath; }
 
     public void setContextPath(@Nullable String contextPath) {
-        this.contextPath = StringUtil.notNullize(contextPath, "/");
+        // StringUtil.notNullize(s, "/") only substitutes null, not empty string — so we
+        // normalize explicitly: null, "", and whitespace-only all mean the root context "/".
+        String s = contextPath == null ? "" : contextPath.trim();
+        this.contextPath = s.isEmpty() ? "/" : s;
     }
 
     /**

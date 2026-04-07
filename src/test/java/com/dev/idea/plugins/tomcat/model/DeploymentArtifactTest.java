@@ -44,13 +44,39 @@ class DeploymentArtifactTest {
     }
 
     @Test
-    @DisplayName("setContextPath defaults to / on null or empty")
-    void setContextPathDefault() {
+    @DisplayName("setContextPath normalizes null to /")
+    void setContextPathNormalizesNull() {
         DeploymentArtifact art = new DeploymentArtifact();
         art.setContextPath(null);
         assertEquals("/", art.getContextPath());
+    }
+
+    @Test
+    @DisplayName("setContextPath normalizes empty string to / (regression: StringUtil.notNullize omission)")
+    void setContextPathNormalizesEmptyString() {
+        // StringUtil.notNullize("", "/") returns "" not "/" — the fix must not use notNullize.
+        DeploymentArtifact art = new DeploymentArtifact();
+        art.setContextPath("");
+        assertEquals("/", art.getContextPath(),
+                "Empty string context path must normalize to root '/', not stay empty");
+    }
+
+    @Test
+    @DisplayName("setContextPath normalizes whitespace-only to /")
+    void setContextPathNormalizesWhitespace() {
+        DeploymentArtifact art = new DeploymentArtifact();
+        art.setContextPath("   ");
+        assertEquals("/", art.getContextPath());
+    }
+
+    @Test
+    @DisplayName("setContextPath preserves non-empty paths")
+    void setContextPathPreservesNonEmpty() {
+        DeploymentArtifact art = new DeploymentArtifact();
         art.setContextPath("/myapp");
         assertEquals("/myapp", art.getContextPath());
+        art.setContextPath("portal");   // no leading slash — stored as-is
+        assertEquals("portal", art.getContextPath());
     }
 
     @Test

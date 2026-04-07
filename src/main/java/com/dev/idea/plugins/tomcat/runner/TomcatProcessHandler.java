@@ -403,7 +403,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         return fallback;
     }
 
-    private static @Nullable String extractContextNameFromBrowserUrl(@Nullable String url) {
+    static @Nullable String extractContextNameFromBrowserUrl(@Nullable String url) {
         if (StringUtil.isEmptyOrSpaces(url)) {
             return null;
         }
@@ -588,7 +588,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      * references the configured port but Tomcat started on an auto-resolved one.
      */
     @NotNull
-    private static String rewritePortIfNeeded(@NotNull String url, int resolvedPort) {
+    static String rewritePortIfNeeded(@NotNull String url, int resolvedPort) {
         try {
             URI uri = URI.create(url.trim());
             int currentPort = uri.getPort();
