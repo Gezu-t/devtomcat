@@ -216,7 +216,7 @@ public final class TomcatConfigPreparer {
             LOG.warn("server.xml not found at " + sourceServerXml + ", generating minimal config");
             String minimal = generateMinimalServerXml(httpPort, shutdownPort,
                     httpsPort, httpsEnabled, ajpPort, ajpEnabled);
-            Files.writeString(targetServerXml, minimal);
+            atomicWriteString(targetServerXml, minimal);
             return List.of();
         }
 
@@ -241,7 +241,7 @@ public final class TomcatConfigPreparer {
             outputXml = result.getXml();
         }
 
-        Files.writeString(targetServerXml, outputXml);
+        atomicWriteString(targetServerXml, outputXml);
         LOG.info("Created server.xml at " + targetServerXml + " (HTTP=" + httpPort +
                 ", shutdown=" + shutdownPort +
                 (httpsEnabled ? ", HTTPS=" + httpsPort : "") +
@@ -295,6 +295,24 @@ public final class TomcatConfigPreparer {
         });
 
         LOG.info("Copied full conf directory from " + sourceConf + " to " + targetConf);
+    }
+
+    /**
+     * Writes {@code content} to {@code target} atomically by writing to a sibling
+     * temp file and then performing an atomic move. Prevents a partially-written
+     * {@code server.xml} if the process crashes or is killed mid-write.
+     */
+    private static void atomicWriteString(@NotNull Path target, @NotNull String content) throws IOException {
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            Files.writeString(tmp, content);
+            Files.move(tmp, target,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            Files.deleteIfExists(tmp);
+            throw e;
+        }
     }
 
     private static void recreateDirectory(@NotNull Path dir) throws IOException {

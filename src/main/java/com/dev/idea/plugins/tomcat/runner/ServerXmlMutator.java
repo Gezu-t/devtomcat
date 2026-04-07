@@ -299,10 +299,13 @@ public final class ServerXmlMutator {
     @NotNull
     static Document parse(@NotNull String xml) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        // Disable external entities for security
+        // Full XXE hardening — defense-in-depth across all major parser implementations
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
         factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
         DocumentBuilder builder = factory.newDocumentBuilder();
         return builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
     }
@@ -310,6 +313,10 @@ public final class ServerXmlMutator {
     @NotNull
     static String serialize(@NotNull Document doc) throws Exception {
         TransformerFactory tf = TransformerFactory.newInstance();
+        // Secure processing prevents SSRF via stylesheet directives
+        tf.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        tf.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        tf.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
         Transformer transformer = tf.newTransformer();
         transformer.setOutputProperty(OutputKeys.INDENT, "no");
         transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "no");
