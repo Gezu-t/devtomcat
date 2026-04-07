@@ -53,13 +53,6 @@
     ]]></description>
 
     <change-notes><![CDATA[
-    <h3>Version 1.0.3</h3>
-    <ul>
-        <li><b>Multi-module project support</b> — Deployment now understands the IntelliJ module dependency graph. When a web module depends on a shared library module already packaged as a JAR in WEB-INF/lib, the plugin no longer adds a conflicting PreResources overlay for that module's output directory. This eliminates Liquibase, CDI, and similar duplicate-classpath errors in Maven and Gradle multi-module projects.</li>
-        <li><b>Build-tool-agnostic duplicate detection</b> — Three-tier guard: (1) name-based matching using Maven artifactId; (2) content-based matching by sampling module output file paths against WEB-INF/lib JAR entries — works regardless of JAR naming convention; (3) Maven pom.properties metadata matching — detects coverage even when the module output directory is empty (not yet compiled).</li>
-        <li><b>Orphaned artifact filtering</b> — Stale artifacts left over from renamed or removed modules are no longer shown in the artifact selector or auto-detected for deployment.</li>
-    </ul>
-
     <h3>Version 1.0.2</h3>
     <ul>
         <li><b>Update Application on re-run</b> — Run/Debug while Tomcat is running shows the Update dialog (Update Resources, Redeploy, Restart) instead of starting a duplicate process</li>

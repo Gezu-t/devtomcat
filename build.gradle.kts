@@ -80,7 +80,7 @@ tasks {
     }
 
     buildSearchableOptions {
-        enabled = true
+        enabled = false
     }
 
     wrapper {
