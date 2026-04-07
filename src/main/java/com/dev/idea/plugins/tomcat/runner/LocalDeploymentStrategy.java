@@ -498,7 +498,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * Built once per JAR during the initial WEB-INF/lib scan so that subsequent
      * per-module guard checks are purely in-memory — no repeated ZipFile opens.
      */
-    private static final class JarMeta {
+    static final class JarMeta {
         /** Stripped base name, e.g. {@code "common"} from {@code "common-1.0-SNAPSHOT.jar"}. */
         final String baseName;
         /** All ZIP entry names — used for content-based module matching. */
@@ -519,7 +519,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * artifactIds for the metadata-based module coverage check.
      */
     @NotNull
-    private static JarMeta scanJar(@NotNull Path jarPath, @Nullable String baseName) {
+    static JarMeta scanJar(@NotNull Path jarPath, @Nullable String baseName) {
         if (baseName == null) {
             String n = jarPath.getFileName().toString();
             baseName = n.endsWith(".jar") ? n.substring(0, n.length() - 4) : n;
@@ -559,7 +559,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * @return the matching JAR's base name, or {@code null} if no JAR covers this module
      */
     @Nullable
-    private static String findCoveringJar(@NotNull String moduleOutputNativePath,
+    static String findCoveringJar(@NotNull String moduleOutputNativePath,
                                           @Nullable String artifactName,
                                           @NotNull List<JarMeta> jarIndex) {
         if (jarIndex.isEmpty()) return null;
