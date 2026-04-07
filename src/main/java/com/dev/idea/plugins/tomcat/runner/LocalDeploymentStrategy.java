@@ -8,6 +8,7 @@ import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -605,9 +606,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     @NotNull
     private static Map<String, String> buildModuleOutputToArtifactName(
             @NotNull Module webModule, @NotNull Project project) {
-        Map<String, String> result = new HashMap<>();
-        collectModuleDependencyNames(webModule, project, result, new HashSet<>());
-        return result;
+        // OrderEnumerator and ModuleRootManager require a read action.
+        return ReadAction.compute(() -> {
+            Map<String, String> result = new HashMap<>();
+            collectModuleDependencyNames(webModule, project, result, new HashSet<>());
+            return result;
+        });
     }
 
     private static void collectModuleDependencyNames(
@@ -684,6 +688,15 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     @Nullable
     private static Module findModuleForArtifact(@NotNull DeploymentArtifact artifact,
                                                 @NotNull Project project) {
+        // All model access (ArtifactManager, ModuleManager, ModuleRootManager) requires a
+        // read action. The method is called both from background threads and from the EDT
+        // (e.g. compiler-completion callbacks), so we always acquire one explicitly.
+        return ReadAction.compute(() -> findModuleForArtifactUnderReadAction(artifact, project));
+    }
+
+    @Nullable
+    private static Module findModuleForArtifactUnderReadAction(@NotNull DeploymentArtifact artifact,
+                                                               @NotNull Project project) {
         try {
             ModuleManager moduleManager = ModuleManager.getInstance(project);
             String name = artifact.getName();
