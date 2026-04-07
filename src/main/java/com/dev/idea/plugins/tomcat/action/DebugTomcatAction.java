@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
-import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.ProgramRunnerUtil;
@@ -54,8 +53,8 @@ public class DebugTomcatAction extends AnAction {
                 : null;
         RunContentDescriptor descriptorToRemove = null;
         if (originalExecutor != null) {
-            for (RunContentDescriptor d : ExecutionManager.getInstance(project)
-                    .getRunningDescriptors(s -> s != null && s.getConfiguration() == config)) {
+            for (RunContentDescriptor d :
+                    RunContentManager.getInstance(project).getAllDescriptors()) {
                 if (d.getProcessHandler() == handler) {
                     descriptorToRemove = d;
                     break;

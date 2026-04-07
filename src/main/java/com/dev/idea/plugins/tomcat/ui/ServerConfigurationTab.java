@@ -346,7 +346,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
         private void testConnection() {
             statusLabel.setText("Testing...");
-            statusLabel.setForeground(com.intellij.util.ui.UIUtil.getContextHelpForeground());
+            statusLabel.setForeground(com.intellij.util.ui.JBUI.CurrentTheme.ContextHelp.FOREGROUND);
             testButton.setEnabled(false);
 
             RemoteConfig rc = buildCurrentRemoteConfig();

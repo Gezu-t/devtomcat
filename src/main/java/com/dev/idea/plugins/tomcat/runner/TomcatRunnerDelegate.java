@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
-import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.ProgramRunnerUtil;
@@ -21,6 +20,7 @@ import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -131,11 +131,18 @@ public final class TomcatRunnerDelegate {
     @NotNull
     public List<RunContentDescriptor> getDescriptorsFor(@NotNull TomcatRunConfiguration config,
                                                          @NotNull ExecutionEnvironment env) {
-        // Use reference equality: env.getRunProfile() is the same instance RunManager holds,
-        // so this is exact identity — immune to duplicate display names.
-        return ExecutionManager.getInstance(env.getProject())
-                .getRunningDescriptors(settings ->
-                        settings != null && settings.getConfiguration() == config);
+        // Use RunContentManager.getAllDescriptors() — the public API that covers both the
+        // Run tool-window and the Services panel — then filter by TomcatProcessHandler identity.
+        // Reference equality on the configuration instance is immune to duplicate display names.
+        List<RunContentDescriptor> result = new ArrayList<>();
+        for (RunContentDescriptor d :
+                RunContentManager.getInstance(env.getProject()).getAllDescriptors()) {
+            if (d.getProcessHandler() instanceof TomcatProcessHandler th
+                    && th.getConfiguration() == config) {
+                result.add(d);
+            }
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
@@ -149,8 +156,8 @@ public final class TomcatRunnerDelegate {
      *
      * <p>{@link RunContentManager#findContentDescriptor} only scans executor tool-window
      * tabs and misses Services-panel entries. We resolve the descriptor via
-     * {@link #getDescriptorsFor} (backed by {@link ExecutionManager#getRunningDescriptors})
-     * which is authoritative for all entries, then pass it directly to
+     * {@link #getDescriptorsFor} (backed by {@link RunContentManager#getAllDescriptors})
+     * which covers both the Run tool-window and the Services panel, then pass it directly to
      * {@link RunContentManager#removeRunContent}.
      */
     public void stopAndRelaunch(@NotNull TomcatProcessHandler conflicting,

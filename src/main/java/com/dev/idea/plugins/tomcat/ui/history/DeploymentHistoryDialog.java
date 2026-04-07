@@ -11,7 +11,6 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -99,7 +98,7 @@ public class DeploymentHistoryDialog extends DialogWrapper {
         textPanel.add(valueLabel);
 
         JBLabel nameLabel = new JBLabel(label);
-        nameLabel.setForeground(UIUtil.getContextHelpForeground());
+        nameLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         textPanel.add(nameLabel);
 
         card.add(textPanel, BorderLayout.CENTER);

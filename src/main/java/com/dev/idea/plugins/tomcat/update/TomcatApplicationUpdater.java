@@ -252,9 +252,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             }
             com.intellij.execution.ui.RunContentDescriptor capturedDescriptor = null;
             for (com.intellij.execution.ui.RunContentDescriptor d :
-                    com.intellij.execution.ExecutionManager.getInstance(project)
-                            .getRunningDescriptors(s -> s != null
-                                    && s.getConfiguration() == configuration)) {
+                    com.intellij.execution.ui.RunContentManager.getInstance(project)
+                            .getAllDescriptors()) {
                 if (d.getProcessHandler() == processHandler) {
                     capturedDescriptor = d;
                     break;

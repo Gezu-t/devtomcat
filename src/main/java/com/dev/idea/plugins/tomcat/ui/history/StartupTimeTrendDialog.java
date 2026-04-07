@@ -8,7 +8,6 @@ import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -86,7 +85,7 @@ public class StartupTimeTrendDialog extends DialogWrapper {
         String statsText = String.format("Last: %s  |  Avg: %s  |  Best: %s  |  Runs: %d",
                 formatMs(last), formatMs(avg), formatMs(fastest), times.size());
         JBLabel statsLabel = new JBLabel(statsText);
-        statsLabel.setForeground(UIUtil.getContextHelpForeground());
+        statsLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         header.add(statsLabel, BorderLayout.EAST);
 
         panel.add(header, BorderLayout.NORTH);
@@ -106,7 +105,7 @@ public class StartupTimeTrendDialog extends DialogWrapper {
                 color = JBColor.RED;
             } else {
                 trend = "Same as previous run";
-                color = UIUtil.getContextHelpForeground();
+                color = JBUI.CurrentTheme.ContextHelp.FOREGROUND;
             }
             JBLabel trendLabel = new JBLabel(trend);
             trendLabel.setForeground(color);
