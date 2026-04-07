@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.RunManagerEx;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
@@ -278,10 +279,13 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                             .map(DeploymentArtifact::getDisplayName)
                             .collect(java.util.stream.Collectors.toList());
 
-            // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager
+            // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager.
+            // ArtifactManager.getInstance() requires a read action — syncBeforeLaunchWithDeployments()
+            // may be called from background threads (e.g. configuration panel sync on non-EDT).
             boolean ultimateArtifactTaskAdded = false;
             try {
-                ArtifactManager artifactManager = ArtifactManager.getInstance(project);
+                ArtifactManager artifactManager = ReadAction.compute(
+                        () -> ArtifactManager.getInstance(project));
                 currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
 
                 if (deploymentArtifacts != null && !deploymentArtifacts.isEmpty()) {

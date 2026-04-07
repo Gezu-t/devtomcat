@@ -22,6 +22,8 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -287,8 +289,11 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                 logger.logServerError("Could not find run configuration settings for restart");
                             }
                         } catch (Exception e) {
-                            LOG.warn("Failed to restart Tomcat", e);
+                            LOG.warn("Failed to restart Tomcat: " + configuration.getName(), e);
                             logger.logServerError("Failed to restart: " + e.getMessage());
+                            // Tomcat is no longer running — notify prominently so the user
+                            // knows they must start the configuration manually.
+                            notifyRestartFailed(project, configuration.getName(), e.getMessage());
                         }
                     });
                 }
@@ -441,6 +446,27 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, config.getName(), defaultAction, isLocal);
         if (!dialog.showAndGet()) return;
         new TomcatApplicationUpdater(project, handler, config, dialog.getSelectedAction()).executeUpdate();
+    }
+
+    /**
+     * Shows a balloon notification when a restart fails after the old process has already
+     * been stopped. The console log entry may be scrolled past — a balloon ensures the user
+     * sees that Tomcat is no longer running and must be started manually.
+     */
+    private static void notifyRestartFailed(@NotNull Project project,
+                                            @NotNull String configName,
+                                            @Nullable String errorMessage) {
+        try {
+            String content = "Tomcat '" + configName + "' stopped but could not restart" +
+                    (errorMessage != null ? ": " + errorMessage : ".") +
+                    " Start the configuration manually to resume.";
+            NotificationGroupManager.getInstance()
+                    .getNotificationGroup(NOTIFICATION_GROUP_ID)
+                    .createNotification("Restart Failed", content, NotificationType.ERROR)
+                    .notify(project);
+        } catch (Exception e) {
+            LOG.debug("Could not show restart-failure notification: " + e.getMessage());
+        }
     }
 
     /**

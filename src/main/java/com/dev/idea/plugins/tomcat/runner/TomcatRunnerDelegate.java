@@ -14,9 +14,12 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManager;
 import com.intellij.execution.dashboard.RunDashboardManager;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import static com.dev.idea.plugins.tomcat.TomcatConstants.NOTIFICATION_GROUP_ID;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -194,9 +197,12 @@ public final class TomcatRunnerDelegate {
                                     + " in " + currentExecutor.getActionName() + " mode");
                         } catch (com.intellij.execution.ExecutionException ex) {
                             LOG.warn("Failed to relaunch " + config.getName(), ex);
+                            notifyRelaunchFailed(project, config.getName(), ex.getMessage());
                         }
                     } else {
-                        LOG.warn("Could not find run settings for relaunch: " + config.getName());
+                        String msg = "Could not find run settings for relaunch: " + config.getName();
+                        LOG.warn(msg);
+                        notifyRelaunchFailed(project, config.getName(), "Run configuration not found");
                     }
                 });
             }
@@ -214,5 +220,27 @@ public final class TomcatRunnerDelegate {
             if (d.getProcessHandler() == handler) return d;
         }
         return null;
+    }
+
+    /**
+     * Shows a balloon notification when a relaunch fails after the old process has already
+     * been stopped. The old process is dead at this point and no rollback is possible —
+     * the balloon ensures the user knows they must start the configuration manually.
+     */
+    private static void notifyRelaunchFailed(@NotNull Project project,
+                                             @NotNull String configName,
+                                             @Nullable String reason) {
+        try {
+            String content = "Tomcat '" + configName + "' stopped but could not relaunch" +
+                    (reason != null ? ": " + reason : ".") +
+                    " Start the configuration manually to resume.";
+            NotificationGroupManager.getInstance()
+                    .getNotificationGroup(NOTIFICATION_GROUP_ID)
+                    .createNotification("Relaunch Failed", content, NotificationType.ERROR)
+                    .notify(project);
+        } catch (Exception e) {
+            Logger.getInstance(TomcatRunnerDelegate.class)
+                    .debug("Could not show relaunch-failure notification: " + e.getMessage());
+        }
     }
 }
