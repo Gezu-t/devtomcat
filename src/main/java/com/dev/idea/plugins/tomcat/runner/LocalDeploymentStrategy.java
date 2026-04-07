@@ -343,12 +343,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                         skippedModules.add(moduleDirName);
                         continue;
                     }
-                    // Guard 2 — content-based: build-tool-agnostic fallback for custom JAR naming
-                    // (e.g. Gradle archivesBaseName, Ant custom jar task). Samples a few file paths
-                    // from the module output and checks whether any WEB-INF/lib JAR contains them.
-                    String coveringJar = findCoveringJarByContent(nativePath, webInfLib);
+                    // Guard 2 — content + metadata: covers custom JAR naming (Gradle archivesBaseName,
+                    // Ant custom jar task) AND empty/not-yet-compiled module outputs.
+                    // Content check: samples file paths from the output dir and looks for them in JARs.
+                    // Metadata check: reads META-INF/maven/<g>/<artifactId>/pom.properties inside JARs
+                    // — works even when the output dir is empty because it doesn't need any content.
+                    String coveringJar = findCoveringJar(nativePath, moduleDirName, webInfLib);
                     if (coveringJar != null) {
-                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — content-matched by '" + coveringJar + "' in WEB-INF/lib");
+                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — matched by '" + coveringJar + "' in WEB-INF/lib");
                         skippedModules.add(moduleDirName != null ? moduleDirName : coveringJar);
                         continue;
                     }
@@ -490,25 +492,31 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static final int CONTENT_SAMPLE_SIZE = 5;
 
     /**
-     * Content-based fallback for detecting whether a module's output is already packaged
-     * inside a JAR in {@code WEB-INF/lib}.
+     * Scans {@code WEB-INF/lib} JARs in a single pass to determine whether any of them
+     * packages the given module's output. Two complementary checks run per JAR:
      *
-     * <p>Name-based matching (Maven artifactId / module name) covers the common case but
-     * fails when the JAR has a custom name — e.g. Gradle {@code archivesBaseName}, Ant
-     * custom jar tasks, or any build tool that names the output differently from the module.
-     * This method samples up to {@value #CONTENT_SAMPLE_SIZE} regular file paths from the
-     * module output directory and checks whether any {@code WEB-INF/lib} JAR contains those
-     * same paths as ZIP entries. A single match is treated as sufficient evidence — two
-     * independent JARs are very unlikely to share the same internal resource path.
+     * <ol>
+     *   <li><b>Content check</b> — samples up to {@value #CONTENT_SAMPLE_SIZE} file paths
+     *       from {@code moduleOutputNativePath} and tests whether the JAR contains those
+     *       entries. Covers any build tool with non-standard JAR naming (e.g. Gradle
+     *       {@code archivesBaseName}, Ant custom jar task). Skipped when the output
+     *       directory is empty or does not yet exist.</li>
+     *   <li><b>Metadata check</b> — looks for
+     *       {@code META-INF/maven/<groupId>/<artifactId>/pom.properties} entries whose
+     *       path ends with {@code /<artifactId>/pom.properties}. Maven always packages
+     *       this file, so this check works even when the module has not been compiled
+     *       yet (empty output directory). Requires {@code artifactName} to be non-null.</li>
+     * </ol>
      *
-     * @return the base JAR name (version stripped) if a covering JAR is found, else {@code null}
+     * @return the base JAR name (version stripped) of the first matching JAR, or {@code null}
      */
     @Nullable
-    private static String findCoveringJarByContent(@NotNull String moduleOutputNativePath,
-                                                   @NotNull Path webInfLib) {
+    private static String findCoveringJar(@NotNull String moduleOutputNativePath,
+                                          @Nullable String artifactName,
+                                          @NotNull Path webInfLib) {
         if (!Files.isDirectory(webInfLib)) return null;
 
-        // Collect a small sample of relative file paths from the module output
+        // Collect a small sample of relative paths from the module output (may be empty)
         Path outputDir = Paths.get(moduleOutputNativePath);
         List<String> sample = new ArrayList<>();
         try (var walk = Files.walk(outputDir)) {
@@ -517,26 +525,38 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 .forEach(p -> sample.add(
                         outputDir.relativize(p).toString().replace(File.separatorChar, '/')));
         } catch (IOException e) {
-            LOG.debug("Content check: could not walk module output '" + moduleOutputNativePath + "': " + e.getMessage());
-            return null;
+            LOG.debug("JAR scan: could not walk '" + moduleOutputNativePath + "': " + e.getMessage());
         }
-        if (sample.isEmpty()) return null;
 
-        // Scan WEB-INF/lib JARs for a match
+        // Maven pom.properties path suffix: META-INF/maven/<groupId>/<artifactId>/pom.properties
+        // We don't know groupId, so match on the tail — unique enough in practice.
+        String pomSuffix = artifactName != null ? "/" + artifactName + "/pom.properties" : null;
+
+        if (sample.isEmpty() && pomSuffix == null) return null;
+
+        // Single pass over WEB-INF/lib JARs — both checks per JAR to avoid double-scanning
         try (var stream = Files.list(webInfLib)) {
             for (Path jarPath : (Iterable<Path>) stream
                     .filter(p -> p.getFileName().toString().endsWith(".jar"))::iterator) {
                 try (var zf = new java.util.zip.ZipFile(jarPath.toFile())) {
-                    boolean matched = sample.stream().anyMatch(s -> zf.getEntry(s) != null);
-                    if (matched) {
+                    // Content check: any sampled path present in this JAR?
+                    if (!sample.isEmpty() && sample.stream().anyMatch(s -> zf.getEntry(s) != null)) {
                         return stripJarVersion(jarPath.getFileName().toString());
                     }
+                    // Metadata check: does pom.properties name this module's artifactId?
+                    if (pomSuffix != null) {
+                        final String suffix = pomSuffix;
+                        boolean hasPom = zf.stream().anyMatch(e -> e.getName().endsWith(suffix));
+                        if (hasPom) {
+                            return stripJarVersion(jarPath.getFileName().toString());
+                        }
+                    }
                 } catch (IOException e) {
-                    LOG.debug("Content check: could not inspect JAR '" + jarPath.getFileName() + "': " + e.getMessage());
+                    LOG.debug("JAR scan: could not inspect '" + jarPath.getFileName() + "': " + e.getMessage());
                 }
             }
         } catch (IOException e) {
-            LOG.debug("Content check: could not list WEB-INF/lib: " + e.getMessage());
+            LOG.debug("JAR scan: could not list WEB-INF/lib: " + e.getMessage());
         }
         return null;
     }
