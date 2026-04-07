@@ -18,7 +18,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.tree.TreePath;
 
 /**
  * Shared utilities for extracting DevTomcat-related objects from the Services
@@ -30,29 +29,26 @@ final class ServiceActionUtils {
 
     /**
      * Extracts a {@link TomcatRunConfiguration} from a Services tree action event.
-     * Tries NAVIGATABLE first (which may expose a RunDashboardRunConfigurationNode),
-     * then walks the tree selection as a fallback.
+     *
+     * <p>Uses only BGT-safe data keys ({@link CommonDataKeys#NAVIGATABLE} and
+     * {@link PlatformCoreDataKeys#SELECTED_ITEMS}) so this method is safe to call from
+     * an action's {@code update()} method running on {@link ActionUpdateThread#BGT}.
+     * {@link PlatformCoreDataKeys#CONTEXT_COMPONENT} / {@code JTree.getSelectionPath()}
+     * requires the EDT and must NOT be called from a BGT update path.
      */
     @Nullable
     static TomcatRunConfiguration findTomcatConfiguration(@NotNull AnActionEvent e) {
-        // Try NAVIGATABLE — may expose RunDashboardRunConfigurationNode directly
+        // Primary: NAVIGATABLE exposes RunDashboardRunConfigurationNode directly — BGT-safe
         Navigatable navigatable = e.getData(CommonDataKeys.NAVIGATABLE);
         TomcatRunConfiguration config = extractFromObject(navigatable);
         if (config != null) return config;
 
-        // Try tree selection fallback
-        var component = e.getData(PlatformCoreDataKeys.CONTEXT_COMPONENT);
-        if (component instanceof JTree tree) {
-            TreePath path = tree.getSelectionPath();
-            if (path != null) {
-                config = extractFromObject(path.getLastPathComponent());
+        // Secondary: SELECTED_ITEMS covers multi-selection and newer Services panel layouts
+        Object[] items = e.getData(PlatformCoreDataKeys.SELECTED_ITEMS);
+        if (items != null) {
+            for (Object item : items) {
+                config = extractFromObject(item);
                 if (config != null) return config;
-
-                // Walk up the tree path for wrapper scenarios
-                for (int i = path.getPathCount() - 1; i >= 0; i--) {
-                    config = extractFromObject(path.getPathComponent(i));
-                    if (config != null) return config;
-                }
             }
         }
 
@@ -61,27 +57,26 @@ final class ServiceActionUtils {
 
     /**
      * Finds the active {@link ProcessHandler} for a Tomcat configuration, if running.
+     *
+     * <p>BGT-safe — uses only {@link CommonDataKeys#NAVIGATABLE} and
+     * {@link PlatformCoreDataKeys#SELECTED_ITEMS}.
      */
     @Nullable
     static ProcessHandler findProcessHandler(@NotNull AnActionEvent e) {
         Navigatable navigatable = e.getData(CommonDataKeys.NAVIGATABLE);
         if (navigatable instanceof RunDashboardRunConfigurationNode node) {
             RunContentDescriptor descriptor = node.getDescriptor();
-            if (descriptor != null) {
-                return descriptor.getProcessHandler();
-            }
+            if (descriptor != null) return descriptor.getProcessHandler();
         }
 
-        // Tree fallback
-        var component = e.getData(PlatformCoreDataKeys.CONTEXT_COMPONENT);
-        if (component instanceof JTree tree) {
-            TreePath path = tree.getSelectionPath();
-            if (path != null) {
-                Object last = path.getLastPathComponent();
-                ProcessHandler handler = extractProcessHandler(last);
+        Object[] items = e.getData(PlatformCoreDataKeys.SELECTED_ITEMS);
+        if (items != null) {
+            for (Object item : items) {
+                ProcessHandler handler = extractProcessHandler(item);
                 if (handler != null) return handler;
             }
         }
+
         return null;
     }
 
