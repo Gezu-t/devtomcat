@@ -507,4 +507,87 @@ class LocalDeploymentStrategyTest {
             assertEquals("common", result);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // getMavenArtifactId — graceful degradation (no IntelliJ platform needed)
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("getMavenArtifactId")
+    class GetMavenArtifactIdTests {
+
+        /**
+         * The Maven plugin (org.jetbrains.idea.maven) is absent in IntelliJ IDEA Community
+         * and in plain test classpaths. The method uses reflection and wraps all exceptions,
+         * so it must return {@code null} rather than propagating {@code ClassNotFoundException}.
+         * Class.forName throws before the Module/Project args are dereferenced — null is safe.
+         */
+        @Test
+        @DisplayName("returns null when Maven plugin classes are absent from classpath")
+        void returnsNullWhenMavenPluginAbsent() throws Exception {
+            java.lang.reflect.Method m = LocalDeploymentStrategy.class.getDeclaredMethod(
+                    "getMavenArtifactId",
+                    com.intellij.openapi.module.Module.class,
+                    com.intellij.openapi.project.Project.class);
+            m.setAccessible(true);
+
+            // Non-null stubs satisfy @NotNull instrumentation; ClassNotFoundException is
+            // thrown inside the method before the args are actually dereferenced.
+            com.intellij.openapi.module.Module module =
+                    org.mockito.Mockito.mock(com.intellij.openapi.module.Module.class);
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            Object result = m.invoke(null, module, project);
+
+            assertNull(result, "Must return null when Maven plugin is absent");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Module name derivation (compound-name stripping)
+    // Tests the string logic used in collectModuleDependencyNames when Maven
+    // plugin is absent and we fall back to the IntelliJ module name.
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("moduleArtifactNameFromModuleName")
+    class ModuleArtifactNameTests {
+
+        /** Simulates the compound-name stripping in collectModuleDependencyNames. */
+        private static String stripCompound(String moduleName) {
+            int dot = moduleName.lastIndexOf('.');
+            return dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
+        }
+
+        @Test
+        @DisplayName("simple name returned unchanged")
+        void simpleName() {
+            assertEquals("common", stripCompound("common"));
+        }
+
+        @Test
+        @DisplayName("compound Maven-style name strips project prefix")
+        void mavenCompound() {
+            assertEquals("common", stripCompound("devtomcat-test-webapp.common"));
+        }
+
+        @Test
+        @DisplayName("multi-level compound name returns only last component")
+        void multiLevel() {
+            assertEquals("api", stripCompound("org.example.myapp.api"));
+        }
+
+        @Test
+        @DisplayName("name ending with dot returns empty string (edge case)")
+        void trailingDot() {
+            assertEquals("", stripCompound("myapp."));
+        }
+
+        @Test
+        @DisplayName("hyphenated simple name returned unchanged")
+        void hyphenated() {
+            assertEquals("webapp-portal", stripCompound("webapp-portal"));
+        }
+    }
 }
