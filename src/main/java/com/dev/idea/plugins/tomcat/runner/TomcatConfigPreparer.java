@@ -307,9 +307,14 @@ public final class TomcatConfigPreparer {
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
         try {
             Files.writeString(tmp, content);
-            Files.move(tmp, target,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            try {
+                Files.move(tmp, target,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                // Filesystem doesn't support atomic move — fall back to non-atomic replace
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             Files.deleteIfExists(tmp);
             throw e;

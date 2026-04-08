@@ -306,18 +306,31 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             // may be called from background threads (e.g. configuration panel sync on non-EDT).
             boolean ultimateArtifactTaskAdded = false;
             try {
-                ArtifactManager artifactManager = ReadAction.compute(
-                        () -> ArtifactManager.getInstance(project));
+                // ArtifactManager.getInstance() and getArtifacts() both access the
+                // project model and require a read action. The read action covers
+                // only model access; list mutations happen outside.
+                List<Artifact> matchedArtifacts = ReadAction.compute(() -> {
+                    ArtifactManager artifactManager = ArtifactManager.getInstance(project);
+                    if (deploymentArtifacts == null || deploymentArtifacts.isEmpty()) {
+                        return Collections.<Artifact>emptyList();
+                    }
+                    List<Artifact> matched = new ArrayList<>();
+                    for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
+                        Artifact a = findMatchingArtifact(artifactManager, deploymentArtifact);
+                        if (a != null) {
+                            matched.add(a);
+                        }
+                    }
+                    return matched;
+                });
+
                 currentTasks.removeIf(task -> task instanceof BuildArtifactsBeforeRunTask);
 
-                if (deploymentArtifacts != null && !deploymentArtifacts.isEmpty()) {
+                if (!matchedArtifacts.isEmpty()) {
                     BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
-                    for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
-                        Artifact matched = findMatchingArtifact(artifactManager, deploymentArtifact);
-                        if (matched != null) {
-                            buildTask.addArtifact(matched);
-                            LOG.info("DevTomcat: Linked artifact '" + matched.getName() + "' to Build task");
-                        }
+                    for (Artifact matched : matchedArtifacts) {
+                        buildTask.addArtifact(matched);
+                        LOG.info("DevTomcat: Linked artifact '" + matched.getName() + "' to Build task");
                     }
                     if (!buildTask.getArtifactPointers().isEmpty()) {
                         buildTask.setEnabled(true);
