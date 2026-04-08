@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.intellij.openapi.diagnostic.Logger;
@@ -346,10 +347,7 @@ public final class TomcatManagerDeployer {
 
     @NotNull
     private static String normalizeContextPath(@Nullable String contextPath) {
-        if (contextPath == null || contextPath.isEmpty() || "/".equals(contextPath)) {
-            return "/";
-        }
-        return contextPath.startsWith("/") ? contextPath : "/" + contextPath;
+        return ContextPathUtils.normalizeContextPath(contextPath);
     }
 
     @NotNull

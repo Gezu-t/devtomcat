@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatCompatibilityChecker;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
+import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
@@ -22,7 +23,7 @@ import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
-import com.intellij.notification.NotificationGroupManager;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -33,6 +34,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Builds the Tomcat process command line and manages process lifecycle.
@@ -46,7 +48,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private final TomcatDeploymentLogger deploymentLogger;
     private volatile PortConfig resolvedPorts;
     private volatile int resolvedDebugPort = -1;
-    private final java.util.concurrent.atomic.AtomicBoolean preLaunchDone = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final AtomicBoolean preLaunchDone = new AtomicBoolean(false);
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
                                   @NotNull TomcatRunConfiguration configuration) {
@@ -101,14 +103,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // are on the remote machine and not claimable or detectable from here.
         boolean portsReserved = false;
         try {
-            if (!TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+            if (!configuration.isRemoteMode()) {
                 resolvePortConflicts();
                 portsReserved = true;
             }
 
             DeploymentStrategy.create(configuration).resolveCredentials(configuration);
 
-            if (TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+            if (configuration.isRemoteMode()) {
                 RemoteConfig rc = configuration.getConfigData().getRemoteConfig();
                 if (rc != null && rc.isUseCredentials() && rc.getPassword().isEmpty()) {
                     throw new ExecutionException(
@@ -140,7 +142,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
         // Only warn for local debug — in remote mode the user must supply their
         // own JDWP agent on the remote JVM, so a manual -agentlib:jdwp is expected.
-        if (TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) return;
+        if (configuration.isRemoteMode()) return;
 
         String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
         if (hasManualJdwpAgent(vmOptions)) {
@@ -198,7 +200,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (isDebug) {
             var debugConfig = configuration.getConfigData().getDebugConfig();
             int debugPort = debugConfig != null ? debugConfig.getPort()
-                    : com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT;
+                    : DebugConfig.DEFAULT_DEBUG_PORT;
 
             PortConflictDetector.DebugPortResolution resolution =
                     PortConflictDetector.resolveConflictsWithDebug(originalPorts, debugPort);
@@ -239,7 +241,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private void claimAndTrack(@NotNull PortConfig rp,
                                @NotNull TomcatPortRegistry registry,
                                @NotNull String configName,
-                               @NotNull java.util.List<String> changes) {
+                               @NotNull List<String> changes) {
         int orig, claimed;
 
         orig = rp.getHttp();
@@ -294,7 +296,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         }
     }
 
-    private void logResolutionChanges(@NotNull java.util.List<String> changes) {
+    private void logResolutionChanges(@NotNull List<String> changes) {
         if (!changes.isEmpty()) {
             deploymentLogger.logServerWarning("Port conflicts detected and auto-resolved:");
             for (String change : changes) {
@@ -371,15 +373,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     }
 
     private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
-        try {
-            NotificationGroupManager.getInstance()
-                    .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
-                    .createNotification(title, content, type)
-                    .notify(configuration.getProject());
-        } catch (Exception e) {
-            // Notification group may not be registered — fall back silently
-            LOG.debug("Could not show notification: " + e.getMessage());
-        }
+        TomcatNotifier.notify(configuration.getProject(), title, content, type);
     }
 
     @NotNull
@@ -423,7 +417,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 int debugPort = resolvedDebugPort > 0 ? resolvedDebugPort
                         : (configuration.getConfigData().getDebugConfig() != null
                             ? configuration.getConfigData().getDebugConfig().getPort()
-                            : com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT);
+                            : DebugConfig.DEFAULT_DEBUG_PORT);
                 commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));
                 String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
                         + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT,

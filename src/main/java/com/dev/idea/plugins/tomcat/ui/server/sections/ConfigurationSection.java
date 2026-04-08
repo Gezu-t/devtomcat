@@ -35,6 +35,30 @@ public interface ConfigurationSection {
         return layout;
     }
 
+    /**
+     * Adds a standard label+field row to {@code panel}: label fixed at column 0,
+     * field expanding horizontally at column 1.
+     *
+     * <p>Fully resets all GBC state before each column so callers never need to
+     * track prior constraint values.
+     *
+     * @param panel  the target panel (must use {@link #createAlignedGridBagLayout()})
+     * @param gbc    shared constraint object — mutated in place
+     * @param row    {@code gridy} for this row
+     * @param label  label component (typically a {@link com.intellij.ui.components.JBLabel})
+     * @param field  field component (ComboBox, JBTextField, etc.)
+     */
+    static void addLabelAndField(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
+                                  int row, @NotNull JComponent label, @NotNull JComponent field) {
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 1; gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE; gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = JBUI.insets(2, 0, 2, 4);
+        panel.add(label, gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = JBUI.insets(2, 4, 2, 8);
+        panel.add(field, gbc);
+    }
+
     boolean isModified(@NotNull TomcatRunConfiguration config);
 
     List<ValidationInfo> validateSettings();

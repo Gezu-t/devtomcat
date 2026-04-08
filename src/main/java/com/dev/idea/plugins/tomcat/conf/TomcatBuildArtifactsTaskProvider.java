@@ -98,8 +98,7 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
                                @NotNull TomcatBuildArtifactsTask task) {
         if (!(configuration instanceof TomcatRunConfiguration tomcatConfig)) return true;
 
-        List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
-                .getDeploymentConfig().getDeployedArtifacts();
+        List<DeploymentArtifact> artifacts = tomcatConfig.getDeployedArtifacts();
 
         boolean allValid = true;
         for (DeploymentArtifact artifact : artifacts) {

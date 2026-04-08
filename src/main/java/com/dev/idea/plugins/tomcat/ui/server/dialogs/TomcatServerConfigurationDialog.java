@@ -2,10 +2,14 @@ package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
+import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileChooser.FileChooser;
+import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
@@ -14,7 +18,9 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.treeStructure.Tree;
+import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -110,7 +116,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JBLabel("Tomcat Home:"), gbc);
 
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+        SafeBrowseUtil.addBrowseFolderListener(
                 homeField, "Tomcat Home", "Select Tomcat installation directory",
                 project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
         gbc.gridx = 1;
@@ -137,7 +143,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JBLabel("Tomcat base directory:"), gbc);
 
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+        SafeBrowseUtil.addBrowseFolderListener(
                 baseField, "Tomcat Base Directory", "Select Tomcat base directory (CATALINA_BASE)",
                 project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
         gbc.gridx = 1;
@@ -166,8 +172,8 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         headerPanel.add(librariesLabel, BorderLayout.NORTH);
 
         JBLabel hintLabel = new JBLabel("Defaults show Tomcat API jars only. Custom entries are stored per server.");
-        hintLabel.setForeground(com.intellij.util.ui.NamedColorUtil.getInactiveTextColor());
-        hintLabel.setFont(com.intellij.util.ui.JBFont.small());
+        hintLabel.setForeground(NamedColorUtil.getInactiveTextColor());
+        hintLabel.setFont(JBFont.small());
         hintLabel.setBorder(JBUI.Borders.emptyBottom(6));
         headerPanel.add(hintLabel, BorderLayout.SOUTH);
 
@@ -187,17 +193,17 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
     }
 
     private void addLibraryJar() {
-        com.intellij.openapi.fileChooser.FileChooserDescriptor descriptor =
-                new com.intellij.openapi.fileChooser.FileChooserDescriptor(true, false, true, true, false, true)
+        FileChooserDescriptor descriptor =
+                new FileChooserDescriptor(true, false, true, true, false, true)
                         .withTitle("Select Library JARs")
                         .withDescription("Choose JAR files to add to the library");
-        com.intellij.openapi.vfs.VirtualFile[] files =
-                com.intellij.openapi.fileChooser.FileChooser.chooseFiles(descriptor, project, null);
+        VirtualFile[] files =
+                FileChooser.chooseFiles(descriptor, project, null);
         if (files.length == 0) return;
 
         DefaultTreeModel model = (DefaultTreeModel) librariesTree.getModel();
         DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
-        for (com.intellij.openapi.vfs.VirtualFile file : files) {
+        for (VirtualFile file : files) {
             root.add(new DefaultMutableTreeNode(file.getPath()));
         }
         model.reload();

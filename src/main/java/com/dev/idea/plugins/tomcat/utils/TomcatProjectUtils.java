@@ -184,8 +184,21 @@ package com.dev.idea.plugins.tomcat.utils;
                 }
             } catch (IOException e) {
                 // Clean up temp file on failure — don't leave orphans
-                try { Files.deleteIfExists(tempFile); } catch (IOException ignored) {}
+                safeDelete(tempFile, LOG);
                 throw e;
+            }
+        }
+
+        /**
+         * Deletes a file if it exists, logging a debug message on failure.
+         * Never throws — intended for cleanup paths where a deletion failure
+         * should not abort the surrounding operation.
+         */
+        public static void safeDelete(@NotNull Path path, @NotNull Logger log) {
+            try {
+                Files.deleteIfExists(path);
+            } catch (IOException e) {
+                log.debug("Failed to delete " + path + ": " + e.getMessage());
             }
         }
 

@@ -57,7 +57,7 @@ public interface DeploymentStrategy {
      */
     @NotNull
     static DeploymentStrategy create(@NotNull TomcatRunConfiguration configuration) {
-        return forMode(configuration.getConfigData().getServerMode());
+        return forMode(configuration.getServerMode());
     }
 
     /**

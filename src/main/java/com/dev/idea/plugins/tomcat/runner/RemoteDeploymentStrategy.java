@@ -62,7 +62,7 @@ final class RemoteDeploymentStrategy implements DeploymentStrategy {
         // and log dumps). TomcatProcessHandler reads credentials at deployment time directly
         // from configuration.getConfigData().getRemoteConfig(), which holds them in-process.
 
-        List<DeploymentArtifact> artifacts = configuration.getConfigData().getDeploymentConfig().getDeployedArtifacts();
+        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
         int index = 0;
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact != null && artifact.isValid()) {

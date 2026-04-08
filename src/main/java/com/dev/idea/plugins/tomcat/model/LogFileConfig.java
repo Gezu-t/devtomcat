@@ -65,7 +65,7 @@ public class LogFileConfig implements Serializable, Cloneable {
     }
 
     private String generateId() {
-        return "logfile-" + java.util.UUID.randomUUID();
+        return "logfile-" + UUID.randomUUID();
     }
 
     @NotNull

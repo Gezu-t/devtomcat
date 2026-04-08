@@ -1,9 +1,12 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+         import com.dev.idea.plugins.tomcat.model.RunnerSettings;
          import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
          import com.intellij.openapi.diagnostic.Logger;
          import org.jetbrains.annotations.NotNull;
 
+         import java.util.LinkedHashMap;
+         import java.util.Map;
          import java.util.Objects;
 
          /**
@@ -53,8 +56,8 @@ package com.dev.idea.plugins.tomcat.conf;
                      dst.setCoverageConfig(src.getCoverageConfig().clone());
 
                      // Deep-clone per-runner settings (startup/shutdown scripts, env vars)
-                     java.util.Map<String, com.dev.idea.plugins.tomcat.model.RunnerSettings> clonedRunnerSettings = new java.util.LinkedHashMap<>();
-                     for (java.util.Map.Entry<String, com.dev.idea.plugins.tomcat.model.RunnerSettings> entry :
+                     Map<String, RunnerSettings> clonedRunnerSettings = new LinkedHashMap<>();
+                     for (Map.Entry<String, RunnerSettings> entry :
                               src.getRunnerSettingsMap().entrySet()) {
                          clonedRunnerSettings.put(entry.getKey(), entry.getValue().clone());
                      }

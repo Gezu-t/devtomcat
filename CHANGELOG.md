@@ -1,5 +1,33 @@
 # DevTomcat Changelog
 
+## [1.0.4]
+
+### Changed
+- **JRE Configuration dialog** — split into focused sub-dialogs (`JdkEditorDialog`, `AutoDetectJdkDialog`) for add/edit and auto-detection flows; main dialog reduced to ~255 lines
+- **Startup/Connection tab** — env var table, actions, computed-key tracking, and Add/Edit dialog extracted to a new `EnvVarPanel` class; `StartupConnectionTab` reduced from 1003 → 542 lines
+- **TomcatJavaParametersBuilder** — inline 44-line port resolution block extracted to `resolvePortsIfNeeded()`, which returns a `PortConfig` or throws; `build()` reduced to a clean 10-step sequence; `setupVmOptions()` signature simplified from 8 params to 5
+- **VM Options field** — replaced with IntelliJ's `ExpandableTextField` for proper handling of long option strings
+- **Services panel focus** — `maybeActivateConsole()` now only activates the Run/Debug tool window when it is already visible, preventing it from stealing focus from the Services panel while scrolling
+
+### Fixed
+- **Context path empty-string edge case** — `TomcatConfigurationData.setContextPath("")` now normalizes to `"/"`. Previously `StringUtil.notNullize` only handled null; an empty string from XML deserialization would pass through as `""`, causing downstream context name resolution to silently fall back to ROOT.
+
+### Refactored — Duplicate Code Elimination
+- **`ContextPathUtils.resolveContextNameSafe()`** — single source for try/catch fallback to ROOT on invalid context paths; replaced 3 private wrappers in TomcatProcessHandler, TomcatApplicationUpdater, and TomcatManagerDeployer
+- **`TomcatNotifier`** — single source for balloon notifications; replaced 3 inline `NotificationGroupManager` blocks in TomcatApplicationUpdater, TomcatRunnerDelegate, and TomcatCommandLineState
+- **`CompilerSupport.compileAndThen()`** — single source for the compile-and-then pattern; replaced 4 `CompilerManager.make()` blocks in TomcatApplicationUpdater
+- **`ProcessStopSupport`** — single source for the stop-clean-relaunch pattern; `findDescriptor()` replaces 2 inline descriptor lookup loops, `stopCleanAndThen()` replaces 3 identical ProcessListener/processTerminated/invokeLater/removeRunContent/destroyProcess blocks in TomcatRunnerDelegate, DebugTomcatAction, and TomcatApplicationUpdater
+- **`ServiceActionUtils.tryInvokeMethod()`** — single source for reflection method invocation; simplified 2 nested try/catch/loop blocks in extractProcessHandler and extractViaReflection
+- **`TomcatProjectUtils.safeDelete()`** — single source for safe file deletion; replaced 3 inline deleteIfExists blocks in atomicCopy and LocalDeploymentStrategy
+- **`ConfigurationSection.addLabelAndField()`** — single source for the label+field GridBagLayout row pattern; replaced identical GBC boilerplate in ApplicationServerSection, JreConfigurationSection, and UpdateActionsSection
+- **`TomcatSettingsSection.addPortRow()`/`addCheckBoxColumn()`** — extracted from 6 identical port-field row blocks
+
+### Tests
+- Added `TomcatDebuggerTest` — covers runner ID stability
+- Added `TomcatApplicationUpdaterTest` — covers `mapActionToDisplay()` for all four update actions
+- Added `TomcatProcessHandlerTest` — covers `extractContextNameFromBrowserUrl` and `rewritePortIfNeeded` helpers
+- Added `LocalDeploymentStrategyTest` — covers `stripJarVersion()` and `extractModuleName()` static helpers
+
 ## [1.0.3]
 
 ### Added

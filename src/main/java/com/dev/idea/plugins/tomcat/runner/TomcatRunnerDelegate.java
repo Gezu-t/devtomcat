@@ -7,18 +7,14 @@ import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
-import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.process.ProcessListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManager;
-import com.intellij.notification.NotificationGroupManager;
-import com.intellij.notification.NotificationType;
-import com.intellij.openapi.application.ApplicationManager;
+import com.dev.idea.plugins.tomcat.utils.ProcessStopSupport;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import static com.dev.idea.plugins.tomcat.TomcatConstants.NOTIFICATION_GROUP_ID;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -167,56 +163,28 @@ public final class TomcatRunnerDelegate {
                                  @NotNull ExecutionEnvironment env) {
         Project project = env.getProject();
         Executor currentExecutor = env.getExecutor();
-        String oldExecutorId = conflicting.getExecutorId();
 
-        // Capture the descriptor now, while the process is still registered
-        RunContentDescriptor oldDescriptor = findDescriptorForHandler(conflicting, config, env);
+        // Capture before destroy — see ProcessStopSupport javadoc for race rationale
+        Executor oldExecutor = ExecutorRegistry.getInstance().getExecutorById(conflicting.getExecutorId());
+        RunContentDescriptor oldDescriptor = ProcessStopSupport.findDescriptor(project, conflicting);
 
-        conflicting.addProcessListener(new ProcessListener() {
-            @Override
-            public void processTerminated(@NotNull ProcessEvent event) {
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    if (oldDescriptor != null) {
-                        Executor oldExecutor = ExecutorRegistry.getInstance().getExecutorById(oldExecutorId);
-                        if (oldExecutor != null) {
-                            RunContentManager.getInstance(project)
-                                    .removeRunContent(oldExecutor, oldDescriptor);
-                            // updateDashboard() omitted — see TomcatApplicationUpdater for rationale.
-                        }
-                    }
-
-                    RunnerAndConfigurationSettings settings =
-                            RunManager.getInstance(project).findSettings(config);
-                    if (settings != null) {
-                        try {
-                            ExecutionEnvironmentBuilder.create(currentExecutor, settings).buildAndExecute();
-                            LOG.info("Relaunched " + config.getName()
-                                    + " in " + currentExecutor.getActionName() + " mode");
-                        } catch (com.intellij.execution.ExecutionException ex) {
-                            LOG.warn("Failed to relaunch " + config.getName(), ex);
-                            notifyRelaunchFailed(project, config.getName(), ex.getMessage());
-                        }
-                    } else {
-                        String msg = "Could not find run settings for relaunch: " + config.getName();
-                        LOG.warn(msg);
-                        notifyRelaunchFailed(project, config.getName(), "Run configuration not found");
-                    }
-                });
+        ProcessStopSupport.stopCleanAndThen(project, conflicting, oldDescriptor, oldExecutor, () -> {
+            RunnerAndConfigurationSettings settings =
+                    RunManager.getInstance(project).findSettings(config);
+            if (settings != null) {
+                try {
+                    ExecutionEnvironmentBuilder.create(currentExecutor, settings).buildAndExecute();
+                    LOG.info("Relaunched " + config.getName()
+                            + " in " + currentExecutor.getActionName() + " mode");
+                } catch (com.intellij.execution.ExecutionException ex) {
+                    LOG.warn("Failed to relaunch " + config.getName(), ex);
+                    notifyRelaunchFailed(project, config.getName(), ex.getMessage());
+                }
+            } else {
+                LOG.warn("Could not find run settings for relaunch: " + config.getName());
+                notifyRelaunchFailed(project, config.getName(), "Run configuration not found");
             }
         });
-
-        conflicting.destroyProcess();
-    }
-
-    /** Finds the {@link RunContentDescriptor} whose process handler is {@code handler}. */
-    @Nullable
-    public RunContentDescriptor findDescriptorForHandler(@NotNull TomcatProcessHandler handler,
-                                                          @NotNull TomcatRunConfiguration config,
-                                                          @NotNull ExecutionEnvironment env) {
-        for (RunContentDescriptor d : getDescriptorsFor(config, env)) {
-            if (d.getProcessHandler() == handler) return d;
-        }
-        return null;
     }
 
     /**
@@ -227,17 +195,9 @@ public final class TomcatRunnerDelegate {
     private static void notifyRelaunchFailed(@NotNull Project project,
                                              @NotNull String configName,
                                              @Nullable String reason) {
-        try {
-            String content = "Tomcat '" + configName + "' stopped but could not relaunch" +
-                    (reason != null ? ": " + reason : ".") +
-                    " Start the configuration manually to resume.";
-            NotificationGroupManager.getInstance()
-                    .getNotificationGroup(NOTIFICATION_GROUP_ID)
-                    .createNotification("Relaunch Failed", content, NotificationType.ERROR)
-                    .notify(project);
-        } catch (Exception e) {
-            Logger.getInstance(TomcatRunnerDelegate.class)
-                    .debug("Could not show relaunch-failure notification: " + e.getMessage());
-        }
+        String content = "Tomcat '" + configName + "' stopped but could not relaunch" +
+                (reason != null ? ": " + reason : ".") +
+                " Start the configuration manually to resume.";
+        TomcatNotifier.error(project, "Relaunch Failed", content);
     }
 }

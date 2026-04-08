@@ -6,6 +6,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -55,7 +56,7 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         JBLabel helpLabel = new JBLabel(
                 "<html><small>The context path where the application will be accessible<br>" +
                         "For example: /myapp will be accessible at http://localhost:8080/myapp</small></html>");
-        helpLabel.setForeground(com.intellij.util.ui.NamedColorUtil.getInactiveTextColor());
+        helpLabel.setForeground(NamedColorUtil.getInactiveTextColor());
         panel.add(helpLabel, gbc);
 
         gbc.gridy = 3; gbc.weighty = 1.0;

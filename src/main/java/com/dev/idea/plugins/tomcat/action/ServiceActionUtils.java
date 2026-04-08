@@ -129,42 +129,47 @@ final class ServiceActionUtils {
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
             return extractProcessHandler(mutable.getUserObject());
         }
-        // Reflection fallback
-        try {
-            for (String methodName : new String[]{"getDescriptor", "getNode"}) {
-                try {
-                    var method = obj.getClass().getMethod(methodName);
-                    Object result = method.invoke(obj);
-                    if (result instanceof RunContentDescriptor desc) {
-                        return desc.getProcessHandler();
-                    }
-                    if (result instanceof RunDashboardRunConfigurationNode node) {
-                        RunContentDescriptor desc = node.getDescriptor();
-                        if (desc != null) return desc.getProcessHandler();
-                    }
-                } catch (NoSuchMethodException ignored) {}
+        for (String methodName : new String[]{"getDescriptor", "getNode"}) {
+            Object result = tryInvokeMethod(obj, methodName);
+            if (result instanceof RunContentDescriptor desc) {
+                return desc.getProcessHandler();
             }
-        } catch (Exception ignored) {}
+            if (result instanceof RunDashboardRunConfigurationNode node) {
+                RunContentDescriptor desc = node.getDescriptor();
+                if (desc != null) return desc.getProcessHandler();
+            }
+        }
         return null;
     }
 
     @Nullable
     private static TomcatRunConfiguration extractViaReflection(@Nullable Object wrapper) {
         if (wrapper == null) return null;
-        try {
-            for (String methodName : new String[]{"getConfigurationSettings", "getNode", "getValue", "getData"}) {
-                try {
-                    var method = wrapper.getClass().getMethod(methodName);
-                    Object result = method.invoke(wrapper);
-                    if (result instanceof RunnerAndConfigurationSettings settings) {
-                        RunConfiguration rc = settings.getConfiguration();
-                        if (rc instanceof TomcatRunConfiguration tomcat) return tomcat;
-                    }
-                    TomcatRunConfiguration nested = extractFromObject(result);
-                    if (nested != null) return nested;
-                } catch (NoSuchMethodException ignored) {}
+        for (String methodName : new String[]{"getConfigurationSettings", "getNode", "getValue", "getData"}) {
+            Object result = tryInvokeMethod(wrapper, methodName);
+            if (result instanceof RunnerAndConfigurationSettings settings) {
+                RunConfiguration rc = settings.getConfiguration();
+                if (rc instanceof TomcatRunConfiguration tomcat) return tomcat;
             }
-        } catch (Exception ignored) {}
+            TomcatRunConfiguration nested = extractFromObject(result);
+            if (nested != null) return nested;
+        }
         return null;
+    }
+
+    /**
+     * Invokes a zero-argument method on {@code obj} by name, returning {@code null}
+     * if the method does not exist or any error occurs during invocation.
+     */
+    @Nullable
+    private static Object tryInvokeMethod(@Nullable Object obj, @NotNull String methodName) {
+        if (obj == null) return null;
+        try {
+            return obj.getClass().getMethod(methodName).invoke(obj);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

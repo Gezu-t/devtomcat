@@ -13,17 +13,16 @@ import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.executors.DefaultRunExecutor;
-import com.intellij.execution.process.ProcessEvent;
-import com.intellij.execution.process.ProcessListener;
+import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.update.RunningApplicationUpdater;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.compiler.CompilerManager;
+import com.dev.idea.plugins.tomcat.utils.CompilerSupport;
+import com.dev.idea.plugins.tomcat.utils.ProcessStopSupport;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.notification.NotificationGroupManager;
-import com.intellij.notification.NotificationType;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -100,8 +99,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     public void performUpdate(@NotNull AnActionEvent event) {
         UpdateConfig updateConfig = configuration.getConfigData().getUpdateConfig();
         if (updateConfig.isShowUpdateDialog()) {
-            boolean isLocal = !com.dev.idea.plugins.tomcat.TomcatConstants.MODE_REMOTE
-                    .equals(configuration.getConfigData().getServerMode());
+            boolean isLocal = !configuration.isRemoteMode();
             TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, configuration.getName(), action, isLocal);
             if (!dialog.showAndGet()) return;
             executeUpdate(dialog.getSelectedAction());
@@ -158,19 +156,11 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * use "Redeploy" for WAR-based deployments.
      */
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
-        logger.logServerInfo("Syncing resources...");
-        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
-            if (aborted) {
-                logger.logServerWarning("Build aborted — resource sync cancelled");
-                return;
-            }
-            if (errors > 0) {
-                logger.logServerError("Build failed with " + errors + " error(s) — resource sync cancelled");
-                return;
-            }
-            logger.logServerInfo("Resources synced" +
-                    (warnings > 0 ? " (" + warnings + " warning(s))" : ""));
-        });
+        CompilerSupport.compileAndThen(project, logger,
+                "Syncing resources...",
+                "Build aborted — resource sync cancelled",
+                "Build failed",
+                warnings -> logger.logServerInfo("Resources synced" + warningSuffix(warnings)));
     }
 
     /**
@@ -184,22 +174,15 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * <p>For WAR artifacts the WAR file is re-copied to webapps after compilation.
      */
     private void doUpdateClassesAndResources(@NotNull TomcatDeploymentLogger logger) {
-        logger.logServerInfo("Compiling project...");
-        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
-            if (aborted) {
-                logger.logServerWarning("Compilation aborted");
-                return;
-            }
-            if (errors > 0) {
-                logger.logServerError("Compilation failed with " + errors + " error(s)");
-                return;
-            }
-            logger.logServerInfo("Compilation successful" +
-                    (warnings > 0 ? " (" + warnings + " warning(s))" : ""));
-
-            redeployWarArtifacts(logger);
-            touchExplodedContextXml(logger);
-        });
+        CompilerSupport.compileAndThen(project, logger,
+                "Compiling project...",
+                "Compilation aborted",
+                "Compilation failed",
+                warnings -> {
+                    logger.logServerInfo("Compilation successful" + warningSuffix(warnings));
+                    redeployWarArtifacts(logger);
+                    touchExplodedContextXml(logger);
+                });
     }
 
     /**
@@ -207,19 +190,14 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * rewrites context.xml for exploded dirs, re-copies WAR files.
      */
     private void doRedeploy(@NotNull TomcatDeploymentLogger logger) {
-        logger.logServerInfo("Compiling and redeploying...");
-        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
-            if (aborted) {
-                logger.logServerWarning("Compilation aborted");
-                return;
-            }
-            if (errors > 0) {
-                logger.logServerError("Compilation failed with " + errors + " error(s)");
-                return;
-            }
-            logger.logServerInfo("Compilation successful, redeploying artifacts...");
-            redeployAllArtifacts(logger);
-        });
+        CompilerSupport.compileAndThen(project, logger,
+                "Compiling and redeploying...",
+                "Compilation aborted",
+                "Compilation failed",
+                warnings -> {
+                    logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", redeploying artifacts...");
+                    redeployAllArtifacts(logger);
+                });
     }
 
     /**
@@ -227,82 +205,43 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * the restarted Tomcat picks up the latest class files.
      */
     private void doRestart(@NotNull TomcatDeploymentLogger logger) {
-        logger.logServerInfo("Compiling before restart...");
         String originalExecutorId = processHandler.getExecutorId();
 
-        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
-            if (aborted) {
-                logger.logServerWarning("Compilation aborted — restart cancelled");
-                return;
-            }
-            if (errors > 0) {
-                logger.logServerError("Compilation failed with " + errors + " error(s) — restart cancelled");
-                return;
-            }
-            logger.logServerInfo("Compilation successful, restarting Tomcat...");
+        CompilerSupport.compileAndThen(project, logger,
+                "Compiling before restart...",
+                "Compilation aborted — restart cancelled",
+                "Compilation failed — restart cancelled",
+                warnings -> {
+            logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", restarting Tomcat...");
 
-            // Capture the executor and descriptor NOW — before destroyProcess() — so the
-            // callback holds a stable reference. Querying ExecutionManager inside
-            // processTerminated/invokeLater is a race: the entry may already be deregistered
-            // from ExecutionManager's runningConfigurations by the time the callback runs.
+            // Capture before destroy — see ProcessStopSupport javadoc for race rationale
             Executor resolvedExecutor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
             if (resolvedExecutor == null) {
-                LOG.warn("Executor '" + originalExecutorId + "' not found in registry — falling back to Run mode");
+                LOG.warn("Executor '" + originalExecutorId + "' not found — falling back to Run mode");
                 logger.logServerWarning("Could not restore executor '" + originalExecutorId + "' — restarting in Run mode");
                 resolvedExecutor = DefaultRunExecutor.getRunExecutorInstance();
             }
-            com.intellij.execution.ui.RunContentDescriptor capturedDescriptor = null;
-            for (com.intellij.execution.ui.RunContentDescriptor d :
-                    com.intellij.execution.ui.RunContentManager.getInstance(project)
-                            .getAllDescriptors()) {
-                if (d.getProcessHandler() == processHandler) {
-                    capturedDescriptor = d;
-                    break;
-                }
-            }
+            RunContentDescriptor descriptor = ProcessStopSupport.findDescriptor(project, processHandler);
             final Executor capturedExecutor = resolvedExecutor;
-            final com.intellij.execution.ui.RunContentDescriptor descriptorToRemove = capturedDescriptor;
 
-            processHandler.addProcessListener(new ProcessListener() {
-                @Override
-                public void processTerminated(@NotNull ProcessEvent event) {
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        try {
-                            if (project.isDisposed()) return;
-
-                            // Remove the old entry using the pre-captured descriptor reference.
-                            if (descriptorToRemove != null) {
-                                com.intellij.execution.ui.RunContentManager
-                                        .getInstance(project)
-                                        .removeRunContent(capturedExecutor, descriptorToRemove);
-                                // Do NOT call updateDashboard() here — IntelliJ's ServiceModel
-                                // updates automatically when RunContentManager removes the descriptor,
-                                // and calling it manually causes ArrayIndexOutOfBoundsException in
-                                // ServiceModel.reset() when the list is transiently empty.
-                            }
-
-                            RunnerAndConfigurationSettings settings =
-                                    RunManager.getInstance(project).findSettings(configuration);
-                            if (settings != null) {
-                                com.intellij.execution.runners.ExecutionEnvironmentBuilder
-                                        .create(capturedExecutor, settings).buildAndExecute();
-                                LOG.info("Tomcat restarted in " + capturedExecutor.getActionName() + " mode");
-                            } else {
-                                logger.logServerError("Could not find run configuration settings for restart");
-                            }
-                        } catch (Exception e) {
-                            LOG.warn("Failed to restart Tomcat: " + configuration.getName(), e);
-                            logger.logServerError("Failed to restart: " + e.getMessage());
-                            // Tomcat is no longer running — notify prominently so the user
-                            // knows they must start the configuration manually.
-                            notifyRestartFailed(project, configuration.getName(), e.getMessage());
-                        }
-                    });
+            ProcessStopSupport.stopCleanAndThen(project, processHandler, descriptor, capturedExecutor, () -> {
+                try {
+                    RunnerAndConfigurationSettings settings =
+                            RunManager.getInstance(project).findSettings(configuration);
+                    if (settings != null) {
+                        com.intellij.execution.runners.ExecutionEnvironmentBuilder
+                                .create(capturedExecutor, settings).buildAndExecute();
+                        LOG.info("Tomcat restarted in " + capturedExecutor.getActionName() + " mode");
+                    } else {
+                        logger.logServerError("Could not find run configuration settings for restart");
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to restart Tomcat: " + configuration.getName(), e);
+                    logger.logServerError("Failed to restart: " + e.getMessage());
+                    notifyRestartFailed(project, configuration.getName(), e.getMessage());
                 }
             });
-
-            processHandler.destroyProcess();
-        });
+        }); // CompilerSupport.compileAndThen
     }
 
     /**
@@ -317,8 +256,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             return;
         }
 
-        List<DeploymentArtifact> artifacts = configuration.getConfigData()
-                .getDeploymentConfig().getDeployedArtifacts();
+        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
 
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null || !artifact.isValid()) continue;
@@ -350,8 +288,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         if (catalinaBase == null) return;
 
         Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
-        List<DeploymentArtifact> artifacts = configuration.getConfigData()
-                .getDeploymentConfig().getDeployedArtifacts();
+        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
 
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null || !artifact.isValid()) continue;
@@ -392,8 +329,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         boolean preserveSessions = configuration.getConfigData()
                 .getDeploymentConfig().isPreserveSessions();
 
-        List<DeploymentArtifact> artifacts = configuration.getConfigData()
-                .getDeploymentConfig().getDeployedArtifacts();
+        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
 
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null || !artifact.isValid()) continue;
@@ -426,14 +362,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
     @NotNull
     private static String resolveContextName(@Nullable String contextPath) {
-        try {
-            return ContextPathUtils.resolveContextName(contextPath);
-        } catch (IllegalArgumentException e) {
-            // In the updater context, log and fall back — the deployment strategy
-            // already validated at launch time.
-            LOG.warn("Invalid context path during update: " + e.getMessage());
-            return ROOT_CONTEXT_NAME;
-        }
+        return ContextPathUtils.resolveContextNameSafe(contextPath, LOG);
     }
 
     /**
@@ -444,7 +373,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                              @NotNull TomcatProcessHandler handler,
                                              @NotNull TomcatRunConfiguration config) {
         String defaultAction = config.getConfigData().getUpdateConfig().getOnUpdate();
-        boolean isLocal = !MODE_REMOTE.equals(config.getConfigData().getServerMode());
+        boolean isLocal = !config.isRemoteMode();
         TomcatUpdateDialog dialog = new TomcatUpdateDialog(project, config.getName(), defaultAction, isLocal);
         if (!dialog.showAndGet()) return;
         new TomcatApplicationUpdater(project, handler, config, dialog.getSelectedAction()).executeUpdate();
@@ -458,17 +387,16 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     private static void notifyRestartFailed(@NotNull Project project,
                                             @NotNull String configName,
                                             @Nullable String errorMessage) {
-        try {
-            String content = "Tomcat '" + configName + "' stopped but could not restart" +
-                    (errorMessage != null ? ": " + errorMessage : ".") +
-                    " Start the configuration manually to resume.";
-            NotificationGroupManager.getInstance()
-                    .getNotificationGroup(NOTIFICATION_GROUP_ID)
-                    .createNotification("Restart Failed", content, NotificationType.ERROR)
-                    .notify(project);
-        } catch (Exception e) {
-            LOG.debug("Could not show restart-failure notification: " + e.getMessage());
-        }
+        String content = "Tomcat '" + configName + "' stopped but could not restart" +
+                (errorMessage != null ? ": " + errorMessage : ".") +
+                " Start the configuration manually to resume.";
+        TomcatNotifier.error(project, "Restart Failed", content);
+    }
+
+    /** Returns {@code " (N warning(s))"} when warnings &gt; 0, empty string otherwise. */
+    @NotNull
+    private static String warningSuffix(int warnings) {
+        return warnings > 0 ? " (" + warnings + " warning(s))" : "";
     }
 
     /**

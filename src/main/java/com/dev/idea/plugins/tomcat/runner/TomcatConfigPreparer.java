@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -477,7 +478,7 @@ public final class TomcatConfigPreparer {
         sb.append("  <Service name=\"Catalina\">\n");
         sb.append("    <Connector port=\"").append(httpPort).append("\" protocol=\"").append(PROTOCOL_HTTP).append("\"\n");
         sb.append("               connectionTimeout=\"20000\" redirectPort=\"")
-                .append(httpsEnabled ? httpsPort : com.dev.idea.plugins.tomcat.model.PortConfig.DEFAULT_HTTPS_PORT)
+                .append(httpsEnabled ? httpsPort : PortConfig.DEFAULT_HTTPS_PORT)
                 .append("\" />\n");
 
         if (httpsEnabled) {
@@ -490,7 +491,7 @@ public final class TomcatConfigPreparer {
         if (ajpEnabled) {
             sb.append("    <Connector port=\"").append(ajpPort).append("\" protocol=\"").append(PROTOCOL_AJP).append("\"\n");
             sb.append("               secretRequired=\"false\" redirectPort=\"")
-                    .append(httpsEnabled ? httpsPort : com.dev.idea.plugins.tomcat.model.PortConfig.DEFAULT_HTTPS_PORT)
+                    .append(httpsEnabled ? httpsPort : PortConfig.DEFAULT_HTTPS_PORT)
                     .append("\" />\n");
         }
 

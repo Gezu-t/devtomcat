@@ -6,6 +6,8 @@ import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -150,8 +152,8 @@ public final class ArtifactReferenceRefresher {
             // would match the orphaned artifact, leaving deployment pointing at stale output.
             java.util.Set<String> activeModules = new java.util.HashSet<>();
             try {
-                for (com.intellij.openapi.module.Module m :
-                        com.intellij.openapi.module.ModuleManager.getInstance(config.getProject()).getModules()) {
+                for (Module m :
+                        ModuleManager.getInstance(config.getProject()).getModules()) {
                     activeModules.add(m.getName().toLowerCase());
                 }
             } catch (Exception e) {

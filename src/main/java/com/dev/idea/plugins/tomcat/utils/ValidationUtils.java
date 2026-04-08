@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.utils;
 
  import com.intellij.openapi.diagnostic.Logger;
+ import com.intellij.openapi.util.text.StringUtil;
  import org.jetbrains.annotations.Nullable;
 
  import java.nio.file.Files;
@@ -13,7 +14,7 @@ package com.dev.idea.plugins.tomcat.utils;
      private ValidationUtils() {}
 
      public static boolean isValidFile(@Nullable String filePath) {
-         if (com.intellij.openapi.util.text.StringUtil.isEmpty(filePath)) return false;
+         if (StringUtil.isEmpty(filePath)) return false;
          try {
              Path path = Paths.get(filePath);
              return Files.isRegularFile(path) && Files.isReadable(path);
@@ -24,7 +25,7 @@ package com.dev.idea.plugins.tomcat.utils;
      }
 
      public static boolean isValidDirectory(@Nullable String dirPath) {
-         if (com.intellij.openapi.util.text.StringUtil.isEmpty(dirPath)) return false;
+         if (StringUtil.isEmpty(dirPath)) return false;
          try {
              Path path = Paths.get(dirPath);
              return Files.isDirectory(path) && Files.isReadable(path);

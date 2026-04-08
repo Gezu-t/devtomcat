@@ -96,69 +96,16 @@ public class TomcatJavaParametersBuilder {
         try {
             Path catalinaBase = getCatalinaBase();
             Path catalinaHome = getCatalinaHome();
+            PortConfig ports = resolvePortsIfNeeded();
 
-            int httpPort;
-            int shutdownPort;
-            int jmxPort;
-            int httpsPort;
-            int ajpPort;
-
-            if (resolvedPorts != null) {
-                // Use pre-resolved ports from PortConflictDetector (conflict-free)
-                httpPort = resolvedPorts.getHttp();
-                shutdownPort = resolvedPorts.getShutdown();
-                jmxPort = resolvedPorts.getJmx();
-                httpsPort = resolvedPorts.getHttps();
-                ajpPort = resolvedPorts.getAjp();
-                LOG.info("Using pre-resolved ports: HTTP=" + httpPort + ", shutdown=" + shutdownPort);
-            } else {
-                // Fallback: resolve ports here (e.g., when called without TomcatCommandLineState).
-                // NOTE: this path is non-atomic — two simultaneous launches can still observe the
-                // same port as free. The preferred path goes through TomcatCommandLineState which
-                // uses TomcatPortRegistry for atomic claiming.
-                httpPort = getConfigPort(configuration.getHttpPort(), PortUtils.DEFAULT_HTTP);
-                shutdownPort = getConfigPort(configuration.getShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
-                jmxPort = getConfigPort(configuration.getJmxPort(), PortUtils.DEFAULT_JMX);
-                httpsPort = getConfigPort(configuration.getHttpsPort(), PortUtils.DEFAULT_HTTPS);
-                ajpPort = getConfigPort(configuration.getAjpPort(), PortUtils.DEFAULT_AJP);
-
-                // Resolve internal conflicts (same port used by multiple services).
-                // Track already-assigned ports so each findNextAvailable skips ports already in use
-                // by sibling services resolved in this same pass.
-                java.util.Set<Integer> assigned = new java.util.HashSet<>();
-                assigned.add(httpPort);
-                if (assigned.contains(shutdownPort)) { shutdownPort = PortUtils.findNextAvailableExcluding(shutdownPort, assigned); }
-                assigned.add(shutdownPort);
-                if (assigned.contains(jmxPort)) { jmxPort = PortUtils.findNextAvailableExcluding(jmxPort, assigned); }
-                assigned.add(jmxPort);
-                if (assigned.contains(httpsPort)) { httpsPort = PortUtils.findNextAvailableExcluding(httpsPort, assigned); }
-                assigned.add(httpsPort);
-                if (assigned.contains(ajpPort)) { ajpPort = PortUtils.findNextAvailableExcluding(ajpPort, assigned); }
-
-                // Resolve external conflicts (port in use by another process)
-                httpPort = resolvePortWithLogging("HTTP", httpPort, true);
-                shutdownPort = resolvePortWithLogging("Shutdown", shutdownPort, true);
-                jmxPort = resolvePortWithLogging("JMX", jmxPort, configuration.isJmxEnabled());
-                httpsPort = resolvePortWithLogging("HTTPS", httpsPort, configuration.isHttpsEnabled());
-                ajpPort = resolvePortWithLogging("AJP", ajpPort, configuration.isAjpEnabled());
-            }
-
-            if (httpPort <= 0 || shutdownPort <= 0 || (configuration.isJmxEnabled() && jmxPort <= 0)
-                    || (configuration.isHttpsEnabled() && httpsPort <= 0)
-                    || (configuration.isAjpEnabled() && ajpPort <= 0)) {
-                throw new ExecutionException("Unable to find available ports for Tomcat run configuration");
-            }
-
-            // Prepare catalina.base with directories and config files (after ports are resolved)
-            prepareCatalinaBase(catalinaBase, catalinaHome, httpPort, shutdownPort, httpsPort, ajpPort);
+            prepareCatalinaBase(catalinaBase, catalinaHome, ports);
 
             Sdk jdk = resolveJdk();
-
             JavaParameters params = new JavaParameters();
             setupBasicParameters(params, catalinaBase, jdk);
             setupClasspath(params, catalinaHome);
             setupEnvironment(params);
-            setupVmOptions(params, catalinaBase, catalinaHome, httpPort, shutdownPort, jmxPort, httpsPort, jdk);
+            setupVmOptions(params, catalinaBase, catalinaHome, ports, jdk);
             setupDeploymentArtifacts(params, catalinaBase);
 
             return params;
@@ -166,6 +113,65 @@ public class TomcatJavaParametersBuilder {
         } catch (IOException e) {
             throw new ExecutionException("Failed to prepare Tomcat directories", e);
         }
+    }
+
+    /**
+     * Returns conflict-free ports for all Tomcat connectors.
+     *
+     * <p>If ports were pre-resolved atomically by {@link TomcatCommandLineState} via
+     * {@link com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry}, returns them directly.
+     * Otherwise falls back to per-launch resolution (non-atomic — concurrent launches may
+     * collide; the registry path is always preferred).
+     *
+     * @throws ExecutionException if any required port cannot be resolved
+     */
+    @NotNull
+    private PortConfig resolvePortsIfNeeded() throws ExecutionException {
+        if (resolvedPorts != null) {
+            LOG.info("Using pre-resolved ports: HTTP=" + resolvedPorts.getHttp()
+                    + ", shutdown=" + resolvedPorts.getShutdown());
+            return resolvedPorts;
+        }
+
+        // Fallback: resolve here. Non-atomic — prefer the TomcatCommandLineState path.
+        int httpPort     = getConfigPort(configuration.getHttpPort(),     PortUtils.DEFAULT_HTTP);
+        int shutdownPort = getConfigPort(configuration.getShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
+        int jmxPort      = getConfigPort(configuration.getJmxPort(),      PortUtils.DEFAULT_JMX);
+        int httpsPort    = getConfigPort(configuration.getHttpsPort(),     PortUtils.DEFAULT_HTTPS);
+        int ajpPort      = getConfigPort(configuration.getAjpPort(),       PortUtils.DEFAULT_AJP);
+
+        // Resolve internal conflicts first (same value assigned to multiple connectors)
+        java.util.Set<Integer> assigned = new java.util.HashSet<>();
+        assigned.add(httpPort);
+        if (assigned.contains(shutdownPort)) { shutdownPort = PortUtils.findNextAvailableExcluding(shutdownPort, assigned); }
+        assigned.add(shutdownPort);
+        if (assigned.contains(jmxPort))      { jmxPort      = PortUtils.findNextAvailableExcluding(jmxPort, assigned); }
+        assigned.add(jmxPort);
+        if (assigned.contains(httpsPort))    { httpsPort    = PortUtils.findNextAvailableExcluding(httpsPort, assigned); }
+        assigned.add(httpsPort);
+        if (assigned.contains(ajpPort))      { ajpPort      = PortUtils.findNextAvailableExcluding(ajpPort, assigned); }
+
+        // Resolve external conflicts (port already bound by another process)
+        httpPort     = resolvePortWithLogging("HTTP",     httpPort,     true);
+        shutdownPort = resolvePortWithLogging("Shutdown", shutdownPort, true);
+        jmxPort      = resolvePortWithLogging("JMX",      jmxPort,      configuration.isJmxEnabled());
+        httpsPort    = resolvePortWithLogging("HTTPS",    httpsPort,    configuration.isHttpsEnabled());
+        ajpPort      = resolvePortWithLogging("AJP",      ajpPort,      configuration.isAjpEnabled());
+
+        if (httpPort <= 0 || shutdownPort <= 0
+                || (configuration.isJmxEnabled()   && jmxPort   <= 0)
+                || (configuration.isHttpsEnabled()  && httpsPort <= 0)
+                || (configuration.isAjpEnabled()    && ajpPort   <= 0)) {
+            throw new ExecutionException("Unable to find available ports for Tomcat run configuration");
+        }
+
+        PortConfig ports = new PortConfig();
+        ports.setHttp(httpPort);
+        ports.setShutdown(shutdownPort);
+        ports.setJmx(jmxPort);
+        ports.setHttps(httpsPort);
+        ports.setAjp(ajpPort);
+        return ports;
     }
 
     private static int getConfigPort(@Nullable Integer configValue, int defaultValue) {
@@ -217,18 +223,15 @@ public class TomcatJavaParametersBuilder {
     }
 
     private void prepareCatalinaBase(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
-                                     int httpPort, int shutdownPort,
-                                     int httpsPort, int ajpPort) throws IOException {
-        boolean httpsEnabled = configuration.isHttpsEnabled();
-        boolean ajpEnabled = configuration.isAjpEnabled();
-
-        // Resolve conf overlay: <project>/.devtomcat/<config-name>/conf/
+                                     @NotNull PortConfig ports) throws IOException {
         Path confOverlay = TomcatProjectUtils.getConfOverlayDirectory(configuration);
         boolean overlayActive = confOverlay != null && java.nio.file.Files.isDirectory(confOverlay);
 
         java.util.List<String> warnings = TomcatConfigPreparer.prepare(
-                catalinaBase, catalinaHome, httpPort, shutdownPort,
-                httpsPort, httpsEnabled, ajpPort, ajpEnabled,
+                catalinaBase, catalinaHome,
+                ports.getHttp(), ports.getShutdown(),
+                ports.getHttps(), configuration.isHttpsEnabled(),
+                ports.getAjp(),  configuration.isAjpEnabled(),
                 overlayActive ? confOverlay : null);
 
         if (deploymentLogger != null) {
@@ -323,10 +326,7 @@ public class TomcatJavaParametersBuilder {
     private void setupVmOptions(@NotNull JavaParameters params,
                                 @NotNull Path catalinaBase,
                                 @NotNull Path catalinaHome,
-                                int httpPort,
-                                int shutdownPort,
-                                int jmxPort,
-                                int httpsPort,
+                                @NotNull PortConfig ports,
                                 @NotNull Sdk jdk) {
         ParametersList vmParams = params.getVMParametersList();
 
@@ -336,11 +336,11 @@ public class TomcatJavaParametersBuilder {
         }
 
         if (configuration.isJmxEnabled()) {
-            configureJmx(vmParams, jmxPort);
+            configureJmx(vmParams, ports.getJmx());
         }
 
         if (configuration.isHttpsEnabled()) {
-            configureHttps(vmParams, httpsPort);
+            configureHttps(vmParams, ports.getHttps());
         }
 
         // Do NOT add -agentlib:jdwp here. In debug mode, GenericDebuggerRunner's
@@ -359,7 +359,7 @@ public class TomcatJavaParametersBuilder {
         // JDK 9+ module opens required by Tomcat (previously delivered via JDK_JAVA_OPTIONS env var)
         configureModuleOpens(vmParams, jdk);
 
-        configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, httpPort, shutdownPort);
+        configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, ports.getHttp(), ports.getShutdown());
     }
 
     private void configureModuleOpens(@NotNull ParametersList vmParams, @NotNull Sdk jdk) {

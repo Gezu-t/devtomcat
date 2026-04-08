@@ -4,9 +4,12 @@ import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -123,7 +126,7 @@ public class TomcatInfo implements Serializable, Cloneable {
         if (getPath().isEmpty()) {
             throw new IllegalStateException("Tomcat path cannot be empty");
         }
-        if (!new java.io.File(getPath()).exists()) {
+        if (!new File(getPath()).exists()) {
             throw new IllegalStateException("Tomcat path does not exist: " + getPath());
         }
     }
@@ -206,14 +209,14 @@ public class TomcatInfo implements Serializable, Cloneable {
      * @return sorted list of absolute paths for matching JARs
      */
     @NotNull
-    public static List<String> filterDefaultLibraries(@NotNull java.io.File libDir) {
+    public static List<String> filterDefaultLibraries(@NotNull File libDir) {
         List<String> result = new ArrayList<>();
         if (!libDir.isDirectory()) return result;
-        java.io.File[] files = libDir.listFiles(file ->
+        File[] files = libDir.listFiles(file ->
                 file.isFile() && file.getName().endsWith(".jar"));
         if (files == null) return result;
-        java.util.Arrays.sort(files, java.util.Comparator.comparing(java.io.File::getName, String.CASE_INSENSITIVE_ORDER));
-        for (java.io.File jar : files) {
+        Arrays.sort(files, Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+        for (File jar : files) {
             String name = jar.getName();
             for (String prefix : DEFAULT_LIBRARY_PREFIXES) {
                 if (name.startsWith(prefix)) {

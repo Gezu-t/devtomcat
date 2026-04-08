@@ -59,14 +59,14 @@ class TomcatConfigurationDataTest {
     }
 
     @Test
-    @DisplayName("contextPath defaults to / on null")
+    @DisplayName("contextPath defaults to / on null or empty")
     void contextPathDefault() {
         TomcatConfigurationData data = new TomcatConfigurationData();
         data.setContextPath(null);
         assertEquals("/", data.getContextPath());
-        // Note: StringUtil.notNullize only replaces null, empty string stays as-is
+        // Empty string is also normalized to "/" — prevents stale "" from XML deserialization
         data.setContextPath("");
-        assertEquals("", data.getContextPath());
+        assertEquals("/", data.getContextPath());
         data.setContextPath("/myapp");
         assertEquals("/myapp", data.getContextPath());
     }

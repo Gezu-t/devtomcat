@@ -186,6 +186,31 @@ public final class ContextPathUtils {
         return contextName;
     }
 
+    /**
+     * Resolves a context path to a Tomcat context name, falling back to
+     * {@link com.dev.idea.plugins.tomcat.TomcatConstants#ROOT_CONTEXT_NAME ROOT} on
+     * invalid input instead of throwing.
+     *
+     * <p>Use this in post-launch paths (process handler, updater) where the
+     * deployment strategy has already validated the path at launch time and a
+     * hard failure would be disproportionate.
+     *
+     * @param contextPath the context path to resolve (may be null)
+     * @param log         logger for the warn message on invalid input
+     * @return the resolved context name, never null or empty
+     */
+    @NotNull
+    public static String resolveContextNameSafe(@Nullable String contextPath,
+                                                @NotNull com.intellij.openapi.diagnostic.Logger log) {
+        try {
+            return resolveContextName(contextPath);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid context path '" + contextPath + "': " + e.getMessage()
+                    + " — falling back to ROOT");
+            return ROOT_CONTEXT_NAME;
+        }
+    }
+
     public static boolean isValidContextPath(@Nullable String context) {
         if (context == null || context.isEmpty()) {
             return false;

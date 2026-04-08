@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
+import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -63,7 +64,7 @@ class JdkEditorDialog extends DialogWrapper {
         panel.add(new JBLabel("JDK Home:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
         pathField = new TextFieldWithBrowseButton();
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+        SafeBrowseUtil.addBrowseFolderListener(
                 pathField, "Select JDK Installation Directory",
                 "Choose a JDK installation directory", project,
                 FileChooserDescriptorFactory.createSingleFolderDescriptor());

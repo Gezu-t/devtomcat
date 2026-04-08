@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.ui;
 
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.ArtifactReferenceRefresher;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
@@ -45,6 +44,7 @@ import java.awt.*;
 import java.awt.event.HierarchyEvent;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -423,9 +423,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
      * Remote mode omits the Code Coverage tab and adjusts Startup/Connection content.
      */
     private boolean isRemoteMode() {
-        return currentConfiguration != null &&
-                TomcatConstants.MODE_REMOTE.equalsIgnoreCase(
-                        currentConfiguration.getConfigData().getServerMode());
+        return currentConfiguration != null && currentConfiguration.isRemoteMode();
     }
 
     /**
@@ -532,9 +530,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             LOG.info("DevTomcat: Added default Build (Make) task to Before Launch panel");
         }
 
-        java.util.List<DeploymentArtifact> allDeployments = deploymentTableManager != null
+        List<DeploymentArtifact> allDeployments = deploymentTableManager != null
                 ? deploymentTableManager.getDeployments()
-                : java.util.Collections.emptyList();
+                : Collections.emptyList();
 
         if (!allDeployments.isEmpty()) {
             BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);

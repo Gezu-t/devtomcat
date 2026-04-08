@@ -18,6 +18,9 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.JBScrollPane;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.JBColor;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -158,7 +161,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     public void resetFrom(TomcatRunConfiguration config) {
         this.config = config;
 
-        String mode = config.getConfigData().getServerMode();
+        String mode = config.getServerMode();
         if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             cardLayout.show(cards, TomcatConstants.MODE_REMOTE);
             if (remoteConnectionSection != null) {
@@ -175,7 +178,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     public void applyTo(TomcatRunConfiguration config) throws ConfigurationException {
-        String mode = config.getConfigData().getServerMode();
+        String mode = config.getServerMode();
 
         if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             if (remoteConnectionSection != null) {
@@ -189,7 +192,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     public boolean isModified(TomcatRunConfiguration config) {
-        String mode = config.getConfigData().getServerMode();
+        String mode = config.getServerMode();
 
         if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             if (remoteConnectionSection != null && remoteConnectionSection.isModified(config)) {
@@ -210,11 +213,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             throw new ConfigurationException("Configuration is not initialized");
         }
 
-        String mode = config.getConfigData().getServerMode();
+        String mode = config.getServerMode();
 
         if (TomcatConstants.MODE_LOCAL.equals(mode)) {
             for (ConfigurationSection section : sharedSections) {
-                List<com.intellij.openapi.ui.ValidationInfo> errors = section.validateSettings();
+                List<ValidationInfo> errors = section.validateSettings();
                 if (!errors.isEmpty()) {
                     throw new ConfigurationException(errors.get(0).message);
                 }
@@ -233,14 +236,14 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             }
 
             if (remoteConnectionSection != null) {
-                List<com.intellij.openapi.ui.ValidationInfo> remoteErrors = remoteConnectionSection.validateSettings();
+                List<ValidationInfo> remoteErrors = remoteConnectionSection.validateSettings();
                 if (!remoteErrors.isEmpty()) {
                     throw new ConfigurationException(remoteErrors.get(0).message);
                 }
             }
 
             for (ConfigurationSection section : sharedSections) {
-                List<com.intellij.openapi.ui.ValidationInfo> errors = section.validateSettings();
+                List<ValidationInfo> errors = section.validateSettings();
                 if (!errors.isEmpty()) {
                     throw new ConfigurationException(errors.get(0).message);
                 }
@@ -346,22 +349,22 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
         private void testConnection() {
             statusLabel.setText("Testing...");
-            statusLabel.setForeground(com.intellij.util.ui.JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+            statusLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
             testButton.setEnabled(false);
 
             RemoteConfig rc = buildCurrentRemoteConfig();
-            com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 TomcatManagerDeployer deployer = new TomcatManagerDeployer(rc);
                 String error = deployer.testConnection();
                 SwingUtilities.invokeLater(() -> {
                     testButton.setEnabled(true);
                     if (error == null) {
                         setStatus("Connected successfully", null,
-                                com.intellij.ui.JBColor.namedColor(
+                                JBColor.namedColor(
                                         "DevTomcat.deployedForeground",
-                                        new com.intellij.ui.JBColor(0x008000, 0x6AAB73)));
+                                        new JBColor(0x008000, 0x6AAB73)));
                     } else {
-                        setStatus(truncateStatus(error), error, com.intellij.ui.JBColor.RED);
+                        setStatus(truncateStatus(error), error, JBColor.RED);
                     }
                 });
             });
@@ -471,30 +474,30 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             }
         }
 
-        List<com.intellij.openapi.ui.ValidationInfo> validateSettings() {
-            List<com.intellij.openapi.ui.ValidationInfo> errors = new ArrayList<>();
+        List<ValidationInfo> validateSettings() {
+            List<ValidationInfo> errors = new ArrayList<>();
             String host = hostField.getText().trim();
             String port = portField.getText().trim();
 
             if (host.isEmpty()) {
-                errors.add(new com.intellij.openapi.ui.ValidationInfo("Host is required", hostField));
+                errors.add(new ValidationInfo("Host is required", hostField));
             }
 
             if (port.isEmpty()) {
-                errors.add(new com.intellij.openapi.ui.ValidationInfo("Port is required", portField));
+                errors.add(new ValidationInfo("Port is required", portField));
             } else {
                 try {
                     int portNum = Integer.parseInt(port);
                     if (portNum < 1 || portNum > 65535) {
-                        errors.add(new com.intellij.openapi.ui.ValidationInfo("Port must be between 1 and 65535", portField));
+                        errors.add(new ValidationInfo("Port must be between 1 and 65535", portField));
                     }
                 } catch (NumberFormatException e) {
-                    errors.add(new com.intellij.openapi.ui.ValidationInfo("Port must be a number", portField));
+                    errors.add(new ValidationInfo("Port must be a number", portField));
                 }
             }
 
             if (useCredentialsCheck.isSelected() && usernameField.getText().trim().isEmpty()) {
-                errors.add(new com.intellij.openapi.ui.ValidationInfo("Username is required when credentials are enabled", usernameField));
+                errors.add(new ValidationInfo("Username is required when credentials are enabled", usernameField));
             }
 
             return errors;

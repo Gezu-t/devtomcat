@@ -67,8 +67,14 @@ package com.dev.idea.plugins.tomcat.model;
             @Nullable public TomcatInfo getTomcatInfo() { return tomcatInfo; }
             public void setTomcatInfo(@Nullable TomcatInfo info) { this.tomcatInfo = info; }
 
-            @NotNull public String getContextPath() { return StringUtil.notNullize(contextPath, DEFAULT_CONTEXT_PATH); }
-            public void setContextPath(@Nullable String path) { this.contextPath = StringUtil.notNullize(path, DEFAULT_CONTEXT_PATH); }
+            @NotNull public String getContextPath() {
+                String s = StringUtil.notNullize(contextPath, DEFAULT_CONTEXT_PATH);
+                return s.isEmpty() ? DEFAULT_CONTEXT_PATH : s;
+            }
+            public void setContextPath(@Nullable String path) {
+                String s = StringUtil.notNullize(path, DEFAULT_CONTEXT_PATH);
+                this.contextPath = s.isEmpty() ? DEFAULT_CONTEXT_PATH : s;
+            }
 
             @NotNull public PortConfig getPortConfig() { return portConfig; }
             public void setPortConfig(@NotNull PortConfig config) { this.portConfig = Objects.requireNonNull(config); }

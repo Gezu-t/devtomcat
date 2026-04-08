@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.runner;
 
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
@@ -77,7 +76,7 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         if (delegate.handleCrossExecutorConflict(config, env)) return null;
 
         // Fresh start — resolve debug host/port and attach debugger
-        boolean isRemote = TomcatConstants.MODE_REMOTE.equals(config.getConfigData().getServerMode());
+        boolean isRemote = config.isRemoteMode();
 
         String debugHost;
         int debugPort;

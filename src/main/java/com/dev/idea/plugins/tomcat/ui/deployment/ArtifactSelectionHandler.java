@@ -3,13 +3,16 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
+import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.IntelliJArtifactSelectionDialog;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ModuleDeploymentDialog;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
@@ -213,12 +216,12 @@ public class ArtifactSelectionHandler {
         Set<String> pomNames = new HashSet<>();
         try {
             for (Module module : ModuleManager.getInstance(project).getModules()) {
-                for (com.intellij.openapi.vfs.VirtualFile root :
-                        com.intellij.openapi.roots.ModuleRootManager.getInstance(module).getContentRoots()) {
-                    com.intellij.openapi.vfs.VirtualFile pomFile = root.findChild("pom.xml");
+                for (VirtualFile root :
+                        ModuleRootManager.getInstance(module).getContentRoots()) {
+                    VirtualFile pomFile = root.findChild("pom.xml");
                     if (pomFile != null && pomFile.exists()) {
                         try {
-                            String content = com.intellij.openapi.vfs.VfsUtil.loadText(pomFile);
+                            String content = VfsUtil.loadText(pomFile);
                             if (content.contains("<packaging>pom</packaging>")) {
                                 pomNames.add(module.getName().toLowerCase());
                                 break;
@@ -238,7 +241,7 @@ public class ArtifactSelectionHandler {
                 .withTitle("Select External WAR or Directory")
                 .withDescription("Select a WAR file or exploded directory to deploy");
 
-        VirtualFile chosen = com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.chooseFile(descriptor, project, null);
+        VirtualFile chosen = SafeBrowseUtil.chooseFile(descriptor, project, null);
         if (chosen == null) {
             return;
         }

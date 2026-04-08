@@ -15,6 +15,7 @@ import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
@@ -129,7 +130,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     private boolean isProducerDisabled() {
         try {
             // Registry key is optional; default to enabled if missing.
-            return com.intellij.openapi.util.registry.Registry.is(DEVTOMCAT_REGISTRY_KEY);
+            return Registry.is(DEVTOMCAT_REGISTRY_KEY);
         } catch (MissingResourceException ignore) {
             return false;
         }

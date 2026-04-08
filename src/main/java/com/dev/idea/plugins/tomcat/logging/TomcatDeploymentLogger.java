@@ -11,7 +11,10 @@ package com.dev.idea.plugins.tomcat.logging;
 
          import java.time.LocalDateTime;
          import java.time.format.DateTimeFormatter;
+         import java.util.Collections;
+         import java.util.IdentityHashMap;
          import java.util.Objects;
+         import java.util.Set;
          import java.util.concurrent.atomic.AtomicBoolean;
 
          /**
@@ -566,7 +569,7 @@ package com.dev.idea.plugins.tomcat.logging;
                  Objects.requireNonNull(sb, "StringBuilder cannot be null");
                  Objects.requireNonNull(throwable, "Throwable cannot be null");
 
-                 java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+                 Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
                  Throwable current = throwable;
                  while (current != null && seen.add(current)) {
                      if (current != throwable) {

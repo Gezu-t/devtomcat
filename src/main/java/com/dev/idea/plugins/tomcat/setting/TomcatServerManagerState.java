@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.UnaryOperator;
 import java.util.jar.JarFile;
 import java.util.stream.Collectors;
@@ -73,7 +74,7 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     // =====================================================================
 
     @XCollection(elementTypes = TomcatInfo.class)
-    private final List<TomcatInfo> tomcatInfos = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<TomcatInfo> tomcatInfos = new CopyOnWriteArrayList<>();
 
     // =====================================================================
     // SINGLETON ACCESSOR

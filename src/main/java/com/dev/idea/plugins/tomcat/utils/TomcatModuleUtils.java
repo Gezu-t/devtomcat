@@ -2,9 +2,11 @@ package com.dev.idea.plugins.tomcat.utils;
 
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
@@ -223,7 +225,7 @@ public final class TomcatModuleUtils {
         }
 
         // Also check the project base dir (for single-module projects where the module root differs)
-        VirtualFile baseDir = com.intellij.openapi.project.ProjectUtil.guessProjectDir(module.getProject());
+        VirtualFile baseDir = ProjectUtil.guessProjectDir(module.getProject());
         if (baseDir != null) {
             if (checkMavenWebConfig(baseDir) || checkGradleWebConfig(baseDir)) {
                 return true;
@@ -238,7 +240,7 @@ public final class TomcatModuleUtils {
         if (pomFile == null || !pomFile.exists()) return false;
 
         try {
-            String content = com.intellij.openapi.vfs.VfsUtil.loadText(pomFile);
+            String content = VfsUtil.loadText(pomFile);
             // POM-packaged projects are aggregators/parents, not web apps
             if (content.contains("<packaging>pom</packaging>")) {
                 return false;
@@ -260,7 +262,7 @@ public final class TomcatModuleUtils {
         if (gradleFile == null || !gradleFile.exists()) return false;
 
         try {
-            String content = com.intellij.openapi.vfs.VfsUtil.loadText(gradleFile);
+            String content = VfsUtil.loadText(gradleFile);
             return content.contains("apply plugin: 'war'") ||
                     content.contains("id(\"war\")") ||
                     content.contains("id 'war'") ||

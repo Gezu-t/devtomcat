@@ -2,10 +2,12 @@ package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
@@ -24,8 +26,8 @@ import java.util.List;
 
 public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
 
-    private static final com.intellij.openapi.diagnostic.Logger LOG =
-            com.intellij.openapi.diagnostic.Logger.getInstance(LogsConfigurationTab.class);
+    private static final Logger LOG =
+            Logger.getInstance(LogsConfigurationTab.class);
 
     private final Project project;
 
@@ -44,7 +46,7 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
     public LogsConfigurationTab(@NotNull Project project, @Nullable TomcatRunConfiguration configuration) {
         this.project = project;
         saveToFileField = new TextFieldWithBrowseButton();
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+        SafeBrowseUtil.addBrowseFolderListener(
                 saveToFileField, "Save Console Output", "Choose file to save console output",
                 project, new com.intellij.openapi.fileChooser.FileChooserDescriptor(true, false, false, false, false, false));
 

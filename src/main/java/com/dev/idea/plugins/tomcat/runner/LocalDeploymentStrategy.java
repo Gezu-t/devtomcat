@@ -13,6 +13,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.openapi.roots.ModuleOrderEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEntry;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.zip.ZipFile;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -101,9 +104,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             throw new ExecutionException("Failed to create deployment directories", e);
         }
 
-        boolean preserveSessions = configuration.getConfigData().getDeploymentConfig().isPreserveSessions();
+        boolean preserveSessions = configuration.isPreserveSessions();
 
-        for (DeploymentArtifact artifact : configuration.getConfigData().getDeploymentConfig().getDeployedArtifacts()) {
+        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
             if (artifact == null || !artifact.isValid()) continue;
 
             String contextName;
@@ -207,9 +210,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // Remove previous context XML descriptors to prevent conflicts with new deployments
         try (var stream = Files.list(confDir)) {
             stream.filter(p -> p.getFileName().toString().endsWith(".xml"))
-                  .forEach(p -> {
-                      try { Files.deleteIfExists(p); } catch (IOException e) { LOG.debug("Failed to clean: " + p, e); }
-                  });
+                  .forEach(p -> TomcatProjectUtils.safeDelete(p, LOG));
         } catch (IOException e) {
             LOG.debug("Could not clean conf directory: " + confDir, e);
         }
@@ -217,9 +218,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // Remove previous WAR files to prevent WAR/context XML conflicts
         try (var stream = Files.list(webappsDir)) {
             stream.filter(p -> p.getFileName().toString().endsWith(".war"))
-                  .forEach(p -> {
-                      try { Files.deleteIfExists(p); } catch (IOException e) { LOG.debug("Failed to clean: " + p, e); }
-                  });
+                  .forEach(p -> TomcatProjectUtils.safeDelete(p, LOG));
         } catch (IOException e) {
             LOG.debug("Could not clean webapps directory: " + webappsDir, e);
         }
@@ -516,7 +515,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         }
         Set<String> entryPaths = new HashSet<>();
         Set<String> pomArtifacts = new HashSet<>();
-        try (var zf = new java.util.zip.ZipFile(jarPath.toFile())) {
+        try (var zf = new ZipFile(jarPath.toFile())) {
             zf.stream().forEach(e -> {
                 String name = e.getName();
                 entryPaths.add(name);
@@ -735,10 +734,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             //    Wrapped in try/catch so it degrades silently on Community Edition where
             //    the packaging plugin may not be loaded (NoClassDefFoundError).
             try {
-                com.intellij.packaging.artifacts.ArtifactManager artifactManager =
-                        com.intellij.packaging.artifacts.ArtifactManager.getInstance(project);
+                ArtifactManager artifactManager =
+                        ArtifactManager.getInstance(project);
                 if (artifactManager != null) {
-                    for (com.intellij.packaging.artifacts.Artifact a : artifactManager.getArtifacts()) {
+                    for (Artifact a : artifactManager.getArtifacts()) {
                         if (name.equals(a.getName())) {
                             String moduleName = a.getName().replaceAll(":war.*$", "").trim();
                             Module m = moduleManager.findModuleByName(moduleName);

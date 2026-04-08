@@ -1,40 +1,31 @@
 package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
+import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.*;
-import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.*;
-import com.intellij.ui.components.JBPanel;
-import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.awt.datatransfer.Clipboard;
-import java.awt.datatransfer.StringSelection;
-import java.awt.datatransfer.DataFlavor;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.io.File;
 import java.nio.file.Paths;
-import java.util.*;
-import java.util.List;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Startup/Connection tab — mirrors IntelliJ Ultimate's Tomcat run configuration behavior.
@@ -50,7 +41,8 @@ import java.util.List;
  *   <li><b>User ownership tracking</b> — Each env var is either "computed" (auto-managed) or
  *       "user-modified" (edited/added by the user). Computed vars auto-refresh when VM options
  *       or Tomcat server change; user-modified vars are never overwritten.</li>
- *   <li><b>Per-mode state</b> — Run/Debug/Coverage/Profile each have independent env var maps.</li>
+ *   <li><b>Per-mode state</b> — Run/Debug/Coverage/Profile each have independent env var maps,
+ *       managed by the embedded {@link EnvVarPanel}.</li>
  * </ul>
  */
 public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
@@ -60,15 +52,12 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private final Project project;
     private TomcatRunConfiguration configuration;
 
-    private static final String RUN_MODE = "Run";
-    private static final String DEBUG_MODE = "Debug";
+    private static final String RUN_MODE      = "Run";
+    private static final String DEBUG_MODE    = "Debug";
     private static final String COVERAGE_MODE = "Coverage";
-    private static final String PROFILE_MODE = "Profile";
+    private static final String PROFILE_MODE  = "Profile";
 
     private static final String[] ALL_MODES = {RUN_MODE, DEBUG_MODE, COVERAGE_MODE, PROFILE_MODE};
-
-    /** Computed env var keys, delegated to RuntimeEnvResolver. */
-    private static final Set<String> COMPUTED_KEYS = RuntimeEnvResolver.COMPUTED_KEYS;
 
     private String selectedMode = RUN_MODE;
     private final Map<String, JToggleButton> modeButtons = new LinkedHashMap<>();
@@ -78,25 +67,19 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private final Map<String, UIState> modeStates = new HashMap<>();
 
     /**
-     * Per-mode UI snapshot. Tracks both the env var values and which keys are
-     * still "computed" (auto-managed) vs "user-modified" (user took ownership).
+     * Per-mode UI snapshot. Script/connection state owned here;
+     * env var state delegated to {@link EnvVarPanel.State}.
      */
     private static class UIState {
         boolean useDefaultStartup = true;
         String startupScript = "";
         boolean useDefaultShutdown = true;
         String shutdownScript = "";
-        boolean passParentEnvs = true;
         /** Remote debug host (only used in Remote + Debug mode). */
         String debugHost = "localhost";
         /** Remote debug port (only used in Remote + Debug mode). */
         int debugPort = 5005;
-        /** All env vars (computed + user). Insertion order preserved. */
-        Map<String, String> envVars = new LinkedHashMap<>();
-        /** Keys still auto-managed — refresh updates only these. */
-        Set<String> computedKeys = new LinkedHashSet<>();
-        /** Keys the user explicitly deleted — never auto-restore until Reset Defaults. */
-        Set<String> deletedComputedKeys = new LinkedHashSet<>();
+        EnvVarPanel.State envState = new EnvVarPanel.State();
     }
 
     // Script sections (local mode only)
@@ -112,10 +95,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private JBTextField debugHostField;
     private JBTextField debugPortField;
 
-    // Env table
-    private JBTable envTable;
-    private DefaultTableModel envModel;
-    private JBCheckBox passParentEnvsCB;
+    // Env var panel
+    private EnvVarPanel envVarPanel;
 
     // Content panel that holds mode-specific sections
     private JPanel contentPanel;
@@ -140,13 +121,11 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
-        // Horizontal mode tab bar
         gbc.gridy = 0;
         gbc.weighty = 0;
         gbc.insets = JBUI.insets(0, 0, 10, 0);
         mainPanel.add(createModeTabBar(), gbc);
 
-        // Content panel with mode-specific sections
         gbc.gridy = 1;
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
@@ -163,7 +142,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     /**
      * Creates a horizontal tab bar with toggle buttons for each mode (Run | Debug | Cover | Profile).
-     * Matches IntelliJ Ultimate's Startup/Connection tab layout.
      */
     private JComponent createModeTabBar() {
         JPanel tabBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
@@ -211,15 +189,13 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             tabBar.add(btn);
         }
 
-        // Select Run by default
         modeButtons.get(RUN_MODE).setSelected(true);
-
         return tabBar;
     }
 
     /**
      * Rebuilds the content panel with all sections. Call once during init;
-     * visibility is controlled by updateModeVisibility().
+     * visibility is controlled by {@link #updateModeVisibility()}.
      */
     private void rebuildContentPanel() {
         contentPanel.removeAll();
@@ -228,29 +204,27 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
-        // Startup script section (local mode)
         gbc.gridy = 0;
         gbc.weighty = 0;
         gbc.insets = JBUI.insets(4, 0);
         startupSection = createStartupSection();
         contentPanel.add(startupSection, gbc);
 
-        // Shutdown script section (local mode)
         gbc.gridy = 1;
         shutdownSection = createShutdownSection();
         contentPanel.add(shutdownSection, gbc);
 
-        // Debug connection section (remote + debug mode)
         gbc.gridy = 2;
         debugConnectionSection = createDebugConnectionSection();
         contentPanel.add(debugConnectionSection, gbc);
 
-        // Environment variables section (always visible)
         gbc.gridy = 3;
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
         gbc.insets = JBUI.insets(10, 0, 0, 0);
-        contentPanel.add(createEnvSection(), gbc);
+        envVarPanel = new EnvVarPanel(project);
+        envVarPanel.setPopulateDefaultsAction(() -> envVarPanel.populateDefaults(configuration));
+        contentPanel.add(envVarPanel, gbc);
 
         updateModeVisibility();
         contentPanel.revalidate();
@@ -259,7 +233,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     /**
      * Creates the remote debug connection section with Host and Port fields.
-     * Shown only in Remote + Debug mode — the IDE connects to a remote JDWP agent.
      */
     private JPanel createDebugConnectionSection() {
         JPanel p = new JPanel(new GridBagLayout());
@@ -268,41 +241,28 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.anchor = GridBagConstraints.WEST;
         g.insets = JBUI.insets(2);
 
-        // Section title
-        g.gridx = 0;
-        g.gridy = 0;
+        g.gridx = 0; g.gridy = 0;
         g.gridwidth = 4;
         g.fill = GridBagConstraints.HORIZONTAL;
         g.weightx = 1.0;
         p.add(new TitledSeparator("Debug Connection"), g);
 
-        // Host
-        g.gridy = 1;
-        g.gridwidth = 1;
-        g.fill = GridBagConstraints.NONE;
-        g.weightx = 0;
+        g.gridy = 1; g.gridwidth = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
         g.insets = JBUI.insets(4, 4, 2, 4);
         p.add(new JBLabel("Host:"), g);
 
-        g.gridx = 1;
-        g.fill = GridBagConstraints.HORIZONTAL;
-        g.weightx = 1.0;
+        g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
         g.insets = JBUI.insets(4, 4, 2, 16);
         debugHostField = new JBTextField();
         debugHostField.setText("localhost");
         debugHostField.getEmptyText().setText("localhost");
         p.add(debugHostField, g);
 
-        // Port
-        g.gridx = 2;
-        g.fill = GridBagConstraints.NONE;
-        g.weightx = 0;
+        g.gridx = 2; g.fill = GridBagConstraints.NONE; g.weightx = 0;
         g.insets = JBUI.insets(4, 4, 2, 4);
         p.add(new JBLabel("Port:"), g);
 
-        g.gridx = 3;
-        g.fill = GridBagConstraints.HORIZONTAL;
-        g.weightx = 0.3;
+        g.gridx = 3; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 0.3;
         g.insets = JBUI.insets(4, 4, 2, 4);
         debugPortField = new JBTextField();
         debugPortField.setText("5005");
@@ -332,7 +292,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
                                         @NotNull String browseDescription,
                                         @NotNull TextFieldWithBrowseButton field,
                                         @NotNull JBCheckBox useDefaultCB) {
-        com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+        SafeBrowseUtil.addBrowseFolderListener(
                 field, browseTitle, browseDescription, project, scriptFileDescriptor());
 
         JPanel p = new JPanel(new GridBagLayout());
@@ -353,123 +313,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         return p;
     }
 
-    private JPanel createEnvSection() {
-        JPanel p = new JPanel(new BorderLayout());
-
-        p.add(new TitledSeparator("Environment Variables"), BorderLayout.NORTH);
-
-        JPanel center = new JPanel(new BorderLayout());
-
-        passParentEnvsCB = new JBCheckBox("Pass environment variables", true);
-        passParentEnvsCB.setBorder(JBUI.Borders.emptyBottom(6));
-        center.add(passParentEnvsCB, BorderLayout.NORTH);
-
-        String[] cols = {"Name", "Value"};
-        envModel = new DefaultTableModel(cols, 0) {
-            @Override
-            public boolean isCellEditable(int r, int c) { return false; }
-        };
-        envTable = new JBTable(envModel);
-        envTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        envTable.setRowHeight(JBUI.scale(24));
-        envTable.getColumnModel().getColumn(0).setPreferredWidth(200);
-        envTable.getColumnModel().getColumn(1).setPreferredWidth(400);
-
-        // Computed defaults render in gray italic; user vars render normally
-        envTable.setDefaultRenderer(Object.class, new ComputedVarCellRenderer());
-
-        // Double-click to edit (promotes computed -> user-modified)
-        envTable.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2 && envTable.getSelectedRow() >= 0) {
-                    editSelectedEnvVar();
-                }
-            }
-        });
-
-        ToolbarDecorator decorator = ToolbarDecorator.createDecorator(envTable)
-                .setAddAction(button -> addEnvVar())
-                .setRemoveAction(button -> removeEnvVar())
-                .setEditAction(button -> editSelectedEnvVar())
-                .disableUpDownActions();
-
-        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction("Populate Defaults", "Populate default environment variables", AllIcons.Actions.Rollback) {
-            @Override
-            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
-                populateDefaults();
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-        });
-
-        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction("Copy", "Copy selected environment variable", AllIcons.Actions.Copy) {
-            @Override
-            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
-                copyEnvVar();
-            }
-
-            @Override
-            public void update(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
-                e.getPresentation().setEnabled(envTable.getSelectedRow() >= 0);
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-        });
-
-        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction("Paste", "Paste environment variable", AllIcons.Actions.MenuPaste) {
-            @Override
-            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
-                pasteEnvVar();
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-        });
-
-        JComponent envTablePanel = decorator.createPanel();
-        envTablePanel.setPreferredSize(new Dimension(0, JBUI.scale(150)));
-        center.add(envTablePanel, BorderLayout.CENTER);
-        p.add(center, BorderLayout.CENTER);
-
-        return p;
-    }
-
-    /**
-     * Cell renderer that visually distinguishes computed defaults from user-defined vars.
-     * Computed defaults render in gray italic; user vars render normally.
-     */
-    private class ComputedVarCellRenderer extends DefaultTableCellRenderer {
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
-                                                       boolean hasFocus, int row, int column) {
-            Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
-            if (row < envModel.getRowCount()) {
-                String name = (String) envModel.getValueAt(row, 0);
-                UIState state = modeStates.get(selectedMode);
-                boolean isComputed = state != null && state.computedKeys.contains(name);
-
-                if (isComputed && !isSelected) {
-                    c.setForeground(NamedColorUtil.getInactiveTextColor());
-                    c.setFont(c.getFont().deriveFont(Font.ITALIC));
-                } else if (!isSelected) {
-                    c.setForeground(table.getForeground());
-                    c.setFont(table.getFont());
-                }
-            }
-            return c;
-        }
-    }
-
     // =========================================================================
     // Mode Visibility
     // =========================================================================
@@ -477,12 +320,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     /**
      * Updates section visibility based on current server mode (local/remote)
      * and selected runner mode (Run/Debug/Cover/Profile).
-     *
-     * <ul>
-     *   <li><b>Local</b>: startup/shutdown scripts + env vars (all modes)</li>
-     *   <li><b>Remote + Debug</b>: debug connection (host/port) + env vars</li>
-     *   <li><b>Remote + Run/Cover/Profile</b>: env vars only</li>
-     * </ul>
      */
     private void updateModeVisibility() {
         boolean showScripts = !remoteMode;
@@ -511,10 +348,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     // Computed Defaults
     // =========================================================================
 
-    /**
-     * Computes Startup/Connection env vars derived from the current configuration.
-     * Delegates to {@link RuntimeEnvResolver} so all derivation rules are centralized.
-     */
     private Map<String, String> computeDefaultEnvVars(@NotNull TomcatRunConfiguration cfg) {
         return RuntimeEnvResolver.computeDefaults(cfg.getConfigData());
     }
@@ -525,21 +358,19 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
      */
     public void refreshComputedEnvVars(@NotNull TomcatRunConfiguration cfg) {
         this.configuration = cfg;
-
-        // Refresh computed env var values (only keys the user hasn't edited)
         saveCurrentState();
+
         Map<String, String> freshDefaults = computeDefaultEnvVars(cfg);
         for (UIState state : modeStates.values()) {
-            for (String key : COMPUTED_KEYS) {
-                if (!state.computedKeys.contains(key)) {
-                    continue;
-                }
+            EnvVarPanel.State envState = state.envState;
+            for (String key : RuntimeEnvResolver.COMPUTED_KEYS) {
+                if (!envState.computedKeys.contains(key)) continue;
                 String value = freshDefaults.get(key);
                 if (value != null) {
-                    state.envVars.put(key, value);
+                    envState.envVars.put(key, value);
                 } else {
-                    state.envVars.remove(key);
-                    state.computedKeys.remove(key);
+                    envState.envVars.remove(key);
+                    envState.computedKeys.remove(key);
                 }
             }
         }
@@ -548,150 +379,122 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         LOG.debug("Refreshed computed env vars from Server tab state");
     }
 
-    /** Populates the current mode's env vars with the current auto-managed values. */
-    private void populateDefaults() {
-        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
-        Map<String, String> defaults = computeDefaultEnvVars(configuration);
+    // =========================================================================
+    // State Management (per-mode save/restore)
+    // =========================================================================
 
-        // Preserve user-added vars that aren't in the computed set
-        Map<String, String> userOnly = new LinkedHashMap<>();
-        for (Map.Entry<String, String> e : state.envVars.entrySet()) {
-            if (!COMPUTED_KEYS.contains(e.getKey()) && !defaults.containsKey(e.getKey())) {
-                userOnly.put(e.getKey(), e.getValue());
-            }
+    public void resetFrom(@NotNull TomcatRunConfiguration cfg) {
+        this.configuration = cfg;
+        modeStates.clear();
+
+        Map<String, String> defaults = computeDefaultEnvVars(cfg);
+
+        for (String mode : ALL_MODES) {
+            UIState state = new UIState();
+            RunnerSettings runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
+
+            String startup = runnerSettings.getStartupScript();
+            state.useDefaultStartup = StringUtil.isEmpty(startup);
+            state.startupScript = state.useDefaultStartup ? defaultStartupScript() : startup;
+
+            String shutdown = runnerSettings.getShutdownScript();
+            state.useDefaultShutdown = StringUtil.isEmpty(shutdown);
+            state.shutdownScript = state.useDefaultShutdown ? defaultShutdownScript() : shutdown;
+
+            state.debugHost = runnerSettings.getDebugHost();
+            state.debugPort = runnerSettings.getDebugPort();
+
+            EnvVarPanel.initializeState(state.envState, defaults, runnerSettings);
+
+            modeStates.put(mode, state);
         }
 
-        state.envVars.clear();
-        state.computedKeys.clear();
-        state.deletedComputedKeys.clear();
-
-        // Computed defaults first (in stable order), then user-added vars
-        for (String key : COMPUTED_KEYS) {
-            if (defaults.containsKey(key)) {
-                state.envVars.put(key, defaults.get(key));
-                state.computedKeys.add(key);
-            }
-        }
-        state.envVars.putAll(userOnly);
-
+        selectedMode = RUN_MODE;
+        modeButtons.get(RUN_MODE).setSelected(true);
+        updateModeVisibility();
         restoreCurrentState();
-        LOG.info("Reset environment variables to defaults for mode: " + selectedMode);
+
+        LOG.debug("StartupConnectionTab reset: "
+                + modeStates.values().stream().mapToInt(s -> s.envState.computedKeys.size()).sum()
+                + " auto-managed env keys");
     }
 
-    // =========================================================================
-    // Env Var Actions
-    // =========================================================================
+    private void saveCurrentState() {
+        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
+        state.useDefaultStartup = useDefaultStartupCB.isSelected();
+        state.startupScript = startupScriptField.getText();
+        state.useDefaultShutdown = useDefaultShutdownCB.isSelected();
+        state.shutdownScript = shutdownScriptField.getText();
 
-    private void addEnvVar() {
-        EnvVarDialog dlg = new EnvVarDialog(project, null, null);
-        if (dlg.showAndGet()) {
-            String[] v = dlg.getVar();
-            String name = v[0];
-            if (hasDuplicate(name)) {
-                Messages.showErrorDialog(project, "Duplicate variable name: " + name, "Error");
-                return;
-            }
-            envModel.addRow(v);
-            // User-added var is not tracked as computed
-            UIState state = modeStates.get(selectedMode);
-            if (state != null) {
-                state.computedKeys.remove(name);
-            }
+        if (debugHostField != null) state.debugHost = debugHostField.getText().trim();
+        if (debugPortField != null) {
+            try { state.debugPort = Integer.parseInt(debugPortField.getText().trim()); }
+            catch (NumberFormatException ignored) { }
         }
+
+        state.envState = envVarPanel.saveState();
     }
 
-    private void editSelectedEnvVar() {
-        int row = envTable.getSelectedRow();
-        if (row < 0) return;
+    private void restoreCurrentState() {
+        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
 
-        String oldName = (String) envModel.getValueAt(row, 0);
-        String oldValue = (String) envModel.getValueAt(row, 1);
+        useDefaultStartupCB.setSelected(state.useDefaultStartup);
+        startupScriptField.setText(state.startupScript);
+        updateStartupState();
 
-        EnvVarDialog dlg = new EnvVarDialog(project, oldName, oldValue);
-        if (dlg.showAndGet()) {
-            String[] v = dlg.getVar();
-            String newName = v[0];
+        useDefaultShutdownCB.setSelected(state.useDefaultShutdown);
+        shutdownScriptField.setText(state.shutdownScript);
+        updateShutdownState();
 
-            // Check duplicate (skip self)
-            for (int i = 0; i < envModel.getRowCount(); i++) {
-                if (i != row && newName.equals(envModel.getValueAt(i, 0))) {
-                    Messages.showErrorDialog(project, "Duplicate variable name: " + newName, "Error");
-                    return;
-                }
-            }
+        if (debugHostField != null) debugHostField.setText(state.debugHost);
+        if (debugPortField != null) debugPortField.setText(String.valueOf(state.debugPort));
 
-            envModel.setValueAt(newName, row, 0);
-            envModel.setValueAt(v[1], row, 1);
-
-            // Editing promotes computed -> user-modified (won't auto-refresh)
-            UIState state = modeStates.get(selectedMode);
-            if (state != null) {
-                state.computedKeys.remove(oldName);
-                state.computedKeys.remove(newName);
-            }
-            envTable.repaint();
-        }
+        envVarPanel.restoreState(state.envState);
     }
 
-    private void removeEnvVar() {
-        int row = envTable.getSelectedRow();
-        if (row < 0) return;
+    public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
+        saveCurrentState();
 
-        String name = (String) envModel.getValueAt(row, 0);
-        UIState state = modeStates.get(selectedMode);
-        if (state != null) {
-            // Track that user explicitly deleted this computed key
-            if (state.computedKeys.remove(name)) {
-                state.deletedComputedKeys.add(name);
+        boolean scriptsApplicable = !remoteMode;
+
+        for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
+            String mode = entry.getKey();
+            UIState state = entry.getValue();
+            RunnerSettings runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
+
+            if (scriptsApplicable && !state.useDefaultStartup) {
+                String path = state.startupScript.trim();
+                if (StringUtil.isEmpty(path))
+                    throw new ConfigurationException("Startup script path is required for mode " + mode);
+                if (!new File(path).exists())
+                    throw new ConfigurationException("Startup script does not exist for mode " + mode + ": " + path);
+                runnerSettings.setStartupScript(path);
+            } else {
+                runnerSettings.setStartupScript(null);
             }
-        }
 
-        envModel.removeRow(row);
-        if (envModel.getRowCount() > 0) {
-            int newSel = Math.min(row, envModel.getRowCount() - 1);
-            envTable.setRowSelectionInterval(newSel, newSel);
-        }
-    }
-
-    private void copyEnvVar() {
-        int row = envTable.getSelectedRow();
-        if (row < 0) return;
-        String name = (String) envModel.getValueAt(row, 0);
-        String value = (String) envModel.getValueAt(row, 1);
-        String text = name + "=" + value;
-        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-        clipboard.setContents(new StringSelection(text), null);
-    }
-
-    private void pasteEnvVar() {
-        try {
-            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-            String text = (String) clipboard.getData(DataFlavor.stringFlavor);
-            if (text == null || text.isEmpty()) return;
-
-            int eq = text.indexOf('=');
-            if (eq > 0) {
-                String name = text.substring(0, eq).trim();
-                String value = text.substring(eq + 1).trim();
-                if (!name.isEmpty() && !hasDuplicate(name)) {
-                    envModel.addRow(new String[]{name, value});
-                    // Pasted var is user-owned
-                    UIState state = modeStates.get(selectedMode);
-                    if (state != null) {
-                        state.computedKeys.remove(name);
-                    }
-                }
+            if (scriptsApplicable && !state.useDefaultShutdown) {
+                String path = state.shutdownScript.trim();
+                if (StringUtil.isEmpty(path))
+                    throw new ConfigurationException("Shutdown script path is required for mode " + mode);
+                if (!new File(path).exists())
+                    throw new ConfigurationException("Shutdown script does not exist for mode " + mode + ": " + path);
+                runnerSettings.setShutdownScript(path);
+            } else {
+                runnerSettings.setShutdownScript(null);
             }
-        } catch (Exception ex) {
-            LOG.debug("Paste failed: " + ex.getMessage());
-        }
-    }
 
-    private boolean hasDuplicate(String name) {
-        for (int i = 0; i < envModel.getRowCount(); i++) {
-            if (name.equals(envModel.getValueAt(i, 0))) return true;
+            runnerSettings.setDebugHost(state.debugHost);
+            runnerSettings.setDebugPort(state.debugPort);
+
+            EnvVarPanel.State envState = state.envState;
+            runnerSettings.setEnvironmentVariables(new LinkedHashMap<>(envState.envVars));
+            runnerSettings.setComputedEnvironmentKeys(new LinkedHashSet<>(envState.computedKeys));
+            runnerSettings.setDeletedComputedEnvironmentKeys(new LinkedHashSet<>(envState.deletedComputedKeys));
+            runnerSettings.setPassParentEnvs(envState.passParentEnvs);
         }
-        return false;
+
+        LOG.info("StartupConnectionTab applied for all modes");
     }
 
     // =========================================================================
@@ -721,7 +524,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         TomcatInfo ti = configuration.getTomcatInfo();
         if (ti == null) return "";
         String bin = Paths.get(ti.getPath(), "bin").toString();
-        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String script = os.contains("win") ? base + ".bat" : base + ".sh";
         return bin + File.separator + script + " " + command;
     }
@@ -736,268 +539,5 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         boolean useDef = useDefaultShutdownCB.isSelected();
         shutdownScriptField.setEnabled(!useDef);
         if (useDef) shutdownScriptField.setText(defaultShutdownScript());
-    }
-
-    // =========================================================================
-    // State Management (per-mode save/restore)
-    // =========================================================================
-
-    public void resetFrom(@NotNull TomcatRunConfiguration cfg) {
-        this.configuration = cfg;
-        modeStates.clear();
-
-        Map<String, String> defaults = computeDefaultEnvVars(cfg);
-
-        for (String mode : ALL_MODES) {
-            UIState state = new UIState();
-            var runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
-
-            String startup = runnerSettings.getStartupScript();
-            state.useDefaultStartup = StringUtil.isEmpty(startup);
-            state.startupScript = state.useDefaultStartup ? defaultStartupScript() : startup;
-
-            String shutdown = runnerSettings.getShutdownScript();
-            state.useDefaultShutdown = StringUtil.isEmpty(shutdown);
-            state.shutdownScript = state.useDefaultShutdown ? defaultShutdownScript() : shutdown;
-
-            state.passParentEnvs = runnerSettings.isPassParentEnvs();
-
-            // Remote debug connection settings
-            state.debugHost = runnerSettings.getDebugHost();
-            state.debugPort = runnerSettings.getDebugPort();
-
-            initializeComputedEnvState(state, defaults, runnerSettings);
-
-            modeStates.put(mode, state);
-        }
-
-        selectedMode = RUN_MODE;
-        modeButtons.get(RUN_MODE).setSelected(true);
-        updateModeVisibility();
-        restoreCurrentState();
-
-        LOG.debug("StartupConnectionTab reset: "
-                + modeStates.values().stream().mapToInt(s -> s.computedKeys.size()).sum() + " auto-managed env keys");
-    }
-
-    private void saveCurrentState() {
-        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
-        state.useDefaultStartup = useDefaultStartupCB.isSelected();
-        state.startupScript = startupScriptField.getText();
-        state.useDefaultShutdown = useDefaultShutdownCB.isSelected();
-        state.shutdownScript = shutdownScriptField.getText();
-        state.passParentEnvs = passParentEnvsCB.isSelected();
-
-        // Save debug connection fields
-        if (debugHostField != null) {
-            state.debugHost = debugHostField.getText().trim();
-        }
-        if (debugPortField != null) {
-            try {
-                state.debugPort = Integer.parseInt(debugPortField.getText().trim());
-            } catch (NumberFormatException ignored) {
-                // Keep existing value
-            }
-        }
-
-        state.envVars.clear();
-        for (int i = 0; i < envModel.getRowCount(); i++) {
-            String name = ((String) envModel.getValueAt(i, 0)).trim();
-            String value = ((String) envModel.getValueAt(i, 1)).trim();
-            if (!StringUtil.isEmpty(name)) {
-                state.envVars.put(name, value);
-            }
-        }
-        // computedKeys and deletedComputedKeys are maintained by add/edit/remove actions
-    }
-
-    static void initializeComputedEnvState(@NotNull UIState state,
-                                           @NotNull Map<String, String> defaults,
-                                           @NotNull com.dev.idea.plugins.tomcat.model.RunnerSettings runnerSettings) {
-        state.envVars.clear();
-        state.computedKeys.clear();
-        state.deletedComputedKeys.clear();
-
-        Map<String, String> persisted = runnerSettings.getEnvironmentVariables();
-        Set<String> persistedComputed = runnerSettings.getComputedEnvironmentKeys();
-        Set<String> persistedDeleted = runnerSettings.getDeletedComputedEnvironmentKeys();
-
-        state.deletedComputedKeys.addAll(persistedDeleted);
-
-        if (!persistedComputed.isEmpty() || !persistedDeleted.isEmpty()) {
-            state.envVars.putAll(persisted);
-            state.computedKeys.addAll(persistedComputed);
-            return;
-        }
-
-        boolean hasPersistedVars = !persisted.isEmpty();
-        if (!hasPersistedVars) {
-            for (String key : COMPUTED_KEYS) {
-                String value = defaults.get(key);
-                if (!StringUtil.isEmpty(value)) {
-                    state.envVars.put(key, value);
-                    state.computedKeys.add(key);
-                }
-            }
-            return;
-        }
-
-        state.envVars.putAll(persisted);
-        for (String key : COMPUTED_KEYS) {
-            if (!persisted.containsKey(key)) continue;
-
-            String computedVal = defaults.get(key);
-            String persistedVal = persisted.get(key);
-            if (!StringUtil.isEmpty(computedVal) && Objects.equals(computedVal, persistedVal)) {
-                state.computedKeys.add(key);
-            }
-        }
-    }
-
-    private void restoreCurrentState() {
-        UIState state = modeStates.computeIfAbsent(selectedMode, k -> new UIState());
-
-        useDefaultStartupCB.setSelected(state.useDefaultStartup);
-        startupScriptField.setText(state.startupScript);
-        updateStartupState();
-
-        useDefaultShutdownCB.setSelected(state.useDefaultShutdown);
-        shutdownScriptField.setText(state.shutdownScript);
-        updateShutdownState();
-
-        passParentEnvsCB.setSelected(state.passParentEnvs);
-
-        // Restore debug connection fields
-        if (debugHostField != null) {
-            debugHostField.setText(state.debugHost);
-        }
-        if (debugPortField != null) {
-            debugPortField.setText(String.valueOf(state.debugPort));
-        }
-
-        envModel.setRowCount(0);
-        state.envVars.forEach((k, v) -> envModel.addRow(new Object[]{k, v}));
-    }
-
-    public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
-        saveCurrentState();
-
-        // Scripts are only relevant for local mode — remote server is already running
-        boolean scriptsApplicable = !remoteMode;
-
-        for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
-            String mode = entry.getKey();
-            UIState state = entry.getValue();
-            var runnerSettings = cfg.getConfigData().getRunnerSettings(mode);
-
-            if (scriptsApplicable && !state.useDefaultStartup) {
-                String path = state.startupScript.trim();
-                if (StringUtil.isEmpty(path)) throw new ConfigurationException("Startup script path is required for mode " + mode);
-                File f = new File(path);
-                if (!f.exists()) throw new ConfigurationException("Startup script does not exist for mode " + mode + ": " + path);
-                runnerSettings.setStartupScript(path);
-            } else {
-                runnerSettings.setStartupScript(null);
-            }
-
-            if (scriptsApplicable && !state.useDefaultShutdown) {
-                String path = state.shutdownScript.trim();
-                if (StringUtil.isEmpty(path)) throw new ConfigurationException("Shutdown script path is required for mode " + mode);
-                File f = new File(path);
-                if (!f.exists()) throw new ConfigurationException("Shutdown script does not exist for mode " + mode + ": " + path);
-                runnerSettings.setShutdownScript(path);
-            } else {
-                runnerSettings.setShutdownScript(null);
-            }
-
-            // Remote debug connection
-            runnerSettings.setDebugHost(state.debugHost);
-            runnerSettings.setDebugPort(state.debugPort);
-
-            runnerSettings.setEnvironmentVariables(new LinkedHashMap<>(state.envVars));
-            runnerSettings.setComputedEnvironmentKeys(new LinkedHashSet<>(state.computedKeys));
-            runnerSettings.setDeletedComputedEnvironmentKeys(new LinkedHashSet<>(state.deletedComputedKeys));
-            runnerSettings.setPassParentEnvs(state.passParentEnvs);
-        }
-
-        LOG.info("StartupConnectionTab applied for all modes");
-    }
-
-    // =========================================================================
-    // Env Var Dialog
-    // =========================================================================
-
-    private static class EnvVarDialog extends DialogWrapper {
-        private final JBTextField nameF = new JBTextField(25);
-        private final JBTextField valueF = new JBTextField(25);
-        private final ComboBox<String> commonCombo = new ComboBox<>(new String[]{
-                "Custom Variable", "JAVA_OPTS", "CATALINA_OPTS", "CATALINA_HOME",
-                "CATALINA_BASE", "JAVA_HOME", "CLASSPATH", "PATH"
-        });
-
-        EnvVarDialog(@NotNull Project p, @Nullable String name, @Nullable String value) {
-            super(p);
-            setTitle(name == null ? "Add Environment Variable" : "Edit Environment Variable");
-            if (name != null) { nameF.setText(name); valueF.setText(value != null ? value : ""); }
-
-            commonCombo.addActionListener(e -> {
-                String sel = (String) commonCombo.getSelectedItem();
-                if ("Custom Variable".equals(sel) || sel == null) return;
-
-                nameF.setText(sel);
-
-                String varValue = switch (sel) {
-                    case "JAVA_OPTS"      -> DynamicTomcatEnvironment.buildJavaOpts();
-                    case "CATALINA_OPTS"  -> DynamicTomcatEnvironment.buildCatalinaOpts();
-                    case "CATALINA_HOME"  -> "";
-                    case "CATALINA_BASE"  -> "";
-                    case "JAVA_HOME"      -> System.getenv("JAVA_HOME");
-                    case "CLASSPATH"      -> System.getenv("CLASSPATH");
-                    case "PATH"           -> System.getenv("PATH");
-                    default               -> "";
-                };
-
-                valueF.setText(StringUtil.notNullize(varValue));
-            });
-            init();
-        }
-
-        @Override
-        protected JComponent createCenterPanel() {
-            JPanel panel = new JPanel(new GridBagLayout());
-            panel.setBorder(JBUI.Borders.empty(15));
-            GridBagConstraints g = new GridBagConstraints();
-            g.insets = JBUI.insets(5);
-            g.anchor = GridBagConstraints.WEST;
-
-            g.gridx = 0; g.gridy = 0;
-            panel.add(new JBLabel("Common:"), g);
-            g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
-            panel.add(commonCombo, g);
-
-            g.gridx = 0; g.gridy = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
-            panel.add(new JBLabel("Name:"), g);
-            g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
-            panel.add(nameF, g);
-
-            g.gridx = 0; g.gridy = 2; g.fill = GridBagConstraints.NONE; g.weightx = 0;
-            panel.add(new JBLabel("Value:"), g);
-            g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
-            panel.add(valueF, g);
-
-            return panel;
-        }
-
-        @Override
-        protected void doOKAction() {
-            if (StringUtil.isEmpty(nameF.getText().trim())) {
-                Messages.showErrorDialog(getContentPane(), "Variable name is required", "Validation");
-                nameF.requestFocus();
-                return;
-            }
-            super.doOKAction();
-        }
-
-        String[] getVar() { return new String[]{nameF.getText().trim(), valueF.getText().trim()}; }
     }
 }

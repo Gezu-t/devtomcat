@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.server.sections;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.ui.server.dialogs.JREConfigurationDialog;
 import com.intellij.openapi.options.ConfigurationException;
@@ -19,6 +20,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import com.intellij.openapi.diagnostic.Logger;
 
 public class JreConfigurationSection implements ConfigurationSection {
@@ -40,17 +42,10 @@ public class JreConfigurationSection implements ConfigurationSection {
             panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
             panel.setBorder(JBUI.Borders.empty(0));
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JBLabel("JRE:"), gbc);
-
-            gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(2, 4, 2, 8);
             jreComboBox = new ComboBox<>();
             jreComboBox.setRenderer(new JreEntryRenderer());
-            panel.add(jreComboBox, gbc);
+            ConfigurationSection.addLabelAndField(panel, gbc, 0,
+                    new JBLabel("JRE:"), jreComboBox);
 
             gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 0, 2, 0);
@@ -124,7 +119,7 @@ public class JreConfigurationSection implements ConfigurationSection {
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
         String saved = configuration.getConfigData().getJreSelection();
         if (saved == null || saved.isEmpty()
-                || com.dev.idea.plugins.tomcat.TomcatConstants.JRE_PROJECT_DEFAULT.equals(saved)) {
+                || TomcatConstants.JRE_PROJECT_DEFAULT.equals(saved)) {
             if (jreComboBox.getItemCount() > 0) {
                 jreComboBox.setSelectedIndex(0);
             }
@@ -149,7 +144,7 @@ public class JreConfigurationSection implements ConfigurationSection {
         JreEntry selected = (JreEntry) jreComboBox.getSelectedItem();
         if (selected != null) {
             String sdkName = selected.isDefault
-                    ? com.dev.idea.plugins.tomcat.TomcatConstants.JRE_PROJECT_DEFAULT
+                    ? TomcatConstants.JRE_PROJECT_DEFAULT
                     : selected.sdkName;
             configuration.getConfigData().setJreSelection(sdkName);
         }
@@ -165,10 +160,10 @@ public class JreConfigurationSection implements ConfigurationSection {
         JreEntry selected = (JreEntry) jreComboBox.getSelectedItem();
         if (selected == null) return false;
         String current = selected.isDefault
-                ? com.dev.idea.plugins.tomcat.TomcatConstants.JRE_PROJECT_DEFAULT
+                ? TomcatConstants.JRE_PROJECT_DEFAULT
                 : selected.sdkName;
         String saved = config.getConfigData().getJreSelection();
-        return !java.util.Objects.equals(current, saved);
+        return !Objects.equals(current, saved);
     }
 
     @Override

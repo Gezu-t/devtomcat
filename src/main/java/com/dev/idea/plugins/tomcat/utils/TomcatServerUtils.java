@@ -7,6 +7,7 @@ import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -173,7 +174,7 @@ public final class TomcatServerUtils {
     }
 
     public static boolean isValidTomcatInstallation(@Nullable String installPath) {
-        if (com.intellij.openapi.util.text.StringUtil.isEmpty(installPath)) {
+        if (StringUtil.isEmpty(installPath)) {
             return false;
         }
         return TomcatServerValidator.isValidInstallation(installPath);

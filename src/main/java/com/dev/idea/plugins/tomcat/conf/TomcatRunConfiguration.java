@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.runner.TomcatCommandLineState;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
@@ -29,8 +30,13 @@ import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Tomcat run configuration. Delegates init/serialize/validate/clone to helper classes.
@@ -185,6 +191,17 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     private static Integer positiveOrNull(int port) { return port > 0 ? port : null; }
 
     // =====================================================================
+    // Server mode accessors
+    // =====================================================================
+
+    @NotNull
+    public String getServerMode() { return configData.getServerMode(); }
+
+    public boolean isRemoteMode() {
+        return TomcatConstants.MODE_REMOTE.equalsIgnoreCase(getServerMode());
+    }
+
+    // =====================================================================
     // Server & context accessors
     // =====================================================================
 
@@ -216,11 +233,11 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     public void setVmOptions(@Nullable String vmOptions) { configData.getVmConfig().setVmOptions(vmOptions); }
 
     @NotNull
-    public java.util.Map<String, String> getEnvironmentVariables() {
+    public Map<String, String> getEnvironmentVariables() {
         return configData.getRunnerSettings(TomcatConstants.RUN_MODE).getEnvironmentVariables();
     }
 
-    public void setEnvironmentVariables(@NotNull java.util.Map<String, String> envVars) {
+    public void setEnvironmentVariables(@NotNull Map<String, String> envVars) {
         configData.getRunnerSettings(TomcatConstants.RUN_MODE).setEnvironmentVariables(envVars);
     }
 
@@ -233,6 +250,11 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // =====================================================================
     // Deployment accessors
     // =====================================================================
+
+    @NotNull
+    public List<DeploymentArtifact> getDeployedArtifacts() {
+        return configData.getDeploymentConfig().getDeployedArtifacts();
+    }
 
     public boolean isHotDeploymentEnabled() { return configData.getDeploymentConfig().isHotDeploymentEnabled(); }
     public void setHotDeploymentEnabled(boolean enabled) { configData.getDeploymentConfig().setHotDeploymentEnabled(enabled); }
@@ -271,13 +293,13 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 LOG.info("DevTomcat: Added default Build (Make) task to Before Launch");
             }
 
-            List<DeploymentArtifact> deploymentArtifacts = configData.getDeploymentConfig().getDeployedArtifacts();
+            List<DeploymentArtifact> deploymentArtifacts = getDeployedArtifacts();
             List<String> artifactDisplayNames = deploymentArtifacts == null
-                    ? java.util.Collections.emptyList()
+                    ? Collections.emptyList()
                     : deploymentArtifacts.stream()
                             .filter(a -> a != null && !a.getDisplayName().isBlank())
                             .map(DeploymentArtifact::getDisplayName)
-                            .collect(java.util.stream.Collectors.toList());
+                            .collect(Collectors.toList());
 
             // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager.
             // ArtifactManager.getInstance() requires a read action — syncBeforeLaunchWithDeployments()
@@ -336,7 +358,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
      */
     @SuppressWarnings("rawtypes")
     private void syncTomcatBuildArtifactsTask(@NotNull List<BeforeRunTask> tasks,
-                                               @NotNull java.util.List<String> artifactNames) {
+                                               @NotNull List<String> artifactNames) {
         for (BeforeRunTask task : tasks) {
             if (task instanceof TomcatBuildArtifactsTask buildTask) {
                 buildTask.setArtifactNames(artifactNames);
@@ -389,7 +411,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     private static String extractBaseModuleName(String name) {
-        return com.dev.idea.plugins.tomcat.utils.ContextPathUtils.extractBaseModuleName(name);
+        return ContextPathUtils.extractBaseModuleName(name);
     }
 
     // =====================================================================
@@ -463,7 +485,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         if (logsDir == null) return;
 
         // Check which log names are already registered in the internal list
-        java.util.Set<String> alreadyRegistered = new java.util.HashSet<>();
+        Set<String> alreadyRegistered = new HashSet<>();
         for (LogFileOptions opt : super.getAllLogFiles()) {
             alreadyRegistered.add(opt.getName());
         }
@@ -486,7 +508,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             return super.getAllLogFiles();
         }
 
-        java.util.Set<String> tomcatLogIds = new java.util.HashSet<>();
+        Set<String> tomcatLogIds = new HashSet<>();
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
             tomcatLogIds.add(logFile.getId());
         }
@@ -516,9 +538,9 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // =====================================================================
 
     @NotNull
-    public java.util.List<String> getLogFileConfigurations() {
-        java.util.List<String> logFiles = configData.getLogFileConfig().getLogFiles();
-        return logFiles != null ? logFiles : new java.util.ArrayList<>();
+    public List<String> getLogFileConfigurations() {
+        List<String> logFiles = configData.getLogFileConfig().getLogFiles();
+        return logFiles != null ? logFiles : new ArrayList<>();
     }
 
     public void setStartupScript(String startupScript) {

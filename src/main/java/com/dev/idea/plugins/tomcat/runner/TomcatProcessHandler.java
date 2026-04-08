@@ -248,8 +248,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         deploymentLogger.logServerInfo("Tomcat process started");
         lifecycleListener.onServerStarting(configurationName);
 
-        List<DeploymentArtifact> artifacts = configuration.getConfigData()
-                .getDeploymentConfig().getDeployedArtifacts();
+        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
         expectedArtifactCount.set(artifacts.size());
         if (artifacts.isEmpty()) {
             deploymentLogger.logDeploymentStart(configurationName);
@@ -265,14 +264,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private static String resolveContextName(@Nullable String contextPath) {
-        try {
-            return ContextPathUtils.resolveContextName(contextPath);
-        } catch (IllegalArgumentException e) {
-            // In the process handler context, we log and fall back rather than
-            // crashing — the deployment strategy already validated at launch time.
-            LOG.warn("Invalid context path in process handler: " + e.getMessage());
-            return ROOT_CONTEXT_NAME;
-        }
+        return ContextPathUtils.resolveContextNameSafe(contextPath, LOG);
     }
 
     @Override
@@ -336,7 +328,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
     private boolean shouldWaitForContextBeforeOpeningBrowser() {
         return configuration.isAfterLaunchEnabled()
-                && !TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())
+                && !configuration.isRemoteMode()
                 && browserTargetContextName != null;
     }
 
@@ -431,6 +423,10 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      * Activates the Run/Debug tool window when output arrives on stdout or stderr,
      * if the corresponding "Show console when message is printed to..." setting is enabled.
      * Debounced to avoid excessive EDT dispatches on rapid output.
+     *
+     * <p>Only activates if the tool window is already visible (expanded). Skipped when
+     * the tool window is collapsed — i.e. when the user is viewing the console via the
+     * Services panel — to prevent Services from losing focus and auto-hiding.
      */
     private void maybeActivateConsole(@NotNull Key outputType) {
         if (!activateToolWindow) return;
@@ -449,7 +445,9 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 // executorId matches ToolWindow ID ("Run" or "Debug")
                 ToolWindow tw = ToolWindowManager.getInstance(configuration.getProject())
                         .getToolWindow(executorId);
-                if (tw != null && !tw.isActive()) {
+                // Only activate if already visible — avoids stealing focus from the
+                // Services panel when the user is viewing the console there instead.
+                if (tw != null && tw.isVisible() && !tw.isActive()) {
                     tw.activate(null);
                 }
             } catch (Exception e) {
@@ -463,7 +461,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      * Tomcat via Manager API after the local server startup is detected.
      */
     private void triggerRemoteDeploymentIfNeeded() {
-        if (!TomcatConstants.MODE_REMOTE.equals(configuration.getConfigData().getServerMode())) {
+        if (!configuration.isRemoteMode()) {
             return;
         }
         RemoteConfig remoteConfig = configuration.getConfigData().getRemoteConfig();
@@ -488,8 +486,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                         return;
                     }
 
-                    List<DeploymentArtifact> artifacts = configuration.getConfigData()
-                            .getDeploymentConfig().getDeployedArtifacts();
+                    List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
                     int successCount = 0;
                     int total = artifacts.size();
                     for (int i = 0; i < total; i++) {

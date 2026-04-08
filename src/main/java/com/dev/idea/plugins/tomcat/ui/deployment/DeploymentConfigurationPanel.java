@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactDeploymentEditDialog;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
@@ -25,7 +26,10 @@ import javax.swing.event.DocumentListener;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import com.intellij.openapi.diagnostic.Logger;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 
@@ -188,8 +192,8 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     private void editSelectedArtifact() {
         DeploymentArtifact deployment = tableManager.getSelectedDeployment();
         if (deployment != null) {
-            com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactDeploymentEditDialog dialog =
-                    new com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactDeploymentEditDialog(
+            ArtifactDeploymentEditDialog dialog =
+                    new ArtifactDeploymentEditDialog(
                             this, deployment
                     );
 
@@ -237,16 +241,16 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         for (int i = 0; i < currentArtifacts.size(); i++) {
             DeploymentArtifact current = currentArtifacts.get(i);
             DeploymentArtifact saved = savedArtifacts.get(i);
-            if (!java.util.Objects.equals(current.getName(), saved.getName())) return true;
-            if (!java.util.Objects.equals(current.getPath(), saved.getPath())) return true;
-            if (!java.util.Objects.equals(current.getContextPath(), saved.getContextPath())) return true;
-            if (!java.util.Objects.equals(current.getType(), saved.getType())) return true;
+            if (!Objects.equals(current.getName(), saved.getName())) return true;
+            if (!Objects.equals(current.getPath(), saved.getPath())) return true;
+            if (!Objects.equals(current.getContextPath(), saved.getContextPath())) return true;
+            if (!Objects.equals(current.getType(), saved.getType())) return true;
         }
         return false;
     }
 
     public boolean isConfigurationValid() {
-        java.util.Set<String> seenContextPaths = new java.util.HashSet<>();
+        Set<String> seenContextPaths = new HashSet<>();
         for (DeploymentArtifact d : tableManager.getDeployments()) {
             if (d.getPath() == null || d.getPath().trim().isEmpty()) {
                 return false;

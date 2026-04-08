@@ -5,6 +5,8 @@ import com.dev.idea.plugins.tomcat.environment.DynamicTomcatEnvironment;
 import com.dev.idea.plugins.tomcat.model.ValidationResult;
 import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import com.dev.idea.plugins.tomcat.utils.PortValidator;
+import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
+import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ValidationInfo;
@@ -70,16 +72,10 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
             JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.anchor = GridBagConstraints.WEST;
 
             int row = 0;
 
             // Row 0: HTTP port + Deploy checkbox
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            formPanel.add(new JBLabel("HTTP port:"), gbc);
-
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             httpPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpPort()), 8);
             httpPortDocListener = new DocumentListener() {
                 @Override public void insertUpdate(DocumentEvent e) { onPortChange(); }
@@ -92,91 +88,57 @@ public class TomcatSettingsSection implements ConfigurationSection {
                 }
             };
             httpPortField.getDocument().addDocumentListener(httpPortDocListener);
-            formPanel.add(httpPortField, gbc);
-
-            gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, JBUI.scale(20), 2, 4);
+            addPortRow(formPanel, gbc, row, new JBLabel("HTTP port:"), httpPortField);
             deployAppsCheckBox = new JBCheckBox("Deploy applications configured in Tomcat instance");
             deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
-            formPanel.add(deployAppsCheckBox, gbc);
+            addCheckBoxColumn(formPanel, gbc, deployAppsCheckBox);
 
             // Row 1: HTTPS port + Preserve sessions checkbox
             row++;
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            formPanel.add(new JBLabel("HTTPs port:"), gbc);
-
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             httpsPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()), 8);
-            formPanel.add(httpsPortField, gbc);
-
-            gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, JBUI.scale(20), 2, 4);
+            addPortRow(formPanel, gbc, row, new JBLabel("HTTPs port:"), httpsPortField);
             preserveSessionsCheckBox = new JBCheckBox("Preserve sessions across restarts and redeploys");
             preserveSessionsCheckBox.setSelected(false);
-            formPanel.add(preserveSessionsCheckBox, gbc);
+            addCheckBoxColumn(formPanel, gbc, preserveSessionsCheckBox);
 
             // Row 2: JMX port + Allow parallel run checkbox
             row++;
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            formPanel.add(new JBLabel("JMX port:"), gbc);
-
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             jmxPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getJmxPort()), 8);
-            formPanel.add(jmxPortField, gbc);
-
-            gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, JBUI.scale(20), 2, 4);
+            addPortRow(formPanel, gbc, row, new JBLabel("JMX port:"), jmxPortField);
             allowMultipleInstancesCheckBox = new JBCheckBox("Allow parallel run");
             allowMultipleInstancesCheckBox.setToolTipText("Allow multiple instances of this configuration to run simultaneously");
-            formPanel.add(allowMultipleInstancesCheckBox, gbc);
+            addCheckBoxColumn(formPanel, gbc, allowMultipleInstancesCheckBox);
 
             // Row 3: AJP port
             row++;
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            formPanel.add(new JBLabel("AJP port:"), gbc);
-
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             ajpPortField = new JBTextField("", 8);
-            formPanel.add(ajpPortField, gbc);
+            addPortRow(formPanel, gbc, row, new JBLabel("AJP port:"), ajpPortField);
 
             // Row 4: Shutdown port
             row++;
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            formPanel.add(new JBLabel("Shutdown port:"), gbc);
-
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
             shutdownPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()), 8);
-            formPanel.add(shutdownPortField, gbc);
+            addPortRow(formPanel, gbc, row, new JBLabel("Shutdown port:"), shutdownPortField);
 
             // Row 5: Debug port
             row++;
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
             JBLabel debugPortLabel = new JBLabel("Debug port:");
             debugPortLabel.setToolTipText("JDWP debug port. Each run configuration must use a unique port when running multiple Tomcat instances simultaneously.");
-            formPanel.add(debugPortLabel, gbc);
-
-            gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
-            debugPortField = new JBTextField(String.valueOf(com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT), 8);
+            debugPortField = new JBTextField(String.valueOf(DebugConfig.DEFAULT_DEBUG_PORT), 8);
             debugPortField.setToolTipText("JDWP debug port (default 5005). Use a different port for each Tomcat instance to avoid conflicts.");
-            formPanel.add(debugPortField, gbc);
+            addPortRow(formPanel, gbc, row, debugPortLabel, debugPortField);
 
-            // Row 6: CATALINA_BASE
+            // Row 6: CATALINA_BASE (spans both field columns for the browse button)
             row++;
-            gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            formPanel.add(new JBLabel("CATALINA_BASE:"), gbc);
-
-            gbc.gridx = 1; gbc.gridwidth = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
             catalinaBaseField = new TextFieldWithBrowseButton();
-            com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil.addBrowseFolderListener(
+            SafeBrowseUtil.addBrowseFolderListener(
                     catalinaBaseField, "Select CATALINA_BASE Directory", "Choose the base directory for this Tomcat instance",
                     project, FileChooserDescriptorFactory.createSingleFolderDescriptor());
             catalinaBaseField.getTextField().setToolTipText("Leave empty to use default (auto-generated per configuration)");
+            gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 1; gbc.weightx = 0;
+            gbc.fill = GridBagConstraints.NONE; gbc.anchor = GridBagConstraints.WEST;
+            gbc.insets = JBUI.insets(2, 0, 2, 4);
+            formPanel.add(new JBLabel("CATALINA_BASE:"), gbc);
+            gbc.gridx = 1; gbc.gridwidth = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
             formPanel.add(catalinaBaseField, gbc);
             gbc.gridwidth = 1;
 
@@ -184,6 +146,28 @@ public class TomcatSettingsSection implements ConfigurationSection {
             panel.add(formPanel);
         }
         return panel;
+    }
+
+    /**
+     * Adds a label at column 0 and a fixed-width port field at column 1.
+     * Column 2 (checkbox) is left for the caller to add when needed.
+     */
+    private static void addPortRow(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
+                                   int row, @NotNull JComponent label, @NotNull JComponent field) {
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 1; gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE; gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = JBUI.insets(2, 0, 2, 4);
+        panel.add(label, gbc);
+        gbc.gridx = 1; gbc.fill = GridBagConstraints.NONE;
+        panel.add(field, gbc);
+    }
+
+    /** Adds a checkbox at column 2 (the wide trailing column for the current row). */
+    private static void addCheckBoxColumn(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
+                                          @NotNull JComponent checkBox) {
+        gbc.gridx = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.NONE;
+        gbc.insets = JBUI.insets(2, JBUI.scale(20), 2, 4);
+        panel.add(checkBox, gbc);
     }
 
     public void setPortChangeListener(@Nullable Consumer<String> listener) {
@@ -199,7 +183,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
         jmxPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
         ajpPortField.setText("");
         shutdownPortField.setText(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()));
-        debugPortField.setText(String.valueOf(com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT));
+        debugPortField.setText(String.valueOf(DebugConfig.DEFAULT_DEBUG_PORT));
         catalinaBaseField.setText("");
         deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(false);
@@ -230,7 +214,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
         var debugConfig = configuration.getConfigData().getDebugConfig();
         int debugPort = debugConfig != null ? debugConfig.getPort()
-                : com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT;
+                : DebugConfig.DEFAULT_DEBUG_PORT;
         debugPortField.setText(String.valueOf(debugPort));
 
         String catalinaBase = configuration.getConfigData().getCatalinaBase();

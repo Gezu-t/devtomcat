@@ -37,43 +37,20 @@ public class UpdateActionsSection implements ConfigurationSection {
             panel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
             panel.setBorder(JBUI.Borders.empty(0));
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
 
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JBLabel("On 'Update' action:"), gbc);
-
-            gbc.gridx = 1;
-            gbc.weightx = 1.0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(2, 4, 2, 8);
             updateActionCombo = new ComboBox<>();
-            panel.add(updateActionCombo, gbc);
-
-            gbc.gridx = 2;
-            gbc.weightx = 0;
-            gbc.fill = GridBagConstraints.NONE;
+            ConfigurationSection.addLabelAndField(panel, gbc, 0,
+                    new JBLabel("On 'Update' action:"), updateActionCombo);
+            gbc.gridx = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 4, 2, 4);
             showDialogCheckBox = new JBCheckBox("Show dialog");
             showDialogCheckBox.setSelected(true);
             panel.add(showDialogCheckBox, gbc);
 
-            gbc.gridx = 0; gbc.gridy = 1;
-            gbc.weightx = 0;
-            gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            panel.add(new JBLabel("On frame deactivation:"), gbc);
-
-            gbc.gridx = 1;
-            gbc.weightx = 1.0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(2, 4, 2, 8);
             frameDeactivationCombo = new ComboBox<>();
-            panel.add(frameDeactivationCombo, gbc);
-
-            gbc.gridx = 2;
-            gbc.weightx = 0;
-            gbc.fill = GridBagConstraints.NONE;
+            ConfigurationSection.addLabelAndField(panel, gbc, 1,
+                    new JBLabel("On frame deactivation:"), frameDeactivationCombo);
+            gbc.gridx = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 4, 2, 4);
             showFrameDialogCheckBox = new JBCheckBox("Show dialog");
             showFrameDialogCheckBox.setSelected(false);

@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.runner;
 
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.RunProfile;
@@ -39,7 +38,7 @@ public class TomcatCoverageRunner extends DefaultJavaProgramRunner {
     public boolean canRun(@NotNull String executorId, @NotNull RunProfile runProfile) {
         if (!COVERAGE_EXECUTOR_ID.equals(executorId)) return false;
         if (!(runProfile instanceof TomcatRunConfiguration config)) return false;
-        return !TomcatConstants.MODE_REMOTE.equals(config.getConfigData().getServerMode());
+        return !config.isRemoteMode();
     }
 
     @Override

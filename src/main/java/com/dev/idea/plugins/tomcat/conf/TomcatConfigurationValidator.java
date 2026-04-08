@@ -11,6 +11,8 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.intellij.execution.configurations.RuntimeConfigurationWarning;
         import com.intellij.openapi.diagnostic.Logger;
         import com.intellij.openapi.util.text.StringUtil;
+        import com.intellij.packaging.artifacts.Artifact;
+        import com.intellij.packaging.artifacts.ArtifactManager;
         import org.jetbrains.annotations.NotNull;
 
         import java.io.File;
@@ -213,10 +215,10 @@ package com.dev.idea.plugins.tomcat.conf;
             List<DeploymentArtifact> artifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
             if (artifacts.isEmpty()) return;
 
-            com.intellij.packaging.artifacts.Artifact[] platformArtifacts;
+            Artifact[] platformArtifacts;
             try {
-                com.intellij.packaging.artifacts.ArtifactManager artifactManager =
-                        com.intellij.packaging.artifacts.ArtifactManager.getInstance(config.getProject());
+                ArtifactManager artifactManager =
+                        ArtifactManager.getInstance(config.getProject());
                 platformArtifacts = artifactManager.getArtifacts();
             } catch (NoClassDefFoundError | Exception e) {
                 // ArtifactManager not available — skip this validation
@@ -234,7 +236,7 @@ package com.dev.idea.plugins.tomcat.conf;
 
                 // Check if any IntelliJ artifact matches by exact name
                 boolean found = false;
-                for (com.intellij.packaging.artifacts.Artifact pa : platformArtifacts) {
+                for (Artifact pa : platformArtifacts) {
                     if (name.equals(pa.getName())) {
                         found = true;
                         break;

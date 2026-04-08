@@ -45,17 +45,10 @@ public class ApplicationServerSection implements ConfigurationSection {
             panel.setBorder(JBUI.Borders.empty(2, 0, 0, 0));
 
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.anchor = GridBagConstraints.WEST;
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-
-            gbc.gridx = 0; gbc.gridy = 0;
-            panel.add(new JBLabel("Application server:"), gbc);
-
-            gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(2, 4, 2, 8);
             serverComboBox = new ComboBox<>();
             serverComboBox.setRenderer(new TomcatInfoRenderer());
-            panel.add(serverComboBox, gbc);
+            ConfigurationSection.addLabelAndField(panel, gbc, 0,
+                    new JBLabel("Application server:"), serverComboBox);
 
             gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 0, 2, 0);
