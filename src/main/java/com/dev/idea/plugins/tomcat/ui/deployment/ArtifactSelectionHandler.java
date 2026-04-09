@@ -25,7 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 
 public class ArtifactSelectionHandler {
@@ -213,27 +213,30 @@ public class ArtifactSelectionHandler {
      * These should not appear as deployable artifacts.
      */
     private Set<String> detectPomModuleNames() {
-        Set<String> pomNames = new HashSet<>();
         try {
-            for (Module module : ModuleManager.getInstance(project).getModules()) {
-                for (VirtualFile root :
-                        ModuleRootManager.getInstance(module).getContentRoots()) {
-                    VirtualFile pomFile = root.findChild("pom.xml");
-                    if (pomFile != null && pomFile.exists()) {
-                        try {
-                            String content = VfsUtil.loadText(pomFile);
-                            if (content.contains("<packaging>pom</packaging>")) {
-                                pomNames.add(module.getName().toLowerCase());
-                                break;
-                            }
-                        } catch (Exception ignored) {}
+            return ReadAction.compute(() -> {
+                Set<String> pomNames = new HashSet<>();
+                for (Module module : ModuleManager.getInstance(project).getModules()) {
+                    for (VirtualFile root :
+                            ModuleRootManager.getInstance(module).getContentRoots()) {
+                        VirtualFile pomFile = root.findChild("pom.xml");
+                        if (pomFile != null && pomFile.exists()) {
+                            try {
+                                String content = VfsUtil.loadText(pomFile);
+                                if (content.contains("<packaging>pom</packaging>")) {
+                                    pomNames.add(module.getName().toLowerCase());
+                                    break;
+                                }
+                            } catch (Exception ignored) {}
+                        }
                     }
                 }
-            }
+                return pomNames;
+            });
         } catch (Exception e) {
             LOG.debug("Error detecting POM modules", e);
+            return new HashSet<>();
         }
-        return pomNames;
     }
 
     public void showExternalSourceDialog() {
@@ -266,16 +269,21 @@ public class ArtifactSelectionHandler {
         try {
             Set<String> activeModules = getActiveModuleNames();
 
+            // artifactManager.getArtifacts() accesses the project model —
+            // snapshot the names+refs under a read action, then filter outside.
+            List<Artifact> allPlatformArtifacts = ReadAction.compute(
+                    () -> List.of(artifactManager.getArtifacts()));
+
             // Show ALL IntelliJ artifacts (not just web-typed), because Community Edition
             // only has PlainArtifactType (ID: "plain") and JarArtifactType (ID: "jar") —
             // neither passes isWebArtifact(). Users must be able to select any artifact.
             // Sort web artifacts first (exploded → WAR), then others alphabetically.
-            List<Artifact> allArtifacts = Stream.of(artifactManager.getArtifacts())
+            List<Artifact> filtered = allPlatformArtifacts.stream()
                     .filter(artifact -> !tableManager.hasDeployment(artifact.getName()))
                     .filter(artifact -> hasActiveSourceModule(artifact.getName(), activeModules))
                     .collect(Collectors.toList());
 
-            return sortByTypeCategory(allArtifacts);
+            return sortByTypeCategory(filtered);
         } catch (Exception e) {
             LOG.warn("Error getting selectable artifacts", e);
             return new ArrayList<>();
@@ -435,15 +443,18 @@ public class ArtifactSelectionHandler {
      */
     @NotNull
     private Set<String> getActiveModuleNames() {
-        Set<String> names = new HashSet<>();
         try {
-            for (Module module : ModuleManager.getInstance(project).getModules()) {
-                names.add(module.getName().toLowerCase());
-            }
+            return ReadAction.compute(() -> {
+                Set<String> names = new HashSet<>();
+                for (Module module : ModuleManager.getInstance(project).getModules()) {
+                    names.add(module.getName().toLowerCase());
+                }
+                return names;
+            });
         } catch (Exception e) {
             LOG.debug("Error getting active module names", e);
+            return new HashSet<>();
         }
-        return names;
     }
 
     /**
@@ -467,7 +478,8 @@ public class ArtifactSelectionHandler {
         if (artifactManager == null) return null;
 
         try {
-            for (Artifact artifact : artifactManager.getArtifacts()) {
+            Artifact[] allArtifacts = ReadAction.compute(artifactManager::getArtifacts);
+            for (Artifact artifact : allArtifacts) {
                 if (artifact.getName().equals(name)) {
                     return artifact;
                 }

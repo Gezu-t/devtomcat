@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.action;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ProcessStopSupport;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
@@ -57,6 +58,9 @@ public class DebugTomcatAction extends AnAction {
                 ExecutionEnvironmentBuilder.create(debugExecutor, settings).buildAndExecute();
             } catch (Exception ex) {
                 LOG.warn("Failed to restart Tomcat in Debug mode: " + config.getName(), ex);
+                TomcatNotifier.error(project, "Debug Restart Failed",
+                        "Tomcat '" + config.getName() + "' stopped but could not restart in Debug mode. " +
+                        "Start the configuration manually to resume.");
             }
         });
     }

@@ -237,10 +237,13 @@ public final class ConfigExportImport {
         if (vmEl != null) {
             VmConfig vm = data.getVmConfig();
             vm.setVmOptions(getChildText(vmEl, "options", ""));
-            // Deserialize environment variables into the Run profile only (matches export scope)
+            // Deserialize environment variables into the Run profile only (matches export scope).
+            // Only set env-related fields — leave startup/shutdown scripts, passParentEnvs,
+            // and debug host/port at defaults so copyFrom() doesn't wipe the target's values
+            // for fields that were never exported.
             Element envVarsEl = vmEl.getChild("envVars");
-            RunnerSettings runSettings = data.getRunnerSettings("Run");
             if (envVarsEl != null) {
+                RunnerSettings runSettings = data.getRunnerSettings("Run");
                 Map<String, String> envMap = new java.util.LinkedHashMap<>();
                 for (Element varEl : envVarsEl.getChildren("var")) {
                     String key = varEl.getAttributeValue("key");

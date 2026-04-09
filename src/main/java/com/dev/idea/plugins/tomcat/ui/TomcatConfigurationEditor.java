@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
+import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.ConfigExportImport;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
@@ -23,6 +24,7 @@ import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.ui.Messages;
@@ -45,7 +47,9 @@ import java.awt.event.HierarchyEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfiguration> {
@@ -289,7 +293,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
             ArtifactManager artifactMgr = null;
             try {
-                artifactMgr = ArtifactManager.getInstance(project);
+                artifactMgr = ReadAction.compute(() -> ArtifactManager.getInstance(project));
                 LOG.info("DevTomcat: ArtifactManager obtained: " + (artifactMgr != null));
             } catch (Throwable t) {
                 LOG.warn("DevTomcat: ArtifactManager not available: " + t.getMessage());
@@ -558,7 +562,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (tabbedPane == null) return;
 
         try {
-            ArtifactManager artifactManager = ArtifactManager.getInstance(project);
+            ArtifactManager artifactManager = ReadAction.compute(
+                    () -> ArtifactManager.getInstance(project));
             syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
         } catch (Throwable t) {
             LOG.debug("DevTomcat: ArtifactManager unavailable while syncing selected deployment", t);
@@ -590,10 +595,14 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             return null;
         }
 
+        // Snapshot the artifact array under a read action — getArtifacts() accesses
+        // the project model. Iterate the snapshot outside.
+        Artifact[] allArtifacts = ReadAction.compute(artifactManager::getArtifacts);
+
         String deployName = deployment.getName();
 
         // 1. Exact case-insensitive match
-        for (Artifact artifact : artifactManager.getArtifacts()) {
+        for (Artifact artifact : allArtifacts) {
             if (deployName.equalsIgnoreCase(artifact.getName())) {
                 return artifact;
             }
@@ -601,7 +610,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
         // 2. Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
         String deployBase = extractBaseModuleName(deployName);
-        for (Artifact artifact : artifactManager.getArtifacts()) {
+        for (Artifact artifact : allArtifacts) {
             if (deployBase.equals(extractBaseModuleName(artifact.getName()))) {
                 return artifact;
             }
@@ -741,8 +750,33 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 currentConfiguration = createTemplateConfiguration();
             }
             if (currentConfiguration != null) {
-                // Merge imported data into current configuration
-                currentConfiguration.getConfigData().copyFrom(importedData);
+                TomcatConfigurationData target = currentConfiguration.getConfigData();
+
+                // Preserve existing runner settings — export only serializes Run env vars,
+                // so copyFrom() would wipe scripts, passParentEnvs, debug host/port, and
+                // all Debug/Coverage/Profile mode settings with fresh defaults.
+                Map<String, RunnerSettings> savedRunnerSettings = new LinkedHashMap<>();
+                for (Map.Entry<String, RunnerSettings> entry :
+                        target.getRunnerSettingsMap().entrySet()) {
+                    savedRunnerSettings.put(entry.getKey(), entry.getValue().clone());
+                }
+
+                target.copyFrom(importedData);
+
+                // Restore non-exported runner settings fields. The import only provides
+                // env vars for the Run profile; merge those into the saved settings,
+                // then put the saved settings back.
+                RunnerSettings importedRun = importedData.getRunnerSettings("Run");
+                RunnerSettings restoredRun = savedRunnerSettings.getOrDefault("Run",
+                        new RunnerSettings());
+                restoredRun.setEnvironmentVariables(importedRun.getEnvironmentVariables());
+                restoredRun.setComputedEnvironmentKeys(importedRun.getComputedEnvironmentKeys());
+                restoredRun.setDeletedComputedEnvironmentKeys(importedRun.getDeletedComputedEnvironmentKeys());
+                savedRunnerSettings.put("Run", restoredRun);
+                target.setRunnerSettingsMap(savedRunnerSettings);
+
+                // Reconcile tabs for the (possibly changed) server mode before resetting
+                reconcileTabsForMode();
                 resetAllTabs(currentConfiguration);
                 Messages.showInfoMessage(project,
                         "Configuration imported from:\n" + file.getAbsolutePath(), "Import Successful");

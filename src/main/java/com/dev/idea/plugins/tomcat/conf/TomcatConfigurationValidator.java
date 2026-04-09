@@ -9,6 +9,7 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
         import com.intellij.execution.configurations.RuntimeConfigurationException;
         import com.intellij.execution.configurations.RuntimeConfigurationWarning;
+        import com.intellij.openapi.application.ReadAction;
         import com.intellij.openapi.diagnostic.Logger;
         import com.intellij.openapi.util.text.StringUtil;
         import com.intellij.packaging.artifacts.Artifact;
@@ -215,17 +216,27 @@ package com.dev.idea.plugins.tomcat.conf;
             List<DeploymentArtifact> artifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
             if (artifacts.isEmpty()) return;
 
-            Artifact[] platformArtifacts;
+            // ArtifactManager.getInstance() and getArtifacts() access the project
+            // model and require a read action. Extract artifact names under the lock,
+            // then validate outside.
+            Set<String> platformArtifactNames;
             try {
-                ArtifactManager artifactManager =
-                        ArtifactManager.getInstance(config.getProject());
-                platformArtifacts = artifactManager.getArtifacts();
+                platformArtifactNames = ReadAction.compute(() -> {
+                    ArtifactManager artifactManager =
+                            ArtifactManager.getInstance(config.getProject());
+                    Artifact[] platformArtifacts = artifactManager.getArtifacts();
+                    Set<String> names = new HashSet<>(platformArtifacts.length);
+                    for (Artifact pa : platformArtifacts) {
+                        names.add(pa.getName());
+                    }
+                    return names;
+                });
             } catch (NoClassDefFoundError | Exception e) {
                 // ArtifactManager not available — skip this validation
                 return;
             }
 
-            if (platformArtifacts.length == 0) return;
+            if (platformArtifactNames.isEmpty()) return;
 
             for (DeploymentArtifact artifact : artifacts) {
                 if (artifact == null) continue;
@@ -234,16 +245,7 @@ package com.dev.idea.plugins.tomcat.conf;
                 String name = artifact.getName();
                 if (name.isEmpty()) continue;
 
-                // Check if any IntelliJ artifact matches by exact name
-                boolean found = false;
-                for (Artifact pa : platformArtifacts) {
-                    if (name.equals(pa.getName())) {
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found) {
+                if (!platformArtifactNames.contains(name)) {
                     // The refresher already ran and couldn't resolve this — it's truly orphaned
                     throw new RuntimeConfigurationWarning(
                             "Deployment artifact '" + artifact.getDisplayName() +
