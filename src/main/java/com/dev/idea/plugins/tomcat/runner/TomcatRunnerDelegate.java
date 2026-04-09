@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
+import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
@@ -176,7 +177,7 @@ public final class TomcatRunnerDelegate {
                     ExecutionEnvironmentBuilder.create(currentExecutor, settings).buildAndExecute();
                     LOG.info("Relaunched " + config.getName()
                             + " in " + currentExecutor.getActionName() + " mode");
-                } catch (com.intellij.execution.ExecutionException ex) {
+                } catch (ExecutionException ex) {
                     LOG.warn("Failed to relaunch " + config.getName(), ex);
                     notifyRelaunchFailed(project, config.getName(), ex.getMessage());
                 }

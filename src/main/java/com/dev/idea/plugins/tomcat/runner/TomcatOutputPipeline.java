@@ -5,6 +5,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -162,7 +163,7 @@ public final class TomcatOutputPipeline {
                     // onArtifactDeployed for each artifact whose individual completion message
                     // was logged; skip those to avoid double-firing the same notification.
                     // This is resilient to Tomcat version differences in deployment log format.
-                    for (String artifactName : new java.util.LinkedHashSet<>(ctx.contextToArtifactName.values())) {
+                    for (String artifactName : new LinkedHashSet<>(ctx.contextToArtifactName.values())) {
                         if (ctx.notifiedArtifacts.add(artifactName)) {
                             ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
                         }

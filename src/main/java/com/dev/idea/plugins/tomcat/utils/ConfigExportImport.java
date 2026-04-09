@@ -13,8 +13,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Configuration Export/Import utility for DevTomcat.
@@ -244,7 +247,7 @@ public final class ConfigExportImport {
             Element envVarsEl = vmEl.getChild("envVars");
             if (envVarsEl != null) {
                 RunnerSettings runSettings = data.getRunnerSettings("Run");
-                Map<String, String> envMap = new java.util.LinkedHashMap<>();
+                Map<String, String> envMap = new LinkedHashMap<>();
                 for (Element varEl : envVarsEl.getChildren("var")) {
                     String key = varEl.getAttributeValue("key");
                     String value = varEl.getAttributeValue("value");
@@ -379,8 +382,8 @@ public final class ConfigExportImport {
         return Boolean.parseBoolean(text);
     }
 
-    private static java.util.Set<String> readKeySet(Element parent, String containerName) {
-        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+    private static Set<String> readKeySet(Element parent, String containerName) {
+        Set<String> keys = new LinkedHashSet<>();
         Element container = parent.getChild(containerName);
         if (container == null) return keys;
 

@@ -14,8 +14,10 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Reconciles stored {@link DeploymentArtifact} references against the current state
@@ -150,7 +152,7 @@ public final class ArtifactReferenceRefresher {
             // When a user renames a module, IntelliJ may keep the OLD artifact definition
             // alongside the new one. Without this filter, Strategy 1 (exact name match)
             // would match the orphaned artifact, leaving deployment pointing at stale output.
-            java.util.Set<String> activeModules = new java.util.HashSet<>();
+            Set<String> activeModules = new HashSet<>();
             try {
                 for (Module m :
                         ModuleManager.getInstance(config.getProject()).getModules()) {

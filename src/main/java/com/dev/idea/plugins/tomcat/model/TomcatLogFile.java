@@ -5,6 +5,7 @@ import com.intellij.execution.configurations.PredefinedLogFile;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
+import java.io.File;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -89,7 +90,7 @@ public class TomcatLogFile {
      */
     @NotNull
     public String resolveFullPath(@NotNull Path logsDirPath) {
-        return logsDirPath + java.io.File.separator + resolveTodayFilename();
+        return logsDirPath + File.separator + resolveTodayFilename();
     }
 
     /**
@@ -102,7 +103,7 @@ public class TomcatLogFile {
      */
     @NotNull
     public String resolvePathPattern(@NotNull Path logsDirPath) {
-        return logsDirPath + java.io.File.separator + filenamePattern;
+        return logsDirPath + File.separator + filenamePattern;
     }
 
     @NotNull

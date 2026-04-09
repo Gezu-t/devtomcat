@@ -10,12 +10,16 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.ui.AnActionButton;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBPanel;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -128,7 +132,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         // Context path editor directly below the list toolbar
         JPanel contextPanel = new JPanel(new BorderLayout(8, 0));
         contextPanel.setBorder(JBUI.Borders.emptyTop(4));
-        contextPanel.add(new com.intellij.ui.components.JBLabel("Application context:"), BorderLayout.WEST);
+        contextPanel.add(new JBLabel("Application context:"), BorderLayout.WEST);
         contextPanel.add(contextTextField, BorderLayout.CENTER);
         centerPanel.add(contextPanel, BorderLayout.SOUTH);
 
@@ -157,7 +161,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             LOG.error("Error creating toolbar, using fallback", e);
 
             JPanel fallbackPanel = new JPanel(new BorderLayout());
-            com.intellij.ui.components.JBScrollPane scrollPane = new com.intellij.ui.components.JBScrollPane(tableManager.getComponent());
+            JBScrollPane scrollPane = new JBScrollPane(tableManager.getComponent());
             fallbackPanel.add(scrollPane, BorderLayout.CENTER);
             return fallbackPanel;
         }
@@ -170,10 +174,10 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             @Override
             public PopupStep<?> onChosen(String selectedValue, boolean finalChoice) {
                 if (TomcatConstants.DEPLOY_OPTION_ARTIFACT.equals(selectedValue)) {
-                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(
+                    ApplicationManager.getApplication().invokeLater(
                             () -> selectionHandler.showArtifactSelectionDialog());
                 } else if (TomcatConstants.DEPLOY_OPTION_EXTERNAL.equals(selectedValue)) {
-                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(
+                    ApplicationManager.getApplication().invokeLater(
                             () -> selectionHandler.showExternalSourceDialog());
                 }
                 return FINAL_CHOICE;
@@ -181,7 +185,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         };
 
         ListPopup popup = JBPopupFactory.getInstance().createListPopup(step);
-        com.intellij.ui.awt.RelativePoint point = button.getPreferredPopupPoint();
+        RelativePoint point = button.getPreferredPopupPoint();
         if (point != null) {
             popup.show(point);
         } else {

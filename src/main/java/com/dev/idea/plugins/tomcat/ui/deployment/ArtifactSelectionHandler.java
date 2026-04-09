@@ -20,8 +20,10 @@ import com.intellij.packaging.artifacts.ArtifactType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -179,7 +181,7 @@ public class ArtifactSelectionHandler {
      * When duplicates exist, prefers the variant with a build output path.
      */
     private static List<DeploymentArtifact> deduplicateByName(List<DeploymentArtifact> artifacts) {
-        java.util.LinkedHashMap<String, DeploymentArtifact> unique = new java.util.LinkedHashMap<>();
+        LinkedHashMap<String, DeploymentArtifact> unique = new LinkedHashMap<>();
         for (DeploymentArtifact item : artifacts) {
             String key = extractBaseModuleName(item.getName()) + "|" + item.getType();
             DeploymentArtifact existing = unique.get(key);
@@ -419,7 +421,7 @@ public class ArtifactSelectionHandler {
         // 3. Check output path — directory = exploded, file = packaged
         String outputPath = artifact.getOutputFilePath();
         if (outputPath != null) {
-            java.io.File outputFile = new java.io.File(outputPath);
+            File outputFile = new File(outputPath);
             if (outputFile.isDirectory()) return DeploymentArtifact.TYPE_EXPLODED;
             if (outputPath.toLowerCase().endsWith(".war")) return DeploymentArtifact.TYPE_WAR;
         }

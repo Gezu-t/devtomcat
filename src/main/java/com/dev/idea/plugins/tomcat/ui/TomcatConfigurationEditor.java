@@ -740,7 +740,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             var descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("xml")
                     .withTitle("Import DevTomcat Configuration")
                     .withDescription("Select an XML configuration file exported from DevTomcat");
-            VirtualFile[] files = com.intellij.openapi.fileChooser.FileChooser.chooseFiles(descriptor, project, null);
+            VirtualFile[] files = FileChooser.chooseFiles(descriptor, project, null);
             if (files.length == 0) return;
 
             File file = new File(files[0].getPath());

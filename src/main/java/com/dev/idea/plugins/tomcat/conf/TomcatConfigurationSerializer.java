@@ -6,6 +6,7 @@ import com.dev.idea.plugins.tomcat.model.LogFileConfig;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
@@ -18,9 +19,15 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 /**
  * Handles XML serialization/deserialization of Tomcat run configuration.
@@ -214,7 +221,7 @@ public class TomcatConfigurationSerializer {
         element.addContent(rsElem);
     }
 
-    private static void writeKeySet(@NotNull Element element, @NotNull String tagName, @NotNull java.util.Set<String> keys) {
+    private static void writeKeySet(@NotNull Element element, @NotNull String tagName, @NotNull Set<String> keys) {
         if (keys.isEmpty()) return;
 
         Element setElem = new Element(tagName);
@@ -252,7 +259,7 @@ public class TomcatConfigurationSerializer {
         element.addContent(logElem);
     }
 
-    private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull java.util.List<DeploymentArtifact> artifacts) {
+    private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull List<DeploymentArtifact> artifacts) {
         Element deployments = new Element(TAG_DEPLOYMENTS);
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null) continue;
@@ -439,7 +446,7 @@ public class TomcatConfigurationSerializer {
         LOG.debug("Read configuration data");
     }
 
-    private static void readInt(@NotNull Element element, @NotNull String name, java.util.function.IntConsumer setter) {
+    private static void readInt(@NotNull Element element, @NotNull String name, IntConsumer setter) {
         String v = element.getAttributeValue(name);
         if (v != null && !v.isEmpty()) {
             try {
@@ -450,14 +457,14 @@ public class TomcatConfigurationSerializer {
         }
     }
 
-    private static void readBool(@NotNull Element element, @NotNull String name, java.util.function.Consumer<Boolean> setter) {
+    private static void readBool(@NotNull Element element, @NotNull String name, Consumer<Boolean> setter) {
         String v = element.getAttributeValue(name);
         if (v != null && !v.isEmpty()) {
             setter.accept(Boolean.parseBoolean(v));
         }
     }
 
-    private static void readEnvironmentVariables(@NotNull Element element, java.util.function.Consumer<Map<String, String>> setter) {
+    private static void readEnvironmentVariables(@NotNull Element element, Consumer<Map<String, String>> setter) {
         Element envElem = element.getChild("environmentVariables");
         if (envElem == null) return;
 
@@ -475,8 +482,8 @@ public class TomcatConfigurationSerializer {
     }
 
     @NotNull
-    private static java.util.Set<String> readKeySet(@NotNull Element element, @NotNull String tagName) {
-        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+    private static Set<String> readKeySet(@NotNull Element element, @NotNull String tagName) {
+        Set<String> keys = new LinkedHashSet<>();
         Element setElem = element.getChild(tagName);
         if (setElem == null) return keys;
 
@@ -505,8 +512,8 @@ public class TomcatConfigurationSerializer {
         String saveFilePath = logElem.getAttributeValue("saveFilePath");
         if (saveFilePath != null) config.setSaveConsoleFilePath(saveFilePath);
 
-        java.util.List<String> files = new java.util.ArrayList<>();
-        java.util.Map<String, Boolean> skipMap = new java.util.HashMap<>();
+        List<String> files = new ArrayList<>();
+        Map<String, Boolean> skipMap = new HashMap<>();
         for (Element file : logElem.getChildren("file")) {
             String path = file.getAttributeValue("path");
             if (path != null) {
@@ -527,9 +534,9 @@ public class TomcatConfigurationSerializer {
         config.setSkipContentEntries(skipMap);
     }
 
-    private static void readDeploymentArtifacts(@NotNull Element element, @NotNull com.dev.idea.plugins.tomcat.model.DeploymentConfig deploymentConfig) {
+    private static void readDeploymentArtifacts(@NotNull Element element, @NotNull DeploymentConfig deploymentConfig) {
         Element deployments = element.getChild(TAG_DEPLOYMENTS);
-        java.util.List<DeploymentArtifact> artifacts = new java.util.ArrayList<>();
+        List<DeploymentArtifact> artifacts = new ArrayList<>();
         if (deployments != null) {
             for (Element art : deployments.getChildren(TAG_ARTIFACT)) {
                 DeploymentArtifact artifact = new DeploymentArtifact();
@@ -545,7 +552,7 @@ public class TomcatConfigurationSerializer {
         deploymentConfig.setArtifacts(artifacts);
     }
 
-    private static void readTomcatInfo(@NotNull Element element, java.util.function.Consumer<TomcatInfo> setter) {
+    private static void readTomcatInfo(@NotNull Element element, Consumer<TomcatInfo> setter) {
         Element tomcat = element.getChild("tomcatInfo");
         if (tomcat == null) return;
 
@@ -563,8 +570,8 @@ public class TomcatConfigurationSerializer {
     }
 
     private static void writeCoverageConfig(@NotNull Element element, @NotNull CoverageConfig config) {
-        java.util.List<String> includes = config.getIncludePatterns();
-        java.util.List<String> excludes = config.getExcludePatterns();
+        List<String> includes = config.getIncludePatterns();
+        List<String> excludes = config.getExcludePatterns();
         if (includes.isEmpty() && excludes.isEmpty()) return;
 
         Element coverageElem = new Element(TAG_COVERAGE);
@@ -585,7 +592,7 @@ public class TomcatConfigurationSerializer {
         Element coverageElem = element.getChild(TAG_COVERAGE);
         if (coverageElem == null) return;
 
-        java.util.List<String> includes = new java.util.ArrayList<>();
+        List<String> includes = new ArrayList<>();
         for (Element inc : coverageElem.getChildren(TAG_COVERAGE_INCLUDE)) {
             String pattern = inc.getAttributeValue("pattern");
             if (pattern != null && !pattern.trim().isEmpty()) {
@@ -594,7 +601,7 @@ public class TomcatConfigurationSerializer {
         }
         config.setIncludePatterns(includes);
 
-        java.util.List<String> excludes = new java.util.ArrayList<>();
+        List<String> excludes = new ArrayList<>();
         for (Element exc : coverageElem.getChildren(TAG_COVERAGE_EXCLUDE)) {
             String pattern = exc.getAttributeValue("pattern");
             if (pattern != null && !pattern.trim().isEmpty()) {

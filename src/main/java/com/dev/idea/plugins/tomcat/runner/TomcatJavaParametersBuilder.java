@@ -26,7 +26,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -141,7 +144,7 @@ public class TomcatJavaParametersBuilder {
         int ajpPort      = getConfigPort(configuration.getAjpPort(),       PortUtils.DEFAULT_AJP);
 
         // Resolve internal conflicts first (same value assigned to multiple connectors)
-        java.util.Set<Integer> assigned = new java.util.HashSet<>();
+        Set<Integer> assigned = new HashSet<>();
         assigned.add(httpPort);
         if (assigned.contains(shutdownPort)) { shutdownPort = PortUtils.findNextAvailableExcluding(shutdownPort, assigned); }
         assigned.add(shutdownPort);
@@ -225,9 +228,9 @@ public class TomcatJavaParametersBuilder {
     private void prepareCatalinaBase(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
                                      @NotNull PortConfig ports) throws IOException {
         Path confOverlay = TomcatProjectUtils.getConfOverlayDirectory(configuration);
-        boolean overlayActive = confOverlay != null && java.nio.file.Files.isDirectory(confOverlay);
+        boolean overlayActive = confOverlay != null && Files.isDirectory(confOverlay);
 
-        java.util.List<String> warnings = TomcatConfigPreparer.prepare(
+        List<String> warnings = TomcatConfigPreparer.prepare(
                 catalinaBase, catalinaHome,
                 ports.getHttp(), ports.getShutdown(),
                 ports.getHttps(), configuration.isHttpsEnabled(),

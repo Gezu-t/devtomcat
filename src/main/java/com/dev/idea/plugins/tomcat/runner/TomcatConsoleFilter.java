@@ -3,10 +3,15 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.intellij.execution.filters.Filter;
 import com.intellij.execution.filters.HyperlinkInfo;
 import com.intellij.ide.BrowserUtil;
+import com.intellij.ide.actions.RevealFileAction;
+import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -69,14 +74,14 @@ public final class TomcatConsoleFilter implements Filter {
 
         @Override
         public void navigate(@NotNull Project project) {
-            com.intellij.openapi.vfs.VirtualFile vf =
-                    com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(filePath);
+            VirtualFile vf =
+                    LocalFileSystem.getInstance().findFileByPath(filePath);
             if (vf != null) {
-                com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf, true);
+                FileEditorManager.getInstance(project).openFile(vf, true);
             } else {
-                java.io.File file = new java.io.File(filePath);
+                File file = new File(filePath);
                 if (file.exists()) {
-                    com.intellij.ide.actions.RevealFileAction.openFile(file);
+                    RevealFileAction.openFile(file);
                 }
             }
         }

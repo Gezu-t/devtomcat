@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui;
 import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
+import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
@@ -48,7 +49,7 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         saveToFileField = new TextFieldWithBrowseButton();
         SafeBrowseUtil.addBrowseFolderListener(
                 saveToFileField, "Save Console Output", "Choose file to save console output",
-                project, new com.intellij.openapi.fileChooser.FileChooserDescriptor(true, false, false, false, false, false));
+                project, new FileChooserDescriptor(true, false, false, false, false, false));
 
         initializeUI();
         wireCheckboxConstraints();
@@ -327,7 +328,7 @@ public class LogsConfigurationTab extends JBPanel<LogsConfigurationTab> {
         logFileConfig.setLogFiles(activeLogs);
 
         // Save skipContent per log entry
-        java.util.Map<String, Boolean> skipMap = new java.util.HashMap<>();
+        Map<String, Boolean> skipMap = new HashMap<>();
         for (LogRow row : logRows) {
             if (row != null && row.entry != null && !row.entry.trim().isEmpty()) {
                 skipMap.put(row.entry.trim(), row.skipContent);

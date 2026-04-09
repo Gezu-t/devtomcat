@@ -17,6 +17,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -66,7 +67,7 @@ final class RemoteDeploymentStrategy implements DeploymentStrategy {
         int index = 0;
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact != null && artifact.isValid()) {
-                VirtualFile artifactFile = VfsUtil.findFileByIoFile(new java.io.File(artifact.getPath()), true);
+                VirtualFile artifactFile = VfsUtil.findFileByIoFile(new File(artifact.getPath()), true);
 
                 if (artifactFile != null) {
                     // Validate context path before sending to remote Tomcat Manager

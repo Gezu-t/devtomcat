@@ -10,11 +10,14 @@ import com.intellij.ui.components.JBList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
+
 import javax.swing.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import com.intellij.openapi.diagnostic.Logger;
 
 /**
  * Handles list operations for deployment artifacts.
@@ -280,8 +283,7 @@ public class DeploymentTableManager {
     }
 
     public void refreshList() {
-        com.intellij.openapi.application.Application app =
-                com.intellij.openapi.application.ApplicationManager.getApplication();
+        Application app = ApplicationManager.getApplication();
         if (app.isDispatchThread()) {
             doRefreshList();
         } else {

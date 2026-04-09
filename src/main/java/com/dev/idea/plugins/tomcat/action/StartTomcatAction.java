@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.intellij.execution.ExecutionException;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.executors.DefaultRunExecutor;
@@ -31,7 +32,7 @@ public class StartTomcatAction extends AnAction {
             try {
                 ExecutionEnvironmentBuilder.create(DefaultRunExecutor.getRunExecutorInstance(), settings)
                         .buildAndExecute();
-            } catch (com.intellij.execution.ExecutionException ex) {
+            } catch (ExecutionException ex) {
                 LOG.warn("Failed to start Tomcat configuration: " + config.getName(), ex);
             }
         }

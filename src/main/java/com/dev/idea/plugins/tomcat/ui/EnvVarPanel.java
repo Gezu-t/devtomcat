@@ -6,7 +6,9 @@ import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -122,34 +124,34 @@ public class EnvVarPanel extends JBPanel<EnvVarPanel> {
                 .setEditAction(button -> editSelectedEnvVar())
                 .disableUpDownActions();
 
-        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction(
+        decorator.addExtraAction(new DumbAwareAction(
                 "Populate Defaults", "Populate default environment variables", AllIcons.Actions.Rollback) {
             @Override
-            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+            public void actionPerformed(@NotNull AnActionEvent e) {
                 if (populateDefaultsListener != null) populateDefaultsListener.run();
             }
             @Override
             public @NotNull ActionUpdateThread getActionUpdateThread() { return ActionUpdateThread.EDT; }
         });
 
-        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction(
+        decorator.addExtraAction(new DumbAwareAction(
                 "Copy", "Copy selected environment variable", AllIcons.Actions.Copy) {
             @Override
-            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+            public void actionPerformed(@NotNull AnActionEvent e) {
                 copyEnvVar();
             }
             @Override
-            public void update(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+            public void update(@NotNull AnActionEvent e) {
                 e.getPresentation().setEnabled(envTable.getSelectedRow() >= 0);
             }
             @Override
             public @NotNull ActionUpdateThread getActionUpdateThread() { return ActionUpdateThread.EDT; }
         });
 
-        decorator.addExtraAction(new com.intellij.openapi.project.DumbAwareAction(
+        decorator.addExtraAction(new DumbAwareAction(
                 "Paste", "Paste environment variable", AllIcons.Actions.MenuPaste) {
             @Override
-            public void actionPerformed(@NotNull com.intellij.openapi.actionSystem.AnActionEvent e) {
+            public void actionPerformed(@NotNull AnActionEvent e) {
                 pasteEnvVar();
             }
             @Override
