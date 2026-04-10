@@ -34,7 +34,7 @@ public class TomcatBuildArtifactsTask extends BeforeRunTask<TomcatBuildArtifacts
 
     private final List<String> artifactNames = new ArrayList<>();
 
-    protected TomcatBuildArtifactsTask(@NotNull Key<TomcatBuildArtifactsTask> providerId) {
+    public TomcatBuildArtifactsTask(@NotNull Key<TomcatBuildArtifactsTask> providerId) {
         super(providerId);
     }
 

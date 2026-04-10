@@ -1,6 +1,8 @@
 package com.dev.idea.plugins.tomcat.ui;
 
 import com.dev.idea.plugins.tomcat.conf.ArtifactReferenceRefresher;
+import com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTask;
+import com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTaskProvider;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
@@ -51,6 +53,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfiguration> {
     private static final Logger LOG = Logger.getInstance(TomcatConfigurationEditor.class);
@@ -319,14 +322,23 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
             // Keep the Before Launch artifact task aligned with all configured deployments.
             // Use coalescing to avoid repeated sync during bulk resetFrom() operations.
+            // On Community Edition (no ArtifactManager), fall back to syncing our custom task.
             final ArtifactManager capturedArtifactMgr = artifactMgr;
             tableManager.setArtifactListChangeListener(() -> {
-                if (isEventsSuppressed() || tabbedPane == null || capturedArtifactMgr == null) return;
-                scheduleBeforeLaunchSync(capturedArtifactMgr);
+                if (isEventsSuppressed() || tabbedPane == null) return;
+                if (capturedArtifactMgr != null) {
+                    scheduleBeforeLaunchSync(capturedArtifactMgr);
+                } else {
+                    syncBeforeLaunchPanelCommunity();
+                }
             });
             tableManager.setSelectionChangeListener(artifact -> {
-                if (isEventsSuppressed() || tabbedPane == null || capturedArtifactMgr == null) return;
-                scheduleBeforeLaunchSync(capturedArtifactMgr);
+                if (isEventsSuppressed() || tabbedPane == null) return;
+                if (capturedArtifactMgr != null) {
+                    scheduleBeforeLaunchSync(capturedArtifactMgr);
+                } else {
+                    syncBeforeLaunchPanelCommunity();
+                }
             });
 
             deploymentTab = new DeploymentConfigurationPanel(
@@ -566,8 +578,77 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     () -> ArtifactManager.getInstance(project));
             syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
         } catch (Throwable t) {
-            LOG.debug("DevTomcat: ArtifactManager unavailable while syncing selected deployment", t);
+            // ArtifactManager not available — Community Edition.
+            // Fall back to syncing the custom TomcatBuildArtifactsTask into the panel.
+            LOG.debug("DevTomcat: ArtifactManager unavailable, using Community fallback for Before Launch sync");
+            syncBeforeLaunchPanelCommunity();
         }
+    }
+
+    /**
+     * Community Edition fallback: syncs the Before Launch panel with a
+     * {@link TomcatBuildArtifactsTask} that shows configured artifact names
+     * and validates their paths before launch.
+     */
+    private void syncBeforeLaunchPanelCommunity() {
+        try {
+            ConfigurationSettingsEditorWrapper wrapper = findEditorWrapper();
+            if (wrapper == null) {
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (isEventsSuppressed() || tabbedPane == null) return;
+                    ConfigurationSettingsEditorWrapper retryWrapper = findEditorWrapper();
+                    if (retryWrapper != null) {
+                        doSyncBeforeLaunchCommunity(retryWrapper);
+                    }
+                });
+                return;
+            }
+            doSyncBeforeLaunchCommunity(wrapper);
+        } catch (Exception e) {
+            LOG.warn("DevTomcat: Error syncing Before Launch (Community)", e);
+        }
+    }
+
+    private void doSyncBeforeLaunchCommunity(@NotNull ConfigurationSettingsEditorWrapper wrapper) {
+        List<BeforeRunTask<?>> existingSteps = new ArrayList<>(wrapper.getStepsBeforeLaunch());
+        List<BeforeRunTask<?>> updatedSteps = new ArrayList<>();
+        for (BeforeRunTask<?> task : existingSteps) {
+            if (!(task instanceof TomcatBuildArtifactsTask)) {
+                updatedSteps.add(task);
+            }
+        }
+
+        // Ensure "Build" (Make) task is present
+        boolean hasMake = updatedSteps.stream()
+                .anyMatch(t -> t instanceof CompileStepBeforeRun.MakeBeforeRunTask);
+        if (!hasMake) {
+            CompileStepBeforeRun.MakeBeforeRunTask makeTask =
+                    new CompileStepBeforeRun.MakeBeforeRunTask();
+            makeTask.setEnabled(true);
+            updatedSteps.add(0, makeTask);
+        }
+
+        List<DeploymentArtifact> allDeployments = deploymentTableManager != null
+                ? deploymentTableManager.getDeployments()
+                : Collections.emptyList();
+
+        if (!allDeployments.isEmpty()) {
+            List<String> artifactNames = allDeployments.stream()
+                    .filter(a -> a != null && !a.getDisplayName().isBlank())
+                    .map(DeploymentArtifact::getDisplayName)
+                    .collect(Collectors.toList());
+
+            TomcatBuildArtifactsTask buildTask =
+                    new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
+            buildTask.setArtifactNames(artifactNames);
+            buildTask.setEnabled(true);
+            updatedSteps.add(buildTask);
+            LOG.info("DevTomcat: Before Launch (Community) — added Build task for " +
+                    artifactNames.size() + " artifact(s)");
+        }
+
+        wrapper.replaceBeforeLaunchSteps(updatedSteps);
+        wrapper.fireStepsBeforeRunChanged();
     }
 
     /**
