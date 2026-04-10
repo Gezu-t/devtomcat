@@ -241,6 +241,24 @@ public class DeploymentTableManager {
         return result;
     }
 
+    /**
+     * Returns the actual {@link DeploymentArtifact} instances held by the list model.
+     * Unlike {@link #getDeployments()}, these are not clones — field mutations
+     * ({@code setName}, {@code setPath}) propagate directly to the UI.
+     *
+     * <p>Intended for {@link com.dev.idea.plugins.tomcat.conf.ArtifactReferenceRefresher}
+     * to repair stale references in-place when modules or artifacts are renamed.
+     * Call {@link #refreshList()} after mutating the returned items to repaint the UI.
+     */
+    @NotNull
+    public List<DeploymentArtifact> getLiveDeployments() {
+        List<DeploymentArtifact> result = new ArrayList<>();
+        for (int i = 0; i < listModel.getSize(); i++) {
+            result.add(listModel.getElementAt(i));
+        }
+        return result;
+    }
+
     public int getDeploymentCount() {
         return listModel.getSize();
     }

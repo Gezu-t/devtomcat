@@ -32,9 +32,14 @@ import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.project.ModuleListener;
 import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.packaging.artifacts.ArtifactListener;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
+import com.intellij.util.Function;
+import com.intellij.util.messages.MessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -64,6 +69,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private final AtomicBoolean editorInitialized = new AtomicBoolean(false);
     private final AtomicBoolean isDisposing = new AtomicBoolean(false);
     private final AtomicBoolean syncScheduled = new AtomicBoolean(false);
+    private final AtomicBoolean renameRefreshScheduled = new AtomicBoolean(false);
+    private MessageBusConnection messageBusConnection;
     private DeploymentTableManager deploymentTableManager;
     private ServerConfigurationTab serverTab;
     private DeploymentConfigurationPanel deploymentTab;
@@ -252,6 +259,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             });
 
             editorInitialized.set(true);
+            subscribeToRenameEvents();
             LOG.info("DevTomcat: Configuration interface created successfully with " + tabbedPane.getTabCount() + " tabs");
 
             // Wrap tabs in a panel with Export/Import toolbar
@@ -322,7 +330,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
             // Keep the Before Launch artifact task aligned with all configured deployments.
             // Use coalescing to avoid repeated sync during bulk resetFrom() operations.
-            // On Community Edition (no ArtifactManager), fall back to syncing our custom task.
+            // Note: ArtifactManager is always available (even on CE) — doSyncBeforeLaunch()
+            // detects CE internally by checking whether any IntelliJ Artifacts match.
             final ArtifactManager capturedArtifactMgr = artifactMgr;
             tableManager.setArtifactListChangeListener(() -> {
                 if (isEventsSuppressed() || tabbedPane == null) return;
@@ -430,6 +439,98 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         }
     }
 
+    // =====================================================================
+    // Live rename detection
+    // =====================================================================
+
+    /**
+     * Subscribes to {@link ArtifactManager#TOPIC} and {@link ModuleListener#TOPIC}
+     * so the editor detects artifact/module renames that occur while the dialog is open.
+     *
+     * <p>Both listeners delegate to {@link #onArtifactOrModuleChanged()} which
+     * coalesces rapid-fire events into a single refresh-then-sync pass on the EDT.
+     */
+    private void subscribeToRenameEvents() {
+        try {
+            messageBusConnection = project.getMessageBus().connect();
+
+            messageBusConnection.subscribe(ArtifactManager.TOPIC, new ArtifactListener() {
+                @Override
+                public void artifactAdded(@NotNull Artifact artifact) {
+                    onArtifactOrModuleChanged();
+                }
+
+                @Override
+                public void artifactRemoved(@NotNull Artifact artifact) {
+                    onArtifactOrModuleChanged();
+                }
+
+                @Override
+                public void artifactChanged(@NotNull Artifact artifact, @NotNull String oldName) {
+                    onArtifactOrModuleChanged();
+                }
+            });
+
+            messageBusConnection.subscribe(ModuleListener.TOPIC, new ModuleListener() {
+                @Override
+                public void modulesRenamed(@NotNull Project project,
+                                           @NotNull List<? extends Module> modules,
+                                           @NotNull Function<? super Module, String> oldNameProvider) {
+                    onArtifactOrModuleChanged();
+                }
+            });
+
+            LOG.info("DevTomcat: Subscribed to artifact and module rename events");
+        } catch (Exception e) {
+            LOG.debug("DevTomcat: Could not subscribe to rename events: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Handles artifact or module changes detected while the editor is open.
+     *
+     * <p>Coalesces multiple rapid-fire events (a module rename can trigger several
+     * artifact change events) into a single refresh-then-sync pass on the next EDT
+     * cycle. The pass:
+     * <ol>
+     *   <li>Runs {@link ArtifactReferenceRefresher#refreshInPlace} on the live
+     *       deployment table items to repair stale names and paths.</li>
+     *   <li>Repaints the deployment list to show the updated names.</li>
+     *   <li>Re-syncs the Before Launch panel so {@code findMatchingArtifact}
+     *       sees the current artifact names.</li>
+     * </ol>
+     */
+    private void onArtifactOrModuleChanged() {
+        if (isDisposing.get() || !editorInitialized.get()) return;
+        if (!renameRefreshScheduled.compareAndSet(false, true)) return;
+
+        ApplicationManager.getApplication().invokeLater(() -> {
+            renameRefreshScheduled.set(false);
+            if (isDisposing.get() || tabbedPane == null || deploymentTableManager == null) return;
+
+            try {
+                List<DeploymentArtifact> liveItems = deploymentTableManager.getLiveDeployments();
+                if (liveItems.isEmpty()) return;
+
+                ArtifactReferenceRefresher.RefreshResult result =
+                        ArtifactReferenceRefresher.refreshInPlace(project, liveItems);
+
+                if (result.hasUpdates()) {
+                    LOG.info("DevTomcat: Live rename refresh updated " +
+                            result.getUpdateCount() + " artifact reference(s)");
+                    for (ArtifactReferenceRefresher.RefreshAction action : result.getUpdatedActions()) {
+                        LOG.info("DevTomcat:   " + action);
+                    }
+
+                    deploymentTableManager.refreshList();
+                    syncBeforeLaunchPanelWithSelectedDeployment();
+                }
+            } catch (Exception e) {
+                LOG.warn("DevTomcat: Error during live rename refresh", e);
+            }
+        });
+    }
+
     public boolean isEventsSuppressed() {
         return isResetting.get() || isApplying.get() || isDisposing.get();
     }
@@ -526,16 +627,16 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void doSyncBeforeLaunch(@NotNull ConfigurationSettingsEditorWrapper wrapper,
                                      @NotNull ArtifactManager artifactManager) {
-        List<BeforeRunTask<?>> existingSteps = new ArrayList<>(wrapper.getStepsBeforeLaunch());
+        // 1. Strip all artifact-related tasks (both Ultimate and Community types)
         List<BeforeRunTask<?>> updatedSteps = new ArrayList<>();
-        for (BeforeRunTask<?> task : existingSteps) {
-            if (!(task instanceof BuildArtifactsBeforeRunTask)) {
-                updatedSteps.add(task);
+        for (BeforeRunTask<?> task : wrapper.getStepsBeforeLaunch()) {
+            if (task instanceof BuildArtifactsBeforeRunTask || task instanceof TomcatBuildArtifactsTask) {
+                continue;
             }
+            updatedSteps.add(task);
         }
 
-        // Ensure a "Build" (Make) task is always present — matches IntelliJ Ultimate's
-        // Tomcat behaviour where the Before Launch list always starts with "Build".
+        // 2. Ensure a "Build" (Make) task is always present
         boolean hasMake = updatedSteps.stream()
                 .anyMatch(t -> t instanceof CompileStepBeforeRun.MakeBeforeRunTask);
         if (!hasMake) {
@@ -546,11 +647,15 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             LOG.info("DevTomcat: Added default Build (Make) task to Before Launch panel");
         }
 
+        // 3. Add the appropriate artifact build task
         List<DeploymentArtifact> allDeployments = deploymentTableManager != null
                 ? deploymentTableManager.getDeployments()
                 : Collections.emptyList();
 
         if (!allDeployments.isEmpty()) {
+            // Try to match deployments against IntelliJ Artifacts (Ultimate path).
+            // On Community Edition, ArtifactManager exists but has zero configured
+            // artifacts, so findMatchingArtifact() returns null for every deployment.
             BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
             for (DeploymentArtifact deployment : allDeployments) {
                 Artifact matched = findMatchingArtifact(deployment, artifactManager);
@@ -558,11 +663,28 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     buildTask.addArtifact(matched);
                 }
             }
+
             if (!buildTask.getArtifactPointers().isEmpty()) {
+                // Ultimate: IntelliJ Artifacts match — use native Build Artifacts task
                 buildTask.setEnabled(true);
                 updatedSteps.add(buildTask);
                 LOG.info("DevTomcat: Before Launch consolidated " +
                         buildTask.getArtifactPointers().size() + " artifact(s) into single Build task");
+            } else {
+                // Community Edition (or external deployments with no matching artifacts):
+                // use TomcatBuildArtifactsTask which shows artifact names and validates
+                // their paths before launch.
+                List<String> artifactNames = allDeployments.stream()
+                        .filter(a -> a != null && !a.getDisplayName().isBlank())
+                        .map(DeploymentArtifact::getDisplayName)
+                        .collect(Collectors.toList());
+                TomcatBuildArtifactsTask ceTask =
+                        new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
+                ceTask.setArtifactNames(artifactNames);
+                ceTask.setEnabled(true);
+                updatedSteps.add(ceTask);
+                LOG.info("DevTomcat: Before Launch (Community) — added Build task for " +
+                        artifactNames.size() + " artifact(s)");
             }
         }
 
@@ -613,9 +735,11 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         List<BeforeRunTask<?>> existingSteps = new ArrayList<>(wrapper.getStepsBeforeLaunch());
         List<BeforeRunTask<?>> updatedSteps = new ArrayList<>();
         for (BeforeRunTask<?> task : existingSteps) {
-            if (!(task instanceof TomcatBuildArtifactsTask)) {
-                updatedSteps.add(task);
+            // Strip both our custom task and any stale Ultimate-style BuildArtifactsBeforeRunTask
+            if (task instanceof TomcatBuildArtifactsTask || task instanceof BuildArtifactsBeforeRunTask) {
+                continue;
             }
+            updatedSteps.add(task);
         }
 
         // Ensure "Build" (Make) task is present
@@ -669,6 +793,17 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         });
     }
 
+    /**
+     * Finds the IntelliJ {@link Artifact} that corresponds to a deployment entry.
+     * Uses the same cascade as {@link ArtifactReferenceRefresher} so renames that
+     * preserve the output path or base module name are still matched.
+     *
+     * <ol>
+     *   <li>Exact case-insensitive name match</li>
+     *   <li>Output path match (artifact renamed but directory unchanged)</li>
+     *   <li>Base module name match (e.g. "myapp_war_exploded" ↔ "myapp:war exploded")</li>
+     * </ol>
+     */
     @Nullable
     private Artifact findMatchingArtifact(@Nullable DeploymentArtifact deployment,
                                           @NotNull ArtifactManager artifactManager) {
@@ -689,7 +824,18 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             }
         }
 
-        // 2. Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
+        // 2. Output path match — artifact renamed but output directory unchanged
+        String deployPath = deployment.getPath();
+        if (deployPath != null && !deployPath.isEmpty()) {
+            for (Artifact artifact : allArtifacts) {
+                String outputPath = artifact.getOutputFilePath();
+                if (outputPath != null && deployPath.equals(outputPath)) {
+                    return artifact;
+                }
+            }
+        }
+
+        // 3. Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
         String deployBase = extractBaseModuleName(deployName);
         for (Artifact artifact : allArtifacts) {
             if (deployBase.equals(extractBaseModuleName(artifact.getName()))) {
@@ -876,6 +1022,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         editorInitialized.set(false);
         isResetting.set(false);
         isApplying.set(false);
+        if (messageBusConnection != null) {
+            messageBusConnection.disconnect();
+            messageBusConnection = null;
+        }
         currentConfiguration = null;
         if (serverTab != null) {
             serverTab.dispose();

@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -118,13 +119,8 @@ public final class ArtifactReferenceRefresher {
     public static RefreshResult refresh(@NotNull TomcatRunConfiguration config) {
         Objects.requireNonNull(config, "Configuration cannot be null");
 
-        // Collect all IntelliJ model data under a single read action and convert to
-        // plain PlatformArtifactSnapshot records immediately. ArtifactManager.getArtifacts()
-        // and ModuleManager.getModules() both require a read action; refresh() is called
-        // from TomcatRunConfiguration.readExternal() on a background coroutine thread
-        // (ProjectRunConfigurationInitializer) where no read action is held by default.
         PlatformArtifactSnapshot[] snapshots = ReadAction.compute(
-                () -> collectArtifactSnapshots(config));
+                () -> collectArtifactSnapshots(config.getProject()));
 
         if (snapshots == null || snapshots.length == 0) {
             return RefreshResult.EMPTY;
@@ -134,17 +130,56 @@ public final class ArtifactReferenceRefresher {
     }
 
     /**
+     * Refreshes a list of deployment artifacts in-place against the current project
+     * model state. Used by the configuration editor to update live table items when
+     * artifacts or modules are renamed while the editor is open.
+     *
+     * <p>The provided {@code artifacts} list must contain the actual objects held by
+     * the UI model — not clones — so that field mutations ({@code setName},
+     * {@code setPath}) propagate back to the UI without a full reload.
+     *
+     * @param project   the current project
+     * @param artifacts the live deployment artifact references to refresh
+     * @return a result documenting every action taken (never null)
+     */
+    @NotNull
+    public static RefreshResult refreshInPlace(@NotNull Project project,
+                                               @NotNull List<DeploymentArtifact> artifacts) {
+        Objects.requireNonNull(project, "Project cannot be null");
+        Objects.requireNonNull(artifacts, "Artifacts list cannot be null");
+
+        if (artifacts.isEmpty()) {
+            return RefreshResult.EMPTY;
+        }
+
+        PlatformArtifactSnapshot[] snapshots = ReadAction.compute(
+                () -> collectArtifactSnapshots(project));
+
+        if (snapshots == null || snapshots.length == 0) {
+            return RefreshResult.EMPTY;
+        }
+
+        // Wrap in a temporary DeploymentConfig. setArtifacts() creates a new list
+        // but preserves the same object references, so when the refresher calls
+        // deployment.setName()/setPath() it mutates the caller's live objects.
+        DeploymentConfig tempConfig = new DeploymentConfig();
+        tempConfig.setArtifacts(artifacts);
+        return refreshArtifacts(tempConfig, snapshots);
+    }
+
+    /**
      * Collects the current IntelliJ artifact state into plain snapshots.
      * <strong>Must be called under a read action.</strong>
      *
+     * @param project the current project
      * @return filtered snapshot array, or {@code null} / empty if ArtifactManager is
      *         unavailable or no artifacts are configured
      */
     @Nullable
     private static PlatformArtifactSnapshot[] collectArtifactSnapshots(
-            @NotNull TomcatRunConfiguration config) {
+            @NotNull Project project) {
         try {
-            ArtifactManager artifactManager = ArtifactManager.getInstance(config.getProject());
+            ArtifactManager artifactManager = ArtifactManager.getInstance(project);
             Artifact[] platformArtifacts = artifactManager.getArtifacts();
             if (platformArtifacts.length == 0) return null;
 
@@ -154,8 +189,7 @@ public final class ArtifactReferenceRefresher {
             // would match the orphaned artifact, leaving deployment pointing at stale output.
             Set<String> activeModules = new HashSet<>();
             try {
-                for (Module m :
-                        ModuleManager.getInstance(config.getProject()).getModules()) {
+                for (Module m : ModuleManager.getInstance(project).getModules()) {
                     activeModules.add(m.getName().toLowerCase());
                 }
             } catch (Exception e) {

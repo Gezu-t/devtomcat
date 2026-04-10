@@ -388,7 +388,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     /**
      * Finds an IntelliJ Artifact that matches the given DeploymentArtifact.
-     * Tries exact name match first, then falls back to case-insensitive matching.
+     * Uses the same cascade as {@link ArtifactReferenceRefresher} so renames that
+     * preserve the output path or base module name are still matched.
+     *
+     * <p><b>Must be called under a read action</b> (getArtifacts() accesses project model).
      */
     @Nullable
     private Artifact findMatchingArtifact(@NotNull ArtifactManager artifactManager,
@@ -396,24 +399,38 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         String name = deploymentArtifact.getName();
         if (name.isEmpty()) return null;
 
-        // Exact match
-        for (Artifact artifact : artifactManager.getArtifacts()) {
+        Artifact[] allArtifacts = artifactManager.getArtifacts();
+
+        // 1. Exact match
+        for (Artifact artifact : allArtifacts) {
             if (name.equals(artifact.getName())) {
                 return artifact;
             }
         }
 
-        // Case-insensitive fallback
-        for (Artifact artifact : artifactManager.getArtifacts()) {
+        // 2. Case-insensitive fallback
+        for (Artifact artifact : allArtifacts) {
             if (name.equalsIgnoreCase(artifact.getName())) {
                 LOG.info("DevTomcat: Matched artifact by case-insensitive name: " + artifact.getName());
                 return artifact;
             }
         }
 
-        // Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
+        // 3. Output path match — artifact renamed but output directory unchanged
+        String deployPath = deploymentArtifact.getPath();
+        if (deployPath != null && !deployPath.isEmpty()) {
+            for (Artifact artifact : allArtifacts) {
+                String outputPath = artifact.getOutputFilePath();
+                if (outputPath != null && deployPath.equals(outputPath)) {
+                    LOG.info("DevTomcat: Matched artifact by output path: " + artifact.getName());
+                    return artifact;
+                }
+            }
+        }
+
+        // 4. Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
         String deployBase = extractBaseModuleName(name);
-        for (Artifact artifact : artifactManager.getArtifacts()) {
+        for (Artifact artifact : allArtifacts) {
             if (deployBase.equals(extractBaseModuleName(artifact.getName()))) {
                 LOG.info("DevTomcat: Matched artifact by base module name: " + artifact.getName());
                 return artifact;
