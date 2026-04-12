@@ -53,6 +53,18 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.0.5</h3>
+    <ul>
+        <li><b>Configurable Build Artifacts task</b> — "Build DevTomcat Artifacts" in Before Launch now shows a checkbox dialog listing all deployed artifacts for selection</li>
+        <li><b>ReadAction safety</b> — all <code>ArtifactManager</code>/<code>ModuleManager</code> model access now wrapped in <code>ReadAction.compute()</code> across 5 files; prevents read-access violations on background threads</li>
+        <li><b>Config import fix</b> — importing a configuration no longer silently wipes startup/shutdown scripts, <code>passParentEnvs</code>, or debug host/port; server mode changes now reconcile tab structure</li>
+        <li><b>EnvVarPanel fixes</b> — <code>passParentEnvs</code> preserved on load; deleted computed keys can be re-added; <code>Populate Defaults</code> no longer resets the checkbox</li>
+        <li><b>ProcessStopSupport guard</b> — descriptor cleanup failure no longer blocks relaunch; debug restart now shows balloon notification on failure</li>
+        <li><b>Atomic move fallback</b> — <code>TomcatConfigPreparer.atomicWriteString()</code> now falls back to non-atomic replace when filesystem doesn't support <code>ATOMIC_MOVE</code></li>
+        <li><b>Duplicate code elimination</b> — extracted 7 reusable utilities replacing ~20 duplicated code blocks; replaced 28 inline FQN references with proper imports across 18 files</li>
+        <li><b>Test coverage</b> — added <code>EnvVarPanelStateTest</code> (11 tests), <code>TomcatDebuggerTest</code>, <code>TomcatApplicationUpdaterTest</code></li>
+    </ul>
+
     <h3>Version 1.0.4</h3>
     <ul>
         <li><b>JRE Configuration dialog refactored</b> — split into focused sub-dialogs for add/edit (<code>JdkEditorDialog</code>) and auto-detection (<code>AutoDetectJdkDialog</code>)</li>
@@ -60,9 +72,6 @@
         <li><b>Port resolution</b> — inline 44-line block in <code>TomcatJavaParametersBuilder.build()</code> extracted to <code>resolvePortsIfNeeded()</code>; build sequence is now a clean 10-step method</li>
         <li><b>VM Options field</b> — replaced with IntelliJ's <code>ExpandableTextField</code> for proper handling of long option strings</li>
         <li><b>Services panel</b> — fixed issue where scrolling in the console could cause the Services panel to lose focus and auto-hide</li>
-        <li><b>Context path fix</b> — empty-string context path from XML deserialization now correctly normalizes to <code>"/"</code></li>
-        <li><b>Duplicate code elimination</b> — extracted 7 reusable utilities (<code>ContextPathUtils.resolveContextNameSafe</code>, <code>TomcatNotifier</code>, <code>CompilerSupport</code>, <code>ProcessStopSupport</code>, <code>ServiceActionUtils.tryInvokeMethod</code>, <code>TomcatProjectUtils.safeDelete</code>, <code>ConfigurationSection.addLabelAndField</code>) replacing ~20 duplicated code blocks across 10+ files</li>
-        <li><b>Test coverage</b> — added unit tests for TomcatDebugger, TomcatApplicationUpdater, TomcatProcessHandler, and LocalDeploymentStrategy static helpers</li>
     </ul>
 
     <h3>Version 1.0.3</h3>

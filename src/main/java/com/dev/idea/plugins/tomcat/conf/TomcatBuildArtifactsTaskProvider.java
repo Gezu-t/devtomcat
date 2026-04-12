@@ -7,12 +7,23 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Key;
+import org.jetbrains.concurrency.AsyncPromise;
+import org.jetbrains.concurrency.Promise;
+import com.intellij.ui.CheckBoxList;
+import com.intellij.ui.components.JBScrollPane;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Provides the "Build N artifact(s)" entry in the Before Launch panel for
@@ -115,12 +126,95 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
 
     @Override
     public boolean isConfigurable() {
-        return false;
+        return true;
+    }
+
+    /**
+     * Shows a dialog listing all deployed artifacts with checkboxes.
+     * Already-selected artifacts are pre-checked. The user can toggle
+     * which artifacts to include in the pre-launch build validation.
+     */
+    @Override
+    public @NotNull Promise<Boolean> configureTask(@NotNull DataContext context,
+                                                    @NotNull RunConfiguration configuration,
+                                                    @NotNull TomcatBuildArtifactsTask task) {
+        AsyncPromise<Boolean> promise = new AsyncPromise<>();
+
+        if (!(configuration instanceof TomcatRunConfiguration tomcatConfig)) {
+            promise.setResult(false);
+            return promise;
+        }
+
+        List<DeploymentArtifact> allArtifacts = tomcatConfig.getDeployedArtifacts();
+        if (allArtifacts.isEmpty()) {
+            promise.setResult(false);
+            return promise;
+        }
+
+        Project project = configuration.getProject();
+        Set<String> selected = new HashSet<>(task.getArtifactNames());
+
+        SelectArtifactsDialog dialog = new SelectArtifactsDialog(project, allArtifacts, selected);
+        if (dialog.showAndGet()) {
+            task.setArtifactNames(dialog.getSelectedNames());
+            promise.setResult(true);
+        } else {
+            promise.setResult(false);
+        }
+        return promise;
     }
 
     @Override
     public boolean canExecuteTask(@NotNull RunConfiguration configuration,
                                   @NotNull TomcatBuildArtifactsTask task) {
         return configuration instanceof TomcatRunConfiguration;
+    }
+
+    /**
+     * Dialog that shows all deployment artifacts with checkboxes.
+     * Deployed artifacts are pre-checked; the user can toggle selection.
+     */
+    private static class SelectArtifactsDialog extends DialogWrapper {
+
+        private final CheckBoxList<String> checkBoxList;
+
+        SelectArtifactsDialog(@NotNull Project project,
+                              @NotNull List<DeploymentArtifact> artifacts,
+                              @NotNull Set<String> preSelected) {
+            super(project, false);
+            setTitle("Select Artifacts");
+
+            checkBoxList = new CheckBoxList<>();
+            for (DeploymentArtifact artifact : artifacts) {
+                String name = artifact.getDisplayName();
+                checkBoxList.addItem(name, name, preSelected.isEmpty() || preSelected.contains(name));
+            }
+
+            init();
+        }
+
+        @Override
+        protected @Nullable JComponent createCenterPanel() {
+            JPanel panel = new JPanel(new BorderLayout());
+            panel.setPreferredSize(JBUI.size(350, 200));
+
+            JBScrollPane scrollPane = new JBScrollPane(checkBoxList);
+            panel.add(scrollPane, BorderLayout.CENTER);
+            return panel;
+        }
+
+        @NotNull
+        List<String> getSelectedNames() {
+            List<String> result = new ArrayList<>();
+            for (int i = 0; i < checkBoxList.getItemsCount(); i++) {
+                if (checkBoxList.isItemSelected(i)) {
+                    String item = checkBoxList.getItemAt(i);
+                    if (item != null) {
+                        result.add(item);
+                    }
+                }
+            }
+            return result;
+        }
     }
 }

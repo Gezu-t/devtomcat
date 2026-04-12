@@ -1,6 +1,9 @@
 # DevTomcat Changelog
 
-## [1.0.4]
+## [1.0.5]
+
+### Added
+- **Configurable Build Artifacts task** — "Build DevTomcat Artifacts" in Before Launch is now configurable; clicking it shows all deployed artifacts with checkboxes so the user can select which artifacts to validate before launch
 
 ### Changed
 - **JRE Configuration dialog** — split into focused sub-dialogs (`JdkEditorDialog`, `AutoDetectJdkDialog`) for add/edit and auto-detection flows; main dialog reduced to ~255 lines
@@ -8,9 +11,17 @@
 - **TomcatJavaParametersBuilder** — inline 44-line port resolution block extracted to `resolvePortsIfNeeded()`, which returns a `PortConfig` or throws; `build()` reduced to a clean 10-step sequence; `setupVmOptions()` signature simplified from 8 params to 5
 - **VM Options field** — replaced with IntelliJ's `ExpandableTextField` for proper handling of long option strings
 - **Services panel focus** — `maybeActivateConsole()` now only activates the Run/Debug tool window when it is already visible, preventing it from stealing focus from the Services panel while scrolling
+- **Facade accessors** — added `isRemoteMode()`, `getServerMode()`, `getDeployedArtifacts()` on `TomcatRunConfiguration`; eliminates Law of Demeter violations across 15+ files
 
 ### Fixed
 - **Context path empty-string edge case** — `TomcatConfigurationData.setContextPath("")` now normalizes to `"/"`. Previously `StringUtil.notNullize` only handled null; an empty string from XML deserialization would pass through as `""`, causing downstream context name resolution to silently fall back to ROOT.
+- **ReadAction scope** — `syncBeforeLaunchWithDeployments()`, `validateArtifactReferences()`, `ArtifactSelectionHandler`, and `TomcatConfigurationEditor` now wrap all `ArtifactManager`/`ModuleManager` model access inside `ReadAction.compute()`. Previously `getArtifacts()` was called outside the read action, risking read-access violations on background threads.
+- **Config import data loss** — importing a configuration no longer silently wipes startup/shutdown scripts, `passParentEnvs`, and debug host/port. The import now preserves existing runner settings and merges only the exported env var fields.
+- **Config import mode mismatch** — importing a Remote config into a Local editor now calls `reconcileTabsForMode()` to update tab structure correctly.
+- **EnvVarPanel state bugs** — `passParentEnvs` is now preserved on load; deleted computed keys can be re-added manually; `Populate Defaults` no longer resets the `Pass environment variables` checkbox.
+- **ProcessStopSupport cleanup guard** — `removeRunContent()` failure no longer blocks relaunch; wrapped in try/catch so the callback always runs.
+- **Debug restart notification** — `DebugTomcatAction` now shows a balloon notification when debug-mode restart fails, matching the pattern in `TomcatRunnerDelegate` and `TomcatApplicationUpdater`.
+- **Atomic move fallback** — `TomcatConfigPreparer.atomicWriteString()` now falls back to non-atomic `REPLACE_EXISTING` when the filesystem doesn't support `ATOMIC_MOVE`, matching `TomcatProjectUtils.atomicCopy()`.
 
 ### Refactored — Duplicate Code Elimination
 - **`ContextPathUtils.resolveContextNameSafe()`** — single source for try/catch fallback to ROOT on invalid context paths; replaced 3 private wrappers in TomcatProcessHandler, TomcatApplicationUpdater, and TomcatManagerDeployer
@@ -21,12 +32,14 @@
 - **`TomcatProjectUtils.safeDelete()`** — single source for safe file deletion; replaced 3 inline deleteIfExists blocks in atomicCopy and LocalDeploymentStrategy
 - **`ConfigurationSection.addLabelAndField()`** — single source for the label+field GridBagLayout row pattern; replaced identical GBC boilerplate in ApplicationServerSection, JreConfigurationSection, and UpdateActionsSection
 - **`TomcatSettingsSection.addPortRow()`/`addCheckBoxColumn()`** — extracted from 6 identical port-field row blocks
+- **Inline FQN cleanup** — replaced 28 inline fully-qualified names with proper imports across 18 files
 
 ### Tests
 - Added `TomcatDebuggerTest` — covers runner ID stability
 - Added `TomcatApplicationUpdaterTest` — covers `mapActionToDisplay()` for all four update actions
 - Added `TomcatProcessHandlerTest` — covers `extractContextNameFromBrowserUrl` and `rewritePortIfNeeded` helpers
 - Added `LocalDeploymentStrategyTest` — covers `stripJarVersion()` and `extractModuleName()` static helpers
+- Added `EnvVarPanelStateTest` — covers `initializeState` (3 paths), `passParentEnvs` round-trip, delete-then-readd lifecycle, and `ensureComputedEnvVars` interaction
 
 ## [1.0.3]
 
