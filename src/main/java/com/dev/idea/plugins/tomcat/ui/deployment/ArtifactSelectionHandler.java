@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -229,7 +230,10 @@ public class ArtifactSelectionHandler {
                                     pomNames.add(module.getName().toLowerCase());
                                     break;
                                 }
-                            } catch (Exception ignored) {}
+                            } catch (IOException | RuntimeException e) {
+                                LOG.debug("Error reading pom.xml for module '" + module.getName() +
+                                        "' at " + pomFile.getPath(), e);
+                            }
                         }
                     }
                 }
@@ -409,7 +413,9 @@ public class ArtifactSelectionHandler {
             String typeId = artifact.getArtifactType().getId().toLowerCase();
             if (typeId.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
             if (typeId.contains("war")) return DeploymentArtifact.TYPE_WAR;
-        } catch (Exception ignored) {}
+        } catch (RuntimeException e) {
+            LOG.debug("Error resolving artifact type for deployment '" + artifact.getName() + "'", e);
+        }
 
         // 2. Check artifact name for type hints (CE users often follow naming conventions)
         String name = artifact.getName().toLowerCase();

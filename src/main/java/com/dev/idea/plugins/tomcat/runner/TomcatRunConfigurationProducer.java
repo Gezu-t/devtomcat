@@ -30,20 +30,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 /**
- * Professional Enterprise DevTomcat Run Configuration Producer
- * Provides intelligent run configuration creation with comprehensive enterprise features
- *
- * Enterprise Production Features:
- * - Intelligent project type detection (Spring Boot, Maven, Gradle)
- * - Professional web root discovery with multiple fallback strategies
- * - Enterprise development mode optimization and smart defaults
- * - Advanced context path extraction with intelligent naming
- * - Professional environment variable setup for development
- * - Comprehensive validation and configuration optimization
- *
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
- * Created: 6/9/25
+ * Produces DevTomcat run configurations for web-oriented module contexts.
  */
 public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer<TomcatRunConfiguration> {
 
@@ -79,35 +66,31 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return false;
         }
 
-        // Professional conflict avoidance with Application run configurations
+        // Skip contexts that should stay as standard Application run configurations.
         PsiClass psiClass = ApplicationConfigurationType.getMainClass(context.getPsiLocation());
         if (psiClass != null) {
             return false;
         }
 
-        // Professional web root discovery with enterprise intelligence
-        List<VirtualFile> webRoots = discoverEnterpriseWebRoots(context.getLocation());
+        List<VirtualFile> webRoots = discoverWebRootsForContext(context.getLocation());
         if (webRoots.isEmpty()) {
             return false;
         }
 
-        // Professional Tomcat server configuration and validation
-        if (!setupEnterpriseServerConfiguration(configuration)) {
+        if (!configureTomcatServer(configuration)) {
             return false;
         }
 
-        // Professional configuration setup with enterprise features
-        setupEnterpriseConfiguration(configuration, module, webRoots);
+        configureRunConfiguration(configuration, module, webRoots);
 
-        LOG.debug("DevTomcat: Professional run configuration created for module: " + module.getName());
+        LOG.debug("DevTomcat: Run configuration created for module: " + module.getName());
         return true;
     }
 
     @Override
     public boolean isPreferredConfiguration(ConfigurationFromContext self, ConfigurationFromContext other) {
-        // DevTomcat configurations are preferred for enterprise web modules
         if (self.getConfiguration() instanceof TomcatRunConfiguration) {
-            return isEnterpriseWebModuleContext(self.getSourceElement());
+            return isWebModuleContext(self.getSourceElement());
         }
         return false;
     }
@@ -119,7 +102,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return false;
         }
 
-        List<VirtualFile> webRoots = discoverEnterpriseWebRoots(context.getLocation());
+        List<VirtualFile> webRoots = discoverWebRootsForContext(context.getLocation());
         return webRoots.stream().anyMatch(webRoot ->
                 webRoot.getPath().equals(configuration.getDocBase()));
     }
@@ -136,16 +119,11 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
     }
 
-    /**
-     * Discover enterprise web roots with comprehensive intelligence
-     * Supports Spring Boot, Maven, Gradle, and traditional web applications
-     */
-    private List<VirtualFile> discoverEnterpriseWebRoots(@Nullable Location<?> location) {
+    private List<VirtualFile> discoverWebRootsForContext(@Nullable Location<?> location) {
         if (location == null) {
             return ContainerUtil.emptyList();
         }
 
-        // Professional test file exclusion
         boolean isTestFile = TomcatModuleUtils.isTestSource(location);
         if (isTestFile) {
             LOG.debug("DevTomcat: Skipping test file location for web root discovery");
@@ -157,7 +135,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return ContainerUtil.emptyList();
         }
 
-        // Professional multi-strategy web root discovery
         List<VirtualFile> webRoots = new ArrayList<>();
 
         webRoots.addAll(TomcatModuleUtils.findWebRoots(module));
@@ -175,70 +152,51 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
 
         if (!webRoots.isEmpty()) {
-            LOG.debug("DevTomcat: Professional web root discovery found " + webRoots.size() + " locations");
+            LOG.debug("DevTomcat: Web root discovery found " + webRoots.size() + " locations");
         }
 
         return webRoots;
     }
 
-    /**
-     * Setup enterprise Tomcat server configuration with validation
-     */
-    private boolean setupEnterpriseServerConfiguration(@NotNull TomcatRunConfiguration configuration) {
+    private boolean configureTomcatServer(@NotNull TomcatRunConfiguration configuration) {
         List<TomcatInfo> tomcatInfos = TomcatServerManagerState.getInstance().getTomcatInfos();
 
         if (tomcatInfos.isEmpty()) {
-            LOG.debug("Tomcat: No Tomcat servers configured - professional configuration creation requires server setup");
+            LOG.debug("Tomcat: No Tomcat servers configured; auto-creation requires server setup");
             return false;
         }
 
-        // Professional server selection with optimization
         TomcatInfo selectedServer = selectOptimalTomcatServer(tomcatInfos);
         configuration.setTomcatInfo(selectedServer);
 
-        LOG.debug("Tomcat: Professional server selected - " + selectedServer.getName() +
+        LOG.debug("Tomcat: Selected server - " + selectedServer.getName() +
                 " " + selectedServer.getVersion());
         return true;
     }
 
-    /**
-     * Setup enterprise configuration with comprehensive professional features
-     */
-    private void setupEnterpriseConfiguration(@NotNull TomcatRunConfiguration configuration,
-                                              @NotNull Module module,
-                                              @NotNull List<VirtualFile> webRoots) {
-
-        // Professional context path extraction and validation
-        String contextPath = extractEnterpriseContextPath(module);
-
-        // Professional configuration naming with project type detection
-        String configName = createProfessionalConfigurationName(contextPath, module);
+    private void configureRunConfiguration(@NotNull TomcatRunConfiguration configuration,
+                                           @NotNull Module module,
+                                           @NotNull List<VirtualFile> webRoots) {
+        String contextPath = deriveContextPath(module);
+        String configName = buildConfigurationName(contextPath, module);
         configuration.setName(configName);
 
-        // Professional document base configuration
         configuration.setDocBase(webRoots.get(0).getPath());
 
-        // Professional context path normalization and validation
         String normalizedContextPath = normalizeAndValidateContextPath(contextPath);
         configuration.setContextPath(normalizedContextPath);
 
 
-        LOG.debug("Tomcat: Professional configuration setup complete - " + configName +
+        LOG.debug("Tomcat: Configuration setup complete - " + configName +
                 " at " + normalizedContextPath);
     }
 
-    /**
-     * Extract enterprise context path with intelligent fallbacks
-     */
-    private String extractEnterpriseContextPath(@NotNull Module module) {
-        // Professional context path extraction - FIXED: Using TomcatModuleUtils
+    private String deriveContextPath(@NotNull Module module) {
         String contextPath = TomcatModuleUtils.extractContextPath(module);
 
         if (contextPath == null || contextPath.trim().isEmpty() || contextPath.equals("/")) {
-            // Professional fallback strategy
             contextPath = module.getName();
 
-            // Professional name cleaning and optimization
             contextPath = contextPath.replaceAll("[-_](web|webapp|app|main|server)$", "");
             contextPath = contextPath.replaceAll("^(web|webapp|app)-?", "");
         }
@@ -246,14 +204,10 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return contextPath;
     }
 
-    /**
-     * Create professional configuration name with project type intelligence
-     */
-    private String createProfessionalConfigurationName(@NotNull String contextPath, @NotNull Module module) {
+    private String buildConfigurationName(@NotNull String contextPath, @NotNull Module module) {
         StringBuilder name = new StringBuilder(CONFIGURATION_PREFIX);
         name.append(contextPath);
 
-        // Professional project type detection and labeling
         if (isSpringBootModule(module)) {
             name.append(" (Spring Boot)");
         } else if (isMavenModule(module)) {
@@ -267,26 +221,21 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return name.toString();
     }
 
-    /**
-     * Normalize and validate context path with enterprise standards
-     */
     private String normalizeAndValidateContextPath(@NotNull String contextPath) {
         if (contextPath.trim().isEmpty()) {
             return "/";
         }
 
-        // Professional context path normalization
         if (!contextPath.startsWith("/")) {
             contextPath = "/" + contextPath;
         }
 
-        // Professional validation and cleaning (preserve dots for paths like /api.v2)
         contextPath = contextPath.replaceAll("[^a-zA-Z0-9/_.~-]", "");
 
         if (contextPath.equals("/")) {
             LOG.debug("Tomcat: Using root context path for deployment");
         } else {
-            LOG.debug("Tomcat: Professional context path configured: " + contextPath);
+            LOG.debug("Tomcat: Context path configured: " + contextPath);
         }
 
         return contextPath;
@@ -294,10 +243,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
 
 
-    /**
-     * Check if this is an enterprise web module context
-     */
-    private boolean isEnterpriseWebModuleContext(@Nullable PsiElement element) {
+    private boolean isWebModuleContext(@Nullable PsiElement element) {
         if (element == null) {
             return false;
         }
@@ -316,15 +262,11 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
                 fileName.contains("controller");
     }
 
-    /**
-     * Discover Spring Boot web roots with enterprise intelligence
-     */
     private List<VirtualFile> discoverSpringBootWebRoots(@NotNull Module module) {
         List<VirtualFile> webRoots = new ArrayList<>();
         VirtualFile[] sourceRoots = ModuleRootManager.getInstance(module).getSourceRoots();
 
         for (VirtualFile sourceRoot : sourceRoots) {
-            // Professional Spring Boot resource directory discovery
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/static"));
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/public"));
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/templates"));
@@ -338,15 +280,11 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return webRoots;
     }
 
-    /**
-     * Discover Maven/Gradle web roots with enterprise patterns
-     */
     private List<VirtualFile> discoverMavenGradleWebRoots(@NotNull Module module) {
         List<VirtualFile> webRoots = new ArrayList<>();
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
         for (VirtualFile contentRoot : contentRoots) {
-            // Professional Maven/Gradle web directory patterns
             addIfExists(webRoots, contentRoot.findFileByRelativePath("src/main/webapp"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("src/main/web"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("web"));
@@ -361,15 +299,11 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return webRoots;
     }
 
-    /**
-     * Discover alternative web roots with comprehensive patterns
-     */
     private List<VirtualFile> discoverAlternativeWebRoots(@NotNull Module module) {
         List<VirtualFile> webRoots = new ArrayList<>();
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
         for (VirtualFile contentRoot : contentRoots) {
-            // Professional alternative web directory patterns
             addIfExists(webRoots, contentRoot.findFileByRelativePath("public"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("static"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("www"));
@@ -389,9 +323,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
     }
 
-    /**
-     * Select optimal Tomcat server for enterprise deployment
-     */
     private TomcatInfo selectOptimalTomcatServer(List<TomcatInfo> servers) {
         return servers.stream()
                 .max((s1, s2) -> compareSemanticVersions(s1.getVersion(), s2.getVersion()))
@@ -418,9 +349,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
     }
 
-    /**
-     * Check if module is a Spring Boot module with enterprise detection
-     */
     private boolean isSpringBootModule(@NotNull Module module) {
         VirtualFile[] sourceRoots = ModuleRootManager.getInstance(module).getSourceRoots();
 
@@ -430,7 +358,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
                 return true;
             }
 
-            // Check for Spring Boot configuration files
             VirtualFile resourcesDir = sourceRoot.findFileByRelativePath("main/resources");
             if (resourcesDir != null && hasSpringBootResources(resourcesDir)) {
                 return true;
@@ -440,9 +367,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return false;
     }
 
-    /**
-     * Check if module is a Maven module with professional detection
-     */
     private boolean isMavenModule(@NotNull Module module) {
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
@@ -456,9 +380,6 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return false;
     }
 
-    /**
-     * Check if module is a Gradle module with professional detection
-     */
     private boolean isGradleModule(@NotNull Module module) {
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
@@ -506,11 +427,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return false;
     }
 
-    /**
-     * Check for Spring Boot resources with enterprise detection
-     */
     private boolean hasSpringBootResources(@NotNull VirtualFile resourcesDir) {
-        // Professional Spring Boot configuration file detection
         VirtualFile applicationProps = resourcesDir.findFileByRelativePath("application.properties");
         VirtualFile applicationYml = resourcesDir.findFileByRelativePath("application.yml");
         VirtualFile applicationYaml = resourcesDir.findFileByRelativePath("application.yaml");

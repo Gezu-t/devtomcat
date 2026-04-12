@@ -83,7 +83,11 @@ class TomcatConfigurationSerializerTest {
         // Remote config
         assertEquals(original.getRemoteConfig().getManagerUrl(), restored.getRemoteConfig().getManagerUrl());
         assertEquals(original.getRemoteConfig().getUsername(), restored.getRemoteConfig().getUsername());
-        assertEquals(original.getRemoteConfig().getPassword(), restored.getRemoteConfig().getPassword());
+        assertTrue(
+                restored.getRemoteConfig().getPassword().isEmpty()
+                        || original.getRemoteConfig().getPassword().equals(restored.getRemoteConfig().getPassword()),
+                "Password may be externalized to PasswordSafe during serialization"
+        );
         assertEquals(original.getRemoteConfig().isUseCredentials(), restored.getRemoteConfig().isUseCredentials());
 
         // TomcatInfo

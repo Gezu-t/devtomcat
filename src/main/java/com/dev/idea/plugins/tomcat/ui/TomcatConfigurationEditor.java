@@ -10,7 +10,7 @@ import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.ConfigExportImport;
-import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
 import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentTableManager;
@@ -506,7 +506,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
         ApplicationManager.getApplication().invokeLater(() -> {
             renameRefreshScheduled.set(false);
-            if (isDisposing.get() || tabbedPane == null || deploymentTableManager == null) return;
+            if (!isEditorAvailable(tabbedPane, deploymentTableManager)) return;
 
             try {
                 List<DeploymentArtifact> liveItems = deploymentTableManager.getLiveDeployments();
@@ -589,7 +589,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (!syncScheduled.compareAndSet(false, true)) return;
         ApplicationManager.getApplication().invokeLater(() -> {
             syncScheduled.set(false);
-            if (!isEventsSuppressed() && tabbedPane != null) {
+            if (!isEditorAvailable(tabbedPane)) return;
+            if (!isEventsSuppressed()) {
                 syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
             }
         });
@@ -608,7 +609,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 // Defer one retry on the next EDT cycle when the component tree is realized.
                 LOG.debug("DevTomcat: EditorWrapper not found, deferring sync");
                 ApplicationManager.getApplication().invokeLater(() -> {
-                    if (isEventsSuppressed() || tabbedPane == null) return;
+                    if (!isEditorAvailable(tabbedPane) || isEventsSuppressed()) return;
                     ConfigurationSettingsEditorWrapper retryWrapper = findEditorWrapper();
                     if (retryWrapper != null) {
                         doSyncBeforeLaunch(retryWrapper, artifactManager);
@@ -717,7 +718,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             ConfigurationSettingsEditorWrapper wrapper = findEditorWrapper();
             if (wrapper == null) {
                 ApplicationManager.getApplication().invokeLater(() -> {
-                    if (isEventsSuppressed() || tabbedPane == null) return;
+                    if (!isEditorAvailable(tabbedPane) || isEventsSuppressed()) return;
                     ConfigurationSettingsEditorWrapper retryWrapper = findEditorWrapper();
                     if (retryWrapper != null) {
                         doSyncBeforeLaunchCommunity(retryWrapper);
@@ -807,47 +808,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     @Nullable
     private Artifact findMatchingArtifact(@Nullable DeploymentArtifact deployment,
                                           @NotNull ArtifactManager artifactManager) {
-        if (deployment == null || deployment.getName().isEmpty()) {
-            return null;
-        }
-
-        // Snapshot the artifact array under a read action — getArtifacts() accesses
-        // the project model. Iterate the snapshot outside.
         Artifact[] allArtifacts = ReadAction.compute(artifactManager::getArtifacts);
-
-        String deployName = deployment.getName();
-
-        // 1. Exact case-insensitive match
-        for (Artifact artifact : allArtifacts) {
-            if (deployName.equalsIgnoreCase(artifact.getName())) {
-                return artifact;
-            }
-        }
-
-        // 2. Output path match — artifact renamed but output directory unchanged
-        String deployPath = deployment.getPath();
-        if (deployPath != null && !deployPath.isEmpty()) {
-            for (Artifact artifact : allArtifacts) {
-                String outputPath = artifact.getOutputFilePath();
-                if (outputPath != null && deployPath.equals(outputPath)) {
-                    return artifact;
-                }
-            }
-        }
-
-        // 3. Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
-        String deployBase = extractBaseModuleName(deployName);
-        for (Artifact artifact : allArtifacts) {
-            if (deployBase.equals(extractBaseModuleName(artifact.getName()))) {
-                return artifact;
-            }
-        }
-
-        return null;
-    }
-
-    private static String extractBaseModuleName(String name) {
-        return ContextPathUtils.extractBaseModuleName(name);
+        return ArtifactMatchingUtils.findMatchingArtifact(allArtifacts, deployment, LOG);
     }
 
     /**
@@ -907,9 +869,21 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     }
     private void notifyError(String message) {
         ApplicationManager.getApplication().invokeLater(() -> {
-            if (isDisposing.get()) return;
+            if (!isEditorAvailable()) return;
             Messages.showErrorDialog(project, message, "Configuration Error");
         });
+    }
+
+    private boolean isEditorAvailable(@Nullable Object... requiredState) {
+        if (isDisposing.get() || project.isDisposed()) {
+            return false;
+        }
+        for (Object value : requiredState) {
+            if (value == null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // =========================================================================

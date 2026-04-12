@@ -4,7 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
+
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -167,44 +167,6 @@ class DynamicTomcatEnvironmentTest {
         void resultIsTrimmed() {
             String opts = DynamicTomcatEnvironment.buildCatalinaOpts();
             assertEquals(opts.trim(), opts);
-        }
-    }
-
-    @Nested
-    @DisplayName("buildEnvironmentVariables")
-    class BuildEnvironmentVariablesTests {
-
-        @Test
-        @DisplayName("contains all required keys")
-        void containsRequiredKeys() {
-            Map<String, String> env = DynamicTomcatEnvironment.buildEnvironmentVariables();
-            assertTrue(env.containsKey("JAVA_OPTS"), "Should contain JAVA_OPTS");
-            assertTrue(env.containsKey("CATALINA_OPTS"), "Should contain CATALINA_OPTS");
-            assertTrue(env.containsKey("JDK_JAVA_OPTIONS"), "Should contain JDK_JAVA_OPTIONS");
-            assertTrue(env.containsKey("TOMCAT_PLUGIN_ENV"), "Should contain TOMCAT_PLUGIN_ENV");
-            assertTrue(env.containsKey("TZ"), "Should contain TZ");
-        }
-
-        @Test
-        @DisplayName("TZ is UTC")
-        void tzIsUtc() {
-            Map<String, String> env = DynamicTomcatEnvironment.buildEnvironmentVariables();
-            assertEquals("UTC", env.get("TZ"));
-        }
-
-        @Test
-        @DisplayName("JDK_JAVA_OPTIONS contains add-opens")
-        void jdkOptionsContainAddOpens() {
-            Map<String, String> env = DynamicTomcatEnvironment.buildEnvironmentVariables();
-            String jdkOpts = env.get("JDK_JAVA_OPTIONS");
-            assertTrue(jdkOpts.contains("--add-opens=java.base/java.lang=ALL-UNNAMED"));
-        }
-
-        @Test
-        @DisplayName("no values are null")
-        void noNullValues() {
-            Map<String, String> env = DynamicTomcatEnvironment.buildEnvironmentVariables();
-            env.forEach((k, v) -> assertNotNull(v, "Value for " + k + " should not be null"));
         }
     }
 

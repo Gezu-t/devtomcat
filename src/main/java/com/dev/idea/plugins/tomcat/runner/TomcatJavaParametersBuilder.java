@@ -14,11 +14,9 @@ import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
-import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -43,22 +41,6 @@ public class TomcatJavaParametersBuilder {
     private static final Logger LOG = Logger.getInstance(TomcatJavaParametersBuilder.class);
 
     private static final String TOMCAT_MAIN_CLASS = "org.apache.catalina.startup.Bootstrap";
-    private static final String PARAM_CATALINA_HOME = "catalina.home";
-    private static final String PARAM_CATALINA_BASE = "catalina.base";
-    private static final String PARAM_CATALINA_TMPDIR = "java.io.tmpdir";
-    private static final String PARAM_LOGGING_CONFIG = "java.util.logging.config.file";
-    private static final String PARAM_LOGGING_MANAGER = "java.util.logging.manager";
-    private static final String PARAM_LOGGING_MANAGER_VALUE = "org.apache.juli.ClassLoaderLogManager";
-
-    private static final String JMX_REMOTE_PROP = "com.sun.management.jmxremote";
-    private static final String JMX_PORT_PROP = "com.sun.management.jmxremote.port";
-    private static final String JMX_SSL_PROP = "com.sun.management.jmxremote.ssl";
-    private static final String JMX_AUTH_PROP = "com.sun.management.jmxremote.authenticate";
-    private static final String JMX_LOCAL_PROP = "com.sun.management.jmxremote.local.only";
-
-    private static final String PARAM_HTTPS_PORT = "tomcat.https.port";
-    private static final String PARAM_SERVER_PORT = "server.port";
-    private static final String PARAM_SHUTDOWN_PORT = "server.shutdown.port";
     private final TomcatRunConfiguration configuration;
     private final Project project;
     private final ExecutionEnvironment environment;
@@ -129,7 +111,7 @@ public class TomcatJavaParametersBuilder {
      * @throws ExecutionException if any required port cannot be resolved
      */
     @NotNull
-    private PortConfig resolvePortsIfNeeded() throws ExecutionException {
+    PortConfig resolvePortsIfNeeded() throws ExecutionException {
         if (resolvedPorts != null) {
             LOG.info("Using pre-resolved ports: HTTP=" + resolvedPorts.getHttp()
                     + ", shutdown=" + resolvedPorts.getShutdown());
@@ -333,19 +315,6 @@ public class TomcatJavaParametersBuilder {
                                 @NotNull Sdk jdk) {
         ParametersList vmParams = params.getVMParametersList();
 
-        String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
-        if (StringUtil.isNotEmpty(vmOptions)) {
-            vmParams.addParametersString(vmOptions);
-        }
-
-        if (configuration.isJmxEnabled()) {
-            configureJmx(vmParams, ports.getJmx());
-        }
-
-        if (configuration.isHttpsEnabled()) {
-            configureHttps(vmParams, ports.getHttps());
-        }
-
         // Do NOT add -agentlib:jdwp here. In debug mode, GenericDebuggerRunner's
         // DebugProcessImpl patches the JavaParameters with the JDWP agent based on
         // the RemoteConnection created by TomcatDebugger. Adding it here would create
@@ -359,58 +328,16 @@ public class TomcatJavaParametersBuilder {
                     "(resolved debug port: " + resolvedDebugPort + ")");
         }
 
-        // JDK 9+ module opens required by Tomcat (previously delivered via JDK_JAVA_OPTIONS env var)
-        configureModuleOpens(vmParams, jdk);
-
-        configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, ports.getHttp(), ports.getShutdown());
-    }
-
-    private void configureModuleOpens(@NotNull ParametersList vmParams, @NotNull Sdk jdk) {
-        // --add-opens requires JDK 9+; passing these flags to JDK 8 crashes with "Unrecognized option"
-        JavaSdkVersion sdkVersion = JavaSdkVersion.fromVersionString(jdk.getVersionString());
-        if (sdkVersion == null || !sdkVersion.isAtLeast(JavaSdkVersion.JDK_1_9)) {
-            return;
-        }
-        String[] moduleOpens = {
-                "--add-opens=java.base/java.lang=ALL-UNNAMED",
-                "--add-opens=java.base/java.io=ALL-UNNAMED",
-                "--add-opens=java.base/java.util=ALL-UNNAMED",
-                "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
-                "--add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED"
-        };
-        for (String open : moduleOpens) {
-            vmParams.add(open);
-        }
-    }
-
-    private void configureJmx(@NotNull ParametersList vmParams, int jmxPort) {
-        // Use defineProperty (set-or-replace) so that user VM options containing these
-        // properties are overridden rather than duplicated.
-        vmParams.defineProperty(JMX_REMOTE_PROP, "");
-        vmParams.defineProperty(JMX_PORT_PROP, String.valueOf(jmxPort));
-        vmParams.defineProperty(JMX_SSL_PROP, "false");
-        vmParams.defineProperty(JMX_AUTH_PROP, "false");
-        vmParams.defineProperty(JMX_LOCAL_PROP, "false");
-    }
-
-    private void configureHttps(@NotNull ParametersList vmParams, int httpsPort) {
-        // HTTPS is configured entirely via server.xml connectors (see copyAndCustomizeServerXml).
-        // Expose port as a system property for custom scripts/monitoring only.
-        vmParams.defineProperty(PARAM_HTTPS_PORT, String.valueOf(httpsPort));
-    }
-
-    private void configureCatalinaProperties(@NotNull ParametersList vmParams,
-                                             @NotNull Path catalinaBase,
-                                             @NotNull Path catalinaHome,
-                                             int httpPort,
-                                             int shutdownPort) {
-        vmParams.defineProperty(PARAM_CATALINA_HOME, catalinaHome.toString());
-        vmParams.defineProperty(PARAM_CATALINA_BASE, catalinaBase.toString());
-        vmParams.defineProperty(PARAM_CATALINA_TMPDIR, catalinaBase.resolve(DIR_TEMP).toString());
-        vmParams.defineProperty(PARAM_LOGGING_CONFIG, catalinaBase.resolve(CONFIG_LOGGING_PROPERTIES).toString());
-        vmParams.defineProperty(PARAM_LOGGING_MANAGER, PARAM_LOGGING_MANAGER_VALUE);
-        vmParams.defineProperty(PARAM_SERVER_PORT, String.valueOf(httpPort));
-        vmParams.defineProperty(PARAM_SHUTDOWN_PORT, String.valueOf(shutdownPort));
+        TomcatVmOptionsConfigurator.configure(
+                vmParams,
+                configuration.getConfigData().getVmConfig().getVmOptions(),
+                ports,
+                configuration.isJmxEnabled(),
+                configuration.isHttpsEnabled(),
+                catalinaBase,
+                catalinaHome,
+                jdk
+        );
     }
 
     private void setupDeploymentArtifacts(@NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {

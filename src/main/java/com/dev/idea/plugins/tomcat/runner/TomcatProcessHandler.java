@@ -27,6 +27,7 @@ import com.intellij.openapi.wm.ToolWindowManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.Socket;
@@ -660,7 +661,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         if (closeable != null) {
             try {
                 closeable.close();
-            } catch (Exception ignored) {
+            } catch (IOException ignored) {
             }
         }
     }

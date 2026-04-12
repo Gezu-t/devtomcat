@@ -3,7 +3,7 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.runner.TomcatCommandLineState;
-import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
@@ -396,52 +396,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     @Nullable
     private Artifact findMatchingArtifact(@NotNull ArtifactManager artifactManager,
                                           @NotNull DeploymentArtifact deploymentArtifact) {
-        String name = deploymentArtifact.getName();
-        if (name.isEmpty()) return null;
-
-        Artifact[] allArtifacts = artifactManager.getArtifacts();
-
-        // 1. Exact match
-        for (Artifact artifact : allArtifacts) {
-            if (name.equals(artifact.getName())) {
-                return artifact;
-            }
-        }
-
-        // 2. Case-insensitive fallback
-        for (Artifact artifact : allArtifacts) {
-            if (name.equalsIgnoreCase(artifact.getName())) {
-                LOG.info("DevTomcat: Matched artifact by case-insensitive name: " + artifact.getName());
-                return artifact;
-            }
-        }
-
-        // 3. Output path match — artifact renamed but output directory unchanged
-        String deployPath = deploymentArtifact.getPath();
-        if (deployPath != null && !deployPath.isEmpty()) {
-            for (Artifact artifact : allArtifacts) {
-                String outputPath = artifact.getOutputFilePath();
-                if (outputPath != null && deployPath.equals(outputPath)) {
-                    LOG.info("DevTomcat: Matched artifact by output path: " + artifact.getName());
-                    return artifact;
-                }
-            }
-        }
-
-        // 4. Base module name match (e.g. "webapp-one_war_exploded" matches "webapp-one:war exploded")
-        String deployBase = extractBaseModuleName(name);
-        for (Artifact artifact : allArtifacts) {
-            if (deployBase.equals(extractBaseModuleName(artifact.getName()))) {
-                LOG.info("DevTomcat: Matched artifact by base module name: " + artifact.getName());
-                return artifact;
-            }
-        }
-
-        return null;
-    }
-
-    private static String extractBaseModuleName(String name) {
-        return ContextPathUtils.extractBaseModuleName(name);
+        return ArtifactMatchingUtils.findMatchingArtifact(artifactManager.getArtifacts(), deploymentArtifact, LOG);
     }
 
     // =====================================================================

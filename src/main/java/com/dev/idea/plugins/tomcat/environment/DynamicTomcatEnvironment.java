@@ -4,9 +4,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /**
  * Dynamic Tomcat Environment Detector — registry-driven configuration.
  *
@@ -33,14 +30,6 @@ public final class DynamicTomcatEnvironment {
     private static final String REG_FAST_SHUTDOWN         = "devtomcat.dev.fast.shutdown";
     private static final String REG_AUTO_BROWSER          = "devtomcat.auto.browser.launch";
     private static final String REG_AUTO_CONFIG           = "devtomcat.enable.auto.configuration";
-
-    private static final String JDK_JAVA_OPTIONS_KEY = "JDK_JAVA_OPTIONS";
-    private static final String ENV_JDK_JAVA_OPTIONS =
-            "--add-opens=java.base/java.lang=ALL-UNNAMED " +
-            "--add-opens=java.base/java.io=ALL-UNNAMED " +
-            "--add-opens=java.base/java.util=ALL-UNNAMED " +
-            "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED " +
-            "--add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED";
 
     private DynamicTomcatEnvironment() {}
 
@@ -183,17 +172,6 @@ public final class DynamicTomcatEnvironment {
     // =========================================================================
     // Environment Variables
     // =========================================================================
-
-    @NotNull
-    public static Map<String, String> buildEnvironmentVariables() {
-        Map<String, String> envVars = new HashMap<>();
-        envVars.put("JAVA_OPTS", buildJavaOpts());
-        envVars.put("CATALINA_OPTS", buildCatalinaOpts());
-        envVars.put(JDK_JAVA_OPTIONS_KEY, ENV_JDK_JAVA_OPTIONS);
-        envVars.put("TOMCAT_PLUGIN_ENV", getCurrentMode().getValue());
-        envVars.put("TZ", "UTC");
-        return envVars;
-    }
 
     // =========================================================================
     // JMX Security
