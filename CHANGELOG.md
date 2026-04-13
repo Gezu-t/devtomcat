@@ -1,5 +1,35 @@
 # DevTomcat Changelog
 
+## [1.0.6]
+
+### Added
+- **Scoped Services actions** — "Run History" and "Startup Time Trends" in the Services panel now open for the selected configuration instead of the whole project; global views remain available in the Tools menu
+
+### Changed
+- **Startup time display** — Services panel shows human-readable durations (`12.3s`, `1m 23s`) instead of raw milliseconds
+- **Startup time tracker** — moved from application-level to project-level service so identically named configurations in different projects maintain separate history
+- **Run History** — renamed from "Deployment History" to better reflect the session-based model
+
+### Fixed
+- **Services panel stale display** — editing a configuration now refreshes the Services tree immediately so updated ports, context paths, and URLs are reflected without restart
+- **Shutdown warning noise** — error/warning counters freeze when shutdown begins; Tomcat classloader cleanup warnings (JDBC driver, leaked threads) no longer inflate the Services badge
+- **Rename tracking** — renaming a run configuration now migrates all stored data (live status, run history, startup trends) from the old name to the new name using identity-based tracking
+- **Stale trend entries** — deleting a configuration now also clears its startup time history
+- **Thread-safe counters** — error/warning counts changed from `volatile int` with `++` to `AtomicInteger` with `incrementAndGet()` to prevent undercounting under concurrent output
+- **Defensive state copy** — `StartupTimeTracker.getState()` returns a deep copy so the trend dialog doesn't read mutable internals
+- **Artifact failure in history** — run history now records artifact deployment failures even when exit code is 0, so partial sessions no longer show as OK
+- **Error counts on FAILED nodes** — error/warning counts now remain visible on failed server nodes, not just running ones
+- **Reload state alignment** — hot reload pushes the parent server node to "Deploying" so parent and child states are aligned
+- **Post-mortem artifact states** — non-zero shutdown preserves FAILED artifact states in Services instead of clearing everything
+- **Navigation gate** — double-clicking a deployment node in Services now only opens the browser when the artifact is confirmed DEPLOYED, preventing 404s on failed or in-progress artifacts
+
+### Tests
+- Added `TomcatConfigurationCleanupListenerTest` — identity key mechanics, rename detection
+- Added `TomcatRunDashboardCustomizerTest` — formatDuration, formatIssueSummary
+- Added `DeploymentHistoryDialogTest` — scoped vs global, titles, clear
+- Added `StartupTimeTrendDialogTest` — scoped vs global, empty state
+- Extended: `TomcatDeploymentStatusServiceTest`, `TomcatDeploymentHistoryTest`, `TomcatDeploymentNodeTest`, `TomcatOutputPipelineTest`, `StartupTimeTrackerTest`, `TomcatLifecycleListenerTest`
+
 ## [1.0.5]
 
 ### Added
