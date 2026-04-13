@@ -52,6 +52,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
         public long durationMs;
         public long startupTimeMs;
         public List<String> artifactNames = new ArrayList<>();
+        public boolean artifactFailure;
         public boolean success;
         public int exitCode;
         public int errorCount;
@@ -75,12 +76,26 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
 
         @NotNull
         public String getSummary() {
-            String status = success ? "OK" : "FAILED (exit " + exitCode + ")";
+            String status = formatStatus();
             String artifacts = artifactNames.isEmpty() ? "no artifacts" :
                     String.join(", ", artifactNames);
             return String.format("[%s] %s — %s — %dms — %s — %d errors, %d warnings",
                     getFormattedTimestamp(), configName, status, durationMs,
                     artifacts, errorCount, warningCount);
+        }
+
+        @NotNull
+        String formatStatus() {
+            if (success) {
+                return "OK";
+            }
+            if (exitCode != 0) {
+                return "FAILED (exit " + exitCode + ")";
+            }
+            if (artifactFailure) {
+                return "FAILED (artifact deployment)";
+            }
+            return "FAILED";
         }
     }
 
@@ -146,6 +161,21 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
             }
         }
         return null;
+    }
+
+    /**
+     * Migrates all history entries from one configuration name to another.
+     * Called when a run configuration is renamed so that historical data
+     * follows the configuration instead of being orphaned.
+     */
+    public void renameConfiguration(@NotNull String oldName, @NotNull String newName) {
+        synchronized (lock) {
+            for (HistoryEntry e : state.entries) {
+                if (oldName.equals(e.configName)) {
+                    e.configName = newName;
+                }
+            }
+        }
     }
 
     /**

@@ -151,6 +151,10 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
 
     @Override
     protected void destroyProcessImpl() {
+        // Freeze error/warning counters — shutdown cleanup messages (JDBC driver
+        // deregistration, leaked thread warnings) are not actionable and should
+        // not inflate the dashboard badge. Warnings still appear in the console.
+        pipelineContext.markShuttingDown();
         // Run shutdown logic on a pooled thread to avoid blocking the EDT
         ApplicationManager.getApplication().executeOnPooledThread(this::doGracefulShutdown);
     }

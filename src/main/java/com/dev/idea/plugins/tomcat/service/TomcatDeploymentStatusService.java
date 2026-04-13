@@ -9,6 +9,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Project-level service that tracks live deployment status for each Tomcat run configuration.
@@ -53,14 +54,15 @@ public final class TomcatDeploymentStatusService {
         final Object lock = new Object();
         private volatile ServerState serverState = ServerState.STOPPED;
         private final Map<String, ArtifactState> artifactStates = new ConcurrentHashMap<>();
-        private volatile int errorCount;
-        private volatile int warningCount;
+        private final AtomicInteger errorCount = new AtomicInteger();
+        private final AtomicInteger warningCount = new AtomicInteger();
+        private volatile boolean startupComplete;
         private volatile long startupTimeMs;
 
         public ServerState getServerState() { return serverState; }
         public Map<String, ArtifactState> getArtifactStates() { return artifactStates; }
-        public int getErrorCount() { return errorCount; }
-        public int getWarningCount() { return warningCount; }
+        public int getErrorCount() { return errorCount.get(); }
+        public int getWarningCount() { return warningCount.get(); }
         public long getStartupTimeMs() { return startupTimeMs; }
     }
 
@@ -110,8 +112,9 @@ public final class TomcatDeploymentStatusService {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
             s.serverState = ServerState.STARTING;
-            s.errorCount = 0;
-            s.warningCount = 0;
+            s.errorCount.set(0);
+            s.warningCount.set(0);
+            s.startupComplete = false;
             s.startupTimeMs = 0;
             s.artifactStates.clear();
         }
@@ -120,34 +123,46 @@ public final class TomcatDeploymentStatusService {
 
     public void onArtifactDeploying(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
-        s.serverState = ServerState.DEPLOYING;
-        s.artifactStates.put(artifactName, ArtifactState.DEPLOYING);
+        synchronized (s.lock) {
+            s.serverState = ServerState.DEPLOYING;
+            s.artifactStates.put(artifactName, ArtifactState.DEPLOYING);
+        }
         refreshDashboard();
     }
 
     public void onArtifactDeployed(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
-        // Don't overwrite FAILED — an artifact that failed deployment stays failed
-        s.artifactStates.merge(artifactName, ArtifactState.DEPLOYED,
-                (existing, incoming) -> existing == ArtifactState.FAILED ? existing : incoming);
+        synchronized (s.lock) {
+            // Don't overwrite FAILED — an artifact that failed deployment stays failed
+            s.artifactStates.merge(artifactName, ArtifactState.DEPLOYED,
+                    (existing, incoming) -> existing == ArtifactState.FAILED ? existing : incoming);
+            restoreRunningStateIfIdle(s);
+        }
         refreshDashboard();
     }
 
     public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
-        s.artifactStates.put(artifactName, ArtifactState.FAILED);
+        synchronized (s.lock) {
+            s.artifactStates.put(artifactName, ArtifactState.FAILED);
+            restoreRunningStateIfIdle(s);
+        }
         refreshDashboard();
     }
 
     public void onArtifactReloading(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
-        s.artifactStates.put(artifactName, ArtifactState.RELOADING);
+        synchronized (s.lock) {
+            s.serverState = ServerState.DEPLOYING;
+            s.artifactStates.put(artifactName, ArtifactState.RELOADING);
+        }
         refreshDashboard();
     }
 
     public void onServerStarted(@NotNull String configName, long startupTimeMs) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
+            s.startupComplete = true;
             s.serverState = ServerState.RUNNING;
             s.startupTimeMs = startupTimeMs;
         }
@@ -156,14 +171,14 @@ public final class TomcatDeploymentStatusService {
 
     public void onError(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
-        s.errorCount++;
+        s.errorCount.incrementAndGet();
         // Don't override RUNNING with FAILED for transient errors
         scheduleCounterRefresh();
     }
 
     public void onWarning(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
-        s.warningCount++;
+        s.warningCount.incrementAndGet();
         scheduleCounterRefresh();
     }
 
@@ -183,13 +198,32 @@ public final class TomcatDeploymentStatusService {
 
     public void onServerStopped(@NotNull String configName, int exitCode) {
         ConfigStatus s = getOrCreate(configName);
-        s.serverState = exitCode == 0 ? ServerState.STOPPED : ServerState.FAILED;
-        s.artifactStates.clear();
+        synchronized (s.lock) {
+            s.startupComplete = false;
+            s.serverState = exitCode == 0 ? ServerState.STOPPED : ServerState.FAILED;
+            if (exitCode == 0) {
+                s.artifactStates.clear();
+            } else {
+                s.artifactStates.entrySet().removeIf(entry -> entry.getValue() != ArtifactState.FAILED);
+            }
+        }
         refreshDashboard();
     }
 
     public void remove(@NotNull String configName) {
         statuses.remove(configName);
+    }
+
+    /**
+     * Migrates live status data from one configuration name to another.
+     * Called when a run configuration is renamed so that status data
+     * follows the configuration instead of being orphaned.
+     */
+    public void renameConfiguration(@NotNull String oldName, @NotNull String newName) {
+        ConfigStatus status = statuses.remove(oldName);
+        if (status != null) {
+            statuses.put(newName, status);
+        }
     }
 
     /** Triggers an immediate refresh of the Services/Run Dashboard tree. */
@@ -201,6 +235,17 @@ public final class TomcatDeploymentStatusService {
     private void doRefreshDashboard() {
         if (project != null && !project.isDisposed()) {
             RunDashboardManager.getInstance(project).updateDashboard(true);
+        }
+    }
+
+    private static void restoreRunningStateIfIdle(@NotNull ConfigStatus status) {
+        if (!status.startupComplete) {
+            return;
+        }
+        boolean deploymentInProgress = status.artifactStates.values().stream().anyMatch(
+                state -> state == ArtifactState.DEPLOYING || state == ArtifactState.RELOADING);
+        if (!deploymentInProgress) {
+            status.serverState = ServerState.RUNNING;
         }
     }
 }

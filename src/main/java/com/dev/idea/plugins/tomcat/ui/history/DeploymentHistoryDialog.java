@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.ui.history;
 
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory.HistoryEntry;
-import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -21,20 +20,28 @@ import java.awt.*;
 import java.util.List;
 
 /**
- * Dialog that displays deployment history and startup time statistics.
- * Shows a table of past deployments with status, duration, errors,
- * and a summary panel with startup performance trends.
+ * Dialog that displays run history for either all tracked configurations
+ * in the current project or a single selected configuration from Services.
  */
 public class DeploymentHistoryDialog extends DialogWrapper {
 
     private final Project project;
+    private final @Nullable String configurationName;
     private final List<HistoryEntry> entries;
 
     public DeploymentHistoryDialog(@NotNull Project project) {
+        this(project, null);
+    }
+
+    public DeploymentHistoryDialog(@NotNull Project project, @Nullable String configurationName) {
         super(project, false);
         this.project = project;
-        this.entries = TomcatDeploymentHistory.getInstance(project).getEntries();
-        setTitle("DevTomcat — Deployment History");
+        this.configurationName = configurationName;
+        this.entries = scopeEntries(
+                TomcatDeploymentHistory.getInstance(project).getEntries(),
+                configurationName
+        );
+        setTitle(dialogTitle(configurationName));
         setSize(800, 500);
         init();
     }
@@ -49,7 +56,7 @@ public class DeploymentHistoryDialog extends DialogWrapper {
 
         // History table
         if (entries.isEmpty()) {
-            JBLabel emptyLabel = new JBLabel("No deployment history yet. Run a Tomcat configuration to start tracking.",
+            JBLabel emptyLabel = new JBLabel(emptyStateMessage(configurationName),
                     AllIcons.General.Information, SwingConstants.CENTER);
             mainPanel.add(emptyLabel, BorderLayout.CENTER);
         } else {
@@ -180,20 +187,68 @@ public class DeploymentHistoryDialog extends DialogWrapper {
 
     @NotNull
     private Action createClearAction() {
-        return new DialogWrapperAction("Clear History") {
+        return new DialogWrapperAction(clearActionLabel(configurationName)) {
             @Override
             protected void doAction(java.awt.event.ActionEvent e) {
                 int confirm = JOptionPane.showConfirmDialog(
                         getContentPanel(),
-                        "Clear all deployment history?",
+                        clearConfirmationMessage(configurationName),
                         "Confirm",
                         JOptionPane.YES_NO_OPTION);
                 if (confirm == JOptionPane.YES_OPTION) {
-                    TomcatDeploymentHistory.getInstance(project).clearHistory();
+                    TomcatDeploymentHistory history = TomcatDeploymentHistory.getInstance(project);
+                    if (configurationName == null) {
+                        history.clearHistory();
+                    } else {
+                        history.removeEntriesFor(configurationName);
+                    }
                     close(OK_EXIT_CODE);
                 }
             }
         };
+    }
+
+    @NotNull
+    static List<HistoryEntry> scopeEntries(@NotNull List<HistoryEntry> entries,
+                                           @Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return List.copyOf(entries);
+        }
+        return entries.stream()
+                .filter(entry -> configurationName.equals(entry.configName))
+                .toList();
+    }
+
+    @NotNull
+    static String dialogTitle(@Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return "DevTomcat — Run History";
+        }
+        return "DevTomcat — Run History — " + configurationName;
+    }
+
+    @NotNull
+    static String emptyStateMessage(@Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return "No run history yet. Run a Tomcat configuration to start tracking.";
+        }
+        return "No run history yet for '" + configurationName + "'. Run it to start tracking.";
+    }
+
+    @NotNull
+    static String clearActionLabel(@Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return "Clear History";
+        }
+        return "Clear This History";
+    }
+
+    @NotNull
+    static String clearConfirmationMessage(@Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return "Clear all run history?";
+        }
+        return "Clear run history for '" + configurationName + "'?";
     }
 
     // ======== Table Model ========

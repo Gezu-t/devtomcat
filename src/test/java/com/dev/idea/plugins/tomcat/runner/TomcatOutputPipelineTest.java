@@ -272,6 +272,82 @@ class TomcatOutputPipelineTest {
             assertEquals(0, errorCount.get());
             assertEquals(0, warningCount.get());
         }
+
+        @Test
+        @DisplayName("shutdown suppresses error counter updates but still logs")
+        void shutdownSuppressesErrors() {
+            AtomicInteger loggedErrors = new AtomicInteger(0);
+            AtomicInteger lifecycleErrors = new AtomicInteger(0);
+            TomcatOutputPipeline.Context shutdownContext = new TomcatOutputPipeline.Context(
+                    new TomcatOutputPipeline.PipelineLogger() {
+                        @Override public void logServerStartup(long durationMs) {}
+                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
+                        @Override public void logServerInfo(@NotNull String msg) {}
+                        @Override public void logServerError(@NotNull String msg) { loggedErrors.incrementAndGet(); }
+                        @Override public void logServerWarning(@NotNull String msg) {}
+                    },
+                    new TomcatLifecycleListener() {
+                        @Override public void onError(@NotNull String configName) {
+                            lifecycleErrors.incrementAndGet();
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            shutdownContext.markShuttingDown();
+            analyzer.analyze("SEVERE: cleanup noise", shutdownContext);
+
+            assertEquals(0, errorCount.get());
+            assertEquals(0, lifecycleErrors.get());
+            assertEquals(1, loggedErrors.get());
+        }
+
+        @Test
+        @DisplayName("shutdown suppresses warning counter updates but still logs")
+        void shutdownSuppressesWarnings() {
+            AtomicInteger loggedWarnings = new AtomicInteger(0);
+            AtomicInteger lifecycleWarnings = new AtomicInteger(0);
+            TomcatOutputPipeline.Context shutdownContext = new TomcatOutputPipeline.Context(
+                    new TomcatOutputPipeline.PipelineLogger() {
+                        @Override public void logServerStartup(long durationMs) {}
+                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
+                        @Override public void logServerInfo(@NotNull String msg) {}
+                        @Override public void logServerError(@NotNull String msg) {}
+                        @Override public void logServerWarning(@NotNull String msg) { loggedWarnings.incrementAndGet(); }
+                    },
+                    new TomcatLifecycleListener() {
+                        @Override public void onWarning(@NotNull String configName) {
+                            lifecycleWarnings.incrementAndGet();
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            shutdownContext.markShuttingDown();
+            analyzer.analyze("WARNING: cleanup noise", shutdownContext);
+
+            assertEquals(0, warningCount.get());
+            assertEquals(0, lifecycleWarnings.get());
+            assertEquals(1, loggedWarnings.get());
+        }
     }
 
     @Nested

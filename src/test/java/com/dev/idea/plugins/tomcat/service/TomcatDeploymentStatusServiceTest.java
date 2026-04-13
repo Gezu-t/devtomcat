@@ -101,6 +101,25 @@ class TomcatDeploymentStatusServiceTest {
             assertEquals(TomcatDeploymentStatusService.ServerState.FAILED,
                     service.getStatus("cfg").getServerState());
         }
+
+        @Test
+        @DisplayName("non-zero stop preserves failed artifacts for post-mortem inspection")
+        void failedStopPreservesFailedArtifacts() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "bad.war");
+            service.onArtifactFailed("cfg", "bad.war");
+            service.onArtifactDeploying("cfg", "good.war");
+            service.onArtifactDeployed("cfg", "good.war");
+
+            service.onServerStopped("cfg", 1);
+
+            var status = service.getStatus("cfg");
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState());
+            assertEquals(1, status.getArtifactStates().size());
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.FAILED,
+                    status.getArtifactStates().get("bad.war"));
+            assertNull(status.getArtifactStates().get("good.war"));
+        }
     }
 
     @Nested
@@ -142,14 +161,62 @@ class TomcatDeploymentStatusServiceTest {
         }
 
         @Test
-        @DisplayName("onArtifactReloading sets artifact to RELOADING")
+        @DisplayName("onArtifactReloading sets parent to DEPLOYING and artifact to RELOADING")
         void artifactReloading() {
             service.onServerStarting("cfg");
+            service.onServerStarted("cfg", 1000);
             service.onArtifactDeployed("cfg", "myapp.war");
             service.onArtifactReloading("cfg", "myapp.war");
 
+            assertEquals(TomcatDeploymentStatusService.ServerState.DEPLOYING,
+                    service.getStatus("cfg").getServerState());
             assertEquals(TomcatDeploymentStatusService.ArtifactState.RELOADING,
                     service.getStatus("cfg").getArtifactStates().get("myapp.war"));
+        }
+
+        @Test
+        @DisplayName("completed post-start deployment returns server to RUNNING")
+        void postStartDeploymentReturnsToRunning() {
+            service.onServerStarting("cfg");
+            service.onServerStarted("cfg", 1500);
+            service.onArtifactDeploying("cfg", "myapp.war");
+
+            assertEquals(TomcatDeploymentStatusService.ServerState.DEPLOYING,
+                    service.getStatus("cfg").getServerState());
+
+            service.onArtifactDeployed("cfg", "myapp.war");
+
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING,
+                    service.getStatus("cfg").getServerState());
+        }
+
+        @Test
+        @DisplayName("server stays DEPLOYING until all post-start deployments finish")
+        void waitsForAllPostStartDeployments() {
+            service.onServerStarting("cfg");
+            service.onServerStarted("cfg", 1500);
+            service.onArtifactDeploying("cfg", "app1.war");
+            service.onArtifactDeploying("cfg", "app2.war");
+
+            service.onArtifactDeployed("cfg", "app1.war");
+            assertEquals(TomcatDeploymentStatusService.ServerState.DEPLOYING,
+                    service.getStatus("cfg").getServerState());
+
+            service.onArtifactFailed("cfg", "app2.war");
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING,
+                    service.getStatus("cfg").getServerState());
+        }
+
+        @Test
+        @DisplayName("pre-start deployment completion does not mark server RUNNING")
+        void preStartDeploymentDoesNotJumpToRunning() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "myapp.war");
+
+            service.onArtifactDeployed("cfg", "myapp.war");
+
+            assertEquals(TomcatDeploymentStatusService.ServerState.DEPLOYING,
+                    service.getStatus("cfg").getServerState());
         }
     }
 
@@ -258,6 +325,23 @@ class TomcatDeploymentStatusServiceTest {
 
             service.remove("cfg");
             assertNull(service.getStatus("cfg"));
+        }
+
+        @Test
+        @DisplayName("renameConfiguration moves live status to new name")
+        void renameMovesStatus() {
+            service.onServerStarting("oldCfg");
+            service.onServerStarted("oldCfg", 1200);
+            service.onWarning("oldCfg");
+
+            service.renameConfiguration("oldCfg", "newCfg");
+
+            assertNull(service.getStatus("oldCfg"));
+            var status = service.getStatus("newCfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState());
+            assertEquals(1200, status.getStartupTimeMs());
+            assertEquals(1, status.getWarningCount());
         }
 
         @Test

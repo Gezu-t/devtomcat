@@ -236,6 +236,19 @@ class StartupTimeTrackerTest {
         }
 
         @Test
+        @DisplayName("renameConfiguration migrates startup history")
+        void renameConfiguration() {
+            tracker.recordStartupTime("OldName", 1000);
+            tracker.recordStartupTime("OldName", 1500);
+
+            tracker.renameConfiguration("OldName", "NewName");
+
+            assertEquals(-1, tracker.getLastStartupTime("OldName"));
+            assertEquals(1500, tracker.getLastStartupTime("NewName"));
+            assertEquals(2, tracker.getRunCount("NewName"));
+        }
+
+        @Test
         @DisplayName("clearAll removes everything")
         void clearAll() {
             tracker.recordStartupTime("App1", 1000);
@@ -255,12 +268,18 @@ class StartupTimeTrackerTest {
     class Persistence {
 
         @Test
-        @DisplayName("getState returns current state")
+        @DisplayName("getState returns defensive copy of current state")
         void getState() {
             tracker.recordStartupTime("MyApp", 3000);
             StartupTimeTracker.State state = tracker.getState();
             assertNotNull(state);
             assertTrue(state.startupTimes.containsKey("MyApp"));
+
+            // Verify it is a defensive copy: mutating the returned state
+            // must not affect the tracker's internal data.
+            state.startupTimes.clear();
+            assertEquals(3000, tracker.getLastStartupTime("MyApp"),
+                    "Clearing the returned state must not affect internal data");
         }
 
         @Test

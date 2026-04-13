@@ -145,4 +145,47 @@ class TomcatDeploymentNodeTest {
             assertEquals(" [WAR]", TomcatDeploymentNode.formatTypeBadge(artifact));
         }
     }
+
+    @Nested
+    @DisplayName("canNavigate")
+    class CanNavigateTests {
+
+        @Test
+        @DisplayName("allows navigation only for deployed artifacts with a valid port")
+        void deployedWithPortCanNavigate() {
+            assertTrue(TomcatDeploymentNode.canNavigate(
+                    8080,
+                    TomcatDeploymentStatusService.ArtifactState.DEPLOYED
+            ));
+        }
+
+        @Test
+        @DisplayName("blocks navigation for non-deployed states")
+        void nonDeployedStatesCannotNavigate() {
+            assertAll(
+                    () -> assertFalse(TomcatDeploymentNode.canNavigate(
+                            8080,
+                            TomcatDeploymentStatusService.ArtifactState.DEPLOYING
+                    )),
+                    () -> assertFalse(TomcatDeploymentNode.canNavigate(
+                            8080,
+                            TomcatDeploymentStatusService.ArtifactState.RELOADING
+                    )),
+                    () -> assertFalse(TomcatDeploymentNode.canNavigate(
+                            8080,
+                            TomcatDeploymentStatusService.ArtifactState.FAILED
+                    )),
+                    () -> assertFalse(TomcatDeploymentNode.canNavigate(8080, null))
+            );
+        }
+
+        @Test
+        @DisplayName("blocks navigation when the port is missing")
+        void missingPortCannotNavigate() {
+            assertFalse(TomcatDeploymentNode.canNavigate(
+                    0,
+                    TomcatDeploymentStatusService.ArtifactState.DEPLOYED
+            ));
+        }
+    }
 }

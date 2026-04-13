@@ -124,6 +124,24 @@ class TomcatLifecycleListenerTest {
         }
 
         @Test
+        @DisplayName("marks session failed when an artifact fails even if the process exits cleanly")
+        void artifactFailureMarksHistoryFailed() {
+            TomcatDeploymentHistory history = new TomcatDeploymentHistory();
+            TomcatLifecycleListener consumer = TomcatLifecycleListener.historyConsumer(history);
+
+            consumer.onServerStarting("cfg");
+            consumer.onArtifactDeploying("cfg", "app.war");
+            consumer.onArtifactFailed("cfg", "app.war");
+            consumer.onServerStopped("cfg", 0, 2000, 1, 0, 750);
+
+            var entry = history.getLastEntry("cfg");
+            assertNotNull(entry);
+            assertFalse(entry.success);
+            assertTrue(entry.artifactFailure);
+            assertEquals(0, entry.exitCode);
+        }
+
+        @Test
         @DisplayName("deduplicates artifact names across multiple onArtifactDeploying calls")
         void deduplicatesArtifactNames() {
             TomcatDeploymentHistory history = new TomcatDeploymentHistory();

@@ -63,6 +63,9 @@ public final class TomcatOutputPipeline {
         final Set<String> notifiedArtifacts = ConcurrentHashMap.newKeySet();
         private final AtomicInteger errorCount;
         private final AtomicInteger warningCount;
+        /** Set when shutdown begins — suppresses error/warning counter increments
+         *  so Tomcat's classloader cleanup noise doesn't inflate the dashboard badge. */
+        private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
         private final boolean jmxEnabled;
 
         /** Called with startup duration when server startup is detected. */
@@ -96,6 +99,11 @@ public final class TomcatOutputPipeline {
             this.onStartupDetected = onStartupDetected;
             this.onPostStartup = onPostStartup;
             this.onContextReady = onContextReady;
+        }
+
+        /** Signals that shutdown has begun — error/warning counters freeze. */
+        public void markShuttingDown() {
+            shuttingDown.set(true);
         }
     }
 
@@ -300,13 +308,19 @@ public final class TomcatOutputPipeline {
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
             if (ERROR_PATTERN.matcher(text).find()) {
-                ctx.errorCount.incrementAndGet();
                 ctx.logger.logServerError(text);
-                ctx.lifecycleListener.onError(ctx.configName);
+                // Only increment counter while running — shutdown cleanup
+                // errors (classloader, JDBC driver) are not actionable.
+                if (!ctx.shuttingDown.get()) {
+                    ctx.errorCount.incrementAndGet();
+                    ctx.lifecycleListener.onError(ctx.configName);
+                }
             } else if (WARNING_PATTERN.matcher(text).find()) {
-                ctx.warningCount.incrementAndGet();
                 ctx.logger.logServerWarning(text);
-                ctx.lifecycleListener.onWarning(ctx.configName);
+                if (!ctx.shuttingDown.get()) {
+                    ctx.warningCount.incrementAndGet();
+                    ctx.lifecycleListener.onWarning(ctx.configName);
+                }
             }
         }
     }

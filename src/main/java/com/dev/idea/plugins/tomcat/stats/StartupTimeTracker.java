@@ -4,7 +4,9 @@ import com.intellij.openapi.components.PersistentStateComponent;
 
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -19,11 +21,14 @@ import java.util.*;
  * This is a DevTomcat-exclusive feature — no other IDE or plugin tracks
  * Tomcat startup performance over time.
  *
+ * <p>This is a <b>project-level</b> service so that two projects with
+ * identically named configurations each keep their own history.
+ *
  * @author Gezahegn Lemma (Gezu)
  */
 @State(
         name = "DevTomcatStartupTimeTracker",
-        storages = @Storage("devtomcat-startup-stats.xml")
+        storages = @Storage(StoragePathMacros.WORKSPACE_FILE)
 )
 public final class StartupTimeTracker implements PersistentStateComponent<StartupTimeTracker.State> {
 
@@ -33,6 +38,20 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     private static final int MAX_HISTORY_SIZE = 20;
 
     private volatile State myState = new State();
+
+    /** Required by the IntelliJ service framework for project-level services. */
+    public StartupTimeTracker(@NotNull Project project) {
+        // Project reference not needed — state is persisted by the platform.
+    }
+
+    /** Constructor for unit tests that run without a real Project. */
+    public StartupTimeTracker() {
+    }
+
+    @NotNull
+    public static StartupTimeTracker getInstance(@NotNull Project project) {
+        return project.getService(StartupTimeTracker.class);
+    }
 
     /**
      * Persistent state container.
@@ -46,7 +65,13 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     @Nullable
     @Override
     public synchronized State getState() {
-        return myState;
+        // Return a defensive copy so callers (e.g. StartupTimeTrendDialog)
+        // do not read or mutate the live internal state.
+        State copy = new State();
+        for (Map.Entry<String, List<Long>> entry : myState.startupTimes.entrySet()) {
+            copy.startupTimes.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+        return copy;
     }
 
     @Override
@@ -180,6 +205,21 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
 
         return String.format("%s (avg: %s, best: %s, runs: %d)",
                 trend, formatDuration(average), formatDuration(fastest), runs);
+    }
+
+    /**
+     * Migrates startup time data from one configuration name to another.
+     * Called when a run configuration is renamed so that trend data
+     * follows the configuration instead of being orphaned.
+     *
+     * @param oldName the previous configuration name
+     * @param newName the new configuration name
+     */
+    public synchronized void renameConfiguration(@NotNull String oldName, @NotNull String newName) {
+        List<Long> times = myState.startupTimes.remove(oldName);
+        if (times != null) {
+            myState.startupTimes.put(newName, times);
+        }
     }
 
     /**

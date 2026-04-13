@@ -16,6 +16,7 @@ import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentTableManager;
 import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.execution.BeforeRunTask;
+import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.execution.impl.ConfigurationSettingsEditorWrapper;
@@ -158,6 +159,12 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             // Do NOT sync Before Launch tasks here — BeforeRunStepsPanel.doApply()
             // runs AFTER applyEditorTo() and would overwrite our changes.
             LOG.debug("DevTomcat: Configuration applied successfully - " + getConfigurationSummary(configuration));
+
+            // Refresh the Services panel so deployment nodes reflect
+            // updated ports, context paths, and browser URLs.
+            if (!project.isDisposed()) {
+                RunDashboardManager.getInstance(project).updateDashboard(true);
+            }
         } catch (ConfigurationException e) {
             LOG.debug("DevTomcat: Configuration validation failed: " + e.getTitle());
             throw e;

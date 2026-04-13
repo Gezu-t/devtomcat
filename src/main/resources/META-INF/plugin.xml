@@ -32,7 +32,7 @@
     <h3>Live Deployment Dashboard</h3>
     <ul>
         <li><b>Live Status Tracking</b> — Real-time server and per-artifact status (Starting, Deploying, Running, Failed) in the Services tool window</li>
-        <li><b>Deployment History</b> — Persistent history of all deployments with duration, error/warning counts, and consecutive failure tracking</li>
+        <li><b>Run History</b> — Persistent history of Tomcat run sessions with duration, startup time, artifact activity, and consecutive failure tracking</li>
         <li><b>Startup Time Trends</b> — Tracks startup performance across runs and shows trend comparisons</li>
     </ul>
 
@@ -118,8 +118,8 @@
         <applicationService
                 serviceImplementation="com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState"/>
 
-        <!-- Startup Time Tracker (DevTomcat exclusive - tracks startup performance) -->
-        <applicationService
+        <!-- Startup Time Tracker (DevTomcat exclusive - tracks startup performance, project-level) -->
+        <projectService
                 serviceImplementation="com.dev.idea.plugins.tomcat.stats.StartupTimeTracker"/>
 
         <!-- Port registry: atomic cross-instance port claiming to prevent debug/Tomcat port races -->
@@ -262,8 +262,8 @@
             <separator/>
             <action id="DevTomcat.Service.DeploymentHistory"
                     class="com.dev.idea.plugins.tomcat.action.ServiceDeploymentHistoryAction"
-                    text="Deployment History"
-                    description="View deployment history and statistics"
+                    text="Run History"
+                    description="View Tomcat run history and statistics"
                     icon="AllIcons.Vcs.History"/>
             <action id="DevTomcat.Service.StartupTrends"
                     class="com.dev.idea.plugins.tomcat.action.ServiceStartupTrendsAction"
@@ -291,8 +291,8 @@
 
             <action id="DevTomcat.ShowDeploymentHistory"
                     class="com.dev.idea.plugins.tomcat.action.ShowDeploymentHistoryAction"
-                    text="Deployment History"
-                    description="View deployment history and statistics"
+                    text="Run History"
+                    description="View Tomcat run history and statistics"
                     icon="AllIcons.Vcs.History"/>
 
             <action id="DevTomcat.ShowStartupTrends"

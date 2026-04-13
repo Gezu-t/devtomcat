@@ -82,15 +82,7 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                     case RUNNING -> {
                         statusText.append(state.getLabel());
                         if (liveStatus.getStartupTimeMs() > 0) {
-                            statusText.append(" (").append(liveStatus.getStartupTimeMs()).append("ms)");
-                        }
-                        int errors = liveStatus.getErrorCount();
-                        int warnings = liveStatus.getWarningCount();
-                        if (errors > 0) {
-                            statusText.append(" · ").append(errors).append(errors == 1 ? " error" : " errors");
-                        }
-                        if (warnings > 0) {
-                            statusText.append(" · ").append(warnings).append(warnings == 1 ? " warning" : " warnings");
+                            statusText.append(" (").append(formatDuration(liveStatus.getStartupTimeMs())).append(")");
                         }
                     }
                     case FAILED -> {
@@ -98,6 +90,16 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                         presentation.setIcon(AllIcons.General.Error);
                     }
                     case STOPPED -> statusText.append(state.getLabel());
+                }
+
+                if (state != TomcatDeploymentStatusService.ServerState.STOPPED) {
+                    String issueSummary = formatIssueSummary(
+                            liveStatus.getErrorCount(),
+                            liveStatus.getWarningCount()
+                    );
+                    if (!issueSummary.isEmpty()) {
+                        statusText.append(" · ").append(issueSummary);
+                    }
                 }
             } else {
                 // No live status — show static artifact count
@@ -155,4 +157,33 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
         }
     }
 
+    /**
+     * Formats a duration in milliseconds to a human-readable string.
+     * Under 1 second: "850ms", under 1 minute: "12.3s", over 1 minute: "1m 23s".
+     */
+    @NotNull
+    static String formatDuration(long ms) {
+        if (ms < 1_000) {
+            return ms + "ms";
+        }
+        if (ms < 60_000) {
+            long tenths = (ms % 1_000) / 100;
+            return (ms / 1_000) + "." + tenths + "s";
+        }
+        long minutes = ms / 60_000;
+        long seconds = (ms % 60_000) / 1_000;
+        return minutes + "m " + seconds + "s";
+    }
+
+    @NotNull
+    static String formatIssueSummary(int errors, int warnings) {
+        List<String> parts = new ArrayList<>(2);
+        if (errors > 0) {
+            parts.add(errors + (errors == 1 ? " error" : " errors"));
+        }
+        if (warnings > 0) {
+            parts.add(warnings + (warnings == 1 ? " warning" : " warnings"));
+        }
+        return String.join(" · ", parts);
+    }
 }

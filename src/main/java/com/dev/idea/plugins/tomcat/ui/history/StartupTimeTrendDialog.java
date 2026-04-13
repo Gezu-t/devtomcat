@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.ui.history;
 
 import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
@@ -13,33 +13,41 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Dialog that displays startup time trends across all tracked Tomcat configurations.
- * Shows a mini bar chart per configuration and key statistics (average, fastest, last, run count).
+ * Dialog that displays startup time trends for either all tracked Tomcat
+ * configurations in the current project or a single selected configuration.
  */
 public class StartupTimeTrendDialog extends DialogWrapper {
 
     private final StartupTimeTracker tracker;
+    private final @Nullable String configurationName;
 
-    public StartupTimeTrendDialog(@Nullable com.intellij.openapi.project.Project project) {
+    public StartupTimeTrendDialog(@NotNull Project project) {
+        this(project, null);
+    }
+
+    public StartupTimeTrendDialog(@NotNull Project project, @Nullable String configurationName) {
         super(project, false);
-        this.tracker = ApplicationManager.getApplication().getService(StartupTimeTracker.class);
-        setTitle("DevTomcat — Startup Time Trends");
+        this.tracker = StartupTimeTracker.getInstance(project);
+        this.configurationName = configurationName;
+        setTitle(dialogTitle(configurationName));
         setSize(700, 450);
         init();
     }
 
     @Override
     protected @Nullable JComponent createCenterPanel() {
-        Map<String, List<Long>> allTimes = tracker.getState() != null
-                ? tracker.getState().startupTimes
+        StartupTimeTracker.State snapshot = tracker.getState();
+        Map<String, List<Long>> allTimes = snapshot != null
+                ? scopeStartupTimes(snapshot.startupTimes, configurationName)
                 : Map.of();
 
         if (allTimes.isEmpty()) {
-            JBLabel emptyLabel = new JBLabel("No startup data recorded yet. Run a Tomcat configuration to begin tracking.",
+            JBLabel emptyLabel = new JBLabel(emptyStateMessage(configurationName),
                     AllIcons.General.Information, SwingConstants.CENTER);
             return emptyLabel;
         }
@@ -123,6 +131,39 @@ public class StartupTimeTrendDialog extends DialogWrapper {
     private static String formatMs(long ms) {
         if (ms < 1000) return ms + "ms";
         return String.format("%.1fs", ms / 1000.0);
+    }
+
+    @NotNull
+    static Map<String, List<Long>> scopeStartupTimes(@NotNull Map<String, List<Long>> startupTimes,
+                                                     @Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return new LinkedHashMap<>(startupTimes);
+        }
+
+        List<Long> times = startupTimes.get(configurationName);
+        if (times == null || times.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, List<Long>> scoped = new LinkedHashMap<>();
+        scoped.put(configurationName, List.copyOf(times));
+        return scoped;
+    }
+
+    @NotNull
+    static String dialogTitle(@Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return "DevTomcat — Startup Time Trends";
+        }
+        return "DevTomcat — Startup Time Trends — " + configurationName;
+    }
+
+    @NotNull
+    static String emptyStateMessage(@Nullable String configurationName) {
+        if (configurationName == null || configurationName.isBlank()) {
+            return "No startup data recorded yet. Run a Tomcat configuration to begin tracking.";
+        }
+        return "No startup data recorded yet for '" + configurationName + "'. Run it to begin tracking.";
     }
 
     @Override

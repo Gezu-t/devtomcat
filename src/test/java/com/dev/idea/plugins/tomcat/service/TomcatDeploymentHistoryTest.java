@@ -102,6 +102,23 @@ class TomcatDeploymentHistoryTest {
     }
 
     @Test
+    @DisplayName("renameConfiguration migrates matching entries")
+    void renameConfiguration() {
+        TomcatDeploymentHistory.HistoryEntry old = history.startEntry("OldName");
+        history.recordCompleted(old);
+        TomcatDeploymentHistory.HistoryEntry other = history.startEntry("Other");
+        history.recordCompleted(other);
+
+        history.renameConfiguration("OldName", "NewName");
+
+        assertNull(history.getLastEntry("OldName"));
+        TomcatDeploymentHistory.HistoryEntry renamed = history.getLastEntry("NewName");
+        assertNotNull(renamed);
+        assertEquals("NewName", renamed.configName);
+        assertNotNull(history.getLastEntry("Other"));
+    }
+
+    @Test
     @DisplayName("clearHistory removes all entries")
     void clearHistory() {
         history.recordCompleted(history.startEntry("A"));
@@ -188,6 +205,19 @@ class TomcatDeploymentHistoryTest {
         String summary = e.getSummary();
         assertTrue(summary.contains("FAILED"));
         assertTrue(summary.contains("exit 1"));
+    }
+
+    @Test
+    @DisplayName("HistoryEntry getSummary distinguishes artifact deployment failures")
+    void entrySummaryArtifactFailure() {
+        TomcatDeploymentHistory.HistoryEntry e = history.startEntry("FailApp");
+        e.success = false;
+        e.artifactFailure = true;
+        e.exitCode = 0;
+
+        String summary = e.getSummary();
+        assertTrue(summary.contains("FAILED"));
+        assertTrue(summary.contains("artifact deployment"));
     }
 
     @Test

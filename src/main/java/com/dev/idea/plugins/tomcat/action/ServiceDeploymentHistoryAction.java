@@ -17,8 +17,9 @@ public class ServiceDeploymentHistoryAction extends AnAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
         Project project = e.getProject();
-        if (project == null) return;
-        new DeploymentHistoryDialog(project).show();
+        TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
+        if (project == null || config == null) return;
+        new DeploymentHistoryDialog(project, config.getName()).show();
     }
 
     @Override

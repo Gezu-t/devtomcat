@@ -166,14 +166,24 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
     @Override
     public boolean canNavigate() {
-        return getValue() != null && httpPort > 0;
+        return canNavigate(httpPort, resolveCurrentArtifactState());
     }
 
     @Override
     public boolean canNavigateToSource() {
-        // Allow navigation (double-click → open browser) whenever the node is valid.
-        // canNavigateToSource() must return true for the Services tree to dispatch navigate().
         return canNavigate();
+    }
+
+    @Nullable
+    private TomcatDeploymentStatusService.ArtifactState resolveCurrentArtifactState() {
+        DeploymentArtifact artifact = getValue();
+        return artifact != null ? resolveArtifactState(artifact) : null;
+    }
+
+    /** Returns true only when the artifact has a valid port and is confirmed deployed. */
+    static boolean canNavigate(int httpPort,
+                               @Nullable TomcatDeploymentStatusService.ArtifactState artifactState) {
+        return httpPort > 0 && artifactState == TomcatDeploymentStatusService.ArtifactState.DEPLOYED;
     }
 
     @Nullable

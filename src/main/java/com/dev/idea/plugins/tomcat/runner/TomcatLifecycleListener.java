@@ -4,7 +4,6 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
 import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
@@ -107,6 +106,19 @@ public interface TomcatLifecycleListener {
             }
 
             @Override
+            public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                synchronized (entryLock) {
+                    TomcatDeploymentHistory.HistoryEntry e = entry;
+                    if (e != null) {
+                        if (!e.artifactNames.contains(artifactName)) {
+                            e.artifactNames.add(artifactName);
+                        }
+                        e.artifactFailure = true;
+                    }
+                }
+            }
+
+            @Override
             public void onServerStopped(@NotNull String configName, int exitCode,
                                          long durationMs, int errorCount,
                                          int warningCount, long startupTimeMs) {
@@ -115,7 +127,7 @@ public interface TomcatLifecycleListener {
                     if (e != null) {
                         e.durationMs = durationMs;
                         e.exitCode = exitCode;
-                        e.success = exitCode == 0;
+                        e.success = exitCode == 0 && !e.artifactFailure;
                         e.errorCount = errorCount;
                         e.warningCount = warningCount;
                         e.startupTimeMs = startupTimeMs;
@@ -175,12 +187,11 @@ public interface TomcatLifecycleListener {
             if (historyService != null) {
                 consumers.add(historyConsumer(historyService));
             }
-        }
 
-        StartupTimeTracker tracker = ApplicationManager.getApplication()
-                .getService(StartupTimeTracker.class);
-        if (tracker != null) {
-            consumers.add(startupTimeConsumer(tracker, pipelineLogger));
+            StartupTimeTracker tracker = StartupTimeTracker.getInstance(configuration.getProject());
+            if (tracker != null) {
+                consumers.add(startupTimeConsumer(tracker, pipelineLogger));
+            }
         }
 
         return composite(consumers);

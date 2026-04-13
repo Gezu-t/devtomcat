@@ -17,8 +17,9 @@ public class ServiceStartupTrendsAction extends AnAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
         Project project = e.getProject();
-        if (project == null) return;
-        new StartupTimeTrendDialog(project).show();
+        TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
+        if (project == null || config == null) return;
+        new StartupTimeTrendDialog(project, config.getName()).show();
     }
 
     @Override
