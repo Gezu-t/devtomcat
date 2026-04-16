@@ -75,7 +75,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private DeploymentTableManager deploymentTableManager;
     private ServerConfigurationTab serverTab;
     private DeploymentConfigurationPanel deploymentTab;
-    private LogsConfigurationTab logsTab;
+    private com.intellij.diagnostic.logging.LogConfigurationPanel<TomcatRunConfiguration> logsPanel;
     private StartupConnectionTab startupConnectionTab;
     private CodeCoverageTab codeCoverageTab;
     private JBTabbedPane tabbedPane;
@@ -127,10 +127,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 LOG.debug("DevTomcat: Deployment tab reset - " +
                         configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
             }
-            if (logsTab != null) {
-                logsTab.resetFrom(configuration);
-                LOG.debug("DevTomcat: Logs tab reset - " +
-                        configuration.getLogFileConfigurations().size() + " log files");
+            if (logsPanel != null) {
+                logsPanel.resetFrom(configuration);
+                LOG.debug("DevTomcat: Logs tab reset");
             }
             if (startupConnectionTab != null) {
                 startupConnectionTab.resetFrom(configuration);
@@ -194,10 +193,13 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             LOG.debug("DevTomcat: Deployment tab applied - " +
                     configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
         }
-        if (logsTab != null) {
-            logsTab.applyTo(configuration);
-            LOG.debug("DevTomcat: Logs tab applied - " +
-                    configuration.getLogFileConfigurations().size() + " log files");
+        if (logsPanel != null) {
+            try {
+                logsPanel.applyTo(configuration);
+            } catch (com.intellij.openapi.options.ConfigurationException e) {
+                throw new ConfigurationException(e.getLocalizedMessage());
+            }
+            LOG.debug("DevTomcat: Logs tab applied");
         }
         if (startupConnectionTab != null) {
             startupConnectionTab.applyTo(configuration);
@@ -375,9 +377,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private void createLogsTab() {
         try {
             LOG.info("DevTomcat: Creating Logs tab...");
-            logsTab = new LogsConfigurationTab(project, null);
-            LOG.info("DevTomcat: LogsConfigurationTab created");
-            tabbedPane.addTab("Logs", logsTab);
+            logsPanel = new com.intellij.diagnostic.logging.LogConfigurationPanel<>();
+            tabbedPane.addTab("Logs", logsPanel.getComponent());
             LOG.info("DevTomcat: Logs tab added to pane");
         } catch (Throwable t) {
             LOG.error("DevTomcat: Failed to create Logs tab", t);
@@ -1016,7 +1017,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             deploymentTab.dispose();
         }
         deploymentTab = null;
-        logsTab = null;
+        logsPanel = null;
         startupConnectionTab = null;
         codeCoverageTab = null;
         deploymentTableManager = null;
