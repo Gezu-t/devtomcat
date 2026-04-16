@@ -12,6 +12,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Listens for Tomcat run configuration lifecycle events (removal, rename)
@@ -39,22 +40,34 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
      */
     private final ConcurrentHashMap<IdentityKey<TomcatRunConfiguration>, String> configIdToName =
             new ConcurrentHashMap<>();
+    private final AtomicBoolean populated = new AtomicBoolean(false);
 
     public TomcatConfigurationCleanupListener(@NotNull Project project) {
         this.project = project;
-        // Eagerly populate the name map with existing Tomcat configurations so
-        // that renames occurring before any runConfigurationChanged event are
-        // detected correctly.
-        for (RunnerAndConfigurationSettings settings :
-                RunManager.getInstance(project).getAllSettings()) {
-            if (settings.getConfiguration() instanceof TomcatRunConfiguration tomcatConfig) {
-                configIdToName.put(identityKey(tomcatConfig), settings.getName());
+        // Do NOT call RunManager.getInstance() here — this listener is instantiated
+        // during RunManager's own initialization, which would cause a cycle.
+        // The name map is populated lazily on the first RunManagerListener event.
+    }
+
+    private void ensurePopulated() {
+        if (populated.compareAndSet(false, true)) {
+            try {
+                for (RunnerAndConfigurationSettings settings :
+                        RunManager.getInstance(project).getAllSettings()) {
+                    if (settings.getConfiguration() instanceof TomcatRunConfiguration tomcatConfig) {
+                        configIdToName.put(identityKey(tomcatConfig), settings.getName());
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debug("Could not populate config name map: " + e.getMessage());
+                populated.set(false);
             }
         }
     }
 
     @Override
     public void runConfigurationAdded(@NotNull RunnerAndConfigurationSettings settings) {
+        ensurePopulated();
         if (!(settings.getConfiguration() instanceof TomcatRunConfiguration tomcatConfig)) {
             return;
         }
@@ -63,6 +76,7 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
 
     @Override
     public void runConfigurationChanged(@NotNull RunnerAndConfigurationSettings settings) {
+        ensurePopulated();
         if (!(settings.getConfiguration() instanceof TomcatRunConfiguration tomcatConfig)) {
             return;
         }
@@ -88,6 +102,7 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
 
     @Override
     public void runConfigurationRemoved(@NotNull RunnerAndConfigurationSettings settings) {
+        ensurePopulated();
         if (!(settings.getConfiguration() instanceof TomcatRunConfiguration tomcatConfig)) {
             return;
         }

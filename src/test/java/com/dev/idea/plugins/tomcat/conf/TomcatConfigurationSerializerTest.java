@@ -1,8 +1,6 @@
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.model.*;
-import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
-import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import org.jdom.Element;

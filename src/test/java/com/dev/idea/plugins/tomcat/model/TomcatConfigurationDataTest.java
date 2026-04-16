@@ -1,8 +1,7 @@
 package com.dev.idea.plugins.tomcat.model;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
-import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
-import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
+
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;

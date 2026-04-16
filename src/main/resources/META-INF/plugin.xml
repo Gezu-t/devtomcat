@@ -153,10 +153,13 @@
 
         <!-- Program Runners -->
         <programRunner
+                order="first"
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatRunner"/>
         <programRunner
+                order="first"
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatDebugger"/>
         <programRunner
+                order="first"
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatCoverageRunner"/>
 
         <!-- Before Launch: "Build N artifact(s)" — visible on Community and Ultimate -->

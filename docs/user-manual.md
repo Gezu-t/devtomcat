@@ -459,7 +459,7 @@ DevTomcat supports deploying to a remote Tomcat server via the Tomcat Manager AP
 Each run configuration gets its own **CATALINA_BASE** directory — an isolated runtime instance with separate `conf/`, `logs/`, `webapps/`, `work/`, and `temp/` directories.
 
 ```
-<project>/.devtomcat/<config-name>/
+<project>/.idea/devtomcat/<config-name>/
 ├── conf/       ← Copied from Tomcat installation, server.xml mutated with your ports
 ├── logs/       ← catalina.out, localhost.log, access log
 ├── temp/       ← JVM temporary files
@@ -478,7 +478,7 @@ Each run configuration gets its own **CATALINA_BASE** directory — an isolated 
 
 Customize Tomcat configuration files that persist across runs:
 
-1. Create the overlay directory: `<project>/.devtomcat/<config-name>/conf/`
+1. Create the overlay directory: `<project>/.idea/devtomcat/<config-name>/conf/`
 2. Place modified config files there (e.g., `context.xml`, `catalina.properties`)
 3. Files in the overlay overwrite the defaults copied from CATALINA_HOME
 4. The plugin always manages ports in `server.xml` — your overlay's custom Realms, Valves, and JNDI resources are preserved

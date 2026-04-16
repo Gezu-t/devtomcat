@@ -230,43 +230,57 @@ class TomcatConfigPreparerTest {
     }
 
     @Nested
-    @DisplayName("inspectTempDirectory")
-    class InspectTempDirectory {
+    @DisplayName("cleanStaleTempState")
+    class CleanStaleTempState {
 
         @Test
-        @DisplayName("returns warning when temp directory contains likely cache or lock state")
-        void warnsWhenTempContainsPersistentState(@TempDir Path tempDir) throws IOException {
+        @DisplayName("removes stale cache/lock directories from temp/")
+        void removesStaleCacheDirectories(@TempDir Path tempDir) throws IOException {
             Path catalinaBase = tempDir.resolve("base");
             Path tempPath = catalinaBase.resolve("temp");
             Files.createDirectories(tempPath);
-            // Create an entry whose name matches a persistent-state pattern
-            Files.createDirectory(tempPath.resolve("ehcache-data"));
+            Path ehcacheDir = Files.createDirectory(tempPath.resolve("ehcache-data"));
+            Files.writeString(ehcacheDir.resolve(".lock"), "");
 
-            List<String> warnings = TomcatConfigPreparer.inspectTempDirectory(catalinaBase);
+            TomcatConfigPreparer.cleanStaleTempState(catalinaBase);
 
-            assertEquals(1, warnings.size());
-            assertTrue(warnings.get(0).contains("possible persistent cache/state entries"));
-            assertTrue(warnings.get(0).contains("ehcache-data"));
+            assertFalse(Files.exists(ehcacheDir), "Stale ehcache directory should be removed");
         }
 
         @Test
-        @DisplayName("returns no warning when temp directory is empty")
-        void noWarningWhenTempEmpty(@TempDir Path tempDir) throws IOException {
-            Path catalinaBase = tempDir.resolve("base");
-            Files.createDirectories(catalinaBase.resolve("temp"));
-
-            assertTrue(TomcatConfigPreparer.inspectTempDirectory(catalinaBase).isEmpty());
-        }
-
-        @Test
-        @DisplayName("ignores ordinary temp files that do not look like persistent state")
-        void ignoresOrdinaryTempFiles(@TempDir Path tempDir) throws IOException {
+        @DisplayName("removes stale lock files from temp/")
+        void removesStaleLockFiles(@TempDir Path tempDir) throws IOException {
             Path catalinaBase = tempDir.resolve("base");
             Path tempPath = catalinaBase.resolve("temp");
             Files.createDirectories(tempPath);
-            Files.writeString(tempPath.resolve("random.tmp"), "scratch");
+            Path lockFile = tempPath.resolve("app.lck");
+            Files.writeString(lockFile, "");
 
-            assertTrue(TomcatConfigPreparer.inspectTempDirectory(catalinaBase).isEmpty());
+            TomcatConfigPreparer.cleanStaleTempState(catalinaBase);
+
+            assertFalse(Files.exists(lockFile), "Stale lock file should be removed");
+        }
+
+        @Test
+        @DisplayName("is a no-op when temp directory is missing")
+        void noOpWhenTempMissing(@TempDir Path tempDir) {
+            Path catalinaBase = tempDir.resolve("base");
+
+            assertDoesNotThrow(() -> TomcatConfigPreparer.cleanStaleTempState(catalinaBase));
+        }
+
+        @Test
+        @DisplayName("preserves ordinary temp files that do not look like persistent state")
+        void preservesOrdinaryFiles(@TempDir Path tempDir) throws IOException {
+            Path catalinaBase = tempDir.resolve("base");
+            Path tempPath = catalinaBase.resolve("temp");
+            Files.createDirectories(tempPath);
+            Path regular = tempPath.resolve("random.tmp");
+            Files.writeString(regular, "scratch");
+
+            TomcatConfigPreparer.cleanStaleTempState(catalinaBase);
+
+            assertTrue(Files.exists(regular), "Ordinary temp file should be preserved");
         }
     }
 

@@ -65,15 +65,22 @@ package com.dev.idea.plugins.tomcat.utils;
                 return null;
             }
 
-            // Create a project-specific CATALINA_BASE outside .idea/ so IntelliJ does not
-            // index the Tomcat work directory (JSP compilations, session files, etc.).
-            // .devtomcat/ is excluded from VCS by the plugin's default .gitignore guidance.
+            // Create a project-specific CATALINA_BASE inside .idea/devtomcat so the Tomcat
+            // work directory (JSP compilations, session files, etc.) sits alongside other
+            // IDE-managed project metadata and is hidden from source trees. .idea/ is
+            // excluded from VCS by the standard IntelliJ .gitignore.
             String configName = sanitizeFileName(config.getName());
-            Path projectCatalinaBase = Paths.get(project.getBasePath(), ".devtomcat", configName);
+            Path projectCatalinaBase = Paths.get(project.getBasePath(), DEVTOMCAT_DIR_NAME, configName);
 
             LOG.debug("Using project CATALINA_BASE: " + projectCatalinaBase);
             return projectCatalinaBase;
         }
+
+        /**
+         * Location of DevTomcat per-configuration data (CATALINA_BASE, conf overlays).
+         * Lives under {@code .idea/} alongside other IntelliJ project metadata.
+         */
+        static final String DEVTOMCAT_DIR_NAME = ".idea/devtomcat";
 
             @Nullable
         public static Path getTomcatHome(@NotNull TomcatRunConfiguration config) {
@@ -131,11 +138,10 @@ package com.dev.idea.plugins.tomcat.utils;
         /**
          * Returns the conf overlay directory for a run configuration.
          *
-         * <p>Path: {@code <project>/.devtomcat/<config-name>/conf/}
+         * <p>Path: {@code <project>/.idea/devtomcat/<config-name>/conf/}
          * <ul>
-         *   <li>Outside {@code .idea/} — survives IDE cache cleans</li>
+         *   <li>Under {@code .idea/} — alongside other IDE project metadata, hidden from source trees</li>
          *   <li>Per-config — different configurations can have different overlays</li>
-         *   <li>Version-controllable if the team wants shared Tomcat customizations</li>
          * </ul>
          *
          * @return the overlay path, or null if project base path is unavailable
@@ -152,11 +158,11 @@ package com.dev.idea.plugins.tomcat.utils;
         /**
          * Builds the conf overlay path from a project base path and config name.
          *
-         * <p>Path: {@code <projectBasePath>/.devtomcat/<sanitized-config-name>/conf/}
+         * <p>Path: {@code <projectBasePath>/.idea/devtomcat/<sanitized-config-name>/conf/}
          */
         @NotNull
         static Path resolveConfOverlayPath(@NotNull String projectBasePath, @Nullable String configName) {
-            return Paths.get(projectBasePath, ".devtomcat", sanitizeFileName(configName), "conf");
+            return Paths.get(projectBasePath, DEVTOMCAT_DIR_NAME, sanitizeFileName(configName), "conf");
         }
 
         /**

@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.execution.BeforeRunTaskProvider;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
@@ -112,14 +113,23 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         List<DeploymentArtifact> artifacts = tomcatConfig.getDeployedArtifacts();
 
         boolean allValid = true;
+        StringBuilder missing = new StringBuilder();
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null) continue;
             if (!artifact.isValid()) {
-                LOG.error("DevTomcat: artifact not ready before launch — '" +
-                        artifact.getDisplayName() + "' (path: " + artifact.getPath() +
-                        "). Build the project first (Build → Build Artifacts).");
+                String message = "Artifact not ready: '" + artifact.getDisplayName() +
+                        "' at " + artifact.getPath();
+                LOG.warn("DevTomcat: " + message);
+                if (missing.length() > 0) missing.append("\n");
+                missing.append("• ").append(artifact.getDisplayName());
                 allValid = false;
             }
+        }
+        if (!allValid) {
+            TomcatNotifier.error(tomcatConfig.getProject(),
+                    "DevTomcat: Artifacts Not Ready",
+                    "Cannot start Tomcat — the following artifacts are missing:\n" + missing +
+                            "\n\nBuild the project first (Build → Build Artifacts).");
         }
         return allValid;
     }

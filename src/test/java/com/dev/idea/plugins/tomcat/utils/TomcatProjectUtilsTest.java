@@ -108,11 +108,11 @@ class TomcatProjectUtilsTest {
     class ResolveConfOverlayPath {
 
         @Test
-        @DisplayName("builds correct path structure: <project>/.devtomcat/<config>/conf")
+        @DisplayName("builds correct path structure: <project>/.idea/devtomcat/<config>/conf")
         void correctStructure() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/home/user/project", "My Config");
 
-            assertTrue(result.toString().startsWith("/home/user/project/.devtomcat/My_Config_"),
+            assertTrue(result.toString().startsWith("/home/user/project/.idea/devtomcat/My_Config_"),
                     "Unexpected path: " + result);
             assertEquals("conf", result.getFileName().toString());
         }
@@ -122,7 +122,7 @@ class TomcatProjectUtilsTest {
         void sanitizesConfigName() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/proj", "Tomcat 10.1 (local)");
 
-            assertTrue(result.toString().contains("/.devtomcat/Tomcat_10.1_local_"),
+            assertTrue(result.toString().contains("/.idea/devtomcat/Tomcat_10.1_local_"),
                     "Unexpected path: " + result);
         }
 
@@ -131,7 +131,7 @@ class TomcatProjectUtilsTest {
         void nullConfigName() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/proj", null);
 
-            assertEquals(Path.of("/proj/.devtomcat/unnamed/conf"), result);
+            assertEquals(Path.of("/proj/.idea/devtomcat/unnamed/conf"), result);
         }
 
         @Test
@@ -147,16 +147,16 @@ class TomcatProjectUtilsTest {
         void whitespaceConfigName() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/proj", "   ");
 
-            assertEquals(Path.of("/proj/.devtomcat/unnamed/conf"), result);
+            assertEquals(Path.of("/proj/.idea/devtomcat/unnamed/conf"), result);
         }
 
         @Test
-        @DisplayName("path contains .devtomcat segment")
+        @DisplayName("path is under .idea/devtomcat")
         void containsDevtomcat() {
             Path result = TomcatProjectUtils.resolveConfOverlayPath("/proj", "test");
 
-            assertTrue(result.toString().contains(".devtomcat"),
-                    "Path should contain .devtomcat: " + result);
+            assertTrue(result.toString().contains(".idea/devtomcat"),
+                    "Path should contain .idea/devtomcat: " + result);
         }
 
         @Test

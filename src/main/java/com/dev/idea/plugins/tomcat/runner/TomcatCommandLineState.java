@@ -27,6 +27,7 @@ import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NotNull;
@@ -43,6 +44,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class TomcatCommandLineState extends JavaCommandLineState {
 
     private static final Logger LOG = Logger.getInstance(TomcatCommandLineState.class);
+
+    /**
+     * Carries the resolved {@link PortConfig} from a stopped process into its
+     * cross-executor relaunch, so the same ports are reused instead of
+     * re-running conflict detection (which would see the OS's {@code TIME_WAIT}
+     * socket state and pick a different port).
+     */
+    public static final Key<PortConfig> CARRIED_PORTS_KEY =
+            Key.create("devtomcat.carried.resolved.ports");
+    /** Debug JDWP port carried across a cross-executor relaunch. */
+    public static final Key<Integer> CARRIED_DEBUG_PORT_KEY =
+            Key.create("devtomcat.carried.resolved.debug.port");
 
     private final TomcatRunConfiguration configuration;
     private final TomcatDeploymentLogger deploymentLogger;
@@ -189,11 +202,29 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      * are released automatically when the process terminates.
      */
     private void resolvePortConflicts() {
-        PortConfig originalPorts = configuration.getConfigData().getPortConfig();
         String configName = configuration.getName();
-        TomcatPortRegistry registry =
-                TomcatPortRegistry.getInstance();
+        TomcatPortRegistry registry = TomcatPortRegistry.getInstance();
 
+        // Carryover path: the previous process (stopped by stopAndRelaunch) handed
+        // its resolved ports down via ExecutionEnvironment user data. Re-use them
+        // atomically instead of re-running conflict detection, which would see the
+        // OS's TIME_WAIT socket state on the just-released port and bump it up.
+        PortConfig carried = getEnvironment().getUserData(CARRIED_PORTS_KEY);
+        if (carried != null) {
+            List<String> changes = new java.util.ArrayList<>();
+            claimAndTrack(carried, registry, configName, changes);
+            this.resolvedPorts = carried;
+
+            Integer carriedDebug = getEnvironment().getUserData(CARRIED_DEBUG_PORT_KEY);
+            if (carriedDebug != null && carriedDebug > 0) {
+                int claimed = registry.claimPort(carriedDebug, configName);
+                this.resolvedDebugPort = claimed > 0 ? claimed : carriedDebug;
+            }
+            logResolutionChanges(changes);
+            return;
+        }
+
+        PortConfig originalPorts = configuration.getConfigData().getPortConfig();
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
 
@@ -450,7 +481,8 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 configuration,
                 runnerSettings,
                 resolvedPorts,
-                executorId
+                executorId,
+                getEnvironment().getRunnerAndConfigurationSettings()
         );
         ProcessTerminatedListener.attach(handler);
         return handler;

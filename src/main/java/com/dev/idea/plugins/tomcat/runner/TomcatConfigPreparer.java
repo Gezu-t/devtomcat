@@ -110,7 +110,7 @@ public final class TomcatConfigPreparer {
         createDirectories(catalinaBase);
         createLogFiles(catalinaBase.resolve(DIR_LOGS));
         cleanWorkDirectory(catalinaBase);
-        warnings.addAll(inspectTempDirectory(catalinaBase));
+        cleanStaleTempState(catalinaBase);
 
         copyConfDirectory(catalinaHome, catalinaBase);
 
@@ -128,28 +128,46 @@ public final class TomcatConfigPreparer {
     }
 
     /**
-     * Non-destructive inspection of temp/ before launch.
-     * Disk-backed caches often persist lock/state files here across runs.
+     * Cleans stale persistent cache/lock state from temp/ before launch.
+     *
+     * <p>Disk-backed caches (ehcache, liquibase, hazelcast, etc.) persist lock
+     * and state files here across runs. When the old JVM is gone but its lock
+     * file remains, the next startup fails with "Persistence directory already
+     * locked by this process". Removing these entries restores a clean slate.
+     *
+     * <p>Only targets entries whose names indicate persistent state
+     * ({@link #looksLikePersistentAppTempState}); other temp files created by
+     * Tomcat during startup are untouched.
      */
-    @NotNull
-    static List<String> inspectTempDirectory(@NotNull Path catalinaBase) throws IOException {
+    static void cleanStaleTempState(@NotNull Path catalinaBase) throws IOException {
         Path tempDir = catalinaBase.resolve(DIR_TEMP);
         if (!Files.isDirectory(tempDir)) {
-            return List.of();
+            return;
         }
 
+        List<Path> stale;
         try (Stream<Path> entries = Files.list(tempDir)) {
-            List<Path> suspiciousEntries = entries
+            stale = entries
                     .filter(TomcatConfigPreparer::looksLikePersistentAppTempState)
                     .toList();
-            if (suspiciousEntries.isEmpty()) {
-                return List.of();
-            }
-            return List.of("CATALINA_BASE temp directory contains possible persistent cache/state entries ("
-                    + suspiciousEntries.size() + ") under " + tempDir + ". "
-                    + "These may cause stale state or lock errors on restart. If startup fails with a locked persistence directory, "
-                    + "stop the old process and clean the stale cache path. Suspect entries: " + summarizeSuspiciousEntries(suspiciousEntries));
         }
+        if (stale.isEmpty()) {
+            return;
+        }
+
+        for (Path entry : stale) {
+            try {
+                if (Files.isDirectory(entry)) {
+                    deleteRecursively(entry);
+                } else {
+                    Files.deleteIfExists(entry);
+                }
+            } catch (IOException e) {
+                LOG.warn("Could not remove stale temp entry '" + entry + "': " + e.getMessage());
+            }
+        }
+        LOG.info("Cleaned " + stale.size() + " stale cache/lock entr"
+                + (stale.size() == 1 ? "y" : "ies") + " from " + tempDir);
     }
 
     private static boolean looksLikePersistentAppTempState(@NotNull Path path) {
@@ -165,15 +183,6 @@ public final class TomcatConfigPreparer {
                 || name.endsWith(".pid");
     }
 
-    @NotNull
-    private static String summarizeSuspiciousEntries(@NotNull List<Path> suspiciousEntries) {
-        return suspiciousEntries.stream()
-                .limit(3)
-                .map(path -> path.getFileName() != null ? path.getFileName().toString() : path.toString())
-                .reduce((left, right) -> left + ", " + right)
-                .map(summary -> suspiciousEntries.size() > 3 ? summary + ", ..." : summary)
-                .orElse("(unknown)");
-    }
 
     /**
      * Creates the CATALINA_BASE directory structure.

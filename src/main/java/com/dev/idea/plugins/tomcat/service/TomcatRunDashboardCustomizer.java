@@ -55,8 +55,10 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                 statusText.append("Tomcat ").append(tomcatInfo.getVersion());
             }
 
-            // HTTP port
-            Integer httpPort = tomcatConfig.getHttpPort();
+            // HTTP port — prefer the live resolved port from the running process
+            // so auto-resolved ports (e.g. 8080 → 8082 on conflict) are displayed,
+            // not the stale configured value.
+            Integer httpPort = resolveLiveHttpPort(node, tomcatConfig);
             if (httpPort != null && httpPort > 0) {
                 if (!statusText.isEmpty()) statusText.append(" · ");
                 statusText.append(":").append(httpPort);
@@ -139,7 +141,9 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
             List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
                     .getDeploymentConfig().getArtifacts();
             if (artifacts != null) {
-                Integer httpPort = tomcatConfig.getHttpPort();
+                // Use the resolved port from the live process handler when available,
+                // so auto-resolved ports appear correctly in child node URLs.
+                Integer httpPort = resolveLiveHttpPort(node, tomcatConfig);
                 int port = httpPort != null ? httpPort : 8080;
                 String configName = tomcatConfig.getName();
 
@@ -155,6 +159,27 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
             LOG.debug("Error getting deployment children", e);
             return null;
         }
+    }
+
+    /**
+     * Resolves the HTTP port to display for a run configuration node.
+     *
+     * <p>If a live process handler exists for the given config, returns its
+     * resolved port (which reflects any auto-increment on port conflict).
+     * Falls back to the stored {@code configuration.getHttpPort()} for
+     * stopped configurations so the dashboard still shows a sensible value.
+     */
+    @Nullable
+    private static Integer resolveLiveHttpPort(@NotNull RunDashboardRunConfigurationNode node,
+                                                @NotNull TomcatRunConfiguration tomcatConfig) {
+        RunContentDescriptor descriptor = node.getDescriptor();
+        if (descriptor != null && descriptor.getProcessHandler()
+                instanceof com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler th
+                && !th.isProcessTerminated()) {
+            int port = th.getHttpPort();
+            if (port > 0) return port;
+        }
+        return tomcatConfig.getHttpPort();
     }
 
     /**

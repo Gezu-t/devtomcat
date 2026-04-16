@@ -130,18 +130,41 @@ public final class TomcatRunnerDelegate {
     @NotNull
     public List<RunContentDescriptor> getDescriptorsFor(@NotNull TomcatRunConfiguration config,
                                                          @NotNull ExecutionEnvironment env) {
-        // Use RunContentManager.getAllDescriptors() — the public API that covers both the
-        // Run tool-window and the Services panel — then filter by TomcatProcessHandler identity.
-        // Reference equality on the configuration instance is immune to duplicate display names.
+        // Match descriptors by the RunnerAndConfigurationSettings they were
+        // launched from — the stable identity IntelliJ uses internally:
+        //   - survives cross-executor switches (Run→Debug uses same settings)
+        //   - survives config clones (settings object is the same)
+        //   - survives renames (settings reference is stable across name changes)
+        //   - distinguishes two configs that happen to share the same display name
+        //
+        // Fall back to raw config reference for handlers launched outside the
+        // normal editor flow (no settings object available).
+        RunnerAndConfigurationSettings targetSettings = env.getRunnerAndConfigurationSettings();
         List<RunContentDescriptor> result = new ArrayList<>();
         for (RunContentDescriptor d :
                 RunContentManager.getInstance(env.getProject()).getAllDescriptors()) {
             if (d.getProcessHandler() instanceof TomcatProcessHandler th
-                    && th.getConfiguration() == config) {
+                    && belongsTo(th, config, targetSettings)) {
                 result.add(d);
             }
         }
         return result;
+    }
+
+    /**
+     * Returns true when the given handler was launched from the same run
+     * configuration identity as the target environment.
+     */
+    private static boolean belongsTo(@NotNull TomcatProcessHandler handler,
+                                      @NotNull TomcatRunConfiguration config,
+                                      @Nullable RunnerAndConfigurationSettings targetSettings) {
+        RunnerAndConfigurationSettings handlerSettings = handler.getLaunchSettings();
+        if (targetSettings != null && handlerSettings != null) {
+            return targetSettings == handlerSettings;
+        }
+        // Fallback for handlers launched without a settings object (rare —
+        // e.g. programmatic execution paths that bypass RunManager).
+        return handler.getConfiguration() == config;
     }
 
     // -------------------------------------------------------------------------
@@ -168,15 +191,29 @@ public final class TomcatRunnerDelegate {
         // Capture before destroy — see ProcessStopSupport javadoc for race rationale
         Executor oldExecutor = ExecutorRegistry.getInstance().getExecutorById(conflicting.getExecutorId());
         RunContentDescriptor oldDescriptor = ProcessStopSupport.findDescriptor(project, conflicting);
+        // Capture the old process's resolved ports so the relaunch can re-use them.
+        // Without this, the new launch would re-run port conflict detection, see the
+        // just-released socket in OS TIME_WAIT state, and bump the port upward —
+        // leading to the user-visible "port keeps increasing" behavior.
+        com.dev.idea.plugins.tomcat.model.PortConfig carriedPorts = conflicting.getResolvedPorts();
 
         ProcessStopSupport.stopCleanAndThen(project, conflicting, oldDescriptor, oldExecutor, () -> {
-            RunnerAndConfigurationSettings settings =
-                    RunManager.getInstance(project).findSettings(config);
+            RunnerAndConfigurationSettings settings = env.getRunnerAndConfigurationSettings();
+            if (settings == null) {
+                settings = RunManager.getInstance(project).findSettings(config);
+            }
             if (settings != null) {
                 try {
-                    ExecutionEnvironmentBuilder.create(currentExecutor, settings).buildAndExecute();
+                    ExecutionEnvironmentBuilder builder =
+                            ExecutionEnvironmentBuilder.create(currentExecutor, settings);
+                    ExecutionEnvironment newEnv = builder.build();
+                    if (carriedPorts != null) {
+                        newEnv.putUserData(TomcatCommandLineState.CARRIED_PORTS_KEY, carriedPorts);
+                    }
+                    newEnv.getRunner().execute(newEnv);
                     LOG.info("Relaunched " + config.getName()
-                            + " in " + currentExecutor.getActionName() + " mode");
+                            + " in " + currentExecutor.getActionName() + " mode"
+                            + (carriedPorts != null ? " (reusing ports)" : ""));
                 } catch (ExecutionException ex) {
                     LOG.warn("Failed to relaunch " + config.getName(), ex);
                     notifyRelaunchFailed(project, config.getName(), ex.getMessage());

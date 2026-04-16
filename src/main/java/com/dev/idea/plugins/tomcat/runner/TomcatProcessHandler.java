@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.runner;
 
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
@@ -11,6 +10,7 @@ import com.intellij.ide.browsers.BrowserLauncher;
 import com.intellij.ide.browsers.WebBrowser;
 import com.intellij.ide.browsers.WebBrowserManager;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.process.KillableColoredProcessHandler;
 import com.intellij.execution.process.ProcessEvent;
@@ -61,11 +61,19 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private static final long SHUTDOWN_TIMEOUT_MS = 15_000;
 
     private final TomcatRunConfiguration configuration;
+    /**
+     * Stable identity of the run configuration as IntelliJ sees it.
+     * Survives cross-executor switches (Run→Debug), config cloning, and renames.
+     * Used by the runner delegate to match descriptors to environments without
+     * relying on fragile reference equality on {@link TomcatRunConfiguration}.
+     */
+    @Nullable private final RunnerAndConfigurationSettings launchSettings;
     private final TomcatDeploymentLogger deploymentLogger;
     private final String configurationName;
     private final String executorId;
     private final int shutdownPort;
     private final int httpPort;
+    @Nullable private final PortConfig resolvedPorts;
     private final RunnerSettings runnerSettings;
 
     private final AtomicBoolean serverStartupDetected = new AtomicBoolean(false);
@@ -96,9 +104,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                                 @NotNull TomcatRunConfiguration configuration,
                                 @NotNull RunnerSettings runnerSettings,
                                 @Nullable PortConfig resolvedPorts,
-                                @NotNull String executorId) {
+                                @NotNull String executorId,
+                                @Nullable RunnerAndConfigurationSettings launchSettings) {
         super(process, commandLine, charset);
         this.configuration = configuration;
+        this.launchSettings = launchSettings;
         this.deploymentLogger = deploymentLogger;
         this.runnerSettings = runnerSettings;
         this.configurationName = configuration.getName();
@@ -106,6 +116,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         this.jmxEnabled = configuration.isJmxEnabled();
         // Use resolved ports (post-conflict-detection) when available, fall back to config
         PortConfig ports = resolvedPorts != null ? resolvedPorts : configuration.getConfigData().getPortConfig();
+        this.resolvedPorts = resolvedPorts;
         this.shutdownPort = ports.getShutdown();
         this.httpPort = ports.getHttp();
         // Build lifecycle listener from event consumers
@@ -659,6 +670,36 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     @NotNull
     public String getExecutorId() {
         return executorId;
+    }
+
+    /**
+     * Returns the actual HTTP port this process was launched on.
+     * May differ from {@code configuration.getHttpPort()} when the configured
+     * port was unavailable and auto-resolved (e.g. 8080 → 8082).
+     */
+    public int getHttpPort() {
+        return httpPort;
+    }
+
+    /**
+     * Returns the {@link RunnerAndConfigurationSettings} that launched this process,
+     * or {@code null} for a process launched outside the normal editor flow.
+     * This is the stable identity across cross-executor switches and renames.
+     */
+    @Nullable
+    public RunnerAndConfigurationSettings getLaunchSettings() {
+        return launchSettings;
+    }
+
+    /**
+     * Returns the resolved {@link PortConfig} this process was launched with
+     * (post-conflict-detection), or {@code null} if ports were not pre-resolved.
+     * Used to carry the same ports across a cross-executor relaunch so the OS's
+     * {@code TIME_WAIT} state doesn't force a different port on the new launch.
+     */
+    @Nullable
+    public PortConfig getResolvedPorts() {
+        return resolvedPorts;
     }
 
     private static void closeQuietly(java.io.Closeable closeable) {

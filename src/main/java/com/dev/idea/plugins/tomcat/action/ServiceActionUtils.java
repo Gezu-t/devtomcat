@@ -17,8 +17,6 @@ import com.intellij.pom.Navigatable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-
 /**
  * Shared utilities for extracting DevTomcat-related objects from the Services
  * tool window action event context.

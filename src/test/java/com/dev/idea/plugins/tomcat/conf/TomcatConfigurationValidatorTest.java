@@ -57,7 +57,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("No Tomcat server selected"));
+            assertTrue(ex.getLocalizedMessage().contains("No Tomcat server selected"));
         }
 
         @Test
@@ -67,7 +67,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("server name is empty"));
+            assertTrue(ex.getLocalizedMessage().contains("server name is empty"));
         }
 
         @Test
@@ -77,7 +77,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("path is not configured"));
+            assertTrue(ex.getLocalizedMessage().contains("path is not configured"));
         }
 
         @Test
@@ -134,7 +134,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("must start with '/'"));
+            assertTrue(ex.getLocalizedMessage().contains("must start with '/'"));
         }
 
         @Test
@@ -144,7 +144,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("cannot contain spaces"));
+            assertTrue(ex.getLocalizedMessage().contains("cannot contain spaces"));
         }
 
         @Test
@@ -154,7 +154,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("cannot contain backslashes"));
+            assertTrue(ex.getLocalizedMessage().contains("cannot contain backslashes"));
         }
     }
 
@@ -184,7 +184,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("HTTP"));
+            assertTrue(ex.getLocalizedMessage().contains("HTTP"));
         }
 
         @Test
@@ -194,7 +194,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("HTTP"));
+            assertTrue(ex.getLocalizedMessage().contains("HTTP"));
         }
 
         @Test
@@ -245,7 +245,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("same artifact output"));
+            assertTrue(ex.getLocalizedMessage().contains("same artifact output"));
         }
 
         @Test
@@ -265,7 +265,7 @@ class TomcatConfigurationValidatorTest {
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
                     () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getMessage().contains("Duplicate deployment for module"));
+            assertTrue(ex.getLocalizedMessage().contains("Duplicate deployment for module"));
         }
     }
 
