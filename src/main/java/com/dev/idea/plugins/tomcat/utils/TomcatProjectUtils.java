@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.utils;
     import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
     import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
     import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+    import com.intellij.openapi.application.PathManager;
     import com.intellij.openapi.diagnostic.Logger;
     import com.intellij.openapi.project.Project;
     import com.intellij.openapi.util.text.StringUtil;
@@ -16,7 +17,6 @@ package com.dev.idea.plugins.tomcat.utils;
 
     import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
     import java.nio.file.Path;
-    import java.nio.file.Paths;
     import java.nio.file.Paths;
     import java.util.Objects;
 
@@ -58,29 +58,50 @@ package com.dev.idea.plugins.tomcat.utils;
                 }
             }
 
-            // Fall back to project-based path
+            // Fall back to the IDE system directory — the standard location for
+            // plugin runtime data (compiled JSPs, session files, temp caches, logs).
+            // Path: {PathManager.getSystemPath()}/devtomcat/{projectLocationHash}/{configName}/
+            //
+            // This mirrors how IntelliJ's built-in Tomcat integration stores its
+            // CATALINA_BASE. The data is completely outside the project tree: no
+            // indexing, no VCS concerns, no visible clutter.
             Project project = config.getProject();
             if (project == null || project.getBasePath() == null) {
                 LOG.debug("No project base path available");
                 return null;
             }
 
-            // Create a project-specific CATALINA_BASE inside .idea/devtomcat so the Tomcat
-            // work directory (JSP compilations, session files, etc.) sits alongside other
-            // IDE-managed project metadata and is hidden from source trees. .idea/ is
-            // excluded from VCS by the standard IntelliJ .gitignore.
+            String projectHash = projectLocationHash(project);
             String configName = sanitizeFileName(config.getName());
-            Path projectCatalinaBase = Paths.get(project.getBasePath(), DEVTOMCAT_DIR_NAME, configName);
+            Path systemCatalinaBase = Paths.get(
+                    PathManager.getSystemPath(), SYSTEM_DIR_NAME, projectHash, configName);
 
-            LOG.debug("Using project CATALINA_BASE: " + projectCatalinaBase);
-            return projectCatalinaBase;
+            LOG.debug("Using system CATALINA_BASE: " + systemCatalinaBase);
+            return systemCatalinaBase;
         }
 
+        /** Root directory name under {@link PathManager#getSystemPath()} for all DevTomcat runtime data. */
+        static final String SYSTEM_DIR_NAME = "devtomcat";
+
+        /** Directory name under the project root for user-editable conf overlays. */
+        static final String CONF_OVERLAY_DIR_NAME = ".devtomcat";
+
         /**
-         * Location of DevTomcat per-configuration data (CATALINA_BASE, conf overlays).
-         * Lives under {@code .idea/} alongside other IntelliJ project metadata.
+         * Returns a short, stable hash derived from the project's base path.
+         * Used to isolate CATALINA_BASE directories per project inside the
+         * shared IDE system directory. Stable across IDE restarts.
          */
-        static final String DEVTOMCAT_DIR_NAME = ".idea/devtomcat";
+        @NotNull
+        static String projectLocationHash(@NotNull Project project) {
+            String basePath = project.getBasePath();
+            if (basePath == null) return "default";
+            // Use the same approach as IntelliJ's internal hashing: simple
+            // hash-code-based hex string for brevity + project name for readability.
+            int hash = basePath.hashCode();
+            String hexHash = Integer.toHexString(hash & 0x7FFFFFFF);
+            String projectName = Paths.get(basePath).getFileName().toString();
+            return sanitizeFileName(projectName) + "_" + hexHash;
+        }
 
             @Nullable
         public static Path getTomcatHome(@NotNull TomcatRunConfiguration config) {
@@ -138,11 +159,12 @@ package com.dev.idea.plugins.tomcat.utils;
         /**
          * Returns the conf overlay directory for a run configuration.
          *
-         * <p>Path: {@code <project>/.idea/devtomcat/<config-name>/conf/}
-         * <ul>
-         *   <li>Under {@code .idea/} — alongside other IDE project metadata, hidden from source trees</li>
-         *   <li>Per-config — different configurations can have different overlays</li>
-         * </ul>
+         * <p>Path: {@code <project>/.devtomcat/<config-name>/conf/}
+         *
+         * <p>Conf overlays are <b>user-editable</b> configuration files (e.g. custom
+         * {@code context.xml}, {@code catalina.properties}) that the user may want to
+         * version-control or share with the team. They live in the project tree — not
+         * in the IDE system directory — so they travel with the project.
          *
          * @return the overlay path, or null if project base path is unavailable
          */
@@ -158,11 +180,11 @@ package com.dev.idea.plugins.tomcat.utils;
         /**
          * Builds the conf overlay path from a project base path and config name.
          *
-         * <p>Path: {@code <projectBasePath>/.idea/devtomcat/<sanitized-config-name>/conf/}
+         * <p>Path: {@code <projectBasePath>/.devtomcat/<sanitized-config-name>/conf/}
          */
         @NotNull
         static Path resolveConfOverlayPath(@NotNull String projectBasePath, @Nullable String configName) {
-            return Paths.get(projectBasePath, DEVTOMCAT_DIR_NAME, sanitizeFileName(configName), "conf");
+            return Paths.get(projectBasePath, CONF_OVERLAY_DIR_NAME, sanitizeFileName(configName), "conf");
         }
 
         /**

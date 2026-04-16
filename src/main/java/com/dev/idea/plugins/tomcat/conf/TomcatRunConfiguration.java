@@ -493,27 +493,40 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             return super.getAllLogFiles();
         }
 
+        // Build a lookup of user-persisted state so we respect Is Active /
+        // Skip Content changes made via the Logs tab (LogConfigurationPanel).
+        Map<String, LogFileOptions> existingByName = new java.util.LinkedHashMap<>();
+        for (LogFileOptions opt : super.getAllLogFiles()) {
+            existingByName.put(opt.getName(), opt);
+        }
+
         Set<String> tomcatLogIds = new HashSet<>();
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
             tomcatLogIds.add(logFile.getId());
         }
 
+        // Keep user-added (non-Tomcat) entries first
         ArrayList<LogFileOptions> result = new ArrayList<>();
-        for (LogFileOptions opt : super.getAllLogFiles()) {
+        for (LogFileOptions opt : existingByName.values()) {
             if (!tomcatLogIds.contains(opt.getName())) {
                 result.add(opt);
             }
         }
 
-        List<String> enabledLogs = getLogFileConfigurations();
-        var logFileConfig = configData.getLogFileConfig();
+        // Tomcat log entries: use persisted user state if it exists,
+        // otherwise seed from defaults
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
-            boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
-            // Use today's concrete filename (e.g. "catalina.2026-03-08.log") — NOT the glob
-            // pattern, because IntelliJ creates a separate tab for every file matching a glob.
             String path = logFile.resolveFullPath(logsDir);
-            boolean skipContent = logFileConfig.isSkipContent(logFile.getId());
-            result.add(new LogFileOptions(logFile.getId(), path, enabled, skipContent, true));
+            LogFileOptions existing = existingByName.get(logFile.getId());
+            if (existing != null) {
+                // Preserve user's Is Active and Skip Content choices;
+                // update the path to today's dated filename.
+                existing.setPathPattern(path);
+                result.add(existing);
+            } else {
+                boolean enabled = logFile.isEnabledByDefault();
+                result.add(new LogFileOptions(logFile.getId(), path, enabled, true, true));
+            }
         }
         return result;
     }
