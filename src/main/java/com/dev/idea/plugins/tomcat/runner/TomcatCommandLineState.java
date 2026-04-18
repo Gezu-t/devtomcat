@@ -299,14 +299,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      * config dialog (via RunManager clone on next open), the browser URL generation,
      * the Services panel, and the serializer.
      *
-     * <p>Runs unconditionally — including parallel-run mode. Per-launch ports stay
-     * on the handler via {@code CARRIED_PORTS_KEY}; writing the most-recent resolved
-     * set to the config establishes the seed for the next fresh launch. Two
-     * simultaneous launches race last-writer-wins on the shared config, which is
-     * harmless: both launches already hold their own per-handler ports, and the
-     * seed value is inherently transient.
+     * <p><b>No-op in effective parallel-run mode.</b> The config represents the
+     * user's seed; overwriting it with whatever a transient conflict happened to
+     * pick would ratchet it permanently away from intent (a one-off bump
+     * {@code 8083 → 8090} would survive the conflict clearing and make 8090 the
+     * new base). Per-launch ports stay on the handler via {@link #CARRIED_PORTS_KEY};
+     * the Services panel and runtime consumers read from there.
      *
-     * <p>After mutation, publishes
+     * <p>After mutation in single-instance mode, publishes
      * {@link RunManagerListener#runConfigurationChanged} on the project message
      * bus so listeners (Run Dashboard, currently-open dialogs on reload, icon
      * caches) requery the configuration. Without this, mutations stayed in-memory
@@ -317,6 +317,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     static void writeBackResolvedPorts(@NotNull TomcatRunConfiguration configuration,
                                         @NotNull PortConfig resolved) {
+        if (configuration.isParallelRunEffective()) {
+            return;
+        }
         PortConfig target = configuration.getConfigData().getPortConfig();
         boolean changed = false;
         if (target.getHttp() != resolved.getHttp()) {
@@ -346,11 +349,15 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     /**
      * Writes the resolved debug port back to {@code DebugConfig} so the config
-     * dialog and serializer agree on the port the JVM actually bound. Fires the
-     * same RunManager change notification as {@link #writeBackResolvedPorts}.
+     * dialog and serializer agree on the port the JVM actually bound. Same
+     * parallel-run skip as {@link #writeBackResolvedPorts} — the seed stays
+     * stable across transient conflicts.
      */
     static void writeBackResolvedDebugPort(@NotNull TomcatRunConfiguration configuration,
                                             int resolvedDebug) {
+        if (configuration.isParallelRunEffective()) {
+            return;
+        }
         if (resolvedDebug <= 0) return;
         var debugConfig = configuration.getConfigData().getDebugConfig();
         if (debugConfig != null && debugConfig.getPort() != resolvedDebug) {
