@@ -33,8 +33,8 @@ public class UpdateApplicationAction extends AnAction {
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler handler = ServiceActionUtils.findTomcatProcessHandler(e);
 
-        if (project == null || config == null || handler == null
-                || handler.isProcessTerminated() || handler.isProcessTerminating()) return;
+        if (project == null || config == null || handler == null) return;
+        if (handler.getRestartBlockReason() != null) return;
 
         TomcatApplicationUpdater.showDialogAndExecute(project, handler, config);
     }
@@ -43,14 +43,7 @@ public class UpdateApplicationAction extends AnAction {
     public void update(@NotNull AnActionEvent e) {
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler handler = ServiceActionUtils.findTomcatProcessHandler(e);
-
-        boolean running = config != null
-                && handler != null
-                && !handler.isProcessTerminated()
-                && !handler.isProcessTerminating()
-                && handler.isServerStartupDetected();
-
-        e.getPresentation().setEnabledAndVisible(running);
+        ServiceActionUtils.applyStartupGate(e.getPresentation(), config, handler, "Update the running Tomcat application");
     }
 
     @Override

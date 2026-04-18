@@ -23,8 +23,11 @@ public class RestartTomcatAction extends AnAction {
         Project project = e.getProject();
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler tomcatHandler = ServiceActionUtils.findTomcatProcessHandler(e);
-        if (project == null || config == null || tomcatHandler == null
-                || tomcatHandler.isProcessTerminated() || tomcatHandler.isProcessTerminating()) return;
+        if (project == null || config == null || tomcatHandler == null) return;
+        // Defence in depth — update() already disables the action during startup and
+        // hides it when the process is gone, but the keyboard shortcut path can
+        // sometimes race ahead of presentation updates.
+        if (tomcatHandler.getRestartBlockReason() != null) return;
 
         new TomcatApplicationUpdater(project, tomcatHandler, config, UpdateConfig.RESTART_SERVER)
                 .executeUpdate();
@@ -34,12 +37,7 @@ public class RestartTomcatAction extends AnAction {
     public void update(@NotNull AnActionEvent e) {
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler handler = ServiceActionUtils.findTomcatProcessHandler(e);
-        boolean running = config != null
-                && handler != null
-                && !handler.isProcessTerminated()
-                && !handler.isProcessTerminating()
-                && handler.isServerStartupDetected();
-        e.getPresentation().setEnabledAndVisible(running);
+        ServiceActionUtils.applyStartupGate(e.getPresentation(), config, handler, "Restart the Tomcat server");
     }
 
     @Override

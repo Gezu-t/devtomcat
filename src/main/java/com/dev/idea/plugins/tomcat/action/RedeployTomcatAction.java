@@ -23,8 +23,8 @@ public class RedeployTomcatAction extends AnAction {
         Project project = e.getProject();
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler tomcatHandler = ServiceActionUtils.findTomcatProcessHandler(e);
-        if (project == null || config == null || tomcatHandler == null
-                || tomcatHandler.isProcessTerminated() || tomcatHandler.isProcessTerminating()) return;
+        if (project == null || config == null || tomcatHandler == null) return;
+        if (tomcatHandler.getRestartBlockReason() != null) return;
 
         new TomcatApplicationUpdater(project, tomcatHandler, config, UpdateConfig.REDEPLOY)
                 .executeUpdate();
@@ -34,12 +34,7 @@ public class RedeployTomcatAction extends AnAction {
     public void update(@NotNull AnActionEvent e) {
         TomcatRunConfiguration config = ServiceActionUtils.findTomcatConfiguration(e);
         TomcatProcessHandler handler = ServiceActionUtils.findTomcatProcessHandler(e);
-        boolean running = config != null
-                && handler != null
-                && !handler.isProcessTerminated()
-                && !handler.isProcessTerminating()
-                && handler.isServerStartupDetected();
-        e.getPresentation().setEnabledAndVisible(running);
+        ServiceActionUtils.applyStartupGate(e.getPresentation(), config, handler, "Redeploy artifacts to the running Tomcat server");
     }
 
     @Override

@@ -751,6 +751,34 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         return serverStartupDetected.get();
     }
 
+    /**
+     * Returns {@code null} when this handler is ready to accept a restart / update
+     * gesture, or a user-facing reason string explaining why it is not.
+     *
+     * <p>Single source of truth for the startup-gate shared by the toolbar rerun
+     * intercept, the Services panel actions, and the Ctrl+F10 updater provider.
+     * Callers decide how to surface the reason (balloon notification, disabled
+     * action tooltip, hidden menu item) but share the same predicate so the three
+     * surfaces cannot drift.
+     *
+     * <p>Messages are phrased for direct display in tooltips and notifications —
+     * short, no trailing punctuation, referencing Tomcat explicitly so users
+     * reading a Services-panel tooltip know which process is being discussed.
+     */
+    @Nullable
+    public String getRestartBlockReason() {
+        if (isProcessTerminating()) {
+            return "Tomcat is shutting down";
+        }
+        if (isProcessTerminated()) {
+            return "Tomcat is not running";
+        }
+        if (!serverStartupDetected.get()) {
+            return "Tomcat is still starting — restart will be available once startup completes";
+        }
+        return null;
+    }
+
     public boolean isDeploymentCompleted() {
         return deployedArtifactCount.get() >= expectedArtifactCount.get();
     }

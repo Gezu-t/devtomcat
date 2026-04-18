@@ -40,8 +40,10 @@ public class TomcatFrameDeactivationListener implements ApplicationActivationLis
 
         for (ProcessHandler handler : ExecutionManager.getInstance(project).getRunningProcesses()) {
             if (!(handler instanceof TomcatProcessHandler tomcatHandler)) continue;
-            if (tomcatHandler.isProcessTerminating() || tomcatHandler.isProcessTerminated()) continue;
-            if (!tomcatHandler.isServerStartupDetected()) continue;
+            // Passive trigger (frame deactivation is not a user gesture) — skip
+            // silently when the shared startup-gate blocks restart. The three
+            // user-gesture surfaces surface the reason themselves.
+            if (tomcatHandler.getRestartBlockReason() != null) continue;
 
             TomcatRunConfiguration config = tomcatHandler.getConfiguration();
             String action = config.getConfigData().getUpdateConfig().getOnFrameDeactivation();

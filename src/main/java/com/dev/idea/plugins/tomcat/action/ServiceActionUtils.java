@@ -12,6 +12,7 @@ import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.Navigatable;
 import org.jetbrains.annotations.NotNull;
@@ -100,6 +101,49 @@ final class ServiceActionUtils {
      */
     static boolean isRunning(@Nullable ProcessHandler handler) {
         return handler != null && !handler.isProcessTerminated() && !handler.isProcessTerminating();
+    }
+
+    /**
+     * Applies the shared Services-panel startup-gate policy to an action's {@link Presentation}.
+     *
+     * <p>Three visibility states, uniform across {@code Restart}, {@code Redeploy}, and
+     * {@code Update Application}:
+     * <ul>
+     *   <li><b>Hidden</b> — no Tomcat config/handler, or the handler is terminated/terminating.
+     *       The action genuinely does not apply to this node.</li>
+     *   <li><b>Visible but disabled</b> — handler is live but server startup has not yet
+     *       completed. The description is set to the block reason from
+     *       {@link TomcatProcessHandler#getRestartBlockReason()} so the IDE renders it as
+     *       a tooltip on the disabled button. Prevents the "where did the button go?"
+     *       confusion while still blocking a half-started restart.</li>
+     *   <li><b>Visible and enabled</b> — startup complete, the action is safe to invoke.
+     *       Description reset to {@code readyDescription}.</li>
+     * </ul>
+     *
+     * <p>The rerun-toolbar surface is covered by the parallel notification in
+     * {@code TomcatRunnerDelegate}; together they form the single UX contract:
+     * every user-gesture surface explains why a restart is temporarily unavailable
+     * instead of silently ignoring the click or vanishing.
+     */
+    static void applyStartupGate(@NotNull Presentation presentation,
+                                  @Nullable TomcatRunConfiguration config,
+                                  @Nullable TomcatProcessHandler handler,
+                                  @NotNull String readyDescription) {
+        if (config == null || handler == null
+                || handler.isProcessTerminated()
+                || handler.isProcessTerminating()) {
+            presentation.setEnabledAndVisible(false);
+            return;
+        }
+        String blockReason = handler.getRestartBlockReason();
+        if (blockReason != null) {
+            presentation.setVisible(true);
+            presentation.setEnabled(false);
+            presentation.setDescription(blockReason);
+        } else {
+            presentation.setEnabledAndVisible(true);
+            presentation.setDescription(readyDescription);
+        }
     }
 
     private static TomcatRunConfiguration extractFromObject(@Nullable Object obj) {

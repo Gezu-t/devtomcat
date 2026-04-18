@@ -27,11 +27,11 @@ public class TomcatRunningApplicationUpdaterProvider implements RunningApplicati
             return null;
         }
 
-        if (tomcatHandler.isProcessTerminating() || tomcatHandler.isProcessTerminated()) {
-            return null;
-        }
-
-        if (!tomcatHandler.isServerStartupDetected()) {
+        // Single startup-gate shared with the rerun intercept and Services-panel
+        // actions. Ctrl+F10 has no UI surface to explain the block (the platform
+        // API expects null for "no updater available"), so this surface stays
+        // silent; the other surfaces carry the user feedback.
+        if (tomcatHandler.getRestartBlockReason() != null) {
             return null;
         }
 

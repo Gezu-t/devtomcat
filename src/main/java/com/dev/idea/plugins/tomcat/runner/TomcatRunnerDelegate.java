@@ -77,8 +77,16 @@ public final class TomcatRunnerDelegate {
                     && !tomcatHandler.isProcessTerminated()
                     && !tomcatHandler.isProcessTerminating()) {
 
-                if (!tomcatHandler.isServerStartupDetected()) {
-                    return true; // suppress during startup
+                String blockReason = tomcatHandler.getRestartBlockReason();
+                if (blockReason != null) {
+                    // Single UX contract shared with the Services-panel actions:
+                    // rather than silently swallow the click we surface the same
+                    // reason string they show as their disabled-action tooltip,
+                    // so the user sees consistent feedback across both surfaces.
+                    TomcatNotifier.info(env.getProject(),
+                            "Restart Unavailable — " + config.getName(),
+                            blockReason);
+                    return true; // suppress launch during startup
                 }
 
                 TomcatApplicationUpdater.showDialogAndExecute(
