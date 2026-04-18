@@ -9,6 +9,7 @@ import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionListener;
 import java.util.List;
 
 /**
@@ -57,6 +58,26 @@ public interface ConfigurationSection {
         gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = JBUI.insets(2, 4, 2, 8);
         panel.add(field, gbc);
+    }
+
+    /**
+     * Adds a trailing "Configure..." button in column 2 of the current row (use after
+     * {@link #addLabelAndField}). The button sizes naturally from the LAF — callers
+     * must not apply {@code setPreferredSize}.
+     *
+     * @param panel    the target panel (must use {@link #createAlignedGridBagLayout()})
+     * @param gbc      shared constraint object — mutated in place
+     * @param onClick  action listener invoked when the button is pressed
+     * @return the created button so callers can store or further configure it
+     */
+    static JButton addConfigureButton(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
+                                       @NotNull ActionListener onClick) {
+        gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
+        gbc.insets = JBUI.insets(2, 0, 2, 0);
+        JButton button = new JButton("Configure...");
+        button.addActionListener(onClick);
+        panel.add(button, gbc);
+        return button;
     }
 
     boolean isModified(@NotNull TomcatRunConfiguration config);

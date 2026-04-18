@@ -47,11 +47,7 @@ public class JreConfigurationSection implements ConfigurationSection {
             ConfigurationSection.addLabelAndField(panel, gbc, 0,
                     new JBLabel("JRE:"), jreComboBox);
 
-            gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 0);
-            JButton configButton = new JButton("Configure...");
-            configButton.addActionListener(e -> configureJRE());
-            panel.add(configButton, gbc);
+            ConfigurationSection.addConfigureButton(panel, gbc, e -> configureJRE());
         }
         return panel;
     }

@@ -50,11 +50,8 @@ public class ApplicationServerSection implements ConfigurationSection {
             ConfigurationSection.addLabelAndField(panel, gbc, 0,
                     new JBLabel("Application server:"), serverComboBox);
 
-            gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 0, 2, 0);
-            configureButton = new JButton("Configure...");
-            configureButton.addActionListener(e -> openTomcatServerConfiguration());
-            panel.add(configureButton, gbc);
+            configureButton = ConfigurationSection.addConfigureButton(
+                    panel, gbc, e -> openTomcatServerConfiguration());
         }
         return panel;
     }
