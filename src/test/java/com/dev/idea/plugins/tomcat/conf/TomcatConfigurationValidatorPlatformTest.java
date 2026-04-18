@@ -126,4 +126,32 @@ public class TomcatConfigurationValidatorPlatformTest extends BasePlatformTestCa
             fail("ID drift against a matching registered path must not block: " + e.getMessage());
         }
     }
+
+    public void testStalePathButNameMatchesRegisteredStillPasses() throws IOException {
+        // The VCS-import case: the persisted snapshot carries a path that was
+        // valid on the original author's machine but doesn't exist locally,
+        // while the registered list has a server with the same name at a
+        // different (usable) path. The validator must reconcile via name
+        // fallback and validate the RESOLVED path, not the stale snapshot.
+        // Previously this threw because validate(data) checked the persisted
+        // path before the resolver ran.
+        String registeredPath = tempServerPath("real");
+        TomcatInfo registered = server("local-id", "Tomcat 10", registeredPath);
+        state.setTomcatInfos(List.of(registered));
+
+        TomcatInfo imported = server("foreign-id", "Tomcat 10",
+                "/mnt/original-author/apache-tomcat-10.1.28");
+        TomcatRunConfiguration cfg = createConfig("StalePathNameMatches");
+        cfg.setTomcatInfo(imported);
+
+        try {
+            TomcatConfigurationValidator.validate(cfg);
+        } catch (RuntimeConfigurationException e) {
+            fail("stale path + registered-by-name must reconcile, not block: " + e.getMessage());
+        }
+        assertEquals("validator must upgrade the config's TomcatInfo to the canonical one",
+                "local-id", cfg.getTomcatInfo().getId());
+        assertEquals("upgraded reference must carry the local registered path",
+                registeredPath, cfg.getTomcatInfo().getPath());
+    }
 }

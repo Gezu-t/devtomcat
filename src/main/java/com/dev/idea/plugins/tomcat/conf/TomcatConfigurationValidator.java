@@ -38,8 +38,15 @@ package com.dev.idea.plugins.tomcat.conf;
 
                     validateConfigurationName(config);
                     TomcatConfigurationData data = config.getConfigData();
+                    // Reconcile BEFORE path-level validation so an imported config whose
+                    // persisted snapshot has a stale path but resolves to a registered
+                    // server by ID/path/name is accepted — matching the UI and runtime,
+                    // which both upgrade to the resolved instance first. Without this
+                    // ordering, a VCS-imported config with a unique registered name but
+                    // a dead persisted path would fail toolbar Run even though runtime
+                    // launch would have reconciled and succeeded.
+                    reconcileTomcatServerRegistration(data);
                     validate(data);
-                    validateTomcatServerRegistration(data);
                     validateArtifactReferences(config);
 
                     LOG.debug("Configuration validation passed: " + config.getName());
@@ -72,19 +79,28 @@ package com.dev.idea.plugins.tomcat.conf;
             }
 
             /**
-             * Enforces that the config's embedded {@link TomcatInfo} snapshot resolves
-             * to a registered server. Called only from the
-             * {@link #validate(TomcatRunConfiguration)} overload because it touches the
-             * application-level {@link TomcatServerManagerState} service — the pure
-             * {@link #validate(TomcatConfigurationData)} overload remains service-free
-             * and is still callable from headless unit tests.
+             * Reconciles the embedded {@link TomcatInfo} snapshot against the
+             * registered list via {@link TomcatServerManagerState#resolve} and
+             * upgrades {@code data.tomcatInfo} to the resolved canonical instance
+             * when they differ. Throws if no registered server matches.
              *
-             * <p>This is the hard gate that blocks toolbar Run when a config references
-             * a Tomcat that isn't registered. Previously the path-exists heuristic let
-             * an embedded snapshot launch even with no registration, which surprised
-             * users who expected registration to be required.
+             * <p>Runs before {@link #validate(TomcatConfigurationData)} so that
+             * downstream path validation checks the <b>resolved</b> path, not the
+             * persisted snapshot's. This mirrors the runtime path in
+             * {@link com.dev.idea.plugins.tomcat.runner.TomcatJavaParametersBuilder}
+             * and the UI in
+             * {@link com.dev.idea.plugins.tomcat.ui.server.sections.ApplicationServerSection}
+             * — an imported config whose persisted path is stale but whose name or
+             * ID still matches a registered server should launch, since both
+             * other gates already reconcile it.
+             *
+             * <p>Called only from the {@link #validate(TomcatRunConfiguration)}
+             * overload because it touches the application-level
+             * {@link TomcatServerManagerState} service. The pure
+             * {@link #validate(TomcatConfigurationData)} overload stays
+             * service-free for headless unit tests.
              */
-            private static void validateTomcatServerRegistration(@NotNull TomcatConfigurationData data)
+            private static void reconcileTomcatServerRegistration(@NotNull TomcatConfigurationData data)
                     throws RuntimeConfigurationException {
                 TomcatInfo persisted = data.getTomcatInfo();
                 if (persisted == null) return; // already caught by validateTomcatServer
@@ -93,21 +109,29 @@ package com.dev.idea.plugins.tomcat.conf;
                     state = TomcatServerManagerState.getInstance();
                 } catch (Throwable t) {
                     // No Application service — headless test path. Pure data validator
-                    // already succeeded; runtime strictness is applied inside
+                    // still runs; runtime strictness is applied inside
                     // TomcatJavaParametersBuilder.getCatalinaHome() as a second gate.
                     LOG.debug("Skipping registration check: service unavailable", t);
                     return;
                 }
                 TomcatInfo resolved = state.resolve(persisted);
-                if (resolved != null) return;
+                if (resolved == null) {
+                    String name = persisted.getName();
+                    String path = persisted.getPath();
+                    String displayName = !name.isEmpty() ? name : (!path.isEmpty() ? path : "(unnamed)");
+                    throw new RuntimeConfigurationException(
+                            "Tomcat server '" + displayName + "' is not registered."
+                                    + " Open the run configuration and select a server from Application Servers,"
+                                    + " or add one via Configure.");
+                }
 
-                String name = persisted.getName();
-                String path = persisted.getPath();
-                String displayName = !name.isEmpty() ? name : (!path.isEmpty() ? path : "(unnamed)");
-                throw new RuntimeConfigurationException(
-                        "Tomcat server '" + displayName + "' is not registered."
-                                + " Open the run configuration and select a server from Application Servers,"
-                                + " or add one via Configure.");
+                if (resolved != persisted) {
+                    LOG.info("Validator reconciled drifted persisted reference"
+                            + " (id=" + persisted.getId() + ", path=" + persisted.getPath() + ")"
+                            + " to registered server (id=" + resolved.getId()
+                            + ", path=" + resolved.getPath() + ")");
+                    data.setTomcatInfo(resolved);
+                }
             }
 
             private static void validateTomcatServer(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
