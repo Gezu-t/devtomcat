@@ -26,19 +26,22 @@ public class RemoteConfig {
      * Validates a Tomcat Manager URL.
      * Accepts: http(s)://host[:port]/manager[/subpath]
      * The host may be a hostname, IPv4 literal, or bracketed IPv6 literal.
-     * Bracketed hosts accept any non-whitespace, non-slash, non-closing-bracket
-     * content, which covers every RFC 3986 {@code IP-literal} form:
-     * <ul>
-     *   <li>{@code [::1]}, {@code [2001:db8::1]}</li>
-     *   <li>IPv4-mapped: {@code [::ffff:192.0.2.1]}</li>
-     *   <li>Zone-qualified: {@code [fe80::1%25en0]}</li>
-     * </ul>
      * Port must be 1-65535 if present.
      *
-     * <p>The regex is a loose structural guard; {@link #isValidManagerUrl}
-     * additionally parses the URL as a {@link java.net.URI} so syntactically
-     * valid but semantically broken inputs (empty host, out-of-range port,
-     * bogus scheme) are rejected by the authoritative validator.
+     * <p>Supported bracketed IPv6 forms (all reachable today):
+     * <ul>
+     *   <li>basic: {@code [::1]}, {@code [2001:db8::1]}</li>
+     *   <li>IPv4-mapped: {@code [::ffff:192.0.2.1]}</li>
+     *   <li>zone-qualified: {@code [fe80::1%25en0]}</li>
+     * </ul>
+     *
+     * <p>The regex is a loose structural guard that would pass additional
+     * RFC 3986 IP-literal shapes (notably {@code IPvFuture}), but
+     * {@link #isValidManagerUrl} delegates to {@link java.net.URI} as the
+     * authoritative validator — and this JDK's {@code URI} parser rejects
+     * {@code IPvFuture}. That narrower JDK-imposed contract is what this
+     * class actually accepts; the regex is kept loose only so the common
+     * forms above reach the URI validator unfiltered.
      */
     public static final Pattern MANAGER_URL_PATTERN = Pattern.compile(
             "^https?://(?:\\[[^\\s/\\]]+]|[a-zA-Z0-9.-]+)(:\\d{1,5})?/manager(/\\w+)?$"

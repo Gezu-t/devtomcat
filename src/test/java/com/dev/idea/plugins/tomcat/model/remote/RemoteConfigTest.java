@@ -145,6 +145,17 @@ class RemoteConfigTest {
         void emptyBracketsRejected() {
             assertFalse(RemoteConfig.isValidManagerUrl("http://[]:8080/manager"));
         }
+
+        @Test
+        @DisplayName("rejects IPvFuture literals (RFC 3986 form unsupported by java.net.URI)")
+        void ipvFutureNotSupported() {
+            // Pins a known limitation: the regex would let this through, but
+            // java.net.URI.create() throws on IPvFuture, and URI is the
+            // authoritative validator. If a future JDK starts accepting it,
+            // this test will flip and we can update the javadoc.
+            assertFalse(RemoteConfig.isValidManagerUrl(
+                    "http://[v1.fe80::a+en1]:8080/manager"));
+        }
     }
 
     // =========================================================================
