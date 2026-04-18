@@ -218,6 +218,13 @@ public class DeploymentTableManager {
         if (isValidIndex(selectedIndex)) {
             listModel.setElementAt(deployment, selectedIndex);
             LOG.debug("Updated deployment: " + deployment.getDisplayName());
+            // fire deploymentChangeListener too so context-path edits made
+            // through the edit dialog propagate to the browser URL, matching
+            // the behaviour of updateSelectedContext() for the inline field.
+            // Previously this fired only fireSelectionChanged(), so a dialog
+            // edit of the context path saved cleanly but the browser URL
+            // kept pointing at the pre-edit context on the next launch.
+            fireDeploymentChanged();
             fireSelectionChanged();
         }
     }
