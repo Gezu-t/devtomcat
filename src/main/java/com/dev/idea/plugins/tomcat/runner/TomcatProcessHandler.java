@@ -80,6 +80,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final int shutdownPort;
     private final int httpPort;
     @Nullable private final PortConfig resolvedPorts;
+    /**
+     * The JDWP port this process is attached to (post-conflict-resolution),
+     * or {@code -1} when the handler is not running under the debug executor.
+     * Carried across same-executor restarts so a TIME_WAIT socket on the just-
+     * released port doesn't force the new launch onto a different JDWP port.
+     */
+    private final int resolvedDebugPort;
     private final RunnerSettings runnerSettings;
     /**
      * Per-launch identifier assigned when "Allow parallel run" is active — this
@@ -120,7 +127,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                                 @NotNull String executorId,
                                 @Nullable RunnerAndConfigurationSettings launchSettings) {
         this(process, commandLine, charset, deploymentLogger, configuration,
-                runnerSettings, resolvedPorts, executorId, launchSettings, null);
+                runnerSettings, resolvedPorts, -1, executorId, launchSettings, null);
     }
 
     public TomcatProcessHandler(@NotNull Process process,
@@ -130,6 +137,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                                 @NotNull TomcatRunConfiguration configuration,
                                 @NotNull RunnerSettings runnerSettings,
                                 @Nullable PortConfig resolvedPorts,
+                                int resolvedDebugPort,
                                 @NotNull String executorId,
                                 @Nullable RunnerAndConfigurationSettings launchSettings,
                                 @Nullable String runId) {
@@ -145,6 +153,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         // Use resolved ports (post-conflict-detection) when available, fall back to config
         PortConfig ports = resolvedPorts != null ? resolvedPorts : configuration.getConfigData().getPortConfig();
         this.resolvedPorts = resolvedPorts;
+        this.resolvedDebugPort = resolvedDebugPort;
         this.shutdownPort = ports.getShutdown();
         this.httpPort = ports.getHttp();
         // Build lifecycle listener from event consumers
@@ -344,6 +353,15 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      *
      * <p>Runs on a pooled thread — the cleanup walks work/, logs/, temp/, and
      * the mirror-managed subtree which can be sizable.
+     *
+     * <p><b>Safety contract:</b> the resolved path's parent directory name must
+     * equal {@link TomcatProjectUtils#PARALLEL_RUNS_SUBDIR} ({@code .runs}) before
+     * anything is deleted. {@link TomcatProjectUtils#getCatalinaBase} ignores
+     * {@code runId} when the user pinned an explicit CATALINA_BASE, so without
+     * this check we would recursively delete whatever directory the user pinned.
+     * {@link TomcatCommandLineState#resolveRunId()} already refuses to assign a
+     * runId when a pin is in effect; this is defense-in-depth against any future
+     * code path that constructs a handler with a runId directly.
      */
     private void cleanupParallelRunBase() {
         if (runId == null) {
@@ -351,6 +369,16 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
         Path base = TomcatProjectUtils.getCatalinaBase(configuration, runId);
         if (base == null || !Files.isDirectory(base)) {
+            return;
+        }
+        Path parent = base.getParent();
+        if (parent == null
+                || parent.getFileName() == null
+                || !TomcatProjectUtils.PARALLEL_RUNS_SUBDIR.equals(parent.getFileName().toString())) {
+            LOG.warn("Refusing to delete CATALINA_BASE '" + base + "' on process exit: "
+                    + "path is not under the " + TomcatProjectUtils.PARALLEL_RUNS_SUBDIR
+                    + "/ isolation subtree (likely a pinned user directory). "
+                    + "runId was '" + runId + "'.");
             return;
         }
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
@@ -788,6 +816,14 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     @Nullable
     public PortConfig getResolvedPorts() {
         return resolvedPorts;
+    }
+
+    /**
+     * Returns the JDWP port this process was launched on (post-conflict-resolution),
+     * or {@code -1} if the handler is not attached under the debug executor.
+     */
+    public int getResolvedDebugPort() {
+        return resolvedDebugPort;
     }
 
     private static void closeQuietly(java.io.Closeable closeable) {

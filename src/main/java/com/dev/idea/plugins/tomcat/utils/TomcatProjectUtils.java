@@ -48,8 +48,12 @@ package com.dev.idea.plugins.tomcat.utils;
          * Subdirectory under the per-config CATALINA_BASE where isolated parallel-run
          * instances live. Keeps per-run state under a single predictable branch so
          * stale cleanup is easy and never reaches into the shared base directly.
+         *
+         * <p>Public so cross-package callers (e.g. process-exit cleanup in
+         * {@code TomcatProcessHandler}) can verify that a path they're about to
+         * delete really is under this isolation subtree.
          */
-        static final String PARALLEL_RUNS_SUBDIR = ".runs";
+        public static final String PARALLEL_RUNS_SUBDIR = ".runs";
 
         /**
          * Returns the CATALINA_BASE directory for a run configuration, optionally
@@ -159,7 +163,13 @@ package com.dev.idea.plugins.tomcat.utils;
 
             @Nullable
         public static Path getLogsDirectory(@NotNull TomcatRunConfiguration config) {
-            Path catalinaBase = getCatalinaBase(config);
+            return getLogsDirectory(config, null);
+        }
+
+            @Nullable
+        public static Path getLogsDirectory(@NotNull TomcatRunConfiguration config,
+                                             @Nullable String runId) {
+            Path catalinaBase = getCatalinaBase(config, runId);
             if (catalinaBase == null) {
                 return null;
             }
@@ -168,7 +178,13 @@ package com.dev.idea.plugins.tomcat.utils;
 
             @Nullable
         public static Path getWorkDirectory(@NotNull TomcatRunConfiguration config) {
-            Path catalinaBase = getCatalinaBase(config);
+            return getWorkDirectory(config, null);
+        }
+
+            @Nullable
+        public static Path getWorkDirectory(@NotNull TomcatRunConfiguration config,
+                                             @Nullable String runId) {
+            Path catalinaBase = getCatalinaBase(config, runId);
             if (catalinaBase == null) {
                 return null;
             }
@@ -177,7 +193,13 @@ package com.dev.idea.plugins.tomcat.utils;
 
             @Nullable
         public static Path getConfDirectory(@NotNull TomcatRunConfiguration config) {
-            Path catalinaBase = getCatalinaBase(config);
+            return getConfDirectory(config, null);
+        }
+
+            @Nullable
+        public static Path getConfDirectory(@NotNull TomcatRunConfiguration config,
+                                             @Nullable String runId) {
+            Path catalinaBase = getCatalinaBase(config, runId);
             if (catalinaBase == null) {
                 return null;
             }
@@ -186,7 +208,20 @@ package com.dev.idea.plugins.tomcat.utils;
 
             @Nullable
         public static Path getWebappsDirectory(@NotNull TomcatRunConfiguration config) {
-            Path catalinaBase = getCatalinaBase(config);
+            return getWebappsDirectory(config, null);
+        }
+
+            /**
+             * Returns the webapps directory for this configuration, isolated per
+             * {@code runId} when the process is running in parallel-run mode. Callers
+             * with access to a {@link com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler}
+             * should pass the handler's {@code runId} so hot-update operations target
+             * the right instance's webapps tree instead of the shared one.
+             */
+            @Nullable
+        public static Path getWebappsDirectory(@NotNull TomcatRunConfiguration config,
+                                                @Nullable String runId) {
+            Path catalinaBase = getCatalinaBase(config, runId);
             if (catalinaBase == null) {
                 return null;
             }

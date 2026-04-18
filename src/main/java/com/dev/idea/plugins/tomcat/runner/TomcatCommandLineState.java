@@ -417,8 +417,16 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     /**
      * Resolves (and lazily assigns) the per-launch identifier used to isolate the
      * CATALINA_BASE when the user enabled <em>Allow parallel run</em>. Returns
-     * {@code null} when parallel-run is disabled, so the launch uses the shared
-     * per-config base — preserving the historical single-instance behaviour.
+     * {@code null} when parallel-run is disabled <em>or</em> when an explicit
+     * {@code CATALINA_BASE} is pinned — in either case the launch uses the shared
+     * base and historical single-instance behaviour is preserved.
+     *
+     * <p>The pinned-base guard is critical: {@link TomcatProjectUtils#getCatalinaBase}
+     * deliberately returns the user's pinned directory regardless of {@code runId},
+     * so if we assigned a runId here the per-run cleanup in
+     * {@link TomcatProcessHandler} would walk and delete the pinned directory on
+     * process exit — data loss. When parallel mode is on and the base is pinned,
+     * parallel isolation is impossible, so we degrade gracefully and warn.
      *
      * <p>The id is derived from {@link ExecutionEnvironment#getExecutionId()} —
      * unique per launch within the IDE session and stable across the lifetime of
@@ -430,6 +438,19 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (!configuration.isAllowMultipleInstances()) {
             return null;
         }
+        String pinned = configuration.getConfigData().getCatalinaBase();
+        if (StringUtil.isNotEmpty(pinned)) {
+            LOG.warn("Allow parallel run: CATALINA_BASE is pinned to '" + pinned
+                    + "' — per-run isolation disabled to prevent data loss on cleanup. "
+                    + "Parallel launches will share the pinned base.");
+            if (deploymentLogger != null) {
+                deploymentLogger.logServerWarning(
+                        "Allow parallel run is ignored because CATALINA_BASE is pinned — "
+                        + "parallel instances would collide on the shared directory. "
+                        + "Unset the pinned base to enable per-run isolation.");
+            }
+            return null;
+        }
         String current = runId;
         if (current != null) return current;
         long id = getEnvironment().getExecutionId();
@@ -438,6 +459,18 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // leading '-' in the directory name on pathological IDs.
         current = "run-" + Long.toUnsignedString(id, 36);
         runId = current;
+        // Known limitation: IntelliJ's LogFileOptions are attached to the run
+        // configuration, not the process, so all parallel launches of this
+        // config share one set of Log tabs pointing at the shared per-config
+        // logs directory. The actual per-instance logs are written under the
+        // isolated CATALINA_BASE; tell the user where to find them.
+        if (deploymentLogger != null) {
+            deploymentLogger.logServerInfo(
+                    "Parallel run active — isolated CATALINA_BASE under .runs/" + current
+                    + "/. Log tabs continue to reflect the shared per-config logs/ "
+                    + "directory; per-instance logs for this launch live under the "
+                    + "isolated base's logs/ subfolder (shown in the server output on startup).");
+        }
         return current;
     }
 
@@ -524,6 +557,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 configuration,
                 runnerSettings,
                 resolvedPorts,
+                resolvedDebugPort,
                 executorId,
                 getEnvironment().getRunnerAndConfigurationSettings(),
                 resolveRunId()

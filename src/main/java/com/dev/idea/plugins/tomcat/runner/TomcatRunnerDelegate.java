@@ -204,9 +204,17 @@ public final class TomcatRunnerDelegate {
         // just-released socket in OS TIME_WAIT state, and bump the port upward —
         // leading to the user-visible "port keeps increasing" behavior.
         com.dev.idea.plugins.tomcat.model.PortConfig carriedPorts = conflicting.getResolvedPorts();
+        int carriedDebugPort = conflicting.getResolvedDebugPort();
+        // Prefer the handler's original launch settings over the executor's environment,
+        // matching the identity the runner delegate uses for descriptor lookup. This keeps
+        // the relaunch bound to the exact configuration that was running even if the
+        // resolved settings have diverged (rename, clone, or lookup-by-reference drift).
+        RunnerAndConfigurationSettings preferredSettings = conflicting.getLaunchSettings();
 
         ProcessStopSupport.stopCleanAndThen(project, conflicting, oldDescriptor, oldExecutor, () -> {
-            RunnerAndConfigurationSettings settings = env.getRunnerAndConfigurationSettings();
+            RunnerAndConfigurationSettings settings = preferredSettings != null
+                    ? preferredSettings
+                    : env.getRunnerAndConfigurationSettings();
             if (settings == null) {
                 settings = RunManager.getInstance(project).findSettings(config);
             }
@@ -217,6 +225,9 @@ public final class TomcatRunnerDelegate {
                     ExecutionEnvironment newEnv = builder.build();
                     if (carriedPorts != null) {
                         newEnv.putUserData(TomcatCommandLineState.CARRIED_PORTS_KEY, carriedPorts);
+                    }
+                    if (carriedDebugPort > 0) {
+                        newEnv.putUserData(TomcatCommandLineState.CARRIED_DEBUG_PORT_KEY, carriedDebugPort);
                     }
                     newEnv.getRunner().execute(newEnv);
                     LOG.info("Relaunched " + config.getName()

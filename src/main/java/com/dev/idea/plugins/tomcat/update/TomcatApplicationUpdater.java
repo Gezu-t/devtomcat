@@ -224,14 +224,40 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             RunContentDescriptor descriptor = ProcessStopSupport.findDescriptor(project, processHandler);
             final Executor capturedExecutor = resolvedExecutor;
 
+            // Carry the running process's resolved ports (and JDWP port, if debugging) to
+            // the relaunch. Without this the new launch re-runs port conflict detection,
+            // sees the just-released socket in OS TIME_WAIT state, and bumps the port
+            // upward — the same "port keeps increasing" symptom the rerun path already
+            // guards against in TomcatRunnerDelegate.stopAndRelaunch.
+            com.dev.idea.plugins.tomcat.model.PortConfig carriedPorts = processHandler.getResolvedPorts();
+            int carriedDebugPort = processHandler.getResolvedDebugPort();
+            // Prefer the handler's original launch settings, the same stable identity the
+            // runner delegate uses for descriptor lookup. findSettings(configuration) is a
+            // fallback for handlers launched outside the normal editor flow.
+            RunnerAndConfigurationSettings preferredSettings = processHandler.getLaunchSettings();
+
             ProcessStopSupport.stopCleanAndThen(project, processHandler, descriptor, capturedExecutor, () -> {
                 try {
-                    RunnerAndConfigurationSettings settings =
-                            RunManager.getInstance(project).findSettings(configuration);
+                    RunnerAndConfigurationSettings settings = preferredSettings != null
+                            ? preferredSettings
+                            : RunManager.getInstance(project).findSettings(configuration);
                     if (settings != null) {
-                        com.intellij.execution.runners.ExecutionEnvironmentBuilder
-                                .create(capturedExecutor, settings).buildAndExecute();
-                        LOG.info("Tomcat restarted in " + capturedExecutor.getActionName() + " mode");
+                        com.intellij.execution.runners.ExecutionEnvironment newEnv =
+                                com.intellij.execution.runners.ExecutionEnvironmentBuilder
+                                        .create(capturedExecutor, settings).build();
+                        if (carriedPorts != null) {
+                            newEnv.putUserData(
+                                    com.dev.idea.plugins.tomcat.runner.TomcatCommandLineState.CARRIED_PORTS_KEY,
+                                    carriedPorts);
+                        }
+                        if (carriedDebugPort > 0) {
+                            newEnv.putUserData(
+                                    com.dev.idea.plugins.tomcat.runner.TomcatCommandLineState.CARRIED_DEBUG_PORT_KEY,
+                                    carriedDebugPort);
+                        }
+                        newEnv.getRunner().execute(newEnv);
+                        LOG.info("Tomcat restarted in " + capturedExecutor.getActionName() + " mode"
+                                + (carriedPorts != null ? " (reusing ports)" : ""));
                     } else {
                         logger.logServerError("Could not find run configuration settings for restart");
                     }
@@ -249,7 +275,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * Exploded artifacts are skipped — Tomcat handles their reload automatically.
      */
     private void redeployWarArtifacts(@NotNull TomcatDeploymentLogger logger) {
-        Path webappsDir = TomcatProjectUtils.getWebappsDirectory(configuration);
+        Path webappsDir = TomcatProjectUtils.getWebappsDirectory(configuration, processHandler.getRunId());
         if (webappsDir == null) {
             LOG.warn("No webapps directory resolved; WAR artifacts will not be updated");
             logger.logServerWarning("Cannot locate webapps directory — WAR update skipped");
