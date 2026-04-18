@@ -21,13 +21,6 @@ class UiConfigTest {
         }
 
         @Test
-        @DisplayName("show logs page false by default")
-        void showLogsDefault() {
-            assertFalse(new UiConfig().isShowLogsPage());
-            assertFalse(UiConfig.DEFAULT_SHOW_LOGS_PAGE);
-        }
-
-        @Test
         @DisplayName("allow multiple instances false by default")
         void multipleInstancesDefault() {
             assertFalse(new UiConfig().isAllowMultipleInstances());
@@ -43,42 +36,12 @@ class UiConfigTest {
         @DisplayName("copies all fields")
         void copiesAll() {
             UiConfig original = new UiConfig();
-            original.setShowLogsPage(true); // implies activateToolWindow=true
+            original.setActivateToolWindow(false);
             original.setAllowMultipleInstances(true);
 
             UiConfig copy = new UiConfig(original);
             assertEquals(original.isActivateToolWindow(), copy.isActivateToolWindow());
-            assertEquals(original.isShowLogsPage(), copy.isShowLogsPage());
             assertEquals(original.isAllowMultipleInstances(), copy.isAllowMultipleInstances());
-        }
-    }
-
-    @Nested
-    @DisplayName("invariant: showLogsPage requires activateToolWindow")
-    class Invariants {
-
-        @Test
-        @DisplayName("disabling tool window clears show logs page")
-        void disablingToolWindowClearsLogs() {
-            UiConfig config = new UiConfig();
-            config.setShowLogsPage(true);
-            assertTrue(config.isShowLogsPage());
-
-            config.setActivateToolWindow(false);
-            assertFalse(config.isShowLogsPage());
-            assertFalse(config.isActivateToolWindow());
-        }
-
-        @Test
-        @DisplayName("enabling show logs page implies activate tool window")
-        void enableLogsImpliesActivate() {
-            UiConfig config = new UiConfig();
-            config.setActivateToolWindow(false);
-            assertFalse(config.isActivateToolWindow());
-
-            config.setShowLogsPage(true);
-            assertTrue(config.isActivateToolWindow());
-            assertTrue(config.isShowLogsPage());
         }
     }
 
@@ -94,19 +57,6 @@ class UiConfigTest {
             config.setActivateToolWindow(false);
             assertFalse(config.shouldShowToolWindow());
         }
-
-        @Test
-        @DisplayName("shouldShowLogsPage requires both flags")
-        void shouldShowLogsPage() {
-            UiConfig config = new UiConfig();
-            assertFalse(config.shouldShowLogsPage()); // activateToolWindow=true, showLogsPage=false
-
-            config.setShowLogsPage(true);
-            assertTrue(config.shouldShowLogsPage()); // both true
-
-            config.setActivateToolWindow(false);
-            assertFalse(config.shouldShowLogsPage()); // activateToolWindow=false clears showLogsPage
-        }
     }
 
     @Nested
@@ -117,12 +67,11 @@ class UiConfigTest {
         @DisplayName("resets all fields to defaults")
         void resetsAll() {
             UiConfig config = new UiConfig();
-            config.setShowLogsPage(true);
+            config.setActivateToolWindow(false);
             config.setAllowMultipleInstances(true);
 
             config.resetToDefaults();
             assertTrue(config.isActivateToolWindow());
-            assertFalse(config.isShowLogsPage());
             assertFalse(config.isAllowMultipleInstances());
         }
     }
@@ -135,7 +84,7 @@ class UiConfigTest {
         @DisplayName("clone equals original")
         void cloneEquals() {
             UiConfig original = new UiConfig();
-            original.setShowLogsPage(true);
+            original.setAllowMultipleInstances(true);
             UiConfig cloned = original.clone();
             assertEquals(original, cloned);
         }
@@ -144,11 +93,11 @@ class UiConfigTest {
         @DisplayName("clone is independent")
         void cloneIndependent() {
             UiConfig original = new UiConfig();
-            original.setShowLogsPage(true);
+            original.setActivateToolWindow(true);
             UiConfig cloned = original.clone();
             cloned.setActivateToolWindow(false);
-            assertTrue(original.isShowLogsPage());
-            assertFalse(cloned.isShowLogsPage());
+            assertTrue(original.isActivateToolWindow());
+            assertFalse(cloned.isActivateToolWindow());
         }
     }
 
@@ -184,7 +133,6 @@ class UiConfigTest {
         void includesFields() {
             String str = new UiConfig().toString();
             assertTrue(str.contains("activate="));
-            assertTrue(str.contains("showLogsPage="));
             assertTrue(str.contains("multiInstance="));
         }
     }

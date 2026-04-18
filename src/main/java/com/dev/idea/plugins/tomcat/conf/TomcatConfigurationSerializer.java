@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.CoverageConfig;
-import com.dev.idea.plugins.tomcat.model.LogFileConfig;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
@@ -81,7 +80,6 @@ public class TomcatConfigurationSerializer {
     private static final String TAG_KEY = "key";
 
     private static final String ATTR_ACTIVATE_TOOL_WINDOW = "activateToolWindow";
-    private static final String ATTR_FOCUS_TOOL_WINDOW = "focusToolWindow";
     private static final String ATTR_JRE_SELECTION = "jreSelection";
     private static final String ATTR_ALLOW_MULTIPLE_INSTANCES = "allowMultipleInstances";
     private static final String ATTR_STORE_AS_PROJECT_FILE = "storeAsProjectFile";
@@ -163,7 +161,6 @@ public class TomcatConfigurationSerializer {
         element.setAttribute(ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, String.valueOf(updateConfig.isShowFrameDeactivationDialog()));
         var uiConfig = data.getUiConfig();
         element.setAttribute(ATTR_ACTIVATE_TOOL_WINDOW, String.valueOf(uiConfig.isActivateToolWindow()));
-        element.setAttribute(ATTR_FOCUS_TOOL_WINDOW, String.valueOf(uiConfig.isShowLogsPage()));
 
         element.setAttribute(ATTR_JRE_SELECTION, StringUtil.notNullize(data.getJreSelection()));
         element.setAttribute(ATTR_ALLOW_MULTIPLE_INSTANCES, String.valueOf(data.isAllowMultipleInstances()));
@@ -179,7 +176,9 @@ public class TomcatConfigurationSerializer {
         boolean storedInSafe = RemoteCredentialStore.storePassword(rc.getManagerUrl(), rc.getPassword());
         element.setAttribute(ATTR_REMOTE_PASSWORD, storedInSafe ? "" : StringUtil.notNullize(rc.getPassword()));
         element.setAttribute(ATTR_USE_REMOTE_CREDENTIALS, String.valueOf(rc.isUseCredentials()));
-        writeLogFileConfig(element, data.getLogFileConfig());
+        // Log file config (Is Active, Skip Content, Save to File, Show Console)
+        // is handled by RunConfigurationBase.writeExternal() via LogConfigurationPanel.
+        // No custom serialization needed — the framework persists it natively.
         writeTomcatInfo(element, data.getTomcatInfo());
         writeCoverageConfig(element, data.getCoverageConfig());
 
@@ -236,28 +235,7 @@ public class TomcatConfigurationSerializer {
         }
     }
 
-    private static void writeLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {
-        Element logElem = new Element("logFileConfig");
 
-        logElem.setAttribute("showStdout", String.valueOf(config.isShowStdoutConsole()));
-        logElem.setAttribute("showStderr", String.valueOf(config.isShowStderrConsole()));
-        logElem.setAttribute("saveToFile", String.valueOf(config.isSaveConsoleToFile()));
-        logElem.setAttribute("saveFilePath", config.getSaveConsoleFilePath());
-
-        for (String path : config.getLogFiles()) {
-            if (path == null) continue;
-
-            String normalized = path.trim();
-            if (normalized.isEmpty()) continue;
-
-            Element file = new Element("file");
-            file.setAttribute("path", normalized);
-            file.setAttribute("skipContent", String.valueOf(config.isSkipContent(normalized)));
-            logElem.addContent(file);
-        }
-
-        element.addContent(logElem);
-    }
 
     private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull List<DeploymentArtifact> artifacts) {
         Element deployments = new Element(TAG_DEPLOYMENTS);
@@ -394,7 +372,6 @@ public class TomcatConfigurationSerializer {
         readBool(element, ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, updateConfig::setShowFrameDeactivationDialog);
         var uiConfig = data.getUiConfig();
         readBool(element, ATTR_ACTIVATE_TOOL_WINDOW, uiConfig::setActivateToolWindow);
-        readBool(element, ATTR_FOCUS_TOOL_WINDOW, uiConfig::setShowLogsPage);
 
         data.setJreSelection(element.getAttributeValue(ATTR_JRE_SELECTION));
         readBool(element, ATTR_ALLOW_MULTIPLE_INSTANCES, data::setAllowMultipleInstances);
@@ -439,7 +416,7 @@ public class TomcatConfigurationSerializer {
             LOG.debug("Cannot schedule deferred credential retrieval", e);
         }
         readBool(element, ATTR_USE_REMOTE_CREDENTIALS, rc::setUseCredentials);
-        readLogFileConfig(element, data.getLogFileConfig());
+        // Log file config is handled by RunConfigurationBase.readExternal().
         readTomcatInfo(element, data::setTomcatInfo);
         readCoverageConfig(element, data.getCoverageConfig());
 
@@ -496,43 +473,7 @@ public class TomcatConfigurationSerializer {
         return keys;
     }
 
-    private static void readLogFileConfig(@NotNull Element element, @NotNull LogFileConfig config) {
-        Element logElem = element.getChild("logFileConfig");
-        if (logElem == null) return;
 
-        String showStdout = logElem.getAttributeValue("showStdout");
-        if (showStdout != null) config.setShowStdoutConsole(Boolean.parseBoolean(showStdout));
-
-        String showStderr = logElem.getAttributeValue("showStderr");
-        if (showStderr != null) config.setShowStderrConsole(Boolean.parseBoolean(showStderr));
-
-        String saveToFile = logElem.getAttributeValue("saveToFile");
-        if (saveToFile != null) config.setSaveConsoleToFile(Boolean.parseBoolean(saveToFile));
-
-        String saveFilePath = logElem.getAttributeValue("saveFilePath");
-        if (saveFilePath != null) config.setSaveConsoleFilePath(saveFilePath);
-
-        List<String> files = new ArrayList<>();
-        Map<String, Boolean> skipMap = new HashMap<>();
-        for (Element file : logElem.getChildren("file")) {
-            String path = file.getAttributeValue("path");
-            if (path != null) {
-                String normalized = path.trim();
-                if (!normalized.isEmpty()) {
-                    files.add(normalized);
-                    String skip = file.getAttributeValue("skipContent");
-                    if (skip != null) {
-                        skipMap.put(normalized, Boolean.parseBoolean(skip));
-                    }
-                }
-            }
-        }
-
-        if (!files.isEmpty()) {
-            config.setLogFiles(files);
-        }
-        config.setSkipContentEntries(skipMap);
-    }
 
     private static void readDeploymentArtifacts(@NotNull Element element, @NotNull DeploymentConfig deploymentConfig) {
         Element deployments = element.getChild(TAG_DEPLOYMENTS);

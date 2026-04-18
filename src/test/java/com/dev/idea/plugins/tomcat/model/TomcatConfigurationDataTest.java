@@ -30,7 +30,6 @@ class TomcatConfigurationDataTest {
         TomcatConfigurationData data = new TomcatConfigurationData();
         assertNotNull(data.getPortConfig());
         assertNotNull(data.getDeploymentConfig());
-        assertNotNull(data.getLogFileConfig());
         assertNotNull(data.getVmConfig());
         assertNotNull(data.getBrowserConfig());
         assertNotNull(data.getUpdateConfig());
@@ -47,7 +46,6 @@ class TomcatConfigurationDataTest {
         // IntelliJ @NotNull instrumentation throws IllegalArgumentException at runtime
         assertThrows(Exception.class, () -> data.setPortConfig(null));
         assertThrows(Exception.class, () -> data.setDeploymentConfig(null));
-        assertThrows(Exception.class, () -> data.setLogFileConfig(null));
         assertThrows(Exception.class, () -> data.setVmConfig(null));
         assertThrows(Exception.class, () -> data.setBrowserConfig(null));
         assertThrows(Exception.class, () -> data.setUpdateConfig(null));
@@ -147,7 +145,7 @@ class TomcatConfigurationDataTest {
     }
 
     @Test
-    @DisplayName("copyFrom copies portable fields but leaves UI/debug/coverage/log untouched")
+    @DisplayName("copyFrom copies portable fields but leaves UI/debug/coverage untouched")
     void copyFromSelectiveFields() {
         TomcatConfigurationData source = new TomcatConfigurationData();
         source.setContextPath("/imported");
@@ -164,7 +162,6 @@ class TomcatConfigurationDataTest {
         TomcatConfigurationData target = new TomcatConfigurationData();
         target.getDebugConfig().setPort(7777);
         target.getUiConfig().setAllowMultipleInstances(true);
-        target.getLogFileConfig().addLogFile("/var/log/custom.log");
 
         target.copyFrom(source);
 
@@ -181,7 +178,6 @@ class TomcatConfigurationDataTest {
         // Non-portable fields untouched
         assertEquals(7777, target.getDebugConfig().getPort());
         assertTrue(target.getUiConfig().isAllowMultipleInstances());
-        assertTrue(target.getLogFileConfig().hasLogFiles());
 
         // Source independence (deep copy)
         source.getPortConfig().setHttp(1111);

@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.conf;
 
          import com.dev.idea.plugins.tomcat.model.RunnerSettings;
          import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
+         import com.intellij.execution.configurations.LogFileOptions;
          import com.intellij.openapi.diagnostic.Logger;
          import org.jetbrains.annotations.NotNull;
 
@@ -52,7 +53,6 @@ package com.dev.idea.plugins.tomcat.conf;
                      dst.setUiConfig(src.getUiConfig().clone());
                      dst.setDebugConfig(src.getDebugConfig().clone());
                      dst.setRemoteConfig(src.getRemoteConfig().clone());
-                     dst.setLogFileConfig(src.getLogFileConfig().clone());
                      dst.setCoverageConfig(src.getCoverageConfig().clone());
 
                      // Deep-clone per-runner settings (startup/shutdown scripts, env vars)
@@ -62,6 +62,10 @@ package com.dev.idea.plugins.tomcat.conf;
                          clonedRunnerSettings.put(entry.getKey(), entry.getValue().clone());
                      }
                      dst.setRunnerSettingsMap(clonedRunnerSettings);
+
+                     // Clone platform-managed log and console settings that live on
+                     // RunConfigurationBase, not in TomcatConfigurationData.
+                     copyPlatformLogSettings(original, clone);
 
                      // Clone fields on TomcatRunConfiguration itself (outside TomcatConfigurationData)
                      clone.setDocBase(original.getDocBase());
@@ -86,6 +90,25 @@ package com.dev.idea.plugins.tomcat.conf;
                  if (data.getPortConfig().getHttp() == 0) {
                      LOG.warn(String.format("Clone '%s' has invalid HTTP port (0)", clone.getName()));
                  }
+             }
+
+             private static void copyPlatformLogSettings(@NotNull TomcatRunConfiguration original,
+                                                         @NotNull TomcatRunConfiguration clone) {
+                 clone.removeAllLogFiles();
+                 for (LogFileOptions logFile : original.getAllLogFiles()) {
+                     clone.addLogFile(
+                             logFile.getPathPattern(),
+                             logFile.getName(),
+                             logFile.isEnabled(),
+                             logFile.isSkipContent(),
+                             logFile.isShowAll()
+                     );
+                 }
+
+                 clone.setShowConsoleOnStdOut(original.isShowConsoleOnStdOut());
+                 clone.setShowConsoleOnStdErr(original.isShowConsoleOnStdErr());
+                 clone.setSaveOutputToFile(original.isSaveOutputToFile());
+                 clone.setFileOutputPath(original.getOutputFilePath());
              }
 
          }

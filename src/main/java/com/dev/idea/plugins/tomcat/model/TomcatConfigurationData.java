@@ -28,7 +28,6 @@ package com.dev.idea.plugins.tomcat.model;
             @NotNull private String contextPath = DEFAULT_CONTEXT_PATH;
             @NotNull private PortConfig portConfig = new PortConfig();
             @NotNull private DeploymentConfig deploymentConfig = new DeploymentConfig();
-            @NotNull private LogFileConfig logFileConfig = new LogFileConfig();
             @NotNull private VmConfig vmConfig = new VmConfig();
             @NotNull private BrowserConfig browserConfig = new BrowserConfig();
             @NotNull private UpdateConfig updateConfig = new UpdateConfig();
@@ -82,9 +81,6 @@ package com.dev.idea.plugins.tomcat.model;
             @NotNull public DeploymentConfig getDeploymentConfig() { return deploymentConfig; }
             public void setDeploymentConfig(@NotNull DeploymentConfig config) { this.deploymentConfig = Objects.requireNonNull(config); }
 
-            @NotNull public LogFileConfig getLogFileConfig() { return logFileConfig; }
-            public void setLogFileConfig(@NotNull LogFileConfig config) { this.logFileConfig = Objects.requireNonNull(config); }
-
             @NotNull public VmConfig getVmConfig() { return vmConfig; }
             public void setVmConfig(@NotNull VmConfig config) { this.vmConfig = Objects.requireNonNull(config); }
 
@@ -125,7 +121,6 @@ package com.dev.idea.plugins.tomcat.model;
                 c.contextPath = this.contextPath;
                 c.portConfig = this.portConfig.clone();
                 c.deploymentConfig = this.deploymentConfig.clone();
-                c.logFileConfig = this.logFileConfig.clone();
                 c.vmConfig = this.vmConfig.clone();
                 c.browserConfig = this.browserConfig.clone();
                 c.updateConfig = this.updateConfig.clone();
@@ -152,7 +147,6 @@ package com.dev.idea.plugins.tomcat.model;
              * <p>The following fields are intentionally excluded because they are
              * local/machine-specific and should not travel with shared configs:
              * <ul>
-             *   <li>{@code logFileConfig} — log file paths are machine-specific</li>
              *   <li>{@code debugConfig} — debug ports depend on the local environment</li>
              *   <li>{@code uiConfig} — tool window preferences are per-user</li>
              *   <li>{@code coverageConfig} — coverage patterns are project-specific</li>

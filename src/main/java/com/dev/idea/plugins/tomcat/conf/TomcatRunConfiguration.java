@@ -31,11 +31,10 @@ import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -429,8 +428,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     public boolean isActivateToolWindow()                  { return configData.getUiConfig().isActivateToolWindow(); }
     public void setActivateToolWindow(boolean activate)    { configData.getUiConfig().setActivateToolWindow(activate); }
-    public boolean isShowLogsPage()                        { return configData.getUiConfig().isShowLogsPage(); }
-    public void setShowLogsPage(boolean show)              { configData.getUiConfig().setShowLogsPage(show); }
 
     public boolean isAllowMultipleInstances()              { return configData.isAllowMultipleInstances(); }
     public void setAllowMultipleInstances(boolean allow)   { configData.setAllowMultipleInstances(allow); }
@@ -457,89 +454,59 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     /**
-     * Syncs Tomcat log file entries into the parent's internal log file list.
-     * Called after readExternal() and during initialization so that IntelliJ's
-     * framework finds them in myLogFiles and creates the Run tool window tabs.
+     * Seeds the default Tomcat log entries into {@code myLogFiles} <b>only when
+     * the list is empty</b>. Called from the constructor (fresh config) and
+     * {@link #readExternal(Element)} (legacy configs without {@code <log_file>}
+     * children). Once any log entry exists — whether loaded from XML, added by
+     * the user, or carried over by {@link TomcatConfigurationCloner} — this
+     * method is a no-op so the user's choices are authoritative.
      *
-     * Only adds entries that don't already exist (by name) to prevent duplicate
-     * accumulation across repeated calls. The {@link #getAllLogFiles()} override
-     * ensures correct path/enabled state regardless of what's in myLogFiles.
+     * <p>Previous revisions repaired "missing" defaults on every call, which
+     * silently resurrected log entries the user had deleted through the Logs
+     * tab (see {@code TomcatConfigurationClonerPlatformTest#testRemovedLogEntryStaysRemovedAfterRoundTrip}).
      */
     public void syncTomcatLogFiles() {
+        if (!super.getLogFiles().isEmpty()) return;
+
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
         if (logsDir == null) return;
 
-        // Check which log names are already registered in the internal list
-        Set<String> alreadyRegistered = new HashSet<>();
-        for (LogFileOptions opt : super.getAllLogFiles()) {
-            alreadyRegistered.add(opt.getName());
-        }
-
-        // Only add entries that are missing — avoids duplicate accumulation
-        List<String> enabledLogs = getLogFileConfigurations();
         for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
-            if (alreadyRegistered.contains(logFile.getId())) continue;
-            boolean enabled = enabledLogs.contains(logFile.getId()) || logFile.isEnabledByDefault();
             String path = logFile.resolveFullPath(logsDir);
-            addLogFile(path, logFile.getId(), enabled);
+            addLogFile(path, logFile.getId(), logFile.isEnabledByDefault());
         }
     }
 
     @NotNull
     @Override
     public ArrayList<LogFileOptions> getAllLogFiles() {
+        // Ensure Tomcat log entries exist in the internal list (seeds on first
+        // call, no-op after that). This covers the case where getAllLogFiles() is
+        // called before readExternal() — e.g. by RunContentBuilder at launch.
+        syncTomcatLogFiles();
+
+        // Update dated Tomcat log paths (e.g. catalina.2026-04-16.log) to today's
+        // filename so the console tab finds the right file on disk.
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
-        if (logsDir == null) {
-            return super.getAllLogFiles();
-        }
-
-        // Build a lookup of user-persisted state so we respect Is Active /
-        // Skip Content changes made via the Logs tab (LogConfigurationPanel).
-        Map<String, LogFileOptions> existingByName = new java.util.LinkedHashMap<>();
-        for (LogFileOptions opt : super.getAllLogFiles()) {
-            existingByName.put(opt.getName(), opt);
-        }
-
-        Set<String> tomcatLogIds = new HashSet<>();
-        for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
-            tomcatLogIds.add(logFile.getId());
-        }
-
-        // Keep user-added (non-Tomcat) entries first
-        ArrayList<LogFileOptions> result = new ArrayList<>();
-        for (LogFileOptions opt : existingByName.values()) {
-            if (!tomcatLogIds.contains(opt.getName())) {
-                result.add(opt);
+        if (logsDir != null) {
+            Map<String, String> todayPaths = new HashMap<>();
+            for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
+                todayPaths.put(logFile.getId(), logFile.resolveFullPath(logsDir));
+            }
+            for (LogFileOptions opt : super.getAllLogFiles()) {
+                String todayPath = todayPaths.get(opt.getName());
+                if (todayPath != null) {
+                    opt.setPathPattern(todayPath);
+                }
             }
         }
 
-        // Tomcat log entries: use persisted user state if it exists,
-        // otherwise seed from defaults
-        for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
-            String path = logFile.resolveFullPath(logsDir);
-            LogFileOptions existing = existingByName.get(logFile.getId());
-            if (existing != null) {
-                // Preserve user's Is Active and Skip Content choices;
-                // update the path to today's dated filename.
-                existing.setPathPattern(path);
-                result.add(existing);
-            } else {
-                boolean enabled = logFile.isEnabledByDefault();
-                result.add(new LogFileOptions(logFile.getId(), path, enabled, true, true));
-            }
-        }
-        return result;
+        return super.getAllLogFiles();
     }
 
     // =====================================================================
-    // Log & script accessors
+    // Script accessors
     // =====================================================================
-
-    @NotNull
-    public List<String> getLogFileConfigurations() {
-        List<String> logFiles = configData.getLogFileConfig().getLogFiles();
-        return logFiles != null ? logFiles : new ArrayList<>();
-    }
 
     public void setStartupScript(String startupScript) {
         configData.getRunnerSettings(TomcatConstants.RUN_MODE).setStartupScript(startupScript);

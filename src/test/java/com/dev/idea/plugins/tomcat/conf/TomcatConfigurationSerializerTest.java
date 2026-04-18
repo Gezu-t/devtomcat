@@ -71,7 +71,6 @@ class TomcatConfigurationSerializerTest {
 
         // UI config
         assertEquals(original.getUiConfig().isActivateToolWindow(), restored.getUiConfig().isActivateToolWindow());
-        assertEquals(original.getUiConfig().isShowLogsPage(), restored.getUiConfig().isShowLogsPage());
 
         // Debug config
         assertEquals(original.getDebugConfig().getPort(), restored.getDebugConfig().getPort());
@@ -138,25 +137,6 @@ class TomcatConfigurationSerializerTest {
         Map<String, String> env = restored.getRunnerSettings("Run").getEnvironmentVariables();
         assertEquals("/usr/lib/jvm/java-17", env.get("JAVA_HOME"));
         assertEquals("-Xmx1024m", env.get("CATALINA_OPTS"));
-    }
-
-    @Test
-    @DisplayName("round-trip preserves log file config")
-    void roundTripLogFiles() {
-        TomcatConfigurationData original = new TomcatConfigurationData();
-        original.getLogFileConfig().addLogFile("/var/log/catalina.out");
-        original.getLogFileConfig().addLogFile("/var/log/localhost.log");
-
-        Element element = new Element("configuration");
-        TomcatConfigurationSerializer.write(original, element);
-
-        TomcatConfigurationData restored = new TomcatConfigurationData();
-        TomcatConfigurationSerializer.read(restored, element);
-
-        List<String> logFiles = restored.getLogFileConfig().getLogFiles();
-        assertEquals(2, logFiles.size());
-        assertTrue(logFiles.contains("/var/log/catalina.out"));
-        assertTrue(logFiles.contains("/var/log/localhost.log"));
     }
 
     @Test
