@@ -41,6 +41,39 @@ package com.dev.idea.plugins.tomcat.utils;
          */
         @Nullable
         public static Path getCatalinaBase(@NotNull TomcatRunConfiguration config) {
+            return getCatalinaBase(config, null);
+        }
+
+        /**
+         * Subdirectory under the per-config CATALINA_BASE where isolated parallel-run
+         * instances live. Keeps per-run state under a single predictable branch so
+         * stale cleanup is easy and never reaches into the shared base directly.
+         */
+        static final String PARALLEL_RUNS_SUBDIR = ".runs";
+
+        /**
+         * Returns the CATALINA_BASE directory for a run configuration, optionally
+         * isolated by {@code runId} when "Allow parallel run" is active.
+         *
+         * <p>When {@code runId} is non-null and the user has not pinned an explicit
+         * {@code CATALINA_BASE}, the resolved path is
+         * {@code {systemBase}/{configName}/.runs/{runId}/} — isolated per launch so
+         * two instances of the same configuration don't clobber each other's
+         * {@code work/}, {@code logs/}, or context descriptors.
+         *
+         * <p>An explicit {@code CATALINA_BASE} pinned in the configuration always
+         * wins over {@code runId}: the user took ownership of that directory and
+         * the plugin must not silently redirect them.
+         *
+         * @param config the run configuration
+         * @param runId  optional per-launch identifier; {@code null} or empty
+         *               resolves the shared per-config base (default, pre-existing
+         *               behaviour).
+         * @return the resolved CATALINA_BASE path, or {@code null} if none can be derived
+         */
+        @Nullable
+        public static Path getCatalinaBase(@NotNull TomcatRunConfiguration config,
+                                           @Nullable String runId) {
             Objects.requireNonNull(config, "Configuration cannot be null");
 
             TomcatConfigurationData data = config.getConfigData();
@@ -49,7 +82,8 @@ package com.dev.idea.plugins.tomcat.utils;
                 return null;
             }
 
-            // First check if there's an explicit CATALINA_BASE set
+            // First check if there's an explicit CATALINA_BASE set.
+            // An explicit pin always wins — runId isolation is skipped deliberately.
             String catalinaBase = data.getCatalinaBase();
             if (StringUtil.isNotEmpty(catalinaBase)) {
                 Path path = Paths.get(catalinaBase);
@@ -60,7 +94,7 @@ package com.dev.idea.plugins.tomcat.utils;
 
             // Fall back to the IDE system directory — the standard location for
             // plugin runtime data (compiled JSPs, session files, temp caches, logs).
-            // Path: {PathManager.getSystemPath()}/devtomcat/{projectLocationHash}/{configName}/
+            // Path: {PathManager.getSystemPath()}/devtomcat/{projectLocationHash}/{configName}[/.runs/{runId}]/
             //
             // This mirrors how IntelliJ's built-in Tomcat integration stores its
             // CATALINA_BASE. The data is completely outside the project tree: no
@@ -73,11 +107,14 @@ package com.dev.idea.plugins.tomcat.utils;
 
             String projectHash = projectLocationHash(project);
             String configName = sanitizeFileName(config.getName());
-            Path systemCatalinaBase = Paths.get(
+            Path base = Paths.get(
                     PathManager.getSystemPath(), SYSTEM_DIR_NAME, projectHash, configName);
+            if (StringUtil.isNotEmpty(runId)) {
+                base = base.resolve(PARALLEL_RUNS_SUBDIR).resolve(sanitizeFileName(runId));
+            }
 
-            LOG.debug("Using system CATALINA_BASE: " + systemCatalinaBase);
-            return systemCatalinaBase;
+            LOG.debug("Using system CATALINA_BASE: " + base);
+            return base;
         }
 
         /** Root directory name under {@link PathManager#getSystemPath()} for all DevTomcat runtime data. */

@@ -33,6 +33,11 @@ import java.net.URI;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -43,6 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
+import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
@@ -75,6 +81,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final int httpPort;
     @Nullable private final PortConfig resolvedPorts;
     private final RunnerSettings runnerSettings;
+    /**
+     * Per-launch identifier assigned when "Allow parallel run" is active — this
+     * handler owns an isolated {@code CATALINA_BASE} under
+     * {@code .runs/{runId}/}. {@code null} means the shared per-config base
+     * (single-instance mode) and no cleanup happens on exit.
+     */
+    @Nullable private final String runId;
 
     private final AtomicBoolean serverStartupDetected = new AtomicBoolean(false);
     private final AtomicInteger deployedArtifactCount = new AtomicInteger(0);
@@ -106,6 +119,20 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                                 @Nullable PortConfig resolvedPorts,
                                 @NotNull String executorId,
                                 @Nullable RunnerAndConfigurationSettings launchSettings) {
+        this(process, commandLine, charset, deploymentLogger, configuration,
+                runnerSettings, resolvedPorts, executorId, launchSettings, null);
+    }
+
+    public TomcatProcessHandler(@NotNull Process process,
+                                @NotNull String commandLine,
+                                @NotNull Charset charset,
+                                @NotNull TomcatDeploymentLogger deploymentLogger,
+                                @NotNull TomcatRunConfiguration configuration,
+                                @NotNull RunnerSettings runnerSettings,
+                                @Nullable PortConfig resolvedPorts,
+                                @NotNull String executorId,
+                                @Nullable RunnerAndConfigurationSettings launchSettings,
+                                @Nullable String runId) {
         super(process, commandLine, charset);
         this.configuration = configuration;
         this.launchSettings = launchSettings;
@@ -113,6 +140,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         this.runnerSettings = runnerSettings;
         this.configurationName = configuration.getName();
         this.executorId = executorId;
+        this.runId = runId;
         this.jmxEnabled = configuration.isJmxEnabled();
         // Use resolved ports (post-conflict-detection) when available, fall back to config
         PortConfig ports = resolvedPorts != null ? resolvedPorts : configuration.getConfigData().getPortConfig();
@@ -147,9 +175,8 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         this.pipeline = TomcatOutputPipeline.create(pipelineContext);
 
         this.activateToolWindow = configuration.getConfigData().getUiConfig().isActivateToolWindow();
-        var logConfig = configuration.getConfigData().getLogFileConfig();
-        this.showConsoleOnStdout = logConfig.isShowStdoutConsole();
-        this.showConsoleOnStderr = logConfig.isShowStderrConsole();
+        this.showConsoleOnStdout = configuration.isShowConsoleOnStdOut();
+        this.showConsoleOnStderr = configuration.isShowConsoleOnStdErr();
 
         addProcessListener(this);
     }
@@ -304,9 +331,60 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     errorCount.get(), warningCount.get(), serverStartupTimeMs);
             generateSessionSummary(duration, exitCode);
         } finally {
+            cleanupParallelRunBase();
             // Always dispose the logger, even if the lifecycle callbacks throw.
             deploymentLogger.dispose();
         }
+    }
+
+    /**
+     * When this handler owns a per-run isolated CATALINA_BASE (parallel mode),
+     * delete it after the process terminates so disk state never accumulates
+     * across launches. No-op for the shared per-config base.
+     *
+     * <p>Runs on a pooled thread — the cleanup walks work/, logs/, temp/, and
+     * the mirror-managed subtree which can be sizable.
+     */
+    private void cleanupParallelRunBase() {
+        if (runId == null) {
+            return;
+        }
+        Path base = TomcatProjectUtils.getCatalinaBase(configuration, runId);
+        if (base == null || !Files.isDirectory(base)) {
+            return;
+        }
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                deleteRecursively(base);
+                LOG.info("Removed parallel-run CATALINA_BASE: " + base);
+            } catch (IOException e) {
+                LOG.warn("Could not remove parallel-run CATALINA_BASE '" + base + "': " + e.getMessage());
+            }
+        });
+    }
+
+    private static void deleteRecursively(@NotNull Path dir) throws IOException {
+        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path current, BasicFileAttributes attrs) throws IOException {
+                if (!current.equals(dir) && attrs.isSymbolicLink()) {
+                    Files.deleteIfExists(current);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.deleteIfExists(file);
+                return FileVisitResult.CONTINUE;
+            }
+            @Override
+            public FileVisitResult postVisitDirectory(Path current, IOException exc) throws IOException {
+                if (exc != null) throw exc;
+                Files.deleteIfExists(current);
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 
     @Override
@@ -670,6 +748,16 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     @NotNull
     public String getExecutorId() {
         return executorId;
+    }
+
+    /**
+     * Returns the per-launch identifier that isolates this instance's
+     * {@code CATALINA_BASE} when "Allow parallel run" was active. {@code null}
+     * when the handler launched under the shared per-config base.
+     */
+    @Nullable
+    public String getRunId() {
+        return runId;
     }
 
     /**

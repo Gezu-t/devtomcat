@@ -54,9 +54,17 @@ public final class TomcatRunnerDelegate {
     /**
      * Handles Case 1: same executor already running → Update dialog.
      * Returns {@code true} if the re-run was intercepted (caller should return null).
+     *
+     * <p>When the configuration has "Allow parallel run" enabled, the intercept
+     * is skipped — the platform proceeds with a fresh launch and
+     * {@code TomcatCommandLineState} assigns a new {@code runId} so the new
+     * instance gets its own isolated {@code CATALINA_BASE} and auto-bumped ports.
      */
     public boolean handleSameExecutorRerun(@NotNull TomcatRunConfiguration config,
                                             @NotNull ExecutionEnvironment env) {
+        if (config.isAllowMultipleInstances()) {
+            return false;
+        }
         RunContentDescriptor existing = findSameExecutorDescriptor(config, env);
         if (existing != null) {
             ProcessHandler handler = existing.getProcessHandler();

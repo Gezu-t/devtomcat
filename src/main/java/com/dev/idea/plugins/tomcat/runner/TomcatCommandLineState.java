@@ -61,6 +61,16 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private final TomcatDeploymentLogger deploymentLogger;
     private volatile PortConfig resolvedPorts;
     private volatile int resolvedDebugPort = -1;
+    /**
+     * Per-launch identifier assigned when "Allow parallel run" is active so this
+     * instance gets an isolated CATALINA_BASE. {@code null} means "shared per-config
+     * base" — the historical single-instance behaviour.
+     *
+     * <p>Assigned once at first {@link #createJavaParameters()} / {@link #startProcess()}
+     * and reused by the handler so post-launch consumers (updater, Services panel)
+     * resolve the same directory.
+     */
+    @Nullable private volatile String runId;
     private final AtomicBoolean preLaunchDone = new AtomicBoolean(false);
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
@@ -81,7 +91,8 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         try {
             TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
                     .setDebugMode(isDebug)
-                    .setDeploymentLogger(deploymentLogger);
+                    .setDeploymentLogger(deploymentLogger)
+                    .setRunId(resolveRunId());
             if (resolvedPorts != null) {
                 builder.setResolvedPorts(resolvedPorts);
             }
@@ -403,6 +414,38 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         return TomcatJavaParametersBuilder.resolveJdkOrNull(configuration, configuration.getProject());
     }
 
+    /**
+     * Resolves (and lazily assigns) the per-launch identifier used to isolate the
+     * CATALINA_BASE when the user enabled <em>Allow parallel run</em>. Returns
+     * {@code null} when parallel-run is disabled, so the launch uses the shared
+     * per-config base — preserving the historical single-instance behaviour.
+     *
+     * <p>The id is derived from {@link ExecutionEnvironment#getExecutionId()} —
+     * unique per launch within the IDE session and stable across the lifetime of
+     * this {@code TomcatCommandLineState} so the builder, the process handler,
+     * and post-launch consumers (updater, Services panel) all see the same path.
+     */
+    @Nullable
+    private String resolveRunId() {
+        if (!configuration.isAllowMultipleInstances()) {
+            return null;
+        }
+        String current = runId;
+        if (current != null) return current;
+        long id = getEnvironment().getExecutionId();
+        // Prefix so the directory is easy to identify on disk and never collides
+        // with legitimate config names. The absolute value is used to avoid a
+        // leading '-' in the directory name on pathological IDs.
+        current = "run-" + Long.toUnsignedString(id, 36);
+        runId = current;
+        return current;
+    }
+
+    @Nullable
+    String getRunId() {
+        return runId;
+    }
+
     private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
         TomcatNotifier.notify(configuration.getProject(), title, content, type);
     }
@@ -482,7 +525,8 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 runnerSettings,
                 resolvedPorts,
                 executorId,
-                getEnvironment().getRunnerAndConfigurationSettings()
+                getEnvironment().getRunnerAndConfigurationSettings(),
+                resolveRunId()
         );
         ProcessTerminatedListener.attach(handler);
         return handler;

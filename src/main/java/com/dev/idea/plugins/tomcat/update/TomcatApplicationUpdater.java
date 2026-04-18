@@ -284,7 +284,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * <p>WAR artifacts are skipped — their reload is handled by {@link #redeployWarArtifacts}.
      */
     private void touchExplodedContextXml(@NotNull TomcatDeploymentLogger logger) {
-        Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration);
+        Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration, processHandler.getRunId());
         if (catalinaBase == null) return;
 
         Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
@@ -318,7 +318,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * </ul>
      */
     private void redeployAllArtifacts(@NotNull TomcatDeploymentLogger logger) {
-        Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration);
+        Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration, processHandler.getRunId());
         if (catalinaBase == null) {
             logger.logServerError("Could not determine CATALINA_BASE directory");
             return;

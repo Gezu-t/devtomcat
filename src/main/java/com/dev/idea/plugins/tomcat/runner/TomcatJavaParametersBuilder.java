@@ -50,6 +50,7 @@ public class TomcatJavaParametersBuilder {
     private int resolvedDebugPort = -1;
     private PortConfig resolvedPorts;
     private TomcatDeploymentLogger deploymentLogger;
+    @Nullable private String runId;
 
     public TomcatJavaParametersBuilder(@NotNull TomcatRunConfiguration configuration,
                                        @NotNull ExecutionEnvironment environment) {
@@ -76,6 +77,21 @@ public class TomcatJavaParametersBuilder {
     public TomcatJavaParametersBuilder setDeploymentLogger(@Nullable TomcatDeploymentLogger deploymentLogger) {
         this.deploymentLogger = deploymentLogger;
         return this;
+    }
+
+    /**
+     * Assigns the per-run identifier used to derive an isolated CATALINA_BASE
+     * when <em>Allow parallel run</em> is active. {@code null} means "shared
+     * per-config base" — the historical single-instance behaviour.
+     */
+    public TomcatJavaParametersBuilder setRunId(@Nullable String runId) {
+        this.runId = runId;
+        return this;
+    }
+
+    @Nullable
+    public String getRunId() {
+        return runId;
     }
 
     @NotNull
@@ -193,7 +209,9 @@ public class TomcatJavaParametersBuilder {
 
     @NotNull
     private Path getCatalinaBase() throws ExecutionException {
-        Path base = TomcatProjectUtils.getCatalinaBase(configuration);
+        // A non-null runId is the signal that "Allow parallel run" gave us an isolated
+        // per-launch base. When unset (default), this resolves the shared per-config base.
+        Path base = TomcatProjectUtils.getCatalinaBase(configuration, runId);
         if (base == null) {
             throw new ExecutionException("Unable to determine catalina.base directory");
         }
