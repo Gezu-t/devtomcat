@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,10 +23,12 @@ class TomcatConfigurationValidatorTest {
     private TomcatConfigurationData data;
 
     @BeforeEach
-    void setUp() {
+    void setUp(@TempDir Path tempDir) {
         data = new TomcatConfigurationData();
-        // Set up a valid baseline so individual tests can break one thing at a time
-        TomcatInfo info = new TomcatInfo("Tomcat 9", "9.0.56", "/opt/tomcat9");
+        // A real directory on disk — the validator now rejects a missing path
+        // as an error (previously a log warning), so the baseline must point
+        // at something that actually exists.
+        TomcatInfo info = new TomcatInfo("Tomcat 9", "9.0.56", tempDir.toString());
         data.setTomcatInfo(info);
         PortConfig ports = data.getPortConfig();
         ports.setHttp(8080);
@@ -86,6 +89,20 @@ class TomcatConfigurationValidatorTest {
             data.getTomcatInfo().setVersion("");
             // Should not throw — version is a warning, not a blocking error
             assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
+        }
+
+        @Test
+        @DisplayName("missing Tomcat home directory throws")
+        void missingHomeDirectoryThrows() {
+            // The validator used to only log a warning when the path didn't exist,
+            // letting toolbar Run through to fail at execution time. Now it throws
+            // up-front with the same wording the UI and runtime use, so the three
+            // gates stay in sync on path validity.
+            data.getTomcatInfo().setPath("/definitely/does/not/exist/on/disk");
+            RuntimeConfigurationException ex = assertThrows(
+                    RuntimeConfigurationException.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("does not exist"));
         }
     }
 

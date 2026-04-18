@@ -123,7 +123,13 @@ package com.dev.idea.plugins.tomcat.conf;
                 }
                 File tomcatDir = new File(tomcatInfo.getPath());
                 if (!tomcatDir.isDirectory()) {
-                    LOG.warn("Tomcat home directory does not exist: " + tomcatInfo.getPath());
+                    // Matches the UI validator (ApplicationServerSection) and the runtime
+                    // (TomcatJavaParametersBuilder.getCatalinaHome). Previously only logged,
+                    // so the toolbar accepted the config and we failed loudly at execution
+                    // time instead of up front in the same warning popup the dialog shows.
+                    throw new RuntimeConfigurationException(
+                            "Tomcat home directory does not exist: " + tomcatInfo.getPath()
+                                    + ". Update the path in Application Servers settings.");
                 }
                 if (StringUtil.isEmpty(tomcatInfo.getVersion())) {
                     LOG.warn(String.format("Tomcat server version not set for: %s", tomcatInfo.getName()));

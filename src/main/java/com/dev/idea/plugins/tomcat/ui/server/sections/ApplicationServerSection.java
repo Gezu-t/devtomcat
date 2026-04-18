@@ -249,22 +249,23 @@ public class ApplicationServerSection implements ConfigurationSection {
     }
 
     /**
-     * Inject a snapshot the resolver couldn't match, classifying it by whether
-     * the runtime will accept it. Path-exists → usable (warning). Path-empty
-     * or path-missing → broken (error).
+     * Inject a snapshot the resolver couldn't match. Both branches block Run;
+     * the path-based split is purely for user messaging so they can tell
+     * "needs registration" (path exists, just add it to Application Servers)
+     * from "broken configuration" (path is missing or empty too).
      */
     private void injectUnresolved(@NotNull TomcatInfo snapshot) {
         serverComboBox.addItem(snapshot);
         String path = snapshot.getPath();
-        boolean usable = !path.isEmpty() && new File(path).isDirectory();
-        if (usable) {
+        boolean pathExists = !path.isEmpty() && new File(path).isDirectory();
+        if (pathExists) {
             unregisteredButUsable.add(snapshot);
-            LOG.info("Persisted Tomcat server is not registered but path is usable"
+            LOG.warn("Persisted Tomcat server is not registered"
                     + " (id=" + snapshot.getId() + ", name=" + snapshot.getName()
-                    + ", path=" + path + "); showing warning");
+                    + ", path=" + path + "); blocking Run");
         } else {
             brokenItems.add(snapshot);
-            LOG.warn("Persisted Tomcat server is not registered and path is not usable"
+            LOG.warn("Persisted Tomcat server is not registered and path is missing"
                     + " (id=" + snapshot.getId() + ", name=" + snapshot.getName()
                     + ", path=" + path + "); blocking Run");
         }
@@ -272,13 +273,16 @@ public class ApplicationServerSection implements ConfigurationSection {
     }
 
     /**
-     * List cell renderer that styles unresolved items distinctly:
+     * List cell renderer that styles unresolved items distinctly. Both
+     * variants block Run — the visual split exists so users can see at a
+     * glance whether the fix is "just register this server" or "fix the path
+     * too."
      * <ul>
-     *   <li>Usable-but-unregistered → yellow-ish warning icon + "(not registered)"
-     *       suffix + tooltip suggesting re-registration. Text stays default color
-     *       so it doesn't read as an error.</li>
-     *   <li>Broken → red text + warning icon + "(not launchable)" suffix + tooltip
-     *       explaining the path problem.</li>
+     *   <li>Unregistered (path exists) → warning icon + "(not registered)"
+     *       suffix + tooltip pointing to Configure. Default text color so it
+     *       doesn't scream "broken" — the user just needs to register.</li>
+     *   <li>Broken → red text + warning icon + "(not launchable)" suffix +
+     *       tooltip explaining the path problem.</li>
      *   <li>Registered → unchanged default rendering.</li>
      * </ul>
      */
@@ -322,9 +326,9 @@ public class ApplicationServerSection implements ConfigurationSection {
                 setIcon(AllIcons.General.Warning);
                 setForeground(selected ? list.getSelectionForeground() : list.getForeground());
                 setToolTipText("<html>This server is saved in the run configuration but is not"
-                        + " registered in <b>Application Servers</b>. Run will still launch it"
-                        + " (the path exists on disk), but registering it is recommended so IDE"
-                        + " features that enumerate servers can see it.<br/>"
+                        + " registered in <b>Application Servers</b>. Run is blocked until you"
+                        + " register it — the path exists on disk, so adding it via <b>Configure…</b>"
+                        + " is enough.<br/>"
                         + "Path: " + value.getPath() + "</html>");
             } else {
                 setText(label);
