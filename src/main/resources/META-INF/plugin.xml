@@ -129,8 +129,19 @@
     <!-- sinceBuild and untilBuild are injected at build time -->
 
     <depends>com.intellij.modules.java</depends>
+    <!-- Required for JavaCoverageEngineExtension and the -javaagent injection
+         flow. Declared non-optional because our Coverage executor path depends
+         on the coverage engine being present. -->
+    <depends>Coverage</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <!-- Opts TomcatRunConfiguration into IntelliJ's Java coverage pipeline.
+             Without this, JavaCoverageEngine.isApplicableTo() returns false
+             for a LocatableConfigurationBase-derived config and the entire
+             coverage flow (agent, suite, report) is a no-op. -->
+        <javaCoverageEngineExtension
+                implementation="com.dev.idea.plugins.tomcat.coverage.TomcatJavaCoverageEngineExtension"/>
+
         <!-- Application-level persistent state for Tomcat server configurations -->
         <applicationService
                 serviceImplementation="com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState"/>

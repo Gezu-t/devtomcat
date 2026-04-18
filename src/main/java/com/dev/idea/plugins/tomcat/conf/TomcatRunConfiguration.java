@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
+import com.intellij.coverage.CoverageHelper;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.runners.ExecutionEnvironment;
@@ -116,6 +117,12 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         try {
             super.writeExternal(element);
             TomcatConfigurationSerializer.write(this, element);
+            // Persists the coverage-enabled flag, runner selection, and per-config
+            // suite metadata that JavaCoverageEnabledConfiguration owns. Our
+            // TomcatConfigurationSerializer handles DevTomcat's CoverageConfig
+            // (include/exclude strings); this sibling call persists the platform
+            // side so coverage-session continuity survives IDE restarts.
+            CoverageHelper.doWriteExternal(this, element);
             LOG.debug("Wrote configuration: " + getName());
         } catch (WriteExternalException e) {
             LOG.error("Failed to write configuration: " + getName(), e);
@@ -132,6 +139,11 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         try {
             super.readExternal(element);
             TomcatConfigurationSerializer.read(this, element);
+            // Companion to doWriteExternal above — reloads the platform coverage
+            // state (runner id, suite metadata) so that the "Run with Coverage"
+            // button on a restarted IDE resumes with the same settings the user
+            // last committed to disk.
+            CoverageHelper.doReadExternal(this, element);
             TomcatConfigurationInitializer.refresh(this);
             syncTomcatLogFiles();
             syncPlatformFlags();

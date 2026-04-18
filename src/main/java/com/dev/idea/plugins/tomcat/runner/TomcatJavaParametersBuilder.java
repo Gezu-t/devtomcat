@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.coverage.CoverageAgentAttacher;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
@@ -95,6 +96,17 @@ public class TomcatJavaParametersBuilder {
     }
 
     @NotNull
+    /**
+     * True when this builder is assembling parameters for the Coverage
+     * executor. Read from the execution environment instead of a setter so
+     * there is no third flag to keep in sync with {@link #debugMode} — the
+     * executor id is the source of truth and both runtime and tests resolve
+     * it the same way.
+     */
+    private boolean isCoverageExecutor() {
+        return TomcatConstants.COVERAGE_MODE.equals(environment.getExecutor().getId());
+    }
+
     public JavaParameters build() throws ExecutionException {
         try {
             Path catalinaBase = getCatalinaBase();
@@ -110,6 +122,15 @@ public class TomcatJavaParametersBuilder {
             setupEnvironment(params);
             setupVmOptions(params, catalinaBase, catalinaHome, ports, jdk);
             setupDeploymentArtifacts(params, catalinaBase);
+
+            // Coverage agent injection must happen after the Tomcat VM options
+            // are set — the coverage -javaagent string is order-sensitive
+            // relative to other agents (debug JDWP, etc.) and the platform's
+            // appendCoverageArgument expects to see the fully-built parameter
+            // list so it can position itself correctly.
+            if (isCoverageExecutor()) {
+                CoverageAgentAttacher.attach(configuration, params);
+            }
 
             return params;
 
