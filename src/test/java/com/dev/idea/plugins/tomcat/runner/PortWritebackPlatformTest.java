@@ -139,4 +139,53 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         assertEquals("browser URL must reflect the resolved port after writeback",
                 "http://localhost:8087/app", cfg.getBrowserUrl());
     }
+
+    public void testParallelRunAutoUrlRewrittenAtRuntime() {
+        // Parallel-run mode deliberately skips writeback (see testParallelRunModeSkipsWriteback
+        // above) so two simultaneous launches do not race on the shared PortConfig.
+        // The cost is that getBrowserUrl() still returns the seed-port URL after launch —
+        // the handler's runtime rewrite is the safety net that lets the browser reach
+        // *this* specific parallel instance. This test pins the runtime half of that
+        // contract: the config URL stays at the seed, and rewritePortIfNeeded turns it
+        // into the handler's actual port.
+        TomcatRunConfiguration cfg = createConfig("ParallelRuntimeRewrite");
+        cfg.setHttpPort(8083);
+        cfg.getConfigData().setContextPath("/app");
+        cfg.setAllowMultipleInstances(true);
+        cfg.setBrowserUrl("http://localhost:8083/app"); // auto, stored empty
+
+        PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
+        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+
+        // Writeback was skipped — config still holds the seed value.
+        assertEquals("parallel-run config must NOT be mutated by writeback",
+                Integer.valueOf(8083), cfg.getHttpPort());
+        assertEquals("config-level browser URL still reflects the seed in parallel mode",
+                "http://localhost:8083/app", cfg.getBrowserUrl());
+
+        // Runtime rewrite brings it in line with THIS instance's actual port.
+        String launched = TomcatProcessHandler.rewritePortIfNeeded(cfg.getBrowserUrl(), 8087);
+        assertEquals("runtime rewrite must bridge config seed → this instance's port",
+                "http://localhost:8087/app", launched);
+    }
+
+    public void testCustomProxyUrlNotRewrittenAtRuntime() {
+        // A user pointing their browser URL at a reverse proxy, CDN, or port-forward
+        // chose that port deliberately. Even at launch time the rewrite must NOT
+        // touch it — the safety net is for localhost URLs only.
+        TomcatRunConfiguration cfg = createConfig("ProxyUrlPreserved");
+        cfg.setHttpPort(8083);
+        cfg.setBrowserUrl("http://proxy.example.com:9090/route");
+
+        PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
+        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+
+        // Config-level: custom URL preserved verbatim (single-source-of-truth contract).
+        assertEquals("http://proxy.example.com:9090/route", cfg.getBrowserUrl());
+
+        // Runtime: rewrite must pass through unchanged because the host is not loopback.
+        String launched = TomcatProcessHandler.rewritePortIfNeeded(cfg.getBrowserUrl(), 8087);
+        assertEquals("custom proxy URL must survive the runtime rewrite untouched",
+                "http://proxy.example.com:9090/route", launched);
+    }
 }

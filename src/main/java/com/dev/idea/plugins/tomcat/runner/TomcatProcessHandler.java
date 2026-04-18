@@ -712,6 +712,17 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     static String rewritePortIfNeeded(@NotNull String url, int resolvedPort) {
         try {
             URI uri = URI.create(url.trim());
+            // Host-gated rewrite. The safety net exists for the parallel-run case
+            // where the config URL's port is the user's seed value but THIS
+            // instance bound a different port — rewriting lets the browser reach
+            // this specific Tomcat. That intent only applies when the URL is
+            // actually pointing at this Tomcat. A user-customised URL against a
+            // proxy / CDN / port-forward ("http://proxy.example.com:9090/...")
+            // has its port chosen deliberately as part of their routing — we
+            // must not silently mutate it.
+            if (!isLoopbackHost(uri.getHost())) {
+                return url;
+            }
             int currentPort = uri.getPort();
             if (currentPort > 0 && currentPort != resolvedPort) {
                 String rewritten = new URI(uri.getScheme(), uri.getUserInfo(),
@@ -724,6 +735,29 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             LOG.debug("Could not parse browser URL for port rewrite: " + url, e);
         }
         return url;
+    }
+
+    /**
+     * True when {@code host} names the local machine's loopback interface — the
+     * only case in which the browser URL's port can be safely rewritten to this
+     * Tomcat instance's runtime port.
+     *
+     * <p>Accepts {@code localhost} (case-insensitive), the IPv4 loopback
+     * {@code 127.0.0.1}, and both the short {@code ::1} and expanded
+     * {@code 0:0:0:0:0:0:0:1} forms of the IPv6 loopback. {@link URI#getHost()}
+     * returns IPv6 literals with their surrounding brackets in Java 17+, so we
+     * strip those before comparing.
+     */
+    private static boolean isLoopbackHost(@Nullable String host) {
+        if (host == null || host.isEmpty()) return false;
+        String normalized = host;
+        if (normalized.startsWith("[") && normalized.endsWith("]")) {
+            normalized = normalized.substring(1, normalized.length() - 1);
+        }
+        return "localhost".equalsIgnoreCase(normalized)
+                || "127.0.0.1".equals(normalized)
+                || "::1".equals(normalized)
+                || "0:0:0:0:0:0:0:1".equals(normalized);
     }
 
     @Nullable

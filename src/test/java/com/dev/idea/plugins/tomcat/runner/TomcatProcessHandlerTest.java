@@ -184,5 +184,62 @@ class TomcatProcessHandlerTest {
             assertTrue(result.contains(":9443"));
             assertTrue(result.startsWith("https://"));
         }
+
+        // Host-gated rewrite — see rewritePortIfNeeded javadoc. The safety net
+        // is strictly for loopback URLs where the port refers to THIS Tomcat.
+        // A custom URL aimed at a proxy, CDN, or port-forward has its port
+        // chosen deliberately and must not be silently mutated.
+
+        @Test
+        @DisplayName("leaves proxy URL unchanged (non-loopback host)")
+        void nonLoopbackProxyUrlIsUnchanged() {
+            String url = "http://proxy.example.com:9090/app";
+            assertEquals(url, TomcatProcessHandler.rewritePortIfNeeded(url, 8087));
+        }
+
+        @Test
+        @DisplayName("leaves CDN URL unchanged even with localhost-ish name")
+        void nonLoopbackLocalhostishIsUnchanged() {
+            // "localhost.example.com" is NOT localhost — it resolves to a
+            // remote host despite the prefix. The loopback test must match the
+            // exact host, not a prefix.
+            String url = "http://localhost.example.com:9090/app";
+            assertEquals(url, TomcatProcessHandler.rewritePortIfNeeded(url, 8087));
+        }
+
+        @Test
+        @DisplayName("rewrites 127.0.0.1 URL")
+        void ipv4LoopbackIsRewritten() {
+            String result = TomcatProcessHandler.rewritePortIfNeeded(
+                    "http://127.0.0.1:8080/app", 8087);
+            assertTrue(result.contains(":8087"));
+            assertTrue(result.contains("127.0.0.1"));
+        }
+
+        @Test
+        @DisplayName("rewrites IPv6 loopback [::1]")
+        void ipv6LoopbackShortFormIsRewritten() {
+            String result = TomcatProcessHandler.rewritePortIfNeeded(
+                    "http://[::1]:8080/app", 8087);
+            assertTrue(result.contains(":8087"), "port should be rewritten, got: " + result);
+            assertTrue(result.contains("[::1]") || result.contains("::1"),
+                    "host should still be IPv6 loopback, got: " + result);
+        }
+
+        @Test
+        @DisplayName("rewrites expanded IPv6 loopback [0:0:0:0:0:0:0:1]")
+        void ipv6LoopbackExpandedFormIsRewritten() {
+            String result = TomcatProcessHandler.rewritePortIfNeeded(
+                    "http://[0:0:0:0:0:0:0:1]:8080/app", 8087);
+            assertTrue(result.contains(":8087"), "port should be rewritten, got: " + result);
+        }
+
+        @Test
+        @DisplayName("localhost host-matching is case-insensitive")
+        void localhostIsCaseInsensitive() {
+            String result = TomcatProcessHandler.rewritePortIfNeeded(
+                    "http://LOCALHOST:8080/app", 8087);
+            assertTrue(result.contains(":8087"), "port should be rewritten, got: " + result);
+        }
     }
 }
