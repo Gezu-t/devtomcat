@@ -1,24 +1,36 @@
 package com.dev.idea.plugins.tomcat.ui;
 
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.CoverageConfig;
+import com.intellij.icons.AllIcons;
+import com.intellij.ide.util.PackageChooserDialog;
+import com.intellij.ide.util.TreeClassChooser;
+import com.intellij.ide.util.TreeClassChooserFactory;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.ui.popup.ListPopup;
+import com.intellij.openapi.ui.popup.PopupStep;
+import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiPackage;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
+import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
-import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import org.jetbrains.annotations.NotNull;
-
-import com.intellij.ui.components.JBPanel;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
-import com.intellij.openapi.diagnostic.Logger;
 
 public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
 
@@ -83,6 +95,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         JBTable table = new JBTable(model);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.setRowHeight(JBUI.scale(24));
+        table.getColumnModel().getColumn(0).setCellRenderer(new PatternCellRenderer());
 
         if (isInclude) {
             includeTableModel = model;
@@ -93,7 +106,8 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         }
 
         ToolbarDecorator decorator = ToolbarDecorator.createDecorator(table)
-                .setAddAction(button -> addPattern(isInclude))
+                .setAddAction(button ->
+                        showAddPatternPopup(isInclude, button.getPreferredPopupPoint().getComponent()))
                 .setRemoveAction(button -> removePattern(isInclude))
                 .setEditAction(button -> editPattern(isInclude))
                 .disableUpDownActions();
@@ -105,28 +119,177 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         return panel;
     }
 
-    private void addPattern(boolean isInclude) {
+    /**
+     * Shows the + button popup — the user picks between class, package, or
+     * freeform pattern, and the relevant chooser opens. Lets entries be pulled
+     * straight from the project model instead of hand-typing FQNs, while the
+     * freeform option preserves the advanced-wildcard escape hatch.
+     */
+    private void showAddPatternPopup(boolean isInclude, @NotNull Component anchor) {
+        BaseListPopupStep<AddOption> step = new BaseListPopupStep<>(null, AddOption.values()) {
+            @NotNull
+            @Override
+            public String getTextFor(AddOption value) {
+                return value.label;
+            }
+
+            @Override
+            public Icon getIconFor(AddOption value) {
+                return value.icon;
+            }
+
+            @Override
+            public PopupStep<?> onChosen(AddOption selected, boolean finalChoice) {
+                return doFinalStep(() -> selected.invoke(CodeCoverageTab.this, isInclude));
+            }
+        };
+        ListPopup popup = JBPopupFactory.getInstance().createListPopup(step);
+        popup.showUnderneathOf(anchor);
+    }
+
+    /** Opens the class chooser and stores the chosen class's qualified name. */
+    private void addClassPattern(boolean isInclude) {
+        TreeClassChooser chooser = TreeClassChooserFactory.getInstance(project)
+                .createAllProjectScopeChooser(chooserTitle(isInclude, "Class"));
+        chooser.showDialog();
+        PsiClass selected = chooser.getSelected();
+        if (selected == null) return;
+        String fqn = ReadAction.compute(selected::getQualifiedName);
+        if (fqn == null || fqn.isEmpty()) return;
+        insertPattern(isInclude, fqn);
+    }
+
+    /**
+     * Opens the package chooser. Appends the {@code .*} subpackage-matching
+     * suffix that the coverage runner interprets as "this package and
+     * everything below it".
+     *
+     * <p>The default (root) package is a hazard: mapping it silently to
+     * {@code *} would turn a single click into a global include/exclude
+     * wildcard and almost always mean something different from what the user
+     * intended. Confirm explicitly in that case so the broad-scope behaviour
+     * is never silent.
+     */
+    private void addPackagePattern(boolean isInclude) {
+        PackageChooserDialog dialog = new PackageChooserDialog(chooserTitle(isInclude, "Package"), project);
+        if (!dialog.showAndGet()) return;
+        PsiPackage selected = dialog.getSelectedPackage();
+        if (selected == null) return;
+        String fqn = ReadAction.compute(selected::getQualifiedName);
+        if (fqn == null) return;
+        if (fqn.isEmpty()) {
+            int choice = Messages.showYesNoDialog(
+                    project,
+                    "You selected the default (root) package. Adding it as a coverage pattern "
+                            + "expands to '*' and matches every class in the project.\n\n"
+                            + "Add a global wildcard " + (isInclude ? "include" : "exclude") + "?",
+                    "Confirm Global Wildcard",
+                    Messages.getWarningIcon());
+            if (choice != Messages.YES) return;
+            insertPattern(isInclude, "*");
+            return;
+        }
+        insertPattern(isInclude, fqn + ".*");
+    }
+
+    /** Freeform wildcard input — preserves the advanced-user escape hatch. */
+    private void addFreeformPattern(boolean isInclude) {
         String type = isInclude ? "include" : "exclude";
         String example = isInclude ? "com.mycompany.*" : "*.test.*, *Test";
         String pattern = Messages.showInputDialog(
                 project,
-                "Enter package pattern to " + type + " in coverage:\n" +
+                "Enter pattern to " + type + " in coverage:\n" +
                         "(Use * for wildcards, e.g., " + example + ")",
                 "Add " + (isInclude ? "Include" : "Exclude") + " Pattern",
                 null,
                 null,
                 null);
-
         if (pattern != null && !pattern.trim().isEmpty()) {
-            pattern = pattern.trim();
-            List<String> patterns = isInclude ? includePatterns : excludePatterns;
-            JBTable table = isInclude ? includeTable : excludeTable;
-            if (!patterns.contains(pattern)) {
-                patterns.add(pattern);
-                refreshTable(isInclude);
-                int newRow = patterns.size() - 1;
-                table.setRowSelectionInterval(newRow, newRow);
-            }
+            insertPattern(isInclude, pattern.trim());
+        }
+    }
+
+    /**
+     * Inserts a pattern into the target list, skipping duplicates and
+     * selecting the new row so the user sees where it landed.
+     */
+    private void insertPattern(boolean isInclude, @NotNull String pattern) {
+        List<String> patterns = isInclude ? includePatterns : excludePatterns;
+        JBTable table = isInclude ? includeTable : excludeTable;
+        if (patterns.contains(pattern)) return;
+        patterns.add(pattern);
+        refreshTable(isInclude);
+        int newRow = patterns.size() - 1;
+        table.setRowSelectionInterval(newRow, newRow);
+    }
+
+    @NotNull
+    private static String chooserTitle(boolean isInclude, @NotNull String kind) {
+        return (isInclude ? "Include " : "Exclude ") + kind + " in Coverage";
+    }
+
+    /**
+     * The three entries in the + popup. Labels, icons, and invocation target
+     * co-located so a fourth option is a one-line change instead of scattered
+     * edits across popup wiring.
+     */
+    private enum AddOption {
+        CLASS("Add Class\u2026", AllIcons.Nodes.Class,
+                CodeCoverageTab::addClassPattern),
+        PACKAGE("Add Package\u2026", AllIcons.Nodes.Package,
+                CodeCoverageTab::addPackagePattern),
+        PATTERN("Add Pattern\u2026", AllIcons.General.Filter,
+                CodeCoverageTab::addFreeformPattern);
+
+        final String label;
+        final Icon icon;
+        private final ObjBooleanConsumer invoker;
+
+        AddOption(String label, Icon icon, ObjBooleanConsumer invoker) {
+            this.label = label;
+            this.icon = icon;
+            this.invoker = invoker;
+        }
+
+        void invoke(@NotNull CodeCoverageTab tab, boolean isInclude) {
+            invoker.accept(tab, isInclude);
+        }
+    }
+
+    /**
+     * Narrow functional interface for {@code (CodeCoverageTab, boolean) → void}.
+     * Avoids the boxing a {@code BiConsumer<CodeCoverageTab, Boolean>} would
+     * incur and keeps the enum declaration compact.
+     */
+    @FunctionalInterface
+    private interface ObjBooleanConsumer {
+        void accept(@NotNull CodeCoverageTab tab, boolean isInclude);
+    }
+
+    /**
+     * Renders each row with an icon that matches its shape: package icon for
+     * {@code *.*}, class icon for non-wildcard FQN, filter icon for freeform
+     * wildcards. The resolution is a pure string check — no PSI lookup on the
+     * paint path so scrolling stays snappy.
+     */
+    private static final class PatternCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                        boolean isSelected, boolean hasFocus,
+                                                        int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            setIcon(iconFor(value == null ? "" : value.toString()));
+            return this;
+        }
+
+        @Nullable
+        private static Icon iconFor(@NotNull String pattern) {
+            if (pattern.isEmpty()) return null;
+            if (pattern.endsWith(".*") || pattern.equals("*")) return AllIcons.Nodes.Package;
+            if (pattern.contains("*") || pattern.contains("?")) return AllIcons.General.Filter;
+            // Non-wildcard FQN — almost always a class. No PSI resolve here
+            // because per-row index lookups on the EDT stall scroll.
+            return AllIcons.Nodes.Class;
         }
     }
 
