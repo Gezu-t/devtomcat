@@ -85,14 +85,18 @@ class ServiceActionUtilsTest {
         }
 
         @Test
-        @DisplayName("hidden when handler is terminating")
-        void hiddenWhenTerminating() {
+        @DisplayName("visible but disabled when handler is terminating (shutdown tooltip)")
+        void visibleDisabledWhenTerminating() {
+            // Terminating is a user-visible transient state, not a "gone" state —
+            // keep the button in place with the shared block reason as tooltip so
+            // the rerun-icon and Services-panel surfaces show the same message.
             TomcatProcessHandler handler = mock(TomcatProcessHandler.class);
-            when(handler.isProcessTerminating()).thenReturn(true);
+            when(handler.getRestartBlockReason()).thenReturn("Tomcat is shutting down");
             Presentation p = new Presentation();
             ServiceActionUtils.applyStartupGate(p, mock(TomcatRunConfiguration.class), handler, READY);
-            assertFalse(p.isVisible());
+            assertTrue(p.isVisible());
             assertFalse(p.isEnabled());
+            assertEquals("Tomcat is shutting down", p.getDescription());
         }
 
         @Test

@@ -17,6 +17,48 @@ import static org.junit.jupiter.api.Assertions.*;
 class TomcatProcessHandlerTest {
 
     // -------------------------------------------------------------------------
+    // computeRestartBlockReason — the pure predicate behind getRestartBlockReason,
+    // the single gate used by all four restart/update surfaces.
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("computeRestartBlockReason")
+    class ComputeRestartBlockReasonTests {
+
+        @Test
+        @DisplayName("returns shutdown reason when terminating (precedes terminated flag)")
+        void terminating() {
+            // terminating also reports terminated briefly; shutdown wins.
+            assertEquals("Tomcat is shutting down",
+                    TomcatProcessHandler.computeRestartBlockReason(true, true, false));
+            assertEquals("Tomcat is shutting down",
+                    TomcatProcessHandler.computeRestartBlockReason(true, false, true));
+        }
+
+        @Test
+        @DisplayName("returns not-running reason when terminated but not terminating")
+        void terminated() {
+            assertEquals("Tomcat is not running",
+                    TomcatProcessHandler.computeRestartBlockReason(false, true, false));
+        }
+
+        @Test
+        @DisplayName("returns starting reason when live but startup not yet detected")
+        void startingUp() {
+            String reason = TomcatProcessHandler.computeRestartBlockReason(false, false, false);
+            assertNotNull(reason);
+            assertTrue(reason.startsWith("Tomcat is still starting"),
+                    "expected a starting-up message, got: " + reason);
+        }
+
+        @Test
+        @DisplayName("returns null when fully ready to accept a restart")
+        void ready() {
+            assertNull(TomcatProcessHandler.computeRestartBlockReason(false, false, true));
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // extractContextNameFromBrowserUrl
     // -------------------------------------------------------------------------
 

@@ -73,20 +73,25 @@ public final class TomcatRunnerDelegate {
         RunContentDescriptor existing = findSameExecutorDescriptor(config, env);
         if (existing != null) {
             ProcessHandler handler = existing.getProcessHandler();
+            // Only short-circuit on fully-terminated handlers (legitimate restart of
+            // a dead config — let the platform launch fresh). For live AND shutting-
+            // down handlers, defer to the shared gate — the previous guard also
+            // excluded terminating, which let the rerun icon silently race a fresh
+            // launch against a still-releasing shutdown port while the Services and
+            // Ctrl+F10 surfaces correctly surfaced "Tomcat is shutting down".
             if (handler instanceof TomcatProcessHandler tomcatHandler
-                    && !tomcatHandler.isProcessTerminated()
-                    && !tomcatHandler.isProcessTerminating()) {
+                    && !tomcatHandler.isProcessTerminated()) {
 
                 String blockReason = tomcatHandler.getRestartBlockReason();
                 if (blockReason != null) {
-                    // Single UX contract shared with the Services-panel actions:
-                    // rather than silently swallow the click we surface the same
-                    // reason string they show as their disabled-action tooltip,
-                    // so the user sees consistent feedback across both surfaces.
+                    // Single UX contract shared with the Services-panel actions
+                    // and Ctrl+F10: surface the same reason string instead of
+                    // silently swallowing the click, so the user sees consistent
+                    // feedback across every user-gesture surface.
                     TomcatNotifier.info(env.getProject(),
                             "Restart Unavailable — " + config.getName(),
                             blockReason);
-                    return true; // suppress launch during startup
+                    return true; // suppress launch while gate is closed
                 }
 
                 TomcatApplicationUpdater.showDialogAndExecute(

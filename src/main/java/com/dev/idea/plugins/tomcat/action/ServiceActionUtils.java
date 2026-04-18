@@ -106,32 +106,35 @@ final class ServiceActionUtils {
     /**
      * Applies the shared Services-panel startup-gate policy to an action's {@link Presentation}.
      *
-     * <p>Three visibility states, uniform across {@code Restart}, {@code Redeploy}, and
+     * <p>Three states, uniform across {@code Restart}, {@code Redeploy}, and
      * {@code Update Application}:
      * <ul>
-     *   <li><b>Hidden</b> — no Tomcat config/handler, or the handler is terminated/terminating.
-     *       The action genuinely does not apply to this node.</li>
-     *   <li><b>Visible but disabled</b> — handler is live but server startup has not yet
-     *       completed. The description is set to the block reason from
-     *       {@link TomcatProcessHandler#getRestartBlockReason()} so the IDE renders it as
-     *       a tooltip on the disabled button. Prevents the "where did the button go?"
-     *       confusion while still blocking a half-started restart.</li>
-     *   <li><b>Visible and enabled</b> — startup complete, the action is safe to invoke.
+     *   <li><b>Hidden</b> — no Tomcat config or handler attached, or the handler has
+     *       fully terminated. The action no longer applies to this node.</li>
+     *   <li><b>Visible but disabled</b> — a live handler is attached but the shared
+     *       gate {@link TomcatProcessHandler#getRestartBlockReason()} says the restart
+     *       is not safe right now (starting up, shutting down). The reason string is
+     *       set as the presentation description so the IDE renders it as the
+     *       disabled-button tooltip. Prevents the "where did the button go?"
+     *       confusion and keeps muscle-memory targets stable as state transitions.</li>
+     *   <li><b>Visible and enabled</b> — gate open; action is safe to invoke.
      *       Description reset to {@code readyDescription}.</li>
      * </ul>
      *
-     * <p>The rerun-toolbar surface is covered by the parallel notification in
-     * {@code TomcatRunnerDelegate}; together they form the single UX contract:
-     * every user-gesture surface explains why a restart is temporarily unavailable
-     * instead of silently ignoring the click or vanishing.
+     * <p>The state-predicate {@code getRestartBlockReason()} is the single source of
+     * truth shared with the toolbar rerun intercept, Ctrl+F10 provider, and
+     * frame-deactivation listener — the three surfaces cannot drift on whether a
+     * restart is allowed, only on how they render the block.
      */
     static void applyStartupGate(@NotNull Presentation presentation,
                                   @Nullable TomcatRunConfiguration config,
                                   @Nullable TomcatProcessHandler handler,
                                   @NotNull String readyDescription) {
-        if (config == null || handler == null
-                || handler.isProcessTerminated()
-                || handler.isProcessTerminating()) {
+        // "Terminated" is the only state that removes the action entirely — the
+        // process is gone, the Services node is about to disappear. Other "not
+        // ready" states (starting, terminating) stay visible with a tooltip so
+        // the user sees why the action is temporarily unavailable.
+        if (config == null || handler == null || handler.isProcessTerminated()) {
             presentation.setEnabledAndVisible(false);
             return;
         }

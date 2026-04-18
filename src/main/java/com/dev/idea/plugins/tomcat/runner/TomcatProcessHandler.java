@@ -756,24 +756,45 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      * gesture, or a user-facing reason string explaining why it is not.
      *
      * <p>Single source of truth for the startup-gate shared by the toolbar rerun
-     * intercept, the Services panel actions, and the Ctrl+F10 updater provider.
-     * Callers decide how to surface the reason (balloon notification, disabled
-     * action tooltip, hidden menu item) but share the same predicate so the three
-     * surfaces cannot drift.
+     * intercept, the Services panel actions, the Ctrl+F10 updater provider, and
+     * the frame-deactivation listener. Callers decide how to surface the reason
+     * (balloon notification, disabled action tooltip, silent skip) but share the
+     * same predicate so the surfaces cannot drift on whether restart is allowed.
      *
-     * <p>Messages are phrased for direct display in tooltips and notifications —
-     * short, no trailing punctuation, referencing Tomcat explicitly so users
-     * reading a Services-panel tooltip know which process is being discussed.
+     * <p>Delegates to {@link #computeRestartBlockReason(boolean, boolean, boolean)}
+     * so the policy itself is independently testable without a live process.
      */
     @Nullable
     public String getRestartBlockReason() {
-        if (isProcessTerminating()) {
+        return computeRestartBlockReason(
+                isProcessTerminating(), isProcessTerminated(), serverStartupDetected.get());
+    }
+
+    /**
+     * Pure-logic companion of {@link #getRestartBlockReason()}. Returns the user-facing
+     * block reason for a handler in the given state, or {@code null} when restart is
+     * allowed. Exposed package-private so unit tests can exercise every branch without
+     * constructing a live {@link KillableColoredProcessHandler}.
+     *
+     * <p>Messages are phrased for direct display in tooltips and balloons — short,
+     * no trailing punctuation, referencing Tomcat explicitly so a Services-panel
+     * tooltip is unambiguous about which process is meant.
+     *
+     * <p>Precedence when multiple flags are set: {@code terminating} wins over
+     * {@code terminated} (a handler briefly reports both during shutdown; shutdown
+     * is the more actionable message) which wins over {@code !startupDetected}.
+     */
+    @Nullable
+    static String computeRestartBlockReason(boolean terminating,
+                                             boolean terminated,
+                                             boolean startupDetected) {
+        if (terminating) {
             return "Tomcat is shutting down";
         }
-        if (isProcessTerminated()) {
+        if (terminated) {
             return "Tomcat is not running";
         }
-        if (!serverStartupDetected.get()) {
+        if (!startupDetected) {
             return "Tomcat is still starting — restart will be available once startup completes";
         }
         return null;
