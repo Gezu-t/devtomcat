@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.coverage;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.CoverageConfig;
-import com.intellij.coverage.CoverageDataManager;
+import com.intellij.coverage.CoverageHelper;
 import com.intellij.coverage.CoverageSuite;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.coverage.CoverageEnabledConfiguration;
@@ -24,8 +24,16 @@ import org.jetbrains.annotations.NotNull;
  *   <li>Push our include/exclude patterns into it via {@link CoverageConfigBridge}
  *       so the platform's own view of the filters matches what the user
  *       entered in our tab.</li>
- *   <li>Flag coverage as enabled and register a fresh {@link CoverageSuite}
- *       for this launch with {@link CoverageDataManager#addCoverageSuite}.</li>
+ *   <li>Delegate suite bookkeeping to {@link CoverageHelper#resetCoverageSuit}
+ *       — the <em>same</em> helper the runner calls post-launch via
+ *       {@link CoverageHelper#attachToProcess}. Using one helper on both sides
+ *       is deliberate: the post-launch attach nulls and re-adds the suite on
+ *       the EDT, and a manually-registered pre-launch suite would be replaced
+ *       by a fresh object with different identity, potentially causing the
+ *       post-exit report loader to read {@code getCurrentCoverageSuite()} and
+ *       find a different suite than the one whose file path is baked into the
+ *       agent argument. Routing through the helper both times keeps the
+ *       identity invariant intact.</li>
  *   <li>Delegate the {@code -javaagent} construction to
  *       {@link JavaCoverageEnabledConfiguration#appendCoverageArgument} so the
  *       bundled coverage runner (JaCoCo or IntelliJ's own agent) is chosen and
@@ -69,12 +77,26 @@ public final class CoverageAgentAttacher {
             // avoids depending on whether getOrCreate() flipped it for us.
             jcec.setCoverageEnabled(true);
 
-            // Re-register the suite for this launch so the post-run report
-            // loader (attached in TomcatCoverageRunner) can find it. Without
-            // this, the IDE reads yesterday's suite or nothing at all.
-            CoverageDataManager manager = CoverageDataManager.getInstance(config.getProject());
-            CoverageSuite suite = manager.addCoverageSuite(jcec);
-            jcec.setCurrentCoverageSuite(suite);
+            // Suite bookkeeping via the platform helper — see class javadoc
+            // for why we do NOT manually call addCoverageSuite /
+            // setCurrentCoverageSuite here. The helper nulls the current
+            // suite, then on the EDT (via invokeAndWait, so we block until
+            // it completes) creates and selects a fresh one. This is the
+            // same call attachToProcess will make after launch; using it
+            // on both sides eliminates the suite-identity split that the
+            // manual path introduced.
+            CoverageHelper.resetCoverageSuit(config);
+            CoverageSuite suite = jcec.getCurrentCoverageSuite();
+            if (suite == null) {
+                // resetCoverageSuit guarantees a non-null suite on return
+                // under normal conditions; a null here means the helper
+                // rejected the config (applicability failed) or the EDT
+                // task was cancelled. Either way, attempting to append the
+                // agent without a suite would NPE — bail cleanly.
+                LOG.warn("DevTomcat: coverage suite setup returned null for '"
+                        + config.getName() + "' — skipping agent injection");
+                return;
+            }
 
             // Agent argument wiring is the platform's responsibility — version
             // skew on the agent jar or JaCoCo dropped in recent builds would
