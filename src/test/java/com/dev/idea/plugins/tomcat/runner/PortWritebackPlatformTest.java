@@ -48,6 +48,27 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
                 Integer.valueOf(8009), cfg.getShutdownPort());
     }
 
+    public void testWritebackIsIdempotent() {
+        // Writing back the same values the config already holds must not mutate
+        // anything. Downstream observers (Services panel refresh, serializer
+        // write-on-exit, modified-flag) can skip their work when nothing
+        // actually changed. Second-launch semantics rely on this: the config
+        // is already at the resolved port from the first launch, so re-running
+        // writeback on the same values is a no-op.
+        TomcatRunConfiguration cfg = createConfig("Idempotent");
+        cfg.setHttpPort(8087);
+        cfg.setShutdownPort(8009);
+
+        PortConfig same = resolvedPorts(8087, 8009, 8443, 1099, 8009);
+        TomcatCommandLineState.writeBackResolvedPorts(cfg, same);
+
+        // Still the same values. The real invariant here is that the code path
+        // detects "nothing changed" and avoids the dashboard refresh — the
+        // visible side-effect we care about is absence of thrash.
+        assertEquals(Integer.valueOf(8087), cfg.getHttpPort());
+        assertEquals(Integer.valueOf(8009), cfg.getShutdownPort());
+    }
+
     public void testParallelRunModeSkipsWriteback() {
         TomcatRunConfiguration cfg = createConfig("ParallelSkip");
         cfg.setHttpPort(8083);

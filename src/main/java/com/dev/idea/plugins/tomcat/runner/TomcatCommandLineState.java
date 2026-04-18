@@ -17,10 +17,13 @@ import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.JavaCommandLineState;
 import com.intellij.execution.configurations.JavaParameters;
+import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.project.Project;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
@@ -309,16 +312,29 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             return;
         }
         PortConfig target = configuration.getConfigData().getPortConfig();
-        target.setHttp(resolved.getHttp());
-        target.setShutdown(resolved.getShutdown());
-        if (target.isHttpsEnabled()) {
+        boolean changed = false;
+        if (target.getHttp() != resolved.getHttp()) {
+            target.setHttp(resolved.getHttp());
+            changed = true;
+        }
+        if (target.getShutdown() != resolved.getShutdown()) {
+            target.setShutdown(resolved.getShutdown());
+            changed = true;
+        }
+        if (target.isHttpsEnabled() && target.getHttps() != resolved.getHttps()) {
             target.setHttps(resolved.getHttps());
+            changed = true;
         }
-        if (target.isJmxEnabled()) {
+        if (target.isJmxEnabled() && target.getJmx() != resolved.getJmx()) {
             target.setJmx(resolved.getJmx());
+            changed = true;
         }
-        if (target.isAjpEnabled()) {
+        if (target.isAjpEnabled() && target.getAjp() != resolved.getAjp()) {
             target.setAjp(resolved.getAjp());
+            changed = true;
+        }
+        if (changed) {
+            scheduleDashboardRefresh(configuration);
         }
     }
 
@@ -335,9 +351,31 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         }
         if (resolvedDebug <= 0) return;
         var debugConfig = configuration.getConfigData().getDebugConfig();
-        if (debugConfig != null) {
+        if (debugConfig != null && debugConfig.getPort() != resolvedDebug) {
             debugConfig.setPort(resolvedDebug);
+            scheduleDashboardRefresh(configuration);
         }
+    }
+
+    /**
+     * Tells the Run Dashboard / Services panel to rebuild its tree so the newly
+     * written-back port values are picked up. Without this the first launch of a
+     * configuration can leave the Services panel pinned to pre-resolution port
+     * values — subsequent launches render correctly because the config already
+     * holds the resolved port from the start. Scheduled on the EDT because
+     * {@link RunDashboardManager#updateDashboard(boolean)} touches UI state.
+     */
+    private static void scheduleDashboardRefresh(@NotNull TomcatRunConfiguration configuration) {
+        Project project = configuration.getProject();
+        if (project == null || project.isDisposed()) return;
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (project.isDisposed()) return;
+            try {
+                RunDashboardManager.getInstance(project).updateDashboard(true);
+            } catch (Exception e) {
+                LOG.debug("Dashboard refresh after port writeback failed", e);
+            }
+        });
     }
 
     /**
