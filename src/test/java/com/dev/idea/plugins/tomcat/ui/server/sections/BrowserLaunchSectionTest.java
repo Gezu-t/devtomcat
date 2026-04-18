@@ -5,7 +5,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("BrowserLaunchSection")
 class BrowserLaunchSectionTest {
@@ -65,6 +67,46 @@ class BrowserLaunchSectionTest {
         @DisplayName("returns null when no digits follow colon")
         void noDigitsAfterColon() {
             assertNull(BrowserLaunchSection.replacePortInUrl("http://localhost:/app", "9090"));
+        }
+    }
+
+    @Nested
+    @DisplayName("looksLikeLegacyAutoUrl")
+    class LooksLikeLegacyAutoUrl {
+
+        @Test
+        @DisplayName("matches stale localhost URL with same context")
+        void localhostSameContext() {
+            assertTrue(BrowserLaunchSection.looksLikeLegacyAutoUrl(
+                    "http://localhost:8083/myapp", "/myapp"));
+        }
+
+        @Test
+        @DisplayName("matches root context")
+        void rootContext() {
+            assertTrue(BrowserLaunchSection.looksLikeLegacyAutoUrl(
+                    "http://localhost:8083/", "/"));
+        }
+
+        @Test
+        @DisplayName("rejects custom host")
+        void customHost() {
+            assertFalse(BrowserLaunchSection.looksLikeLegacyAutoUrl(
+                    "http://127.0.0.1:8083/myapp", "/myapp"));
+        }
+
+        @Test
+        @DisplayName("rejects different context path")
+        void differentContext() {
+            assertFalse(BrowserLaunchSection.looksLikeLegacyAutoUrl(
+                    "http://localhost:8083/other", "/myapp"));
+        }
+
+        @Test
+        @DisplayName("rejects query string")
+        void queryString() {
+            assertFalse(BrowserLaunchSection.looksLikeLegacyAutoUrl(
+                    "http://localhost:8083/myapp?x=1", "/myapp"));
         }
     }
 }
