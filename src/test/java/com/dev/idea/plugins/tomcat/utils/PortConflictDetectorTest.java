@@ -38,21 +38,21 @@ class PortConflictDetectorTest {
         }
 
         @Test
-        @DisplayName("actively-bound port returns false (SO_REUSEADDR probe must still detect real conflicts)")
+        @DisplayName("actively-bound port returns false; idle closed port returns true")
         void activeListenerReportedUnavailable() throws IOException {
-            // Regression guard: the SO_REUSEADDR change to tryBind lets the
-            // probe ignore TIME_WAIT (just-released ports), but it must still
-            // report false when another process is actively bound. Without
-            // this guarantee the port-conflict detector would silently let
-            // Tomcat try to bind over a live service.
+            // Guards the invariant that SO_REUSEADDR in tryBind does not hide
+            // genuine conflicts: a port with an active listener must still be
+            // reported as unavailable. Also verifies that a port closed without
+            // ever accepting a connection (no TIME_WAIT) is immediately free.
+            // Note: this does not simulate a real TIME_WAIT socket — that state
+            // requires a completed TCP handshake and cannot be created reliably
+            // in a unit test without raw socket access.
             int port;
             try (ServerSocket occupying = boundWithReuse(0)) {
                 port = occupying.getLocalPort();
                 assertFalse(PortConflictDetector.isPortAvailable(port),
                         "probe must detect an actively-bound port as unavailable");
             }
-            // After close, the port becomes available again — no TIME_WAIT
-            // because nothing ever accepted a connection on it.
             assertTrue(PortConflictDetector.isPortAvailable(port),
                     "probe must see a just-closed idle port as available");
         }

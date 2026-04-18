@@ -6,6 +6,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.util.Set;
 import org.jetbrains.annotations.NotNull;
@@ -59,7 +60,9 @@ public final class PortUtils {
     private static boolean tryBind(int port, String address) {
         try {
             InetAddress addr = address != null ? InetAddress.getByName(address) : null;
-            try (ServerSocket socket = new ServerSocket(port, 1, addr)) {
+            try (ServerSocket socket = new ServerSocket()) {
+                socket.setReuseAddress(true);
+                socket.bind(new InetSocketAddress(addr, port), 1);
                 return true;
             }
         } catch (IOException e) {
