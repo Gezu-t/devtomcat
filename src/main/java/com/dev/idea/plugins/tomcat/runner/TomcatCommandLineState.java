@@ -126,6 +126,18 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private void ensurePreLaunchSetup() throws ExecutionException {
         if (!preLaunchDone.compareAndSet(false, true)) return;
 
+        // Fail fast on unregistered server — before port conflict detection,
+        // compatibility checks, or any other work that fires user-visible
+        // notifications. Otherwise the user sees "Port Auto-Resolved" balloons
+        // and only afterwards the real error ("not registered"), which makes
+        // the registration problem look secondary. This is the same gate as
+        // TomcatJavaParametersBuilder.getCatalinaHome() but it runs before
+        // side-effectful setup. Remote mode is exempt because there's no local
+        // Tomcat install to register.
+        if (!configuration.isRemoteMode()) {
+            requireRegisteredTomcatServer();
+        }
+
         checkCompatibility();
         runPreflightValidation();
         warnIfManualJdwpInDebugMode();
@@ -479,6 +491,46 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     public int getResolvedDebugPort() {
         return resolvedDebugPort;
+    }
+
+    /**
+     * Early registration gate that runs before any side-effectful pre-launch
+     * work (port conflict detection, compatibility check, preflight). When the
+     * run configuration references a Tomcat that isn't registered, we throw
+     * immediately with the same wording
+     * {@link TomcatJavaParametersBuilder#getCatalinaHome()} uses — without this
+     * the user sees port auto-resolve balloons before the real "not registered"
+     * error, making it look like port resolution succeeded and only the launch
+     * failed.
+     *
+     * <p>If the resolver reconciles via ID/path/name drift, the config's
+     * {@link TomcatInfo} reference is upgraded to the canonical registered
+     * instance so downstream code (compatibility check, builder) reads a
+     * consistent, already-resolved value.
+     */
+    private void requireRegisteredTomcatServer() throws ExecutionException {
+        TomcatInfo persisted = configuration.getConfigData().getTomcatInfo();
+        if (persisted == null) {
+            throw new ExecutionException("No Tomcat server configured."
+                    + " Open the run configuration and select a server from Application Servers.");
+        }
+        TomcatInfo resolved = com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState
+                .getInstance().resolve(persisted);
+        if (resolved == null) {
+            String name = !persisted.getName().isEmpty() ? persisted.getName() : "(unnamed)";
+            String path = persisted.getPath();
+            throw new ExecutionException("Tomcat server '" + name + "' is not registered."
+                    + " Persisted path: " + (path.isEmpty() ? "(empty)" : path) + "."
+                    + " Open the run configuration and select a registered server,"
+                    + " or add one via Configure.");
+        }
+        if (resolved != persisted) {
+            LOG.info("Pre-launch reconciled drifted persisted reference"
+                    + " (id=" + persisted.getId() + ", path=" + persisted.getPath() + ")"
+                    + " to registered server (id=" + resolved.getId()
+                    + ", path=" + resolved.getPath() + ")");
+            configuration.getConfigData().setTomcatInfo(resolved);
+        }
     }
 
     /**
