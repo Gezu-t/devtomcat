@@ -51,12 +51,6 @@ public class JreConfigurationSection implements ConfigurationSection {
             gbc.insets = JBUI.insets(2, 0, 2, 0);
             JButton configButton = new JButton("Configure...");
             configButton.addActionListener(e -> configureJRE());
-            Dimension comboSize = jreComboBox.getPreferredSize();
-            Dimension buttonSize = configButton.getPreferredSize();
-            configButton.setPreferredSize(new Dimension(
-                    Math.max(buttonSize.width, JBUI.scale(96)),
-                    comboSize.height
-            ));
             panel.add(configButton, gbc);
         }
         return panel;

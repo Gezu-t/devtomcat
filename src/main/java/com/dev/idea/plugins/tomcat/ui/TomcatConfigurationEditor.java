@@ -15,6 +15,7 @@ import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentTableManager;
 import com.intellij.compiler.options.CompileStepBeforeRun;
+import com.intellij.diagnostic.logging.LogConfigurationPanel;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.configurations.ConfigurationFactory;
@@ -75,7 +76,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private DeploymentTableManager deploymentTableManager;
     private ServerConfigurationTab serverTab;
     private DeploymentConfigurationPanel deploymentTab;
-    private com.intellij.diagnostic.logging.LogConfigurationPanel<TomcatRunConfiguration> logsPanel;
+    private LogConfigurationPanel<TomcatRunConfiguration> logsPanel;
     private StartupConnectionTab startupConnectionTab;
     private CodeCoverageTab codeCoverageTab;
     private JBTabbedPane tabbedPane;
@@ -194,11 +195,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
         }
         if (logsPanel != null) {
-            try {
-                logsPanel.applyTo(configuration);
-            } catch (com.intellij.openapi.options.ConfigurationException e) {
-                throw new ConfigurationException(e.getLocalizedMessage());
-            }
+            logsPanel.applyTo(configuration);
             LOG.debug("DevTomcat: Logs tab applied");
         }
         if (startupConnectionTab != null) {
@@ -287,12 +284,12 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         createServerTab();
         createDeploymentTab();
         createLogsTab();
-        createStartupConnectionTab();
         // Code Coverage is only applicable to local mode — remote server
         // runs independently and can't be instrumented from the plugin.
         if (!isRemoteMode()) {
             createCodeCoverageTab();
         }
+        createStartupConnectionTab();
     }
 
     private void createServerTab() {
@@ -377,7 +374,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private void createLogsTab() {
         try {
             LOG.info("DevTomcat: Creating Logs tab...");
-            logsPanel = new com.intellij.diagnostic.logging.LogConfigurationPanel<>();
+            logsPanel = new LogConfigurationPanel<>();
             tabbedPane.addTab("Logs", logsPanel.getComponent());
             LOG.info("DevTomcat: Logs tab added to pane");
         } catch (Throwable t) {
@@ -405,12 +402,34 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     private void createCodeCoverageTab() {
         try {
             codeCoverageTab = new CodeCoverageTab(project);
-            tabbedPane.addTab("Code Coverage", codeCoverageTab);
+            insertCodeCoverageTab(codeCoverageTab);
             LOG.debug("DevTomcat: Code Coverage tab created");
         } catch (Throwable t) {
             LOG.error("DevTomcat: Failed to create Code Coverage tab", t);
-            tabbedPane.addTab("Code Coverage", createErrorPanel("Code Coverage tab error: " + t.getMessage()));
+            insertCodeCoverageTab(createErrorPanel("Code Coverage tab error: " + t.getMessage()));
         }
+    }
+
+    /**
+     * Inserts the Code Coverage tab immediately before Startup/Connection so the
+     * canonical tab order (Server, Deployment, Logs, Code Coverage, Startup/Connection)
+     * is preserved both at initial creation and when toggling between local/remote modes.
+     * Falls back to append when Startup/Connection hasn't been created yet.
+     */
+    private void insertCodeCoverageTab(@NotNull JComponent component) {
+        int startupIdx = indexOfTab("Startup/Connection");
+        if (startupIdx >= 0) {
+            tabbedPane.insertTab("Code Coverage", null, component, null, startupIdx);
+        } else {
+            tabbedPane.addTab("Code Coverage", component);
+        }
+    }
+
+    private int indexOfTab(@NotNull String title) {
+        for (int i = 0; i < tabbedPane.getTabCount(); i++) {
+            if (title.equals(tabbedPane.getTitleAt(i))) return i;
+        }
+        return -1;
     }
 
     private JPanel createErrorPanel(String errorMessage) {
@@ -854,7 +873,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     httpPort != null ? httpPort : "N/A",
                     configuration.isJmxEnabled() ? String.valueOf(configuration.getJmxPort()) : "disabled",
                     configuration.getConfigData().getDeploymentConfig().getArtifacts().size(),
-                    configuration.getLogFileConfigurations().size());
+                    configuration.getAllLogFiles().size());
         } catch (Exception e) {
             return "summary unavailable";
         }

@@ -54,12 +54,6 @@ public class ApplicationServerSection implements ConfigurationSection {
             gbc.insets = JBUI.insets(2, 0, 2, 0);
             configureButton = new JButton("Configure...");
             configureButton.addActionListener(e -> openTomcatServerConfiguration());
-            Dimension comboSize = serverComboBox.getPreferredSize();
-            Dimension buttonSize = configureButton.getPreferredSize();
-            configureButton.setPreferredSize(new Dimension(
-                    Math.max(buttonSize.width, JBUI.scale(96)),
-                    comboSize.height
-            ));
             panel.add(configureButton, gbc);
         }
         return panel;
@@ -135,16 +129,40 @@ public class ApplicationServerSection implements ConfigurationSection {
 
     private void openTomcatServerConfiguration() {
         try {
+            TomcatInfo previouslySelected = getSelectedTomcatServer();
             TomcatServerConfigurationDialog dialog = new TomcatServerConfigurationDialog(project);
             boolean accepted = dialog.showAndGet();
             if (accepted) {
                 loadConfiguration();
+                restoreSelection(previouslySelected);
                 LOG.debug("Tomcat server configuration updated");
             }
         } catch (Exception e) {
             LOG.error("Error opening server configuration", e);
             Messages.showErrorDialog(project, "Failed to open server configuration: " + e.getMessage(), "Error");
         }
+    }
+
+    /**
+     * Restores the previous combo selection after the Tomcat server list is rebuilt.
+     * Matches by id when available (survives renames) and falls back to name + path
+     * for older {@link TomcatInfo} instances. Selects the first item if the previous
+     * server was removed or never existed.
+     */
+    private void restoreSelection(@org.jetbrains.annotations.Nullable TomcatInfo previous) {
+        if (serverComboBox.getItemCount() == 0) return;
+        if (previous == null) {
+            serverComboBox.setSelectedIndex(0);
+            return;
+        }
+        for (int i = 0; i < serverComboBox.getItemCount(); i++) {
+            TomcatInfo candidate = serverComboBox.getItemAt(i);
+            if (candidate != null && Objects.equals(candidate.getId(), previous.getId())) {
+                serverComboBox.setSelectedIndex(i);
+                return;
+            }
+        }
+        serverComboBox.setSelectedIndex(0);
     }
 
     private static class TomcatInfoRenderer extends com.intellij.ui.SimpleListCellRenderer<TomcatInfo> {
