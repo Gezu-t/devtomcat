@@ -3,7 +3,9 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
@@ -212,12 +214,17 @@ public class TomcatJavaParametersBuilder {
         Path confOverlay = TomcatProjectUtils.getConfOverlayDirectory(configuration);
         boolean overlayActive = confOverlay != null && Files.isDirectory(confOverlay);
 
+        boolean hotDeployEnabled = configuration.isHotDeploymentEnabled();
+        Set<String> reservedContextStems = collectIdeContextStems();
+
         List<String> warnings = TomcatConfigPreparer.prepare(
                 catalinaBase, catalinaHome,
                 ports.getHttp(), ports.getShutdown(),
                 ports.getHttps(), configuration.isHttpsEnabled(),
                 ports.getAjp(),  configuration.isAjpEnabled(),
-                overlayActive ? confOverlay : null);
+                overlayActive ? confOverlay : null,
+                hotDeployEnabled,
+                reservedContextStems);
 
         if (deploymentLogger != null) {
             if (overlayActive) {
@@ -229,6 +236,31 @@ public class TomcatJavaParametersBuilder {
                 deploymentLogger.logServerWarning(warning);
             }
         }
+    }
+
+    /**
+     * Returns the set of context-XML stems (e.g. "ROOT", "myapp") claimed by this
+     * configuration's IDE-managed artifacts so {@link CatalinaHomeMirror} can skip
+     * conflicting shared apps and leave the IDE descriptor in charge.
+     */
+    @NotNull
+    private Set<String> collectIdeContextStems() {
+        List<DeploymentArtifact> artifacts =
+                configuration.getConfigData().getDeploymentConfig().getArtifacts();
+        if (artifacts == null || artifacts.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> stems = new HashSet<>();
+        for (DeploymentArtifact artifact : artifacts) {
+            if (artifact == null) continue;
+            try {
+                stems.add(ContextPathUtils.resolveContextName(artifact.getContextPath()));
+            } catch (IllegalArgumentException e) {
+                // Invalid context path — ignore here; deployment strategy reports it at deploy time.
+                LOG.debug("Skipping invalid context path for mirror reservation: " + artifact.getContextPath());
+            }
+        }
+        return stems;
     }
 
     private void setupBasicParameters(@NotNull JavaParameters params, @NotNull Path catalinaBase, @NotNull Sdk jdk) {

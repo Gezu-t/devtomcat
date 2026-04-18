@@ -11,7 +11,9 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -71,6 +73,17 @@ public final class TomcatConfigPreparer {
                 httpsPort, httpsEnabled, ajpPort, ajpEnabled, null);
     }
 
+    @NotNull
+    public static List<String> prepare(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
+                                       int httpPort, int shutdownPort,
+                                       int httpsPort, boolean httpsEnabled,
+                                       int ajpPort, boolean ajpEnabled,
+                                       @Nullable Path confOverlay) throws IOException {
+        return prepare(catalinaBase, catalinaHome, httpPort, shutdownPort,
+                httpsPort, httpsEnabled, ajpPort, ajpEnabled, confOverlay,
+                false, Collections.emptySet());
+    }
+
     /**
      * Prepares the CATALINA_BASE directory with all config files needed for launch.
      *
@@ -104,7 +117,9 @@ public final class TomcatConfigPreparer {
                                        int httpPort, int shutdownPort,
                                        int httpsPort, boolean httpsEnabled,
                                        int ajpPort, boolean ajpEnabled,
-                                       @Nullable Path confOverlay) throws IOException {
+                                       @Nullable Path confOverlay,
+                                       boolean hotDeploymentEnabled,
+                                       @NotNull Set<String> reservedContextStems) throws IOException {
         List<String> warnings = new ArrayList<>();
 
         createDirectories(catalinaBase);
@@ -112,6 +127,7 @@ public final class TomcatConfigPreparer {
         cleanWorkDirectory(catalinaBase);
         cleanStaleTempState(catalinaBase);
 
+        // copyConfDirectory skips Catalina/localhost so the mirror owns that subtree.
         copyConfDirectory(catalinaHome, catalinaBase);
 
         if (confOverlay != null) {
@@ -121,6 +137,12 @@ public final class TomcatConfigPreparer {
         warnings.addAll(customizeServerXml(
                 catalinaHome, catalinaBase, httpPort, shutdownPort,
                 httpsPort, httpsEnabled, ajpPort, ajpEnabled));
+
+        // Mirror Tomcat's bundled webapps into the per-run base when the user opted in.
+        // When disabled, this cleans up any entries left by a prior enabled run.
+        CatalinaHomeMirror.Result mirror = CatalinaHomeMirror.apply(
+                hotDeploymentEnabled, catalinaHome, catalinaBase, reservedContextStems);
+        warnings.addAll(mirror.warnings);
 
         warnings.addAll(validateConf(catalinaBase));
 
@@ -261,12 +283,13 @@ public final class TomcatConfigPreparer {
     }
 
     /**
-     * Recursively copies the entire {@code conf} directory from CATALINA_HOME into CATALINA_BASE.
+     * Recursively copies the {@code conf} tree from CATALINA_HOME into CATALINA_BASE.
      *
      * <p>This ensures the runtime base has the full configuration tree that Tomcat expects,
      * including files the plugin does not explicitly know about (e.g. custom valves, realms,
-     * MIME mappings). Only {@code server.xml} is mutated afterwards; everything else is
-     * kept as-is from the installation.
+     * MIME mappings). {@code server.xml} is mutated afterwards; {@code Catalina/localhost/}
+     * is intentionally left out because {@link CatalinaHomeMirror} owns that subtree and
+     * gates it on the user's "Deploy applications configured in Tomcat instance" choice.
      */
     static void copyConfDirectory(@NotNull Path catalinaHome, @NotNull Path catalinaBase) throws IOException {
         Path sourceConf = catalinaHome.resolve(DIR_CONF);
@@ -278,12 +301,17 @@ public final class TomcatConfigPreparer {
         }
 
         recreateDirectory(targetConf);
+        Path catalinaLocalhost = sourceConf.resolve("Catalina").resolve("localhost");
 
         Files.walkFileTree(sourceConf, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 if (attrs.isSymbolicLink()) {
                     LOG.warn("Skipping symlink directory in CATALINA_HOME conf: " + dir);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                if (dir.equals(catalinaLocalhost)) {
+                    // Reserved for CatalinaHomeMirror — skip entirely so disable/enable cycles are clean.
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 Path relative = sourceConf.relativize(dir);
@@ -304,7 +332,8 @@ public final class TomcatConfigPreparer {
             }
         });
 
-        LOG.info("Copied full conf directory from " + sourceConf + " to " + targetConf);
+        LOG.info("Copied conf directory from " + sourceConf + " to " + targetConf +
+                " (excluding Catalina/localhost, owned by CatalinaHomeMirror)");
     }
 
     /**

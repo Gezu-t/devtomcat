@@ -88,6 +88,13 @@ public class TomcatSettingsSection implements ConfigurationSection {
             httpPortField.getDocument().addDocumentListener(httpPortDocListener);
             addPortRow(formPanel, gbc, row, new JBLabel("HTTP port:"), httpPortField);
             deployAppsCheckBox = new JBCheckBox("Deploy applications configured in Tomcat instance");
+            deployAppsCheckBox.setToolTipText("<html>When enabled, Tomcat's bundled web apps from the install's " +
+                    "<code>webapps/</code> and <code>conf/Catalina/localhost/</code> directories " +
+                    "(e.g. <i>manager</i>, <i>host-manager</i>, <i>ROOT</i>) deploy alongside the " +
+                    "artifacts configured in this run configuration.<br>" +
+                    "WAR files are hardlinked when the filesystem supports it; exploded web apps " +
+                    "run in place via a synthesized context descriptor — no file duplication. " +
+                    "IDE-managed artifacts always win on context-path collisions.</html>");
             deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
             addCheckBoxColumn(formPanel, gbc, deployAppsCheckBox);
 

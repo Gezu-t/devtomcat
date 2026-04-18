@@ -133,21 +133,26 @@ class TomcatConfigPreparerTest {
         }
 
         @Test
-        @DisplayName("copies subdirectories recursively")
+        @DisplayName("copies subdirectories recursively but skips Catalina/localhost (owned by mirror)")
         void copiesSubdirectories(@TempDir Path tempDir) throws IOException {
             Path catalinaHome = tempDir.resolve("home");
             Path catalinaBase = tempDir.resolve("base");
             Files.createDirectories(catalinaHome.resolve("conf/Catalina/localhost"));
+            Files.createDirectories(catalinaHome.resolve("conf/extras"));
             Files.createDirectories(catalinaBase);
 
             Files.writeString(catalinaHome.resolve("conf/Catalina/localhost/manager.xml"),
                     "<Context docBase=\"manager\"/>");
+            Files.writeString(catalinaHome.resolve("conf/extras/valve.xml"),
+                    "<Valve/>");
 
             TomcatConfigPreparer.copyConfDirectory(catalinaHome, catalinaBase);
 
-            assertTrue(Files.exists(catalinaBase.resolve("conf/Catalina/localhost/manager.xml")));
-            assertEquals("<Context docBase=\"manager\"/>",
-                    Files.readString(catalinaBase.resolve("conf/Catalina/localhost/manager.xml")));
+            // Regular subdirectories still copy.
+            assertTrue(Files.exists(catalinaBase.resolve("conf/extras/valve.xml")));
+            // Catalina/localhost is reserved for CatalinaHomeMirror.
+            assertFalse(Files.exists(catalinaBase.resolve("conf/Catalina/localhost/manager.xml")),
+                    "Catalina/localhost should not be copied here; the mirror gates that subtree");
         }
 
         @Test
