@@ -104,6 +104,10 @@ package com.dev.idea.plugins.tomcat.conf;
                              logFile.isShowAll()
                      );
                  }
+                 // Carry over the one-shot seed marker so the clone's
+                 // syncTomcatLogFiles() does not re-seed defaults when the user
+                 // has intentionally emptied the list on the original.
+                 clone.setLogsSeeded(original.isLogsSeeded());
 
                  clone.setShowConsoleOnStdOut(original.isShowConsoleOnStdOut());
                  clone.setShowConsoleOnStdErr(original.isShowConsoleOnStdErr());

@@ -120,6 +120,10 @@ public class ArtifactSelectionHandler {
                 existingBaseNames.add(baseName);
                 String context = getUniqueContext(deployment.getContextPath());
                 deployment.setContextPath(context);
+                // Auto-detected deployments come from project scanning; rename-tracking
+                // and orphan validation are still meaningful because the source module
+                // is part of the project.
+                deployment.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
 
                 tableManager.addAndSelectDeployment(deployment);
                 LOG.info("Added auto-detected deployment: " + deployment.getName() +
@@ -255,16 +259,38 @@ public class ArtifactSelectionHandler {
             return;
         }
 
+        String localPath = chosen.getPath();
+
+        // Duplicate-path guard: external sources don't have a stable "name" from the
+        // project model — the file path IS the identity. Picking the same file twice
+        // would add two rows deploying the same bytes to different context paths,
+        // which is almost never what the user wants. Refuse silently with an info
+        // dialog so the user doesn't get a mysterious second row.
+        for (DeploymentArtifact existing : tableManager.getDeployments()) {
+            if (existing != null && localPath.equals(existing.getPath())) {
+                Messages.showInfoMessage(project,
+                        "This file or directory is already in the deployment list as '"
+                                + existing.getDisplayName() + "' at context '"
+                                + existing.getApplicationContext() + "'.\n\n"
+                                + "Remove the existing entry first if you want to re-add it.",
+                        "Already Added");
+                LOG.debug("Refused duplicate external-source add: " + localPath);
+                return;
+            }
+        }
+
         String name = chosen.getName();
         String type = chosen.isDirectory() ? DeploymentArtifact.TYPE_EXPLODED : DeploymentArtifact.TYPE_WAR;
-        String localPath = chosen.getPath();
 
         String context = getUniqueContext(ContextPathUtils.generateContextPath(name));
         DeploymentArtifact deployment = new DeploymentArtifact(name, localPath, type);
         deployment.setContextPath(context);
+        // Mark as EXTERNAL so the validator never flags this entry as an orphaned
+        // IntelliJ artifact (it isn't one) and the rename refresher skips it.
+        deployment.setSource(DeploymentArtifact.Source.EXTERNAL);
 
         tableManager.addAndSelectDeployment(deployment);
-        LOG.debug("Added external source: " + name);
+        LOG.debug("Added external source: " + name + " at " + localPath);
     }
 
     private List<Artifact> getSelectableArtifacts() {

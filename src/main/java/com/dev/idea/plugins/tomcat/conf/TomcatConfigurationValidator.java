@@ -240,7 +240,12 @@ package com.dev.idea.plugins.tomcat.conf;
 
             for (DeploymentArtifact artifact : artifacts) {
                 if (artifact == null) continue;
-                if (DeploymentArtifact.TYPE_EXTERNAL.equals(artifact.getType())) continue;
+                // Skip EXTERNAL artifacts (user-picked files/directories) — they are
+                // by definition not IntelliJ-managed, so flagging them as "not in
+                // platform artifacts" would be a false positive. Source is the
+                // authoritative marker; the legacy TYPE_EXTERNAL string check has
+                // been retired along with the overloaded type field.
+                if (artifact.getSource() == DeploymentArtifact.Source.EXTERNAL) continue;
 
                 String name = artifact.getName();
                 if (name.isEmpty()) continue;

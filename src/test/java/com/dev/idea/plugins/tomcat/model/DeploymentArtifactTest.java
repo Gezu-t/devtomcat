@@ -148,4 +148,61 @@ class DeploymentArtifactTest {
         assertEquals("exploded", DeploymentArtifact.TYPE_EXPLODED);
         assertEquals("external", DeploymentArtifact.TYPE_EXTERNAL);
     }
+
+    @Test
+    @DisplayName("default source is INTELLIJ_ARTIFACT")
+    void defaultSourceIsIntelliJArtifact() {
+        DeploymentArtifact a = new DeploymentArtifact();
+        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, a.getSource());
+    }
+
+    @Test
+    @DisplayName("setType('external') route-maps to source=EXTERNAL + type=WAR for legacy configs")
+    void legacyExternalTypeMapsToSource() {
+        // Pre-source-field configs wrote type="external" as the only marker for
+        // user-picked files. On the way in, setType() must split that overloaded
+        // value into its two real facets so the rest of the code (validator,
+        // refresher) sees a proper Source.EXTERNAL.
+        DeploymentArtifact a = new DeploymentArtifact();
+        a.setType(DeploymentArtifact.TYPE_EXTERNAL);
+        assertEquals(DeploymentArtifact.TYPE_WAR, a.getType(),
+                "legacy 'external' type must collapse to packaging=WAR");
+        assertEquals(DeploymentArtifact.Source.EXTERNAL, a.getSource(),
+                "legacy 'external' type must also set source=EXTERNAL");
+    }
+
+    @Test
+    @DisplayName("clone carries source across")
+    void cloneCarriesSource() {
+        DeploymentArtifact a = new DeploymentArtifact("ext.war", "/tmp/ext.war", "war");
+        a.setSource(DeploymentArtifact.Source.EXTERNAL);
+
+        DeploymentArtifact copy = a.clone();
+        assertEquals(DeploymentArtifact.Source.EXTERNAL, copy.getSource());
+    }
+
+    @Test
+    @DisplayName("equals distinguishes artifacts by source")
+    void equalsDistinguishesSource() {
+        DeploymentArtifact a = new DeploymentArtifact("app", "/p", "war");
+        DeploymentArtifact b = new DeploymentArtifact("app", "/p", "war");
+        assertEquals(a, b);
+        b.setSource(DeploymentArtifact.Source.EXTERNAL);
+        assertNotEquals(a, b,
+                "same name/path/type with different source must not be equal — "
+                + "they behave differently downstream (validator, refresher)");
+    }
+
+    @Test
+    @DisplayName("Source.fromSerialized defaults to INTELLIJ_ARTIFACT for absent or unknown values")
+    void fromSerializedDefaults() {
+        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT,
+                DeploymentArtifact.Source.fromSerialized(null));
+        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT,
+                DeploymentArtifact.Source.fromSerialized("bogus"));
+        assertEquals(DeploymentArtifact.Source.EXTERNAL,
+                DeploymentArtifact.Source.fromSerialized("EXTERNAL"));
+        assertEquals(DeploymentArtifact.Source.AUTO_DETECTED,
+                DeploymentArtifact.Source.fromSerialized("AUTO_DETECTED"));
+    }
 }

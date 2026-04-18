@@ -120,6 +120,89 @@ class TomcatConfigurationSerializerTest {
     }
 
     @Test
+    @DisplayName("round-trip preserves DeploymentArtifact.Source")
+    void roundTripArtifactSource() {
+        TomcatConfigurationData original = new TomcatConfigurationData();
+
+        DeploymentArtifact ij = new DeploymentArtifact("app-war", "/out/app.war", "war");
+        ij.setSource(DeploymentArtifact.Source.INTELLIJ_ARTIFACT);
+        DeploymentArtifact auto = new DeploymentArtifact("detected", "/build/detected", "exploded");
+        auto.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
+        DeploymentArtifact ext = new DeploymentArtifact("my.war", "/tmp/my.war", "war");
+        ext.setSource(DeploymentArtifact.Source.EXTERNAL);
+
+        original.getDeploymentConfig().addArtifact(ij);
+        original.getDeploymentConfig().addArtifact(auto);
+        original.getDeploymentConfig().addArtifact(ext);
+
+        Element element = new Element("configuration");
+        TomcatConfigurationSerializer.write(original, element);
+
+        TomcatConfigurationData restored = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(restored, element);
+
+        List<DeploymentArtifact> artifacts = restored.getDeploymentConfig().getArtifacts();
+        assertEquals(3, artifacts.size());
+        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, artifacts.get(0).getSource());
+        assertEquals(DeploymentArtifact.Source.AUTO_DETECTED,    artifacts.get(1).getSource());
+        assertEquals(DeploymentArtifact.Source.EXTERNAL,         artifacts.get(2).getSource());
+    }
+
+    @Test
+    @DisplayName("legacy config with type='external' deserializes to source=EXTERNAL + type=WAR")
+    void legacyTypeExternalMigrates() {
+        // Simulates a config written by an older plugin version that only knew
+        // about type and treated 'external' as a packaging value. The new reader
+        // must route that to source=EXTERNAL so the validator and refresher
+        // skip it, and the packaging falls back to WAR so downstream deployment
+        // code has a sensible default.
+        Element element = new Element("configuration");
+        Element deployments = new Element("deployments");
+        Element art = new Element("artifact");
+        art.setAttribute("name", "legacy.war");
+        art.setAttribute("path", "/tmp/legacy.war");
+        art.setAttribute("type", "external");
+        art.setAttribute("contextPath", "/legacy");
+        deployments.addContent(art);
+        element.addContent(deployments);
+
+        TomcatConfigurationData restored = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(restored, element);
+
+        List<DeploymentArtifact> artifacts = restored.getDeploymentConfig().getArtifacts();
+        assertEquals(1, artifacts.size());
+        DeploymentArtifact a = artifacts.get(0);
+        assertEquals(DeploymentArtifact.Source.EXTERNAL, a.getSource(),
+                "legacy type='external' must map to source=EXTERNAL on read");
+        assertEquals(DeploymentArtifact.TYPE_WAR, a.getType(),
+                "packaging must default to WAR when the legacy config gave no real packaging");
+    }
+
+    @Test
+    @DisplayName("legacy config without source attribute defaults to INTELLIJ_ARTIFACT")
+    void legacyMissingSourceDefaultsIntelliJArtifact() {
+        Element element = new Element("configuration");
+        Element deployments = new Element("deployments");
+        Element art = new Element("artifact");
+        art.setAttribute("name", "classic");
+        art.setAttribute("path", "/out/classic.war");
+        art.setAttribute("type", "war");
+        art.setAttribute("contextPath", "/classic");
+        // No source attribute at all.
+        deployments.addContent(art);
+        element.addContent(deployments);
+
+        TomcatConfigurationData restored = new TomcatConfigurationData();
+        TomcatConfigurationSerializer.read(restored, element);
+
+        DeploymentArtifact a = restored.getDeploymentConfig().getArtifacts().get(0);
+        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, a.getSource(),
+                "absent source attribute must default to INTELLIJ_ARTIFACT so legacy "
+                + "configs keep their pre-split behaviour (validator still enforces "
+                + "IntelliJ-artifact presence, refresher still rename-tracks them).");
+    }
+
+    @Test
     @DisplayName("round-trip preserves environment variables")
     void roundTripEnvironmentVariables() {
         TomcatConfigurationData original = new TomcatConfigurationData();

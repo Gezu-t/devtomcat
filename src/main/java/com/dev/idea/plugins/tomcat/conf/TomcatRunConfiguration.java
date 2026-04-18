@@ -46,6 +46,16 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     private static final Logger LOG = Logger.getInstance(TomcatRunConfiguration.class);
 
     private final TomcatConfigurationData configData = new TomcatConfigurationData();
+
+    /**
+     * True once the Tomcat default log entries have been seeded (or the
+     * configuration was loaded from persisted XML that already declared a list).
+     * Distinguishes "fresh config — seed defaults" from "user emptied the list —
+     * respect their choice" so seeding never reverts an intentional delete-all.
+     * Persisted via {@link TomcatConfigurationSerializer}.
+     */
+    private boolean logsSeeded = false;
+
     public TomcatRunConfiguration(@NotNull Project project, @NotNull ConfigurationFactory factory, String name) {
         super(project, factory, name);
         try {
@@ -479,19 +489,29 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     /**
-     * Seeds the default Tomcat log entries into {@code myLogFiles} <b>only when
-     * the list is empty</b>. Called from the constructor (fresh config) and
-     * {@link #readExternal(Element)} (legacy configs without {@code <log_file>}
-     * children). Once any log entry exists — whether loaded from XML, added by
-     * the user, or carried over by {@link TomcatConfigurationCloner} — this
-     * method is a no-op so the user's choices are authoritative.
+     * Seeds the default Tomcat log entries into {@code myLogFiles} exactly once
+     * per configuration lifetime — when the seeded flag is still {@code false}.
+     * Ensures fresh configs get sensible defaults while respecting every user
+     * action that follows (toggle, delete single, delete all).
      *
-     * <p>Previous revisions repaired "missing" defaults on every call, which
-     * silently resurrected log entries the user had deleted through the Logs
-     * tab (see {@code TomcatConfigurationClonerPlatformTest#testRemovedLogEntryStaysRemovedAfterRoundTrip}).
+     * <p>Behaviour:
+     * <ul>
+     *   <li>{@code logsSeeded == true}: no-op. The list is authoritative; an
+     *       empty list means "user removed everything".</li>
+     *   <li>{@code logsSeeded == false} and list non-empty: mark seeded without
+     *       touching entries. Happens when a legacy XML populated the list
+     *       before the flag existed.</li>
+     *   <li>{@code logsSeeded == false} and list empty: add the six Tomcat
+     *       defaults, then mark seeded.</li>
+     * </ul>
      */
     public void syncTomcatLogFiles() {
-        if (!super.getLogFiles().isEmpty()) return;
+        if (logsSeeded) return;
+
+        if (!super.getLogFiles().isEmpty()) {
+            logsSeeded = true;
+            return;
+        }
 
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
         if (logsDir == null) return;
@@ -500,33 +520,75 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             String path = logFile.resolveFullPath(logsDir);
             addLogFile(path, logFile.getId(), logFile.isEnabledByDefault());
         }
+        logsSeeded = true;
+    }
+
+    public boolean isLogsSeeded() {
+        return logsSeeded;
+    }
+
+    public void setLogsSeeded(boolean seeded) {
+        this.logsSeeded = seeded;
     }
 
     @NotNull
     @Override
     public ArrayList<LogFileOptions> getAllLogFiles() {
-        // Ensure Tomcat log entries exist in the internal list (seeds on first
-        // call, no-op after that). This covers the case where getAllLogFiles() is
-        // called before readExternal() — e.g. by RunContentBuilder at launch.
+        // Ensure Tomcat log entries exist in the internal list for fresh configs.
+        // No-op after the one-time seed; empty list after seed means the user
+        // removed every entry and we must not resurrect them.
         syncTomcatLogFiles();
 
-        // Update dated Tomcat log paths (e.g. catalina.2026-04-16.log) to today's
-        // filename so the console tab finds the right file on disk.
+        // Refresh dated Tomcat log paths (catalina.YYYY-MM-DD.log etc.) to today's
+        // filename so the console tab opens the right file on disk. Skip any
+        // entry whose path the user has customised — a path that no longer
+        // matches the plugin-managed shape is a deliberate override and must
+        // not be overwritten.
         Path logsDir = TomcatProjectUtils.getLogsDirectory(this);
         if (logsDir != null) {
-            Map<String, String> todayPaths = new HashMap<>();
+            Map<String, TomcatLogFile> standardById = new HashMap<>();
             for (TomcatLogFile logFile : TomcatLogFile.getStandardLogFiles()) {
-                todayPaths.put(logFile.getId(), logFile.resolveFullPath(logsDir));
+                standardById.put(logFile.getId(), logFile);
             }
             for (LogFileOptions opt : super.getAllLogFiles()) {
-                String todayPath = todayPaths.get(opt.getName());
-                if (todayPath != null) {
-                    opt.setPathPattern(todayPath);
+                TomcatLogFile logFile = standardById.get(opt.getName());
+                if (logFile == null) continue;
+                if (isPluginManagedPath(opt.getPathPattern(), logsDir, logFile)) {
+                    opt.setPathPattern(logFile.resolveFullPath(logsDir));
                 }
             }
         }
 
         return super.getAllLogFiles();
+    }
+
+    /**
+     * Tests whether a stored log path still conforms to the plugin-managed
+     * shape for a given {@link TomcatLogFile} — {@code logsDir/<filenamePattern>}
+     * with the {@code *} wildcard expanded to any non-empty substring. User
+     * customisations (different directory, renamed file, hand-typed literal)
+     * fall outside the pattern and are preserved verbatim.
+     */
+    private static boolean isPluginManagedPath(@Nullable String currentPath,
+                                               @NotNull Path logsDir,
+                                               @NotNull TomcatLogFile logFile) {
+        if (currentPath == null || currentPath.isEmpty()) return true;
+
+        String expectedPrefix = logsDir.toString() + java.io.File.separator;
+        if (!currentPath.startsWith(expectedPrefix)) return false;
+
+        String filename = currentPath.substring(expectedPrefix.length());
+        String pattern = logFile.getFilenamePattern();
+        int wildcardIdx = pattern.indexOf('*');
+        if (wildcardIdx < 0) {
+            return filename.equals(pattern);
+        }
+
+        String prefix = pattern.substring(0, wildcardIdx);
+        String suffix = pattern.substring(wildcardIdx + 1);
+        return filename.length() >= prefix.length() + suffix.length()
+                && filename.startsWith(prefix)
+                && filename.endsWith(suffix);
     }
 
     // =====================================================================

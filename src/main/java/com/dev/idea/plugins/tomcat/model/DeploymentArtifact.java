@@ -25,19 +25,70 @@ public class DeploymentArtifact implements Serializable, Cloneable {
 
     public static final String TYPE_WAR = "war";
     public static final String TYPE_EXPLODED = "exploded";
+    /**
+     * @deprecated Packaging type and source provenance are orthogonal.
+     * Retained as a legacy input only — {@link #setType(String)} silently maps
+     * this value to {@link Source#EXTERNAL} + {@link #TYPE_WAR} for backward
+     * compatibility with configs written before the {@code source} field existed.
+     * New code should set {@code type} to {@link #TYPE_WAR} / {@link #TYPE_EXPLODED}
+     * and {@code source} to {@link Source#EXTERNAL} explicitly.
+     */
+    @Deprecated
     public static final String TYPE_EXTERNAL = "external";
+
+    /**
+     * Where a deployment artifact came from. Orthogonal to {@link #type} (packaging).
+     *
+     * <ul>
+     *   <li>{@link #INTELLIJ_ARTIFACT}: backed by an entry in IntelliJ's Artifacts
+     *       configuration. The artifact's output path is produced by Before Launch
+     *       compilation; rename tracking updates stale references via
+     *       {@code ArtifactReferenceRefresher}.</li>
+     *   <li>{@link #AUTO_DETECTED}: derived by {@code ProjectArtifactDetector}
+     *       from web-module layout or build output scanning. Treated like an
+     *       IntelliJ artifact for rename tracking because the source module is
+     *       still part of the project.</li>
+     *   <li>{@link #EXTERNAL}: a file or directory the user chose explicitly via
+     *       "External Source...". Lives outside the project artifact model —
+     *       must NOT be rename-tracked against IntelliJ's ArtifactManager, and
+     *       must NOT be flagged as orphaned when it doesn't match a platform
+     *       artifact name.</li>
+     * </ul>
+     */
+    public enum Source {
+        INTELLIJ_ARTIFACT,
+        AUTO_DETECTED,
+        EXTERNAL;
+
+        /**
+         * Resolves a serialized source name to a {@link Source}. Returns
+         * {@link #INTELLIJ_ARTIFACT} for {@code null}, unknown, or absent values
+         * so legacy configs (written before the source field existed) default to
+         * the pre-existing behaviour.
+         */
+        @NotNull
+        public static Source fromSerialized(@Nullable String name) {
+            if (name == null) return INTELLIJ_ARTIFACT;
+            try {
+                return valueOf(name);
+            } catch (IllegalArgumentException e) {
+                return INTELLIJ_ARTIFACT;
+            }
+        }
+    }
 
     @NotNull private String name = "";
     @NotNull private String path = "";
     @NotNull private String type = TYPE_WAR;
     @NotNull private String contextPath = "/";
+    @NotNull private Source source = Source.INTELLIJ_ARTIFACT;
 
     public DeploymentArtifact() {}
 
     public DeploymentArtifact(@NotNull String name, @NotNull String path, @NotNull String type) {
         this.name = Objects.requireNonNull(name);
         this.path = Objects.requireNonNull(path);
-        this.type = Objects.requireNonNull(type);
+        setType(type);
     }
 
     @NotNull
@@ -58,7 +109,26 @@ public class DeploymentArtifact implements Serializable, Cloneable {
     public String getType() { return type; }
 
     public void setType(@Nullable String type) {
-        this.type = StringUtil.notNullize(type, TYPE_WAR);
+        String normalized = StringUtil.notNullize(type, TYPE_WAR);
+        // Backward-compat: legacy configs wrote type="external" to mark a user-
+        // picked file/directory. The packaging (war vs exploded) was lost on disk
+        // so we can't reconstruct it here — callers deserializing a legacy config
+        // are expected to post-process (see TomcatConfigurationSerializer). When
+        // such a value sneaks through a direct setter call we still route it to
+        // the source flag so the artifact is treated as external downstream.
+        if (TYPE_EXTERNAL.equalsIgnoreCase(normalized)) {
+            this.type = TYPE_WAR;
+            this.source = Source.EXTERNAL;
+            return;
+        }
+        this.type = normalized;
+    }
+
+    @NotNull
+    public Source getSource() { return source; }
+
+    public void setSource(@Nullable Source source) {
+        this.source = source != null ? source : Source.INTELLIJ_ARTIFACT;
     }
 
     @NotNull
@@ -138,6 +208,7 @@ public class DeploymentArtifact implements Serializable, Cloneable {
             copy.path = this.path;
             copy.type = this.type;
             copy.contextPath = this.contextPath;
+            copy.source = this.source;
             return copy;
         }
     }
@@ -147,17 +218,19 @@ public class DeploymentArtifact implements Serializable, Cloneable {
         if (this == o) return true;
         if (!(o instanceof DeploymentArtifact that)) return false;
         return name.equals(that.name) && path.equals(that.path) &&
-                type.equals(that.type) && contextPath.equals(that.contextPath);
+                type.equals(that.type) && contextPath.equals(that.contextPath) &&
+                source == that.source;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, path, type, contextPath);
+        return Objects.hash(name, path, type, contextPath, source);
     }
 
     @NotNull
     @Override
     public String toString() {
-        return "DeploymentArtifact{name='" + name + "', type='" + type + "', path='" + path + "'}";
+        return "DeploymentArtifact{name='" + name + "', type='" + type
+                + "', source=" + source + ", path='" + path + "'}";
     }
 }

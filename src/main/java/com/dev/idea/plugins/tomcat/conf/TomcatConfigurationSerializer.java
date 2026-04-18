@@ -99,11 +99,13 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_ARTIFACT_PATH = "path";
     private static final String ATTR_ARTIFACT_TYPE = "type";
     private static final String ATTR_ARTIFACT_CONTEXT = "contextPath";
+    private static final String ATTR_ARTIFACT_SOURCE = "source";
 
     private static final String TAG_COVERAGE = "coverageConfig";
     private static final String TAG_COVERAGE_INCLUDE = "include";
     private static final String TAG_COVERAGE_EXCLUDE = "exclude";
     private static final String ATTR_DOC_BASE = "docBase";
+    private static final String ATTR_LOGS_SEEDED = "logsSeeded";
 
     public static void write(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
         Objects.requireNonNull(config, "Configuration cannot be null");
@@ -111,6 +113,9 @@ public class TomcatConfigurationSerializer {
         // docBase lives on TomcatRunConfiguration (not ConfigData) — used by
         // TomcatRunConfigurationProducer to match configs to web roots.
         element.setAttribute(ATTR_DOC_BASE, StringUtil.notNullize(config.getDocBase()));
+        // Persist the one-shot seed marker so later reads can distinguish
+        // "user removed every log entry" from "fresh config — seed defaults".
+        element.setAttribute(ATTR_LOGS_SEEDED, String.valueOf(config.isLogsSeeded()));
     }
 
     public static void write(@NotNull TomcatConfigurationData data, @NotNull Element element) {
@@ -246,6 +251,7 @@ public class TomcatConfigurationSerializer {
             art.setAttribute(ATTR_ARTIFACT_PATH, StringUtil.notNullize(artifact.getPath()));
             art.setAttribute(ATTR_ARTIFACT_TYPE, StringUtil.notNullize(artifact.getType()));
             art.setAttribute(ATTR_ARTIFACT_CONTEXT, StringUtil.notNullize(artifact.getContextPath(), TomcatConstants.DEFAULT_CONTEXT_PATH));
+            art.setAttribute(ATTR_ARTIFACT_SOURCE, artifact.getSource().name());
             deployments.addContent(art);
         }
         if (!deployments.getChildren(TAG_ARTIFACT).isEmpty()) {
@@ -271,6 +277,14 @@ public class TomcatConfigurationSerializer {
         if (docBase != null) {
             config.setDocBase(docBase);
         }
+        // Restore the seed marker. Absent attribute is treated as false so
+        // legacy XMLs (written before this attribute existed, or configs
+        // persisted before their constructor had a chance to seed) still
+        // receive the default Tomcat log entries on next access. The explicit
+        // reset also overrides the constructor's default-true state — readExternal
+        // is authoritative, not the pre-load initialization.
+        String seeded = element.getAttributeValue(ATTR_LOGS_SEEDED);
+        config.setLogsSeeded(seeded != null && Boolean.parseBoolean(seeded));
     }
 
     public static void read(@NotNull TomcatConfigurationData data, @NotNull Element element) {
@@ -483,8 +497,27 @@ public class TomcatConfigurationSerializer {
                 DeploymentArtifact artifact = new DeploymentArtifact();
                 artifact.setName(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_NAME)));
                 artifact.setPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_PATH)));
-                artifact.setType(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_TYPE), DeploymentArtifact.TYPE_WAR));
-                artifact.setContextPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), TomcatConstants.DEFAULT_CONTEXT_PATH));
+
+                // Read type first. setType() route-maps the legacy value
+                // "external" (from pre-source-field configs) to source=EXTERNAL +
+                // type=WAR — a best-effort recovery since the real packaging was
+                // never persisted. The explicit source attribute below then
+                // overrides this mapping if present in the XML.
+                String rawType = StringUtil.notNullize(
+                        art.getAttributeValue(ATTR_ARTIFACT_TYPE), DeploymentArtifact.TYPE_WAR);
+                artifact.setType(rawType);
+                artifact.setContextPath(StringUtil.notNullize(
+                        art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), TomcatConstants.DEFAULT_CONTEXT_PATH));
+
+                // Source is orthogonal to type. Absent attribute = INTELLIJ_ARTIFACT
+                // (the pre-source-field behaviour), so legacy configs without the
+                // attribute keep behaving as before. The legacy type="external"
+                // route above already set source=EXTERNAL for those configs.
+                String sourceAttr = art.getAttributeValue(ATTR_ARTIFACT_SOURCE);
+                if (sourceAttr != null) {
+                    artifact.setSource(DeploymentArtifact.Source.fromSerialized(sourceAttr));
+                }
+
                 // Note: legacy "deployed" attribute is intentionally ignored on read.
                 // All artifacts in the list are deployed; to exclude one, remove it.
                 artifacts.add(artifact);

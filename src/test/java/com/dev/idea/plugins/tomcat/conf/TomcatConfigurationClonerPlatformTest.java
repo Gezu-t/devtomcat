@@ -100,6 +100,63 @@ public class TomcatConfigurationClonerPlatformTest extends BasePlatformTestCase 
     }
 
     /**
+     * User removes every log entry in the Logs tab. The deletion must persist
+     * across write/read — an absence of {@code <log_file>} children alone is
+     * ambiguous (matches legacy XML), so the {@code logsSeeded} marker decides
+     * between "fresh config — seed defaults" and "user emptied the list".
+     */
+    public void testDeleteAllLogsSurvivesRoundTrip() throws Exception {
+        TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+        TomcatRunConfiguration original = new TomcatRunConfiguration(
+                getProject(),
+                type.getConfigurationFactories()[0],
+                "Tomcat"
+        );
+
+        // Mimic the user removing every row in the Logs tab.
+        original.removeAllLogFiles();
+
+        Element element = new Element("configuration");
+        original.writeExternal(element);
+
+        TomcatRunConfiguration restored = new TomcatRunConfiguration(
+                getProject(),
+                type.getConfigurationFactories()[0],
+                "Tomcat"
+        );
+        restored.readExternal(element);
+
+        assertEquals("an explicit delete-all must not be resurrected on reload",
+                0, restored.getLogFiles().size());
+    }
+
+    /**
+     * User edits the path of a standard Tomcat log entry (e.g. points it at a
+     * custom directory). The daily path-refresh in {@code getAllLogFiles()}
+     * must recognise that the path no longer conforms to the plugin-managed
+     * shape and leave it untouched.
+     */
+    public void testCustomPathForStandardLogIsPreserved() {
+        TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+        TomcatRunConfiguration config = new TomcatRunConfiguration(
+                getProject(),
+                type.getConfigurationFactories()[0],
+                "Tomcat"
+        );
+
+        String customPath = myFixture.getTempDirFixture().getTempDirPath()
+                + "/my-tomcat-logs/my-catalina.log";
+        LogFileOptions catalinaLog = findLogFile(config, TomcatLogFile.TOMCAT_CATALINA_LOG_ID);
+        catalinaLog.setPathPattern(customPath);
+
+        // Trigger the daily path-refresh code path. Without the guard it would
+        // overwrite customPath with today's catalina.YYYY-MM-DD.log.
+        LogFileOptions afterRefresh = findLogFile(config, TomcatLogFile.TOMCAT_CATALINA_LOG_ID);
+        assertEquals("custom path on a standard log id must not be overwritten",
+                customPath, afterRefresh.getPathPattern());
+    }
+
+    /**
      * Legacy configs written before the Tomcat logs feature (no &lt;log_file&gt;
      * children in XML) must still receive the default Tomcat log entries. The
      * backward-compat seed path kicks in only when myLogFiles is empty.

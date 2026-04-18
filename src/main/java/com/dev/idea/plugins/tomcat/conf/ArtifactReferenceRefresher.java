@@ -249,8 +249,11 @@ public final class ArtifactReferenceRefresher {
         for (DeploymentArtifact deployment : artifacts) {
             if (deployment == null) continue;
 
-            // External artifacts are user-provided paths — no IntelliJ Artifact backing
-            if (DeploymentArtifact.TYPE_EXTERNAL.equals(deployment.getType())) {
+            // External artifacts are user-provided paths — no IntelliJ Artifact backing,
+            // so rename-matching against ArtifactManager would always miss. Source is
+            // the authoritative marker now; the legacy type="external" string check
+            // has been retired.
+            if (deployment.getSource() == DeploymentArtifact.Source.EXTERNAL) {
                 continue;
             }
 
