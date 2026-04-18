@@ -74,11 +74,12 @@ public class BrowserLaunchSection implements ConfigurationSection {
         browserComboBox = new ComboBox<>();
         browserComboBox.setRenderer(new BrowserComboRenderer());
         browserConfigButton = new JButton("...");
-        withJavaScriptDebuggerCheckBox = new JBCheckBox("with JavaScript debugger");
-        if (!isJavaScriptPluginAvailable()) {
-            withJavaScriptDebuggerCheckBox.setEnabled(false);
-            withJavaScriptDebuggerCheckBox.setToolTipText(
-                    "JavaScript debugger requires the JavaScript and TypeScript plugin (available in IntelliJ IDEA Ultimate)");
+        // "with JavaScript debugger" is plugin-gated. Match the IntelliJ Platform
+        // convention of hiding plugin-gated controls rather than showing a disabled
+        // upsell — if the JavaScript/TypeScript plugin is not installed the checkbox
+        // never appears in the layout.
+        if (isJavaScriptPluginAvailable()) {
+            withJavaScriptDebuggerCheckBox = new JBCheckBox("with JavaScript debugger");
         }
         urlField = new JBTextField();
 
@@ -134,9 +135,11 @@ public class BrowserLaunchSection implements ConfigurationSection {
         gbc.fill = GridBagConstraints.NONE;
         formPanel.add(browserConfigButton, gbc);
 
-        gbc.gridx = 3;
-        gbc.weightx = 0;
-        formPanel.add(withJavaScriptDebuggerCheckBox, gbc);
+        if (withJavaScriptDebuggerCheckBox != null) {
+            gbc.gridx = 3;
+            gbc.weightx = 0;
+            formPanel.add(withJavaScriptDebuggerCheckBox, gbc);
+        }
 
         gbc.gridx = 0; gbc.gridy = 1;
         gbc.insets = JBUI.insets(2, 0, 2, 6);
@@ -201,7 +204,12 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
         try {
             afterLaunchCheckBox.setSelected(configuration.isAfterLaunchEnabled());
-            withJavaScriptDebuggerCheckBox.setSelected(configuration.isWithJsDebugger());
+            if (withJavaScriptDebuggerCheckBox != null) {
+                withJavaScriptDebuggerCheckBox.setSelected(configuration.isWithJsDebugger());
+            }
+            // When the checkbox is absent (JS plugin not installed) the persisted
+            // isWithJsDebugger value is left untouched — if the user later installs the
+            // plugin their preference is restored.
 
             // Use saved URL if available, otherwise generate from port/context
             isSettingUrl = true;
@@ -324,7 +332,9 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
             browserComboBox.setEnabled(enabled);
             browserConfigButton.setEnabled(enabled);
-            withJavaScriptDebuggerCheckBox.setEnabled(enabled);
+            if (withJavaScriptDebuggerCheckBox != null) {
+                withJavaScriptDebuggerCheckBox.setEnabled(enabled);
+            }
             urlField.setEnabled(enabled);
         } catch (Exception e) {
             LOG.error("Error updating browser controls", e);
