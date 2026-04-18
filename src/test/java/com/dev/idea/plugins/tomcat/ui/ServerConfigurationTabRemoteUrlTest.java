@@ -88,5 +88,22 @@ class ServerConfigurationTabRemoteUrlTest {
             // http://::1 — scheme strip leaves "::1", bracket wrap produces "[::1]"
             assertEquals("[::1]", normaliseHost("http://::1"));
         }
+
+        @Test
+        @DisplayName("bracketed IPv6 followed by :port has the port stripped so Port field wins")
+        void bracketedIpv6WithInlinePort() throws Exception {
+            // Previously this left ":9090" attached to "[::1]", producing
+            // "http://[::1]:9090:8080/manager" when buildManagerUrl appended
+            // the Port field. After the fix, anything past ']' is dropped.
+            assertEquals("[::1]", normaliseHost("[::1]:9090"));
+        }
+
+        @Test
+        @DisplayName("full pasted IPv6 URL with scheme, brackets, port, and path normalises to bare bracketed host")
+        void fullPastedIpv6Url() throws Exception {
+            // The regression case Codex flagged: http://[::1]:9090/manager
+            assertEquals("[::1]", normaliseHost("http://[::1]:9090/manager"));
+            assertEquals("[2001:db8::1]", normaliseHost("https://[2001:db8::1]:8443/manager/text"));
+        }
     }
 }

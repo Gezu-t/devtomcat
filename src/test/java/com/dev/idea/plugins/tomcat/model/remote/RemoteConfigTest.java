@@ -90,6 +90,30 @@ class RemoteConfigTest {
         void minPort() {
             assertTrue(RemoteConfig.isValidManagerUrl("http://localhost:1/manager"));
         }
+
+        @Test
+        @DisplayName("accepts bracketed IPv6 loopback")
+        void ipv6Loopback() {
+            assertTrue(RemoteConfig.isValidManagerUrl("http://[::1]:8080/manager"));
+        }
+
+        @Test
+        @DisplayName("accepts bracketed IPv6 link-local with port")
+        void ipv6LinkLocal() {
+            assertTrue(RemoteConfig.isValidManagerUrl("https://[fe80::1]:8443/manager"));
+        }
+
+        @Test
+        @DisplayName("accepts bracketed IPv6 global address without port")
+        void ipv6NoPort() {
+            assertTrue(RemoteConfig.isValidManagerUrl("http://[2001:db8::1]/manager"));
+        }
+
+        @Test
+        @DisplayName("rejects unbracketed IPv6 literal — port colon would be ambiguous")
+        void ipv6Unbracketed() {
+            assertFalse(RemoteConfig.isValidManagerUrl("http://::1:8080/manager"));
+        }
     }
 
     // =========================================================================
@@ -119,6 +143,26 @@ class RemoteConfigTest {
         void emptyFallsBack() {
             config.setManagerUrl("");
             assertEquals("http://localhost:8080/manager", config.getManagerUrl());
+        }
+
+        @Test
+        @DisplayName("bracketed IPv6 URL round-trips without silent fallback to localhost")
+        void ipv6RoundTrip() {
+            // The whole UI pipeline (buildManagerUrl → new RemoteConfig → setManagerUrl)
+            // must preserve an IPv6 URL. Before the fix, MANAGER_URL_PATTERN rejected
+            // bracketed hosts and setManagerUrl silently replaced the URL with
+            // http://localhost:8080/manager — so a user configuring an IPv6 Tomcat
+            // would unknowingly test/save against localhost.
+            config.setManagerUrl("http://[::1]:8080/manager");
+            assertEquals("http://[::1]:8080/manager", config.getManagerUrl());
+        }
+
+        @Test
+        @DisplayName("bracketed IPv6 constructor variant round-trips")
+        void ipv6Constructor() {
+            RemoteConfig rc = new RemoteConfig(
+                    "https://[2001:db8::1]:8443/manager", "admin", "pw", false);
+            assertEquals("https://[2001:db8::1]:8443/manager", rc.getManagerUrl());
         }
     }
 

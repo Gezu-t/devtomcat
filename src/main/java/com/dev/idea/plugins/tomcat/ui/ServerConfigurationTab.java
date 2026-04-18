@@ -319,21 +319,29 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             gbc.gridx = 0; gbc.gridy = ++y; gbc.gridwidth = 2; gbc.weightx = 1.0;
             panel.add(testPanel, gbc);
 
-            useCredentialsCheck.addActionListener(e -> updateCredentialFieldsState());
-            updateCredentialFieldsState();
             testButton.addActionListener(e -> testConnection());
 
-            // Clear the Test Connection status whenever a field that feeds into the
-            // manager URL changes, so a stale "Connected successfully" doesn't
-            // mislead the user after they retarget the URL.
-            javax.swing.event.DocumentListener urlFieldListener = new javax.swing.event.DocumentListener() {
+            // Clear the Test Connection status whenever any input that feeds into the
+            // connection request changes: URL components AND credentials. A stale
+            // "Connected successfully" otherwise survives credential edits even though
+            // buildCurrentRemoteConfig() would use the new values on the next Test.
+            javax.swing.event.DocumentListener invalidatingListener = new javax.swing.event.DocumentListener() {
                 @Override public void insertUpdate(javax.swing.event.DocumentEvent e)  { invalidateTestStatus(); }
                 @Override public void removeUpdate(javax.swing.event.DocumentEvent e)  { invalidateTestStatus(); }
                 @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { invalidateTestStatus(); }
             };
-            hostField.getDocument().addDocumentListener(urlFieldListener);
-            portField.getDocument().addDocumentListener(urlFieldListener);
+            hostField.getDocument().addDocumentListener(invalidatingListener);
+            portField.getDocument().addDocumentListener(invalidatingListener);
+            usernameField.getDocument().addDocumentListener(invalidatingListener);
+            passwordField.getDocument().addDocumentListener(invalidatingListener);
             useHttpsCheck.addActionListener(e -> invalidateTestStatus());
+            // useCredentialsCheck already has an action listener — chain so the status
+            // invalidation and field enable/disable both fire, in that order.
+            useCredentialsCheck.addActionListener(e -> {
+                invalidateTestStatus();
+                updateCredentialFieldsState();
+            });
+            updateCredentialFieldsState();
         }
 
         /**
@@ -427,9 +435,17 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 host = host.substring(0, firstSlash);
             }
             // Strip a user-supplied :port suffix so it can't double up with portField.
-            // Detect by "more than one colon and not already bracketed" → IPv6;
-            // otherwise "exactly one colon" → user typed host:port.
-            if (!host.startsWith("[")) {
+            // Three cases:
+            //   - bare IPv4/hostname with ":port"            → single colon → strip tail
+            //   - bare IPv6 literal (no brackets)            → multiple colons → wrap in brackets
+            //   - bracketed IPv6 possibly followed by :port  → strip after ']'
+            if (host.startsWith("[")) {
+                int closeBracket = host.indexOf(']');
+                if (closeBracket >= 0) {
+                    // Anything after ']' is a user-typed port — drop it so Port field wins.
+                    host = host.substring(0, closeBracket + 1);
+                }
+            } else {
                 int colons = 0;
                 for (int i = 0; i < host.length(); i++) if (host.charAt(i) == ':') colons++;
                 if (colons == 1) {

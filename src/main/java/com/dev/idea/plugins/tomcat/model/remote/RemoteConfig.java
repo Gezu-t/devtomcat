@@ -5,6 +5,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
+import java.net.URI;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -24,10 +25,15 @@ public class RemoteConfig {
     /**
      * Validates a Tomcat Manager URL.
      * Accepts: http(s)://host[:port]/manager[/subpath]
-     * Port must be 1-65535 if present.
+     * The host may be a hostname, IPv4 literal, or bracketed IPv6 literal
+     * ({@code [::1]}, {@code [fe80::1]}, ...). Port must be 1-65535 if present.
+     *
+     * <p>The regex is a structural guard; {@link #isValidManagerUrl} additionally
+     * parses the URL as a {@link java.net.URI} to enforce the port range and
+     * reject hosts the regex cannot distinguish (empty host with bracket pair, etc.).
      */
     public static final Pattern MANAGER_URL_PATTERN = Pattern.compile(
-            "^https?://[a-zA-Z0-9.-]+(:\\d{1,5})?/manager(/\\w+)?$"
+            "^https?://(?:\\[[0-9a-fA-F:]+]|[a-zA-Z0-9.-]+)(:\\d{1,5})?/manager(/\\w+)?$"
     );
 
     private String managerUrl;
@@ -132,21 +138,28 @@ public class RemoteConfig {
         if (!MANAGER_URL_PATTERN.matcher(url).matches()) {
             return false;
         }
-        // Validate port range if present
-        int portStart = url.indexOf("://") + 3;
-        int colonIdx = url.indexOf(':', portStart);
-        if (colonIdx > 0) {
-            int slashIdx = url.indexOf('/', colonIdx);
-            if (slashIdx > colonIdx) {
-                try {
-                    int port = Integer.parseInt(url.substring(colonIdx + 1, slashIdx));
-                    return port >= 1 && port <= 65535;
-                } catch (NumberFormatException e) {
-                    return false;
-                }
+        // URI parsing is the authoritative validator — the regex accepts shapes
+        // that can't be hand-parsed correctly (the bracketed IPv6 host has its
+        // own embedded colons that the old string-scan logic confused with the
+        // port separator). URI also enforces a valid host and port range.
+        try {
+            URI uri = URI.create(url);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return false;
             }
+            String host = uri.getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            int port = uri.getPort();
+            if (port != -1 && (port < 1 || port > 65535)) {
+                return false;
+            }
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
         }
-        return true;
     }
 
     public boolean isValid() {
