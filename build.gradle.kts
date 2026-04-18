@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 fun prop(key: String): String = project.findProperty(key)?.toString()
@@ -58,7 +59,14 @@ intellijPlatform {
 
     pluginVerification {
         ides {
-            recommended()
+            // recommended() pulls seven IDE builds (~35GB of DMG downloads) which
+            // exceeds available disk on developer laptops. Verify against a
+            // tighter, meaningful set: our exact build target (pinned in
+            // gradle.properties as platformVersion) plus one newer stable so
+            // until-build compatibility is still covered. If you're running in
+            // CI with plenty of disk, swap this for `recommended()`.
+            ide(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
+            ide(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1.7")
         }
     }
 
