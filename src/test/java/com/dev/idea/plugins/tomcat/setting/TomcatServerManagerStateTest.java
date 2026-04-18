@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.setting;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -114,6 +115,118 @@ class TomcatServerManagerStateTest {
                     ignored -> "ignored");
 
             assertTrue(info.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("resolve() — reconciling persisted references to registered state")
+    class Resolve {
+
+        private TomcatServerManagerState state;
+        private TomcatInfo registered;
+
+        @BeforeEach
+        void seed() {
+            state = new TomcatServerManagerState();
+            registered = new TomcatInfo("Tomcat 10", "10.1.28", "/opt/tomcat10");
+            // Seed a deterministic ID so ID-drift scenarios can be exercised.
+            registered.setId("registered-id-1");
+            state.setTomcatInfos(List.of(registered));
+        }
+
+        @Test
+        @DisplayName("null input returns null")
+        void nullReturnsNull() {
+            assertNull(state.resolve(null));
+        }
+
+        @Test
+        @DisplayName("ID match returns the registered instance")
+        void idMatchReturnsRegistered() {
+            TomcatInfo persisted = new TomcatInfo("renamed-locally", "10.1.28", "/opt/other-path");
+            persisted.setId("registered-id-1");
+
+            TomcatInfo resolved = state.resolve(persisted);
+
+            assertSame(registered, resolved, "ID hit must return the canonical live instance");
+        }
+
+        @Test
+        @DisplayName("ID miss + path exact match returns registered")
+        void pathExactMatchReturnsRegistered() {
+            TomcatInfo persisted = new TomcatInfo("imported", "10.0.0", "/opt/tomcat10");
+            persisted.setId("different-id");
+
+            TomcatInfo resolved = state.resolve(persisted);
+
+            assertSame(registered, resolved, "path match must reconcile ID drift");
+        }
+
+        @Test
+        @DisplayName("ID miss + path differs only by trailing slash matches via normalization")
+        void pathNormalizationMatches() {
+            TomcatInfo persisted = new TomcatInfo("imported", "10.0.0", "/opt/tomcat10/");
+            persisted.setId("different-id");
+
+            TomcatInfo resolved = state.resolve(persisted);
+
+            assertSame(registered, resolved, "normalized-path match must succeed");
+        }
+
+        @Test
+        @DisplayName("ID miss + path miss + name match returns registered")
+        void nameFallbackMatches() {
+            TomcatInfo persisted = new TomcatInfo("Tomcat 10", "9.0", "/nowhere/at/all");
+            persisted.setId("different-id");
+
+            TomcatInfo resolved = state.resolve(persisted);
+
+            assertSame(registered, resolved, "name fallback must match as last resort");
+        }
+
+        @Test
+        @DisplayName("full miss returns null — caller treats as dangling")
+        void fullMissReturnsNull() {
+            TomcatInfo persisted = new TomcatInfo("Unknown Server", "9.0", "/missing");
+            persisted.setId("ghost");
+
+            assertNull(state.resolve(persisted));
+        }
+
+        @Test
+        @DisplayName("empty ID + empty path + matching name still resolves")
+        void bareNameReferenceResolves() {
+            TomcatInfo persisted = new TomcatInfo();
+            persisted.setName("Tomcat 10");
+            persisted.setId("");
+            persisted.setPath("");
+
+            TomcatInfo resolved = state.resolve(persisted);
+
+            assertSame(registered, resolved);
+        }
+
+        @Test
+        @DisplayName("ID match takes precedence over path drift")
+        void idBeatsPath() {
+            TomcatInfo persisted = new TomcatInfo("Irrelevant", "0.0", "/completely/unrelated");
+            persisted.setId("registered-id-1");
+
+            assertSame(registered, state.resolve(persisted));
+        }
+
+        @Test
+        @DisplayName("path match takes precedence over name collision")
+        void pathBeatsName() {
+            TomcatInfo other = new TomcatInfo("Tomcat 10", "10.0", "/opt/tomcat10-other");
+            other.setId("other-id");
+            state.setTomcatInfos(List.of(registered, other));
+
+            TomcatInfo persisted = new TomcatInfo("Tomcat 10", "9.0", "/opt/tomcat10-other");
+            persisted.setId("unknown");
+
+            // Path match should win over name match — returns `other`, not `registered`.
+            assertSame(other, state.resolve(persisted));
         }
     }
 

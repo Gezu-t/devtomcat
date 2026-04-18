@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.UnaryOperator;
 import java.util.jar.JarFile;
@@ -202,6 +203,87 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
                 .filter(info -> path.equals(info.getPath()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Resolve a persisted {@link TomcatInfo} reference to the canonical registered instance.
+     *
+     * <p>A run configuration carries an embedded {@code TomcatInfo} snapshot so it can survive
+     * cross-machine transport (VCS imports). That snapshot can drift from the registered
+     * state — IDs regenerate when users remove-and-re-add, paths change after reinstalls,
+     * and hand-edited XML is always possible. Every caller that reads a run configuration's
+     * server reference must go through this resolver so the UI (Server-tab combo),
+     * validator, runtime launch path, and dashboard all agree on a single interpretation.
+     *
+     * <p>Match priority:
+     * <ol>
+     *   <li><b>ID</b> — exact match. Authoritative when present.</li>
+     *   <li><b>Path</b> — exact, then normalized ({@code toAbsolutePath().normalize()}),
+     *       then {@code Files.isSameFile} when both exist on disk. Catches trailing
+     *       slashes, symlinks, and {@code ..} segments.</li>
+     *   <li><b>Name</b> — last resort for legacy configs with no ID and a path that
+     *       has since moved.</li>
+     * </ol>
+     *
+     * @param persisted the embedded reference (may be null)
+     * @return the matching registered instance, or {@code null} if no match — treat as
+     *         dangling (surface in UI, block validation).
+     */
+    @Nullable
+    public TomcatInfo resolve(@Nullable TomcatInfo persisted) {
+        if (persisted == null) return null;
+
+        String persistedId = persisted.getId();
+        if (!persistedId.isEmpty()) {
+            TomcatInfo byId = findTomcatInfoById(persistedId);
+            if (byId != null) return byId;
+        }
+
+        String persistedPath = persisted.getPath();
+        if (!persistedPath.isEmpty()) {
+            TomcatInfo byPath = findRegisteredByPath(persistedPath);
+            if (byPath != null) return byPath;
+        }
+
+        String persistedName = persisted.getName();
+        if (!persistedName.isEmpty()) {
+            TomcatInfo byName = findTomcatInfoByName(persistedName);
+            if (byName != null) return byName;
+        }
+
+        return null;
+    }
+
+    /**
+     * Path match with three tiers (exact → normalized → {@link Files#isSameFile}).
+     * Kept private so callers flow through {@link #resolve}.
+     */
+    @Nullable
+    private TomcatInfo findRegisteredByPath(@NotNull String persistedPath) {
+        for (TomcatInfo info : tomcatInfos) {
+            if (persistedPath.equals(info.getPath())) return info;
+        }
+        Path persistedNormalized;
+        try {
+            persistedNormalized = Paths.get(persistedPath).toAbsolutePath().normalize();
+        } catch (Exception e) {
+            return null;
+        }
+        for (TomcatInfo info : tomcatInfos) {
+            String candidatePath = info.getPath();
+            if (candidatePath.isEmpty()) continue;
+            try {
+                Path candidateNormalized = Paths.get(candidatePath).toAbsolutePath().normalize();
+                if (persistedNormalized.equals(candidateNormalized)) return info;
+                if (Files.exists(persistedNormalized) && Files.exists(candidateNormalized)
+                        && Files.isSameFile(persistedNormalized, candidateNormalized)) {
+                    return info;
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // fall through to next candidate
+            }
+        }
+        return null;
     }
 
     // =====================================================================
