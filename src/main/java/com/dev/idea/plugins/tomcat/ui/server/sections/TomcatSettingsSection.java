@@ -16,6 +16,7 @@ import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
+import com.intellij.ui.components.panels.VerticalLayout;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -62,13 +63,10 @@ public class TomcatSettingsSection implements ConfigurationSection {
     @NotNull
     public JPanel createPanel() {
         if (panel == null) {
-            panel = new JPanel();
-            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+            panel = new JPanel(new VerticalLayout(0));
             panel.setBorder(JBUI.Borders.empty(0));
 
-            TitledSeparator separator = new TitledSeparator("Tomcat Server Settings");
-            separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, separator.getPreferredSize().height));
-            panel.add(separator);
+            panel.add(new TitledSeparator("Tomcat Server Settings"));
 
             JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
             GridBagConstraints gbc = new GridBagConstraints();
@@ -142,7 +140,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
             formPanel.add(catalinaBaseField, gbc);
             gbc.gridwidth = 1;
 
-            formPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, formPanel.getPreferredSize().height));
             panel.add(formPanel);
         }
         return panel;

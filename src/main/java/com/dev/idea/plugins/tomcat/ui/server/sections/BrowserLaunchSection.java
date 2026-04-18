@@ -15,6 +15,7 @@ import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
+import com.intellij.ui.components.panels.VerticalLayout;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -105,20 +106,15 @@ public class BrowserLaunchSection implements ConfigurationSection {
         };
         browserComboBox.addActionListener(browserActionListener);
 
-        browserConfigButton.setPreferredSize(new Dimension(JBUI.scale(30), JBUI.scale(25)));
-
         afterLaunchCheckBox.addActionListener(e -> updateBrowserControls());
         browserConfigButton.addActionListener(e -> configureBrowsers());
     }
 
     private void createLayout() {
-        panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel = new JPanel(new VerticalLayout(0));
         panel.setBorder(JBUI.Borders.empty(0));
 
-        TitledSeparator separator = new TitledSeparator("Open browser");
-        separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, separator.getPreferredSize().height));
-        panel.add(separator);
+        panel.add(new TitledSeparator("Open browser"));
 
         JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -152,7 +148,6 @@ public class BrowserLaunchSection implements ConfigurationSection {
         gbc.insets = JBUI.insets(2, 4, 2, 8);
         formPanel.add(urlField, gbc);
 
-        formPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, formPanel.getPreferredSize().height));
         panel.add(formPanel);
     }
 

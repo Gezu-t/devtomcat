@@ -18,6 +18,7 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.components.panels.VerticalLayout;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.JBColor;
@@ -61,11 +62,9 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     private void buildUI() {
         createSharedSections();
 
-        JPanel mainPanel = new JPanel();
-        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
+        JPanel mainPanel = new JPanel(new VerticalLayout(0));
 
-        JPanel commonPanel = createCommonSections();
-        mainPanel.add(commonPanel);
+        mainPanel.add(createCommonSections());
 
         localContent = createLocalContent();
         remoteContent = createRemoteContent();
@@ -85,18 +84,10 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     private JPanel createCommonSections() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        JPanel panel = new JPanel(new VerticalLayout(0));
         panel.setBorder(JBUI.Borders.empty(2, 12, 0, 12));
-
-        JPanel appServerPanel = applicationServerSection.createPanel();
-        appServerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, appServerPanel.getPreferredSize().height));
-        panel.add(appServerPanel);
-
-        JPanel browserPanel = browserLaunchSection.createPanel();
-        browserPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, browserPanel.getPreferredSize().height));
-        panel.add(browserPanel);
-
+        panel.add(applicationServerSection.createPanel());
+        panel.add(browserLaunchSection.createPanel());
         return panel;
     }
 
@@ -125,36 +116,20 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
     }
 
     private JPanel createLocalContent() {
-        JPanel content = new JPanel();
-        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        JPanel content = new JPanel(new VerticalLayout(0));
         content.setBorder(JBUI.Borders.empty(0, 12, 2, 12));
-
-        addSection(content, vmOptionsSection);
-        addSection(content, updateActionsSection);
-        addSection(content, jreConfigurationSection);
-        addSection(content, tomcatSettingsSection);
-
+        content.add(vmOptionsSection.createPanel());
+        content.add(updateActionsSection.createPanel());
+        content.add(jreConfigurationSection.createPanel());
+        content.add(tomcatSettingsSection.createPanel());
         return content;
     }
 
-    private void addSection(JPanel container, ConfigurationSection section) {
-        JPanel sectionPanel = section.createPanel();
-        Dimension preferred = sectionPanel.getPreferredSize();
-        sectionPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, preferred.height));
-        container.add(sectionPanel);
-    }
-
     private JPanel createRemoteContent() {
-        JPanel content = new JPanel();
-        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(JBUI.Borders.empty(4, 12, 4, 12));
-
+        JPanel content = new JPanel(new VerticalLayout(0));
+        content.setBorder(JBUI.Borders.empty(4, 12));
         remoteConnectionSection = new RemoteConnectionSection();
-
-        JPanel connectionPanel = remoteConnectionSection.getPanel();
-        connectionPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, connectionPanel.getPreferredSize().height));
-        content.add(connectionPanel);
-
+        content.add(remoteConnectionSection.getPanel());
         return content;
     }
 
