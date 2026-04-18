@@ -75,12 +75,14 @@ public final class TomcatRunnerDelegate {
             ProcessHandler handler = existing.getProcessHandler();
             // Only short-circuit on fully-terminated handlers (legitimate restart of
             // a dead config — let the platform launch fresh). For live AND shutting-
-            // down handlers, defer to the shared gate — the previous guard also
-            // excluded terminating, which let the rerun icon silently race a fresh
-            // launch against a still-releasing shutdown port while the Services and
-            // Ctrl+F10 surfaces correctly surfaced "Tomcat is shutting down".
+            // down handlers, defer to the shared gate. Uses isFullyTerminated()
+            // rather than the raw isProcessTerminated() flag so the shutdown overlap
+            // window (both terminating and terminated briefly true) still routes
+            // through getRestartBlockReason() and surfaces "Tomcat is shutting down"
+            // — otherwise the rerun icon silently races a fresh launch against a
+            // still-releasing shutdown port.
             if (handler instanceof TomcatProcessHandler tomcatHandler
-                    && !tomcatHandler.isProcessTerminated()) {
+                    && !tomcatHandler.isFullyTerminated()) {
 
                 String blockReason = tomcatHandler.getRestartBlockReason();
                 if (blockReason != null) {
@@ -118,7 +120,12 @@ public final class TomcatRunnerDelegate {
     public boolean handleCrossExecutorConflict(@NotNull TomcatRunConfiguration config,
                                                 @NotNull ExecutionEnvironment env) {
         TomcatProcessHandler conflicting = findConflictingExecutorHandler(config, env);
-        if (conflicting != null && !conflicting.isProcessTerminated()) {
+        // isFullyTerminated() — not the raw flag — so the shutdown overlap still
+        // routes through stopAndRelaunch's listener-based sequencing. Using
+        // isProcessTerminated() here would let the fresh new-executor launch
+        // race the terminating process for ports and the parallel-run
+        // CATALINA_BASE cleanup during that window.
+        if (conflicting != null && !conflicting.isFullyTerminated()) {
             LOG.info("Mode switch: "
                     + (conflicting.isProcessTerminating() ? "waiting for " : "stopping ")
                     + conflicting.getExecutorId() + " instance of " + config.getName());
@@ -132,14 +139,21 @@ public final class TomcatRunnerDelegate {
     // Descriptor / handler lookup
     // -------------------------------------------------------------------------
 
-    /** Returns the running descriptor for this config under the same executor. */
+    /**
+     * Returns the running descriptor for this config under the same executor.
+     *
+     * <p>Filters on {@link TomcatProcessHandler#isFullyTerminated()} so a handler
+     * in the shutdown overlap window is still returned to the rerun intercept —
+     * it must route through the shared gate and surface "Tomcat is shutting down"
+     * rather than fall through and allow a fresh launch.
+     */
     @Nullable
     public RunContentDescriptor findSameExecutorDescriptor(@NotNull TomcatRunConfiguration config,
                                                             @NotNull ExecutionEnvironment env) {
         for (RunContentDescriptor d : getDescriptorsFor(config, env)) {
             ProcessHandler h = d.getProcessHandler();
             if (h instanceof TomcatProcessHandler th
-                    && !th.isProcessTerminated()
+                    && !th.isFullyTerminated()
                     && executorId.equals(th.getExecutorId())) {
                 return d;
             }
@@ -147,14 +161,22 @@ public final class TomcatRunnerDelegate {
         return null;
     }
 
-    /** Returns a running handler for this config under a DIFFERENT executor. */
+    /**
+     * Returns a running handler for this config under a DIFFERENT executor.
+     *
+     * <p>Same {@link TomcatProcessHandler#isFullyTerminated()} contract as
+     * {@link #findSameExecutorDescriptor} — a shutdown-overlap handler still
+     * counts as a conflict so the cross-executor path can sequence the new
+     * launch via {@link #stopAndRelaunch} instead of racing the terminating
+     * process for ports and parallel-run {@code CATALINA_BASE} cleanup.
+     */
     @Nullable
     public TomcatProcessHandler findConflictingExecutorHandler(@NotNull TomcatRunConfiguration config,
                                                                 @NotNull ExecutionEnvironment env) {
         for (RunContentDescriptor d : getDescriptorsFor(config, env)) {
             ProcessHandler h = d.getProcessHandler();
             if (h instanceof TomcatProcessHandler th
-                    && !th.isProcessTerminated()
+                    && !th.isFullyTerminated()
                     && !executorId.equals(th.getExecutorId())) {
                 return th;
             }

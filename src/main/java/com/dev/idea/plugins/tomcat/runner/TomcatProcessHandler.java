@@ -752,6 +752,27 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     /**
+     * True when the handler has fully terminated — the process is gone and no
+     * shutdown work is still in flight.
+     *
+     * <p>Distinct from the raw {@link #isProcessTerminated()} flag, which can
+     * briefly read {@code true} while {@link #isProcessTerminating()} is also
+     * {@code true} during the shutdown overlap window (custom shutdown script
+     * finished but parallel-run base cleanup is still running, etc.). Surface
+     * callers that decide "hide the node / proceed with a fresh launch" must
+     * use this method rather than the raw flag — otherwise the overlap state
+     * bypasses the {@code "Tomcat is shutting down"} branch of the shared gate
+     * and reopens the same UX drift the gate was introduced to close.
+     *
+     * <p>Rule of thumb: when the decision is "should this UI element exist?"
+     * use {@code isFullyTerminated()}. When the decision is "is the JVM
+     * actually dead for cleanup purposes?" the raw flag is fine.
+     */
+    public boolean isFullyTerminated() {
+        return isProcessTerminated() && !isProcessTerminating();
+    }
+
+    /**
      * Returns {@code null} when this handler is ready to accept a restart / update
      * gesture, or a user-facing reason string explaining why it is not.
      *

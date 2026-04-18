@@ -74,14 +74,33 @@ class ServiceActionUtilsTest {
         }
 
         @Test
-        @DisplayName("hidden when handler is terminated")
-        void hiddenWhenTerminated() {
+        @DisplayName("hidden when handler is fully terminated")
+        void hiddenWhenFullyTerminated() {
+            // Fully terminated = terminated && !terminating. The node is gone.
             TomcatProcessHandler handler = mock(TomcatProcessHandler.class);
-            when(handler.isProcessTerminated()).thenReturn(true);
+            when(handler.isFullyTerminated()).thenReturn(true);
             Presentation p = new Presentation();
             ServiceActionUtils.applyStartupGate(p, mock(TomcatRunConfiguration.class), handler, READY);
             assertFalse(p.isVisible());
             assertFalse(p.isEnabled());
+        }
+
+        @Test
+        @DisplayName("shutdown overlap (terminating+terminated) stays visible-disabled")
+        void shutdownOverlapStaysVisibleDisabled() {
+            // The handler's javadoc documents that terminating and terminated can
+            // both briefly read true. Using the raw terminated flag here would hide
+            // the button in that window, bypassing the shared gate. Gating on
+            // isFullyTerminated() keeps the overlap routed through
+            // getRestartBlockReason() so the "shutting down" tooltip still appears.
+            TomcatProcessHandler handler = mock(TomcatProcessHandler.class);
+            when(handler.isFullyTerminated()).thenReturn(false);
+            when(handler.getRestartBlockReason()).thenReturn("Tomcat is shutting down");
+            Presentation p = new Presentation();
+            ServiceActionUtils.applyStartupGate(p, mock(TomcatRunConfiguration.class), handler, READY);
+            assertTrue(p.isVisible());
+            assertFalse(p.isEnabled());
+            assertEquals("Tomcat is shutting down", p.getDescription());
         }
 
         @Test

@@ -130,11 +130,14 @@ final class ServiceActionUtils {
                                   @Nullable TomcatRunConfiguration config,
                                   @Nullable TomcatProcessHandler handler,
                                   @NotNull String readyDescription) {
-        // "Terminated" is the only state that removes the action entirely — the
-        // process is gone, the Services node is about to disappear. Other "not
-        // ready" states (starting, terminating) stay visible with a tooltip so
-        // the user sees why the action is temporarily unavailable.
-        if (config == null || handler == null || handler.isProcessTerminated()) {
+        // Only a handler that has fully terminated removes the action entirely —
+        // the process is gone, the Services node is about to disappear. Using the
+        // raw isProcessTerminated() flag here would silently hide the action
+        // during the shutdown overlap window (both terminating and terminated
+        // briefly true), bypassing the "Tomcat is shutting down" branch of the
+        // shared gate. isFullyTerminated() keeps the overlap routed through
+        // getRestartBlockReason() so the tooltip still appears.
+        if (config == null || handler == null || handler.isFullyTerminated()) {
             presentation.setEnabledAndVisible(false);
             return;
         }
