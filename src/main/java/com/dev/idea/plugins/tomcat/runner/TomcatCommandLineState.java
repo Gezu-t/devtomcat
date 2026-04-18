@@ -632,16 +632,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 DebugConfig dc = configuration.getConfigData().getDebugConfig();
                 int debugPort = resolvedDebugPort > 0 ? resolvedDebugPort
                         : (dc != null ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT);
-                // Honor the configured transport — today this is always dt_socket (UI locks it),
-                // but deriving from DebugConfig keeps the custom-script path aligned with the
-                // attach path in TomcatDebugger, so both evolve together.
-                String transportName = (dc != null
-                        && TomcatConstants.TRANSPORT_SHARED_MEMORY.equalsIgnoreCase(dc.getTransport()))
-                        ? TomcatConstants.JDWP_TRANSPORT_SHMEM
-                        : TomcatConstants.JDWP_TRANSPORT_SOCKET;
                 commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));
                 String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, transportName, debugPort);
+                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, TomcatConstants.JDWP_TRANSPORT_SOCKET, debugPort);
                 commandLine.withEnvironment(TomcatConstants.ENV_JDWP_OPTS, jdwpArg);
                 deploymentLogger.logServerInfo("Debug mode with custom script: add $TOMCAT_JDWP_OPTS to your CATALINA_OPTS or JAVA_OPTS");
             }

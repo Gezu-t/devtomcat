@@ -9,7 +9,8 @@ package com.dev.idea.plugins.tomcat.model.debug;
 
     /**
      * JDWP debug configuration for Tomcat.
-     * Encapsulates port, transport protocol (Socket/SharedMemory), and classpath scope.
+     * Encapsulates port, transport protocol (Socket only), and classpath scope.
+     * Shared Memory transport is not supported; legacy configs are normalized to Socket on load.
      */
     public class DebugConfig {
 
@@ -56,10 +57,8 @@ package com.dev.idea.plugins.tomcat.model.debug;
         public void setTransport(@NotNull String transport) {
             Objects.requireNonNull(transport, "Transport cannot be null");
             String normalized = transport.trim();
-
-            if (!TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(normalized) &&
-                    !TomcatConstants.TRANSPORT_SHARED_MEMORY.equalsIgnoreCase(normalized)) {
-                LOG.warn("Invalid transport: " + transport + ", using default " + TomcatConstants.TRANSPORT_SOCKET);
+            if (!TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(normalized)) {
+                LOG.warn("Unsupported transport '" + transport + "' (Shared Memory is not supported) — normalizing to " + TomcatConstants.TRANSPORT_SOCKET);
                 this.transport = TomcatConstants.TRANSPORT_SOCKET;
             } else {
                 this.transport = normalized;
@@ -107,17 +106,13 @@ package com.dev.idea.plugins.tomcat.model.debug;
         }
 
         public boolean isValid() {
-            return port >= MIN_DEBUG_PORT && port <= MAX_DEBUG_PORT &&
-                    (TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(transport) ||
-                     TomcatConstants.TRANSPORT_SHARED_MEMORY.equalsIgnoreCase(transport));
+            return port >= MIN_DEBUG_PORT && port <= MAX_DEBUG_PORT;
         }
 
         /** Returns JDWP connection string, e.g. "dt_socket,server=y,suspend=n,address=5005" */
         @NotNull
         public String getJdwpConnectionString() {
-            String transportName = TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(transport)
-                    ? TomcatConstants.JDWP_TRANSPORT_SOCKET : TomcatConstants.JDWP_TRANSPORT_SHMEM;
-            return String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, transportName, port);
+            return String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, TomcatConstants.JDWP_TRANSPORT_SOCKET, port);
         }
 
         /** Returns complete -agentlib VM argument for debug startup. */

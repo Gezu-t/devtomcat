@@ -22,11 +22,9 @@ public final class TomcatConstants {
 
     // --- Debug Transport ---
     public static final String TRANSPORT_SOCKET = "Socket";
-    public static final String TRANSPORT_SHARED_MEMORY = "Shared Memory";
 
     // --- JDWP Transport Names (JVM spec identifiers for -agentlib:jdwp) ---
     public static final String JDWP_TRANSPORT_SOCKET = "dt_socket";
-    public static final String JDWP_TRANSPORT_SHMEM = "dt_shmem";
     /** JDWP connection format: transport, server mode, suspend policy, address. Args: transport name, port. */
     /** JDK 9+ requires {@code *:port} to listen on all interfaces (not just localhost). */
     public static final String JDWP_CONNECTION_FORMAT = "%s,server=y,suspend=n,address=*:%d";

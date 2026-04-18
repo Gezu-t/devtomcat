@@ -242,11 +242,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
      * in either local or remote server mode. Matches IntelliJ Ultimate's layout:
      * <ul>
      *   <li><b>Host</b> — remote mode only (JDWP target host)</li>
-     *   <li><b>Transport</b> — Socket / Shared memory radios
-     *       (Socket-only in local mode; Tomcat's JDWP launcher doesn't support dt_shmem cross-platform)</li>
      *   <li><b>Port</b> — JDWP listen port (local) / attach port (remote)</li>
      *   <li><b>Debugger Settings…</b> — opens IDE-wide Debugger configurable</li>
      * </ul>
+     * Transport is always Socket (dt_socket); Shared Memory is not supported.
      */
     private JPanel createDebugSection() {
         JPanel p = new JPanel(new GridBagLayout());

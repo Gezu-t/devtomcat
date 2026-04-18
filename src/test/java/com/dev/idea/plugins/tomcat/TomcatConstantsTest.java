@@ -157,12 +157,6 @@ class TomcatConstantsTest {
         }
 
         @Test
-        @DisplayName("shared memory transport identifier")
-        void shmemTransport() {
-            assertEquals("dt_shmem", TomcatConstants.JDWP_TRANSPORT_SHMEM);
-        }
-
-        @Test
         @DisplayName("connection format contains placeholders")
         void connectionFormat() {
             assertTrue(TomcatConstants.JDWP_CONNECTION_FORMAT.contains("%s"));

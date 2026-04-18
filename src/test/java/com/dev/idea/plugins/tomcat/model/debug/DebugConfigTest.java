@@ -41,10 +41,17 @@ class DebugConfigTest {
         @Test
         @DisplayName("sets all fields")
         void setsAll() {
-            DebugConfig config = new DebugConfig(8000, TomcatConstants.TRANSPORT_SHARED_MEMORY, true);
+            DebugConfig config = new DebugConfig(8000, TomcatConstants.TRANSPORT_SOCKET, true);
             assertEquals(8000, config.getPort());
-            assertEquals(TomcatConstants.TRANSPORT_SHARED_MEMORY, config.getTransport());
+            assertEquals(TomcatConstants.TRANSPORT_SOCKET, config.getTransport());
             assertTrue(config.isUseModuleClasspath());
+        }
+
+        @Test
+        @DisplayName("unsupported transport normalizes to Socket")
+        void unsupportedTransportNormalized() {
+            DebugConfig config = new DebugConfig(8000, "Shared Memory", false);
+            assertEquals(TomcatConstants.TRANSPORT_SOCKET, config.getTransport());
         }
     }
 
@@ -106,11 +113,11 @@ class DebugConfigTest {
         }
 
         @Test
-        @DisplayName("Shared Memory accepted")
-        void sharedMemoryAccepted() {
+        @DisplayName("Shared Memory is normalized to Socket")
+        void sharedMemoryNormalizedToSocket() {
             DebugConfig config = new DebugConfig();
-            config.setTransport(TomcatConstants.TRANSPORT_SHARED_MEMORY);
-            assertEquals(TomcatConstants.TRANSPORT_SHARED_MEMORY, config.getTransport());
+            config.setTransport("Shared Memory");
+            assertEquals(TomcatConstants.TRANSPORT_SOCKET, config.getTransport());
         }
 
         @Test
@@ -164,11 +171,11 @@ class DebugConfigTest {
         }
 
         @Test
-        @DisplayName("getJdwpConnectionString for shared memory")
-        void jdwpShmem() {
-            DebugConfig config = new DebugConfig(5005, TomcatConstants.TRANSPORT_SHARED_MEMORY, false);
+        @DisplayName("getJdwpConnectionString always uses dt_socket even for Shared Memory input")
+        void jdwpSocketOnly() {
+            DebugConfig config = new DebugConfig(5005, "Shared Memory", false);
             String jdwp = config.getJdwpConnectionString();
-            assertTrue(jdwp.contains("dt_shmem"));
+            assertTrue(jdwp.contains("dt_socket"));
         }
 
         @Test
@@ -226,11 +233,11 @@ class DebugConfigTest {
         }
 
         @Test
-        @DisplayName("different transport not equal")
-        void differentTransportNotEqual() {
+        @DisplayName("different useModuleClasspath not equal")
+        void differentUseModuleClasspathNotEqual() {
             DebugConfig a = new DebugConfig();
             DebugConfig b = new DebugConfig();
-            b.setTransport(TomcatConstants.TRANSPORT_SHARED_MEMORY);
+            b.setUseModuleClasspath(true);
             assertNotEquals(a, b);
         }
     }
