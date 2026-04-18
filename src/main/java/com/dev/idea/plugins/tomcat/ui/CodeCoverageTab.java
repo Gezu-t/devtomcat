@@ -17,6 +17,7 @@ import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiPackage;
+import com.intellij.ui.AnActionButton;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBPanel;
@@ -106,8 +107,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         }
 
         ToolbarDecorator decorator = ToolbarDecorator.createDecorator(table)
-                .setAddAction(button ->
-                        showAddPatternPopup(isInclude, button.getPreferredPopupPoint().getComponent()))
+                .setAddAction(button -> showAddPatternPopup(isInclude, button))
                 .setRemoveAction(button -> removePattern(isInclude))
                 .setEditAction(button -> editPattern(isInclude))
                 .disableUpDownActions();
@@ -124,8 +124,14 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
      * freeform pattern, and the relevant chooser opens. Lets entries be pulled
      * straight from the project model instead of hand-typing FQNs, while the
      * freeform option preserves the advanced-wildcard escape hatch.
+     *
+     * <p>Anchored via {@link AnActionButton#getPreferredPopupPoint()} so the popup
+     * pins to the {@code +} button on the table's toolbar. Passing the raw component
+     * to {@code showUnderneathOf} dropped the popup to the bottom of the screen on
+     * some IntelliJ versions because the resolved component wasn't where the button
+     * actually rendered.
      */
-    private void showAddPatternPopup(boolean isInclude, @NotNull Component anchor) {
+    private void showAddPatternPopup(boolean isInclude, @NotNull AnActionButton button) {
         BaseListPopupStep<AddOption> step = new BaseListPopupStep<>(null, AddOption.values()) {
             @NotNull
             @Override
@@ -144,7 +150,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
             }
         };
         ListPopup popup = JBPopupFactory.getInstance().createListPopup(step);
-        popup.showUnderneathOf(anchor);
+        popup.show(button.getPreferredPopupPoint());
     }
 
     /** Opens the class chooser and stores the chosen class's qualified name. */

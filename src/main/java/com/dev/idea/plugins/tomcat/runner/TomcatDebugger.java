@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
@@ -104,9 +105,17 @@ public class TomcatDebugger extends GenericDebuggerRunner {
                     + " — using config debug port " + debugPort);
         }
 
-        LOG.info("Debug session: " + config.getName() + " → " + debugHost + ":" + debugPort);
+        // Derive useSockets from DebugConfig so the attach respects the user's transport choice
+        // end-to-end. Today the UI locks this to Socket, but threading the flag here prevents
+        // a silent regression if/when Shared Memory becomes a first-class option.
+        DebugConfig dc = config.getConfigData().getDebugConfig();
+        boolean useSockets = dc == null
+                || TomcatConstants.TRANSPORT_SOCKET.equalsIgnoreCase(dc.getTransport());
 
-        RemoteConnection connection = new RemoteConnection(true, debugHost, String.valueOf(debugPort), false);
+        LOG.info("Debug session: " + config.getName() + " → " + debugHost + ":" + debugPort
+                + " (" + (useSockets ? "socket" : "shmem") + ")");
+
+        RemoteConnection connection = new RemoteConnection(useSockets, debugHost, String.valueOf(debugPort), false);
         RunContentDescriptor descriptor = attachVirtualMachine(state, env, connection, true);
 
         if (descriptor != null) {

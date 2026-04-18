@@ -1,14 +1,18 @@
 package com.dev.idea.plugins.tomcat.ui;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
+import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
+import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.util.text.StringUtil;
@@ -77,8 +81,6 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         String shutdownScript = "";
         /** Remote debug host (only used in Remote + Debug mode). */
         String debugHost = "localhost";
-        /** Remote debug port (only used in Remote + Debug mode). */
-        int debugPort = 5005;
         EnvVarPanel.State envState = new EnvVarPanel.State();
     }
 
@@ -90,10 +92,14 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     private JBCheckBox useDefaultStartupCB;
     private JBCheckBox useDefaultShutdownCB;
 
-    // Debug connection section (remote + debug mode only)
-    private JPanel debugConnectionSection;
+    // Debug section (Debug mode only; shown in both local and remote)
+    private JPanel debugSection;
+    private JBLabel debugHostLabel;
     private JBTextField debugHostField;
+    private JBRadioButton transportSocketRadio;
+    private JBRadioButton transportShmemRadio;
     private JBTextField debugPortField;
+    private JButton debuggerSettingsButton;
 
     // Env var panel
     private EnvVarPanel envVarPanel;
@@ -215,8 +221,8 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         contentPanel.add(shutdownSection, gbc);
 
         gbc.gridy = 2;
-        debugConnectionSection = createDebugConnectionSection();
-        contentPanel.add(debugConnectionSection, gbc);
+        debugSection = createDebugSection();
+        contentPanel.add(debugSection, gbc);
 
         gbc.gridy = 3;
         gbc.weighty = 1.0;
@@ -232,9 +238,17 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     }
 
     /**
-     * Creates the remote debug connection section with Host and Port fields.
+     * Creates the Debug configuration section — shown whenever Debug mode is selected
+     * in either local or remote server mode. Matches IntelliJ Ultimate's layout:
+     * <ul>
+     *   <li><b>Host</b> — remote mode only (JDWP target host)</li>
+     *   <li><b>Transport</b> — Socket / Shared memory radios
+     *       (Socket-only in local mode; Tomcat's JDWP launcher doesn't support dt_shmem cross-platform)</li>
+     *   <li><b>Port</b> — JDWP listen port (local) / attach port (remote)</li>
+     *   <li><b>Debugger Settings…</b> — opens IDE-wide Debugger configurable</li>
+     * </ul>
      */
-    private JPanel createDebugConnectionSection() {
+    private JPanel createDebugSection() {
         JPanel p = new JPanel(new GridBagLayout());
         p.setBorder(JBUI.Borders.emptyTop(4));
         GridBagConstraints g = new GridBagConstraints();
@@ -245,31 +259,73 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         g.gridwidth = 4;
         g.fill = GridBagConstraints.HORIZONTAL;
         g.weightx = 1.0;
-        p.add(new TitledSeparator("Debug Connection"), g);
+        p.add(new TitledSeparator("Debug"), g);
 
+        // Row: Host (remote mode only) — visibility toggled in updateModeVisibility()
         g.gridy = 1; g.gridwidth = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
         g.insets = JBUI.insets(4, 4, 2, 4);
-        p.add(new JBLabel("Host:"), g);
+        debugHostLabel = new JBLabel("Host:");
+        p.add(debugHostLabel, g);
 
-        g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
-        g.insets = JBUI.insets(4, 4, 2, 16);
+        g.gridx = 1; g.gridwidth = 3; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
+        g.insets = JBUI.insets(4, 4, 2, 4);
         debugHostField = new JBTextField();
-        debugHostField.setText("localhost");
         debugHostField.getEmptyText().setText("localhost");
         p.add(debugHostField, g);
 
-        g.gridx = 2; g.fill = GridBagConstraints.NONE; g.weightx = 0;
+        // Row: Transport radios
+        g.gridy = 2; g.gridx = 0; g.gridwidth = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
+        g.insets = JBUI.insets(4, 4, 2, 4);
+        p.add(new JBLabel("Transport:"), g);
+
+        transportSocketRadio = new JBRadioButton("Socket", true);
+        transportShmemRadio = new JBRadioButton("Shared memory");
+        ButtonGroup transportGroup = new ButtonGroup();
+        transportGroup.add(transportSocketRadio);
+        transportGroup.add(transportShmemRadio);
+
+        JPanel transportPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0));
+        transportPanel.add(transportSocketRadio);
+        transportPanel.add(transportShmemRadio);
+
+        g.gridx = 1; g.gridwidth = 3; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
+        g.insets = JBUI.insets(0, 0, 2, 0);
+        p.add(transportPanel, g);
+
+        // Row: Port + Debugger Settings button
+        g.gridy = 3; g.gridx = 0; g.gridwidth = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
         g.insets = JBUI.insets(4, 4, 2, 4);
         p.add(new JBLabel("Port:"), g);
 
-        g.gridx = 3; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 0.3;
-        g.insets = JBUI.insets(4, 4, 2, 4);
-        debugPortField = new JBTextField();
-        debugPortField.setText("5005");
-        debugPortField.getEmptyText().setText("5005");
+        g.gridx = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 0;
+        g.ipadx = JBUI.scale(40);
+        debugPortField = new JBTextField(8);
+        debugPortField.getEmptyText().setText(String.valueOf(DebugConfig.DEFAULT_DEBUG_PORT));
         p.add(debugPortField, g);
+        g.ipadx = 0;
+
+        // Spacer to push the button right
+        g.gridx = 2; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1.0;
+        p.add(Box.createHorizontalGlue(), g);
+
+        g.gridx = 3; g.fill = GridBagConstraints.NONE; g.weightx = 0;
+        g.anchor = GridBagConstraints.EAST;
+        g.insets = JBUI.insets(4, 4, 2, 4);
+        debuggerSettingsButton = new JButton("Debugger Settings...");
+        debuggerSettingsButton.addActionListener(e -> openDebuggerSettings());
+        p.add(debuggerSettingsButton, g);
+        g.anchor = GridBagConstraints.WEST;
 
         return p;
+    }
+
+    /**
+     * Opens IntelliJ's IDE-wide Debugger settings page. Uses the display name lookup
+     * so the call remains stable across IntelliJ versions (the internal configurable ID
+     * has changed over time, the display name has not).
+     */
+    private void openDebuggerSettings() {
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, "Debugger");
     }
 
     private JPanel createStartupSection() {
@@ -320,14 +376,37 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
     /**
      * Updates section visibility based on current server mode (local/remote)
      * and selected runner mode (Run/Debug/Cover/Profile).
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>Startup/Shutdown scripts: local mode only.</li>
+     *   <li>Debug section: Debug mode only (local OR remote).</li>
+     *   <li>Host field inside Debug section: remote mode only.</li>
+     *   <li>Transport radios: always locked to Socket (both disabled).
+     *       Tomcat's JDWP launcher only binds {@code dt_socket}, and the data model
+     *       stores a numeric port rather than a shared-memory address. The Shared-memory
+     *       radio is rendered (to match IntelliJ Ultimate's visual layout) but disabled
+     *       so users aren't misled into picking an unsupported transport.</li>
+     * </ul>
      */
     private void updateModeVisibility() {
         boolean showScripts = !remoteMode;
-        boolean showDebugConnection = remoteMode && DEBUG_MODE.equals(selectedMode);
+        boolean showDebug = DEBUG_MODE.equals(selectedMode);
 
         if (startupSection != null) startupSection.setVisible(showScripts);
         if (shutdownSection != null) shutdownSection.setVisible(showScripts);
-        if (debugConnectionSection != null) debugConnectionSection.setVisible(showDebugConnection);
+        if (debugSection != null) debugSection.setVisible(showDebug);
+
+        if (debugHostField != null) {
+            debugHostField.setVisible(remoteMode);
+            debugHostLabel.setVisible(remoteMode);
+        }
+
+        if (transportSocketRadio != null && transportShmemRadio != null) {
+            transportSocketRadio.setEnabled(false);
+            transportShmemRadio.setEnabled(false);
+            transportSocketRadio.setSelected(true);
+        }
 
         if (contentPanel != null) {
             contentPanel.revalidate();
@@ -402,12 +481,24 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             state.shutdownScript = state.useDefaultShutdown ? defaultShutdownScript() : shutdown;
 
             state.debugHost = runnerSettings.getDebugHost();
-            state.debugPort = runnerSettings.getDebugPort();
 
             EnvVarPanel.initializeState(state.envState, defaults, runnerSettings);
 
             modeStates.put(mode, state);
         }
+
+        // Debug port/transport are global (not per-mode). Local mode reads DebugConfig (single
+        // source of truth for the launch path); remote mode reads the Debug-mode RunnerSettings
+        // (which stores the attach target). Transport is always Socket — see updateModeVisibility().
+        DebugConfig debugConfig = cfg.getConfigData().getDebugConfig();
+        int initialPort;
+        if (remoteMode) {
+            initialPort = cfg.getConfigData().getRunnerSettings(DEBUG_MODE).getDebugPort();
+        } else {
+            initialPort = (debugConfig != null) ? debugConfig.getPort() : DebugConfig.DEFAULT_DEBUG_PORT;
+        }
+        if (debugPortField != null) debugPortField.setText(String.valueOf(initialPort));
+        if (transportSocketRadio != null) transportSocketRadio.setSelected(true);
 
         selectedMode = RUN_MODE;
         modeButtons.get(RUN_MODE).setSelected(true);
@@ -427,10 +518,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         state.shutdownScript = shutdownScriptField.getText();
 
         if (debugHostField != null) state.debugHost = debugHostField.getText().trim();
-        if (debugPortField != null) {
-            try { state.debugPort = Integer.parseInt(debugPortField.getText().trim()); }
-            catch (NumberFormatException ignored) { }
-        }
+
+        // Port/transport live in their widgets — no per-mode cache. The widgets retain their
+        // state across mode switches (they're just hidden), and applyTo() reads them directly
+        // so invalid input is surfaced as a ConfigurationException instead of being swallowed.
 
         state.envState = envVarPanel.saveState();
     }
@@ -447,15 +538,36 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         updateShutdownState();
 
         if (debugHostField != null) debugHostField.setText(state.debugHost);
-        if (debugPortField != null) debugPortField.setText(String.valueOf(state.debugPort));
 
         envVarPanel.restoreState(state.envState);
+    }
+
+    /**
+     * Parses and validates the debug port from the widget. Called from {@link #applyTo}
+     * so bad input (empty / non-numeric / out-of-range) produces a user-visible
+     * {@link ConfigurationException} instead of being silently swallowed.
+     */
+    private int parseDebugPortOrThrow() throws ConfigurationException {
+        String raw = debugPortField != null ? debugPortField.getText() : "";
+        Integer parsed = PortUtils.parsePort(raw, "Debug");
+        if (parsed == null) {
+            throw new ConfigurationException("Debug port is required");
+        }
+        if (parsed < 1024 || parsed > PortUtils.MAX_PORT) {
+            throw new ConfigurationException(
+                    "Debug port must be between 1024 and " + PortUtils.MAX_PORT + " (got " + parsed + ")");
+        }
+        return parsed;
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration cfg) throws ConfigurationException {
         saveCurrentState();
 
         boolean scriptsApplicable = !remoteMode;
+
+        int debugPort = parseDebugPortOrThrow();
+        // Transport is always Socket — the radios are render-only (see updateModeVisibility()).
+        String debugTransport = TomcatConstants.TRANSPORT_SOCKET;
 
         for (Map.Entry<String, UIState> entry : modeStates.entrySet()) {
             String mode = entry.getKey();
@@ -485,7 +597,10 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             }
 
             runnerSettings.setDebugHost(state.debugHost);
-            runnerSettings.setDebugPort(state.debugPort);
+            // In remote mode, the attach port lives on the Debug-mode RunnerSettings.
+            // In local mode, the JDWP port is global (DebugConfig); keep RunnerSettings in sync
+            // so serialization/cloning round-trips don't resurrect a stale value.
+            runnerSettings.setDebugPort(debugPort);
 
             EnvVarPanel.State envState = state.envState;
             runnerSettings.setEnvironmentVariables(new LinkedHashMap<>(envState.envVars));
@@ -494,7 +609,16 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
             runnerSettings.setPassParentEnvs(envState.passParentEnvs);
         }
 
-        LOG.info("StartupConnectionTab applied for all modes");
+        // Persist the local JDWP port + transport into DebugConfig — single source of truth
+        // for the launch path (TomcatJavaParametersBuilder reads from here).
+        DebugConfig debugConfig = cfg.getConfigData().getDebugConfig();
+        if (debugConfig != null) {
+            debugConfig.setPort(debugPort);
+            debugConfig.setTransport(debugTransport);
+        }
+
+        LOG.info("StartupConnectionTab applied for all modes (debugPort=" + debugPort
+                + ", transport=" + debugTransport + ")");
     }
 
     // =========================================================================

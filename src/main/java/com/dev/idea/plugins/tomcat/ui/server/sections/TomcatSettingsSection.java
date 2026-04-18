@@ -6,7 +6,6 @@ import com.dev.idea.plugins.tomcat.model.ValidationResult;
 import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import com.dev.idea.plugins.tomcat.utils.PortValidator;
 import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
-import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ValidationInfo;
@@ -39,7 +38,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
     private JBTextField jmxPortField;
     private JBTextField ajpPortField;
     private JBTextField shutdownPortField;
-    private JBTextField debugPortField;
     private TextFieldWithBrowseButton catalinaBaseField;
     private JBCheckBox deployAppsCheckBox;
     private JBCheckBox preserveSessionsCheckBox;
@@ -124,15 +122,9 @@ public class TomcatSettingsSection implements ConfigurationSection {
             shutdownPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()), 8);
             addPortRow(formPanel, gbc, row, new JBLabel("Shutdown port:"), shutdownPortField);
 
-            // Row 5: Debug port
-            row++;
-            JBLabel debugPortLabel = new JBLabel("Debug port:");
-            debugPortLabel.setToolTipText("JDWP debug port. Each run configuration must use a unique port when running multiple Tomcat instances simultaneously.");
-            debugPortField = new JBTextField(String.valueOf(DebugConfig.DEFAULT_DEBUG_PORT), 8);
-            debugPortField.setToolTipText("JDWP debug port (default 5005). Use a different port for each Tomcat instance to avoid conflicts.");
-            addPortRow(formPanel, gbc, row, debugPortLabel, debugPortField);
-
-            // Row 6: CATALINA_BASE (spans both field columns for the browse button)
+            // Row 5: CATALINA_BASE (spans both field columns for the browse button)
+            // Note: Debug port/transport are configured in the Startup/Connection tab (Debug mode),
+            // matching IntelliJ Ultimate's layout. Values persist to DebugConfig.
             row++;
             catalinaBaseField = new TextFieldWithBrowseButton();
             SafeBrowseUtil.addBrowseFolderListener(
@@ -187,7 +179,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
         jmxPortField.setText(String.valueOf(DynamicTomcatEnvironment.getJmxPort()));
         ajpPortField.setText("");
         shutdownPortField.setText(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()));
-        debugPortField.setText(String.valueOf(DebugConfig.DEFAULT_DEBUG_PORT));
         catalinaBaseField.setText("");
         deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(false);
@@ -215,11 +206,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
         Integer shutdownPort = configuration.getShutdownPort();
         shutdownPortField.setText(shutdownPort != null ? shutdownPort.toString()
                 : String.valueOf(DynamicTomcatEnvironment.getShutdownPort()));
-
-        var debugConfig = configuration.getConfigData().getDebugConfig();
-        int debugPort = debugConfig != null ? debugConfig.getPort()
-                : DebugConfig.DEFAULT_DEBUG_PORT;
-        debugPortField.setText(String.valueOf(debugPort));
 
         String catalinaBase = configuration.getConfigData().getCatalinaBase();
         catalinaBaseField.setText(catalinaBase != null ? catalinaBase : "");
@@ -267,13 +253,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
         configuration.getConfigData().getPortConfig().setAjpEnabled(portConfig.ajpEnabled);
         if (portConfig.ajpEnabled && portConfig.ajpPort != null) {
             configuration.getConfigData().getPortConfig().setAjp(portConfig.ajpPort);
-        }
-
-        try {
-            int dp = Integer.parseInt(debugPortField.getText().trim());
-            configuration.getConfigData().getDebugConfig().setPort(dp);
-        } catch (NumberFormatException ignored) {
-            // Keep existing debug port if field is empty or invalid
         }
 
         String catalinaBase = catalinaBaseField.getText().trim();
