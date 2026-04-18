@@ -114,6 +114,37 @@ class RemoteConfigTest {
         void ipv6Unbracketed() {
             assertFalse(RemoteConfig.isValidManagerUrl("http://::1:8080/manager"));
         }
+
+        @Test
+        @DisplayName("accepts IPv4-mapped IPv6 literal")
+        void ipv6Ipv4Mapped() {
+            // [::ffff:192.0.2.1] contains a '.' which the previous regex rejected.
+            assertTrue(RemoteConfig.isValidManagerUrl(
+                    "http://[::ffff:192.0.2.1]:8080/manager"));
+        }
+
+        @Test
+        @DisplayName("accepts zone-qualified IPv6 literal")
+        void ipv6ZoneQualified() {
+            // [fe80::1%25en0] contains '%' which the previous regex rejected.
+            // The %25 is the percent-encoded zone separator per RFC 6874.
+            assertTrue(RemoteConfig.isValidManagerUrl(
+                    "http://[fe80::1%25en0]:8080/manager"));
+        }
+
+        @Test
+        @DisplayName("rejects bracketed host with embedded whitespace")
+        void bracketedWithSpaceRejected() {
+            // Broader regex must still reject garbage; URI parser catches this.
+            assertFalse(RemoteConfig.isValidManagerUrl(
+                    "http://[::1 bogus]:8080/manager"));
+        }
+
+        @Test
+        @DisplayName("rejects empty bracketed host")
+        void emptyBracketsRejected() {
+            assertFalse(RemoteConfig.isValidManagerUrl("http://[]:8080/manager"));
+        }
     }
 
     // =========================================================================

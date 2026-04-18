@@ -25,15 +25,23 @@ public class RemoteConfig {
     /**
      * Validates a Tomcat Manager URL.
      * Accepts: http(s)://host[:port]/manager[/subpath]
-     * The host may be a hostname, IPv4 literal, or bracketed IPv6 literal
-     * ({@code [::1]}, {@code [fe80::1]}, ...). Port must be 1-65535 if present.
+     * The host may be a hostname, IPv4 literal, or bracketed IPv6 literal.
+     * Bracketed hosts accept any non-whitespace, non-slash, non-closing-bracket
+     * content, which covers every RFC 3986 {@code IP-literal} form:
+     * <ul>
+     *   <li>{@code [::1]}, {@code [2001:db8::1]}</li>
+     *   <li>IPv4-mapped: {@code [::ffff:192.0.2.1]}</li>
+     *   <li>Zone-qualified: {@code [fe80::1%25en0]}</li>
+     * </ul>
+     * Port must be 1-65535 if present.
      *
-     * <p>The regex is a structural guard; {@link #isValidManagerUrl} additionally
-     * parses the URL as a {@link java.net.URI} to enforce the port range and
-     * reject hosts the regex cannot distinguish (empty host with bracket pair, etc.).
+     * <p>The regex is a loose structural guard; {@link #isValidManagerUrl}
+     * additionally parses the URL as a {@link java.net.URI} so syntactically
+     * valid but semantically broken inputs (empty host, out-of-range port,
+     * bogus scheme) are rejected by the authoritative validator.
      */
     public static final Pattern MANAGER_URL_PATTERN = Pattern.compile(
-            "^https?://(?:\\[[0-9a-fA-F:]+]|[a-zA-Z0-9.-]+)(:\\d{1,5})?/manager(/\\w+)?$"
+            "^https?://(?:\\[[^\\s/\\]]+]|[a-zA-Z0-9.-]+)(:\\d{1,5})?/manager(/\\w+)?$"
     );
 
     private String managerUrl;
