@@ -10,8 +10,12 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase;
  * {@link TomcatCommandLineState#writeBackResolvedPorts} must persist runtime-
  * resolved ports back into the authoritative {@link PortConfig} so the next
  * read (UI dialog, serializer, Services panel, browser-URL derivation) sees
- * runtime reality — except in parallel-run mode where the config represents
- * the seed value for each fresh launch.
+ * runtime reality.
+ *
+ * <p>Writeback is unconditional, including parallel-run mode — the config
+ * represents the seed for the next fresh launch, and races between concurrent
+ * launches are harmless (each launch still holds its own per-handler ports via
+ * {@code CARRIED_PORTS_KEY}; only the seed last-writer-wins, which is fine).
  */
 public class PortWritebackPlatformTest extends BasePlatformTestCase {
 
@@ -69,8 +73,13 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         assertEquals(Integer.valueOf(8009), cfg.getShutdownPort());
     }
 
-    public void testParallelRunModeSkipsWriteback() {
-        TomcatRunConfiguration cfg = createConfig("ParallelSkip");
+    public void testParallelRunModeStillWritesBack() {
+        // Parallel mode no longer skips writeback. Per-launch ports stay on the
+        // handler via CARRIED_PORTS_KEY; the config seed is updated to the most
+        // recent resolution so the dialog, serializer, and auto-URL derivation
+        // agree with runtime. Two simultaneous launches race last-writer-wins on
+        // the seed, which is harmless — the seed is inherently transient.
+        TomcatRunConfiguration cfg = createConfig("ParallelWriteback");
         cfg.setHttpPort(8083);
         cfg.setShutdownPort(8005);
         cfg.setAllowMultipleInstances(true);
@@ -80,10 +89,10 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
 
         TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
 
-        assertEquals("parallel-run mode must leave HTTP port as the user's seed",
-                Integer.valueOf(8083), cfg.getHttpPort());
-        assertEquals("parallel-run mode must leave Shutdown port as the user's seed",
-                Integer.valueOf(8005), cfg.getShutdownPort());
+        assertEquals("parallel-run must still write back HTTP so the dialog isn't stale",
+                Integer.valueOf(8087), cfg.getHttpPort());
+        assertEquals("parallel-run must still write back Shutdown",
+                Integer.valueOf(8009), cfg.getShutdownPort());
     }
 
     public void testPinnedBaseTreatsAsSingleInstance() {
@@ -134,15 +143,18 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         assertEquals(5007, cfg.getConfigData().getDebugConfig().getPort());
     }
 
-    public void testDebugPortWritebackSkippedForParallel() {
+    public void testDebugPortWritebackRunsInParallel() {
+        // Symmetric with testParallelRunModeStillWritesBack — the debug-port
+        // writeback is unconditional too, so the Server/Debug tab doesn't
+        // diverge from the JVM's bound JDWP port across relaunches.
         TomcatRunConfiguration cfg = createConfig("DebugParallel");
         cfg.getConfigData().getDebugConfig().setPort(5005);
         cfg.setAllowMultipleInstances(true);
 
         TomcatCommandLineState.writeBackResolvedDebugPort(cfg, 5007);
 
-        assertEquals("parallel-run must leave debug port at the seed value",
-                5005, cfg.getConfigData().getDebugConfig().getPort());
+        assertEquals("parallel-run must still write back the resolved debug port",
+                5007, cfg.getConfigData().getDebugConfig().getPort());
     }
 
     public void testBrowserUrlFollowsWritebackInSingleInstance() {
@@ -161,14 +173,13 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
                 "http://localhost:8087/app", cfg.getBrowserUrl());
     }
 
-    public void testParallelRunAutoUrlRewrittenAtRuntime() {
-        // Parallel-run mode deliberately skips writeback (see testParallelRunModeSkipsWriteback
-        // above) so two simultaneous launches do not race on the shared PortConfig.
-        // The cost is that getBrowserUrl() still returns the seed-port URL after launch —
-        // the handler's runtime rewrite is the safety net that lets the browser reach
-        // *this* specific parallel instance. This test pins the runtime half of that
-        // contract: the config URL stays at the seed, and rewritePortIfNeeded turns it
-        // into the handler's actual port.
+    public void testParallelRunRuntimeRewriteStillBridgesPerInstancePort() {
+        // With unconditional writeback, the config seed tracks the most recent
+        // resolution. But when two parallel launches pick different ports, each
+        // handler still needs to show the user a URL pointing at *its* port —
+        // not the config seed (which is whatever launch wrote back last). The
+        // runtime rewrite is the per-instance safety net; this test pins that
+        // it still translates a config-level URL into a handler-specific one.
         TomcatRunConfiguration cfg = createConfig("ParallelRuntimeRewrite");
         cfg.setHttpPort(8083);
         cfg.getConfigData().setContextPath("/app");
@@ -178,16 +189,16 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
         TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
 
-        // Writeback was skipped — config still holds the seed value.
-        assertEquals("parallel-run config must NOT be mutated by writeback",
-                Integer.valueOf(8083), cfg.getHttpPort());
-        assertEquals("config-level browser URL still reflects the seed in parallel mode",
-                "http://localhost:8083/app", cfg.getBrowserUrl());
+        // Writeback ran — config seed is now 8087, URL auto-derived matches.
+        assertEquals(Integer.valueOf(8087), cfg.getHttpPort());
+        assertEquals("http://localhost:8087/app", cfg.getBrowserUrl());
 
-        // Runtime rewrite brings it in line with THIS instance's actual port.
-        String launched = TomcatProcessHandler.rewritePortIfNeeded(cfg.getBrowserUrl(), 8087);
-        assertEquals("runtime rewrite must bridge config seed → this instance's port",
-                "http://localhost:8087/app", launched);
+        // A second parallel launch bound 8091; the runtime rewrite must take
+        // the current config URL (auto-derived from the seed) and retarget it
+        // to this second handler's port.
+        String launched = TomcatProcessHandler.rewritePortIfNeeded(cfg.getBrowserUrl(), 8091);
+        assertEquals("runtime rewrite must bridge config URL → this handler's port",
+                "http://localhost:8091/app", launched);
     }
 
     public void testCustomProxyUrlNotRewrittenAtRuntime() {

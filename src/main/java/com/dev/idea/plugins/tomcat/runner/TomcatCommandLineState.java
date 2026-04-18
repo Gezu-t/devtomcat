@@ -12,6 +12,9 @@ import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
+import com.intellij.execution.RunManager;
+import com.intellij.execution.RunManagerListener;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.GeneralCommandLine;
@@ -293,24 +296,27 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     /**
      * Writes the resolved ports back to the configuration's {@link PortConfig}
      * so it becomes the single source of truth for every downstream read — the
-     * config dialog, the browser URL generation, the Services panel, and the
-     * serializer. Prior to this sync the resolved ports lived only on the
-     * process handler, and the dialog kept showing stale pre-resolution values
-     * until the user manually edited them.
+     * config dialog (via RunManager clone on next open), the browser URL generation,
+     * the Services panel, and the serializer.
      *
-     * <p>No-op in parallel-run mode: two simultaneous launches of the same
-     * configuration would race on the shared {@code PortConfig}, last-writer-
-     * wins. In parallel mode per-launch ports stay on the handler; the config
-     * represents the user's seed values for the next fresh launch.
+     * <p>Runs unconditionally — including parallel-run mode. Per-launch ports stay
+     * on the handler via {@code CARRIED_PORTS_KEY}; writing the most-recent resolved
+     * set to the config establishes the seed for the next fresh launch. Two
+     * simultaneous launches race last-writer-wins on the shared config, which is
+     * harmless: both launches already hold their own per-handler ports, and the
+     * seed value is inherently transient.
+     *
+     * <p>After mutation, publishes
+     * {@link RunManagerListener#runConfigurationChanged} on the project message
+     * bus so listeners (Run Dashboard, currently-open dialogs on reload, icon
+     * caches) requery the configuration. Without this, mutations stayed in-memory
+     * only and the dialog read stale clones.
      *
      * <p>Static + package-private so unit tests can exercise it without
      * constructing a full {@link ExecutionEnvironment}.
      */
     static void writeBackResolvedPorts(@NotNull TomcatRunConfiguration configuration,
                                         @NotNull PortConfig resolved) {
-        if (configuration.isParallelRunEffective()) {
-            return;
-        }
         PortConfig target = configuration.getConfigData().getPortConfig();
         boolean changed = false;
         if (target.getHttp() != resolved.getHttp()) {
@@ -334,42 +340,49 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             changed = true;
         }
         if (changed) {
-            scheduleDashboardRefresh(configuration);
+            notifyConfigurationChanged(configuration);
         }
     }
 
     /**
      * Writes the resolved debug port back to {@code DebugConfig} so the config
-     * dialog and serializer agree on the port the JVM actually bound. Same
-     * parallel-run caveat as {@link #writeBackResolvedPorts}: skipped when
-     * multiple launches of one configuration could race.
+     * dialog and serializer agree on the port the JVM actually bound. Fires the
+     * same RunManager change notification as {@link #writeBackResolvedPorts}.
      */
     static void writeBackResolvedDebugPort(@NotNull TomcatRunConfiguration configuration,
                                             int resolvedDebug) {
-        if (configuration.isParallelRunEffective()) {
-            return;
-        }
         if (resolvedDebug <= 0) return;
         var debugConfig = configuration.getConfigData().getDebugConfig();
         if (debugConfig != null && debugConfig.getPort() != resolvedDebug) {
             debugConfig.setPort(resolvedDebug);
-            scheduleDashboardRefresh(configuration);
+            notifyConfigurationChanged(configuration);
         }
     }
 
     /**
-     * Tells the Run Dashboard / Services panel to rebuild its tree so the newly
-     * written-back port values are picked up. Without this the first launch of a
-     * configuration can leave the Services panel pinned to pre-resolution port
-     * values — subsequent launches render correctly because the config already
-     * holds the resolved port from the start. Scheduled on the EDT because
-     * {@link RunDashboardManager#updateDashboard(boolean)} touches UI state.
+     * Publish {@link RunManagerListener#runConfigurationChanged} on the project's
+     * message bus so every interested listener re-reads the now-resolved port
+     * values: the editor (on its next reset), the Run Dashboard, the Services
+     * panel, and anything else subscribed to the standard IntelliJ change channel.
+     * Also forces a dashboard rebuild as a belt-and-braces — some listeners rely
+     * on it rather than subscribing to the topic. All UI work runs on the EDT.
      */
-    private static void scheduleDashboardRefresh(@NotNull TomcatRunConfiguration configuration) {
+    private static void notifyConfigurationChanged(@NotNull TomcatRunConfiguration configuration) {
         Project project = configuration.getProject();
         if (project == null || project.isDisposed()) return;
         ApplicationManager.getApplication().invokeLater(() -> {
             if (project.isDisposed()) return;
+            try {
+                RunnerAndConfigurationSettings settings =
+                        RunManager.getInstance(project).findSettings(configuration);
+                if (settings != null) {
+                    project.getMessageBus()
+                            .syncPublisher(RunManagerListener.TOPIC)
+                            .runConfigurationChanged(settings);
+                }
+            } catch (Exception e) {
+                LOG.debug("RunManager change notification after port writeback failed", e);
+            }
             try {
                 RunDashboardManager.getInstance(project).updateDashboard(true);
             } catch (Exception e) {
