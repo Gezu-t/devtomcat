@@ -31,25 +31,21 @@ import java.util.Set;
 /**
  * Application Server section.
  *
- * <p>The run configuration persists an embedded {@link TomcatInfo} snapshot so it can
- * survive cross-machine transport (VCS imports). That snapshot can drift from the
- * registered list (IDs regenerate, paths change, XML gets hand-edited). Every read
- * goes through {@link TomcatServerManagerState#resolve(TomcatInfo)} so the combo,
- * validator, and downstream callers share a single interpretation. Three UI states
- * match the three runtime outcomes:
+ * <p>The run configuration persists an embedded {@link TomcatInfo} snapshot. Every
+ * read goes through {@link TomcatServerManagerState#resolve(TomcatInfo)} so the
+ * combo, validator, and runtime share one interpretation. Registration is
+ * <b>required to launch</b> — an embedded snapshot whose path happens to exist is
+ * not enough. The UI keeps two visual states for unresolved references so the user
+ * can tell the situations apart, but both block Run:
  * <ul>
  *   <li><b>Registered</b> — resolver hits a registered instance. The UI selects it
  *       and {@link #applyTo} writes it back, upgrading any drifted ID.</li>
- *   <li><b>Unregistered-but-usable</b> — resolver misses, yet the snapshot's path
- *       exists on disk. This matches the runtime's policy in
- *       {@link com.dev.idea.plugins.tomcat.runner.TomcatJavaParametersBuilder},
- *       which accepts the embedded snapshot for portability. The UI shows a
- *       <b>warning decoration</b> (icon + "(not registered)" suffix + tooltip) but
- *       does <b>not</b> block Run — a validator error here would contradict the
- *       toolbar's willingness to launch.</li>
- *   <li><b>Broken</b> — resolver misses <i>and</i> the path is empty or missing
- *       on disk. The runtime can't launch; the UI matches with a hard validator
- *       error, red decoration, and an explicit message.</li>
+ *   <li><b>Unregistered</b> (usable path) — snapshot not in the registered list,
+ *       but its path exists. Warning icon + "(not registered)" suffix + tooltip
+ *       pointing to Configure. Blocks the validator with a "not registered"
+ *       error so the toolbar Run can't silently launch.</li>
+ *   <li><b>Broken</b> — resolver misses <i>and</i> the path is empty or missing.
+ *       Red decoration + hard validator error about the path.</li>
  * </ul>
  */
 public class ApplicationServerSection implements ConfigurationSection {
@@ -151,7 +147,11 @@ public class ApplicationServerSection implements ConfigurationSection {
     @Override
     public boolean isConfigurationValid() {
         TomcatInfo selected = getSelectedTomcatServer();
-        return selected != null && !brokenItems.contains(selected);
+        if (selected == null) return false;
+        // Registration required: unregistered-but-usable now blocks too, matching
+        // the runtime and TomcatConfigurationValidator. The renderer still
+        // distinguishes the two cases visually.
+        return !brokenItems.contains(selected) && !unregisteredButUsable.contains(selected);
     }
 
     @Override
@@ -187,10 +187,17 @@ public class ApplicationServerSection implements ConfigurationSection {
             return errors;
         }
 
-        // Usable-but-unregistered is intentionally NOT returned as an error:
-        // the runtime will launch it, so blocking Run here would be a worse UX
-        // than the toolbar. The renderer surfaces the state via warning icon +
-        // tooltip so the user still knows to reconcile.
+        if (unregisteredButUsable.contains(selected)) {
+            String name = selected.getName();
+            String path = selected.getPath();
+            String displayName = !name.isEmpty() ? name : (!path.isEmpty() ? path : "(unnamed)");
+            errors.add(new ValidationInfo(
+                    "Tomcat server '" + displayName + "' is not registered."
+                            + " Open Configure to add it to Application Servers,"
+                            + " or select a different server.",
+                    serverComboBox));
+            return errors;
+        }
 
         try {
             selected.validate();

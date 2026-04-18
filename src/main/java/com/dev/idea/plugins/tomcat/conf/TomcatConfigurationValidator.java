@@ -5,6 +5,7 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
         import com.dev.idea.plugins.tomcat.model.ValidationResult;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+        import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
         import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
         import com.intellij.execution.configurations.RuntimeConfigurationException;
@@ -38,6 +39,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     validateConfigurationName(config);
                     TomcatConfigurationData data = config.getConfigData();
                     validate(data);
+                    validateTomcatServerRegistration(data);
                     validateArtifactReferences(config);
 
                     LOG.debug("Configuration validation passed: " + config.getName());
@@ -67,6 +69,45 @@ package com.dev.idea.plugins.tomcat.conf;
                     config.setName("Tomcat");
                     LOG.debug("Configuration name was empty; defaulted to 'Tomcat'");
                 }
+            }
+
+            /**
+             * Enforces that the config's embedded {@link TomcatInfo} snapshot resolves
+             * to a registered server. Called only from the
+             * {@link #validate(TomcatRunConfiguration)} overload because it touches the
+             * application-level {@link TomcatServerManagerState} service — the pure
+             * {@link #validate(TomcatConfigurationData)} overload remains service-free
+             * and is still callable from headless unit tests.
+             *
+             * <p>This is the hard gate that blocks toolbar Run when a config references
+             * a Tomcat that isn't registered. Previously the path-exists heuristic let
+             * an embedded snapshot launch even with no registration, which surprised
+             * users who expected registration to be required.
+             */
+            private static void validateTomcatServerRegistration(@NotNull TomcatConfigurationData data)
+                    throws RuntimeConfigurationException {
+                TomcatInfo persisted = data.getTomcatInfo();
+                if (persisted == null) return; // already caught by validateTomcatServer
+                TomcatServerManagerState state;
+                try {
+                    state = TomcatServerManagerState.getInstance();
+                } catch (Throwable t) {
+                    // No Application service — headless test path. Pure data validator
+                    // already succeeded; runtime strictness is applied inside
+                    // TomcatJavaParametersBuilder.getCatalinaHome() as a second gate.
+                    LOG.debug("Skipping registration check: service unavailable", t);
+                    return;
+                }
+                TomcatInfo resolved = state.resolve(persisted);
+                if (resolved != null) return;
+
+                String name = persisted.getName();
+                String path = persisted.getPath();
+                String displayName = !name.isEmpty() ? name : (!path.isEmpty() ? path : "(unnamed)");
+                throw new RuntimeConfigurationException(
+                        "Tomcat server '" + displayName + "' is not registered."
+                                + " Open the run configuration and select a server from Application Servers,"
+                                + " or add one via Configure.");
             }
 
             private static void validateTomcatServer(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {

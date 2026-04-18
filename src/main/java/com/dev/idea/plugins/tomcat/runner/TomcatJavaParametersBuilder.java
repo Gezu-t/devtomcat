@@ -242,39 +242,53 @@ public class TomcatJavaParametersBuilder {
     }
 
     /**
-     * Resolve CATALINA_HOME via the same path the UI uses so the runtime and the
-     * dialog never diverge. If the persisted reference's path is absent or missing
-     * on disk, fall back to {@link TomcatServerManagerState#resolve} — this catches
-     * the cross-machine case where an imported run config carries a drifted ID or
-     * a stale path but the registered list has a live server matching by name.
+     * Resolve CATALINA_HOME via {@link TomcatServerManagerState#resolve} so the
+     * runtime, the editor, and the configuration-validator all use the same
+     * source of truth. Registration is required: an embedded snapshot whose path
+     * exists on disk is <b>not</b> enough — if the resolver can't match by ID,
+     * path, or name, the launch is blocked with a clear message pointing the
+     * user at Application Servers. This is the second gate behind
+     * {@link com.dev.idea.plugins.tomcat.conf.TomcatConfigurationValidator},
+     * covering code paths that bypass run-configuration validation.
+     *
+     * <p>When the resolver <i>does</i> match but via drift (stale persisted ID,
+     * moved path, renamed server), upgrade the config's embedded reference to
+     * the canonical registered instance so the next open is clean.
      */
     @NotNull
     private Path getCatalinaHome() throws ExecutionException {
         TomcatInfo persisted = configuration.getConfigData().getTomcatInfo();
         if (persisted == null) {
-            throw new ExecutionException("No Tomcat server configured");
-        }
-
-        String persistedPath = persisted.getPath();
-        if (!persistedPath.isEmpty() && Files.isDirectory(Paths.get(persistedPath))) {
-            return Paths.get(persistedPath);
+            throw new ExecutionException("No Tomcat server configured."
+                    + " Open the run configuration and select a server from Application Servers.");
         }
 
         TomcatInfo resolved = TomcatServerManagerState.getInstance().resolve(persisted);
-        if (resolved != null && !resolved.getPath().isEmpty()
-                && Files.isDirectory(Paths.get(resolved.getPath()))) {
-            LOG.info("Launch path upgraded from drifted persisted reference"
-                    + " (id=" + persisted.getId() + ", path=" + persistedPath + ")"
-                    + " to registered server (id=" + resolved.getId()
-                    + ", path=" + resolved.getPath() + ")");
-            configuration.getConfigData().setTomcatInfo(resolved);
-            return Paths.get(resolved.getPath());
+        if (resolved == null) {
+            String name = !persisted.getName().isEmpty() ? persisted.getName() : "(unnamed)";
+            String path = persisted.getPath();
+            throw new ExecutionException("Tomcat server '" + name + "' is not registered."
+                    + " Persisted path: " + (path.isEmpty() ? "(empty)" : path) + "."
+                    + " Open the run configuration and select a registered server,"
+                    + " or add one via Configure.");
         }
 
-        String name = !persisted.getName().isEmpty() ? persisted.getName() : "(unnamed)";
-        throw new ExecutionException("Tomcat server '" + name + "' is not available."
-                + " Persisted path: " + (persistedPath.isEmpty() ? "(empty)" : persistedPath)
-                + ". Open the run configuration to select a registered server.");
+        String resolvedPath = resolved.getPath();
+        if (resolvedPath.isEmpty() || !Files.isDirectory(Paths.get(resolvedPath))) {
+            throw new ExecutionException("Registered Tomcat server '" + resolved.getName()
+                    + "' has an invalid path: "
+                    + (resolvedPath.isEmpty() ? "(empty)" : resolvedPath)
+                    + ". Open Application Servers settings to fix it.");
+        }
+
+        if (resolved != persisted) {
+            LOG.info("Launch reconciled drifted persisted reference"
+                    + " (id=" + persisted.getId() + ", path=" + persisted.getPath() + ")"
+                    + " to registered server (id=" + resolved.getId()
+                    + ", path=" + resolvedPath + ")");
+            configuration.getConfigData().setTomcatInfo(resolved);
+        }
+        return Paths.get(resolvedPath);
     }
 
     private void prepareCatalinaBase(@NotNull Path catalinaBase, @NotNull Path catalinaHome,

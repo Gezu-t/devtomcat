@@ -147,34 +147,36 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
                         && message.toLowerCase().contains("cannot be launched"));
     }
 
-    public void testUnregisteredButUsablePathIsWarningNotBlocker() throws IOException {
-        // Regression guard for the UI/runtime split: the embedded TomcatInfo is a
-        // portability mechanism. When a teammate pulls a run config via VCS, the
-        // snapshot points at their local install even though they haven't added
-        // it to Application Servers yet. The runtime launches it (the path
-        // exists); the UI must NOT block with a hard error, or the toolbar and
-        // dialog would disagree again. The warning decoration on the combo is
-        // enough to nudge the user toward registration.
+    public void testUnregisteredButUsablePathBlocksRun() throws IOException {
+        // Registration is required to launch. An embedded snapshot whose path
+        // exists on disk is NOT enough — the user has to add the server to
+        // Application Servers first. The toolbar, the dialog validator, and
+        // the runtime all enforce this uniformly; no path lets a config slip
+        // through to launch without a registered reference.
         String usablePath = tempServerPath("usable");
         state.setTomcatInfos(List.of(
                 server("other-id", "Other Server", tempServerPath("other"))));
 
-        TomcatInfo portable = server("foreign-id", "Imported Tomcat", usablePath);
+        TomcatInfo unregistered = server("foreign-id", "Imported Tomcat", usablePath);
         TomcatRunConfiguration cfg = createConfig("UsableUnregistered");
-        cfg.setTomcatInfo(portable);
+        cfg.setTomcatInfo(unregistered);
 
         ApplicationServerSection section = createdSection();
         section.resetFrom(cfg);
 
         TomcatInfo selected = section.getSelectedTomcatServer();
-        assertNotNull("portable snapshot must be injected, not silently dropped",
-                selected);
+        assertNotNull("unregistered snapshot must be injected so the user sees it,"
+                        + " not silently dropped", selected);
         assertEquals("foreign-id", selected.getId());
-        assertTrue("usable-but-unregistered must NOT block Run — the runtime will launch it",
+        assertFalse("unregistered-but-usable must block Run until the user registers the server",
                 section.isConfigurationValid());
-        assertTrue("validator must return no errors for usable-but-unregistered"
-                        + " (the warning lives in the renderer, not the validator)",
-                section.validateSettings().isEmpty());
+        List<ValidationInfo> errors = section.validateSettings();
+        assertEquals("unregistered selection must surface exactly one validator error",
+                1, errors.size());
+        String message = errors.get(0).message;
+        assertTrue("error must name the server and explain the fix (was: " + message + ")",
+                message.contains("Imported Tomcat")
+                        && message.toLowerCase().contains("not registered"));
     }
 
     public void testNullPersistedLeavesCombSelectionClearWithValidationError() {
@@ -194,10 +196,10 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
 
     public void testReregisterCycleClearsUnresolvedMarkersAcrossReopens() throws IOException {
         // First open: the server is unregistered but its path is usable — the
-        // section injects it as a warning-state item. After re-registering and
-        // reopening, the resolver must find the canonical instance and the
-        // injected marker must be gone (otherwise the live entry would render
-        // with a warning icon forever).
+        // section injects it AND blocks Run with a "not registered" error.
+        // After re-registering and reopening, the resolver matches by path and
+        // the marker is gone (otherwise the live entry would render as
+        // unregistered forever).
         String canonicalPath = tempServerPath("canon");
         TomcatInfo unregisteredSnapshot = server("ghost-id", "Tomcat", canonicalPath);
         state.setTomcatInfos(List.of(
@@ -210,10 +212,10 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
         section.resetFrom(cfg);
         assertSame("first open: the injected snapshot is selected",
                 unregisteredSnapshot, section.getSelectedTomcatServer());
-        assertTrue("first open: usable path means no hard validator error",
-                section.validateSettings().isEmpty());
-        assertTrue("first open: isConfigurationValid must be true (warning only)",
+        assertFalse("first open: unregistered must block Run",
                 section.isConfigurationValid());
+        assertFalse("first open: validator surfaces the not-registered error",
+                section.validateSettings().isEmpty());
 
         // User re-registers via the global settings.
         TomcatInfo registered = server("new-canonical-id", "Tomcat", canonicalPath);
@@ -227,7 +229,7 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
                 registered, section.getSelectedTomcatServer());
         assertTrue("after re-register: no validator error",
                 section.validateSettings().isEmpty());
-        assertTrue("after re-register: fully valid (no warning)",
+        assertTrue("after re-register: fully valid",
                 section.isConfigurationValid());
     }
 }
