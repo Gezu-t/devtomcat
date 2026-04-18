@@ -437,8 +437,66 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     public boolean isAfterLaunchEnabled()                     { return configData.getBrowserConfig().isAfterLaunchEnabled(); }
     public void setAfterLaunchEnabled(boolean enabled)        { configData.getBrowserConfig().setAfterLaunchEnabled(enabled); }
-    @NotNull public String getBrowserUrl()                    { return configData.getBrowserConfig().getBrowserUrl(); }
-    public void setBrowserUrl(@NotNull String url)            { configData.getBrowserConfig().setBrowserUrl(url); }
+
+    /**
+     * Returns the effective browser URL for this run configuration.
+     *
+     * <p>When the user has customised the URL it is stored verbatim and
+     * returned unchanged. When the URL is auto-generated (matches the
+     * {@code http://localhost:{port}{contextPath}} pattern for the current
+     * port and context), {@link BrowserConfig#getUrl()} holds an empty string
+     * and the URL is <em>computed live</em> from the current
+     * {@link #getHttpPort()} and {@link #getContextPath()}.
+     *
+     * <p>This is the <b>single source of truth</b> for the browser URL. The
+     * previous design stored the URL with a baked-in port and drifted out of
+     * sync whenever the port changed at runtime (auto-resolution, parallel-run
+     * isolation). With the URL computed, any change to the authoritative port
+     * is reflected everywhere — config dialog, launch-time browser open,
+     * Services panel — without a secondary "rewrite" step.
+     */
+    @NotNull public String getBrowserUrl() {
+        String stored = configData.getBrowserConfig().getUrl();
+        if (!stored.isEmpty()) {
+            return stored;
+        }
+        return autoBrowserUrl();
+    }
+
+    /**
+     * Stores the browser URL, normalising to "auto" semantics when the value
+     * matches the current auto-generated pattern.
+     *
+     * <p>Storing an empty string for auto-generated URLs keeps a single source
+     * of truth: later reads of {@link #getBrowserUrl()} recompute from the
+     * current port, so runtime port changes (auto-resolution, parallel-run
+     * isolation) flow through automatically without a rewrite step.
+     */
+    public void setBrowserUrl(@NotNull String url) {
+        String normalized = url == null ? "" : url.trim();
+        if (!normalized.isEmpty() && normalized.equals(autoBrowserUrl())) {
+            configData.getBrowserConfig().setBrowserUrl("");
+        } else {
+            configData.getBrowserConfig().setBrowserUrl(normalized);
+        }
+    }
+
+    /**
+     * Computes the auto-generated browser URL from the current port and
+     * context path. Exposed so UI sections can mirror the same pattern when
+     * deciding whether a user-typed URL should be treated as custom or
+     * normalised back to auto.
+     */
+    @NotNull
+    public String autoBrowserUrl() {
+        Integer port = getHttpPort();
+        String effectivePort = port != null ? port.toString() : TomcatConstants.DEFAULT_PORT;
+        String context = getContextPath();
+        String effectiveContext = (context != null && !context.isEmpty())
+                ? context
+                : TomcatConstants.DEFAULT_CONTEXT_PATH;
+        return "http://" + TomcatConstants.DEFAULT_HOST + ":" + effectivePort + effectiveContext;
+    }
     @NotNull public String getBrowserName()                   { return configData.getBrowserConfig().getBrowserName(); }
     public void setBrowserName(@NotNull String browserName)   { configData.getBrowserConfig().setBrowserName(browserName); }
     public boolean isWithJsDebugger()                         { return configData.getBrowserConfig().isWithJsDebugger(); }

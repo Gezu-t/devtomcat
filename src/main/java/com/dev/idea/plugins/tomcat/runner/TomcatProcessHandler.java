@@ -653,17 +653,19 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 return;
             }
 
-            String url = configuration.getBrowserUrl();
-            if (url == null || url.isEmpty()) {
-                String context = configuration.getContextPath();
-                url = "http://" + DEFAULT_HOST + ":" + httpPort
-                        + (context != null ? context : DEFAULT_CONTEXT_PATH);
-            } else {
-                // Rewrite the port in the saved URL to the resolved runtime port.
-                // The user's saved URL may reference the configured port (e.g. 8084)
-                // but the actual Tomcat started on an auto-resolved port (e.g. 8092).
-                url = rewritePortIfNeeded(url, httpPort);
-            }
+            // Single source of truth: configuration.getBrowserUrl() returns either the
+            // user-customised URL verbatim or a live-computed auto URL derived from the
+            // config's current httpPort + contextPath. In single-instance mode port
+            // resolution at launch was written back to the config (see
+            // TomcatCommandLineState.syncResolvedPortsToConfig), so the computed URL
+            // already carries the actual listening port.
+            //
+            // In parallel-run mode we deliberately do NOT write back (instances would
+            // race on the shared config). In that case the config port is the seed
+            // value and may differ from this instance's runtime httpPort — we still
+            // rewrite here as a safety net so the browser opens on the right port for
+            // *this* parallel instance.
+            String url = rewritePortIfNeeded(configuration.getBrowserUrl(), httpPort);
 
             boolean jsDebug = configuration.isWithJsDebugger();
             String browserName = configuration.getBrowserName();

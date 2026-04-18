@@ -225,11 +225,13 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             List<String> changes = new java.util.ArrayList<>();
             claimAndTrack(carried, registry, configName, changes);
             this.resolvedPorts = carried;
+            syncResolvedPortsToConfig(carried);
 
             Integer carriedDebug = getEnvironment().getUserData(CARRIED_DEBUG_PORT_KEY);
             if (carriedDebug != null && carriedDebug > 0) {
                 int claimed = registry.claimPort(carriedDebug, configName);
                 this.resolvedDebugPort = claimed > 0 ? claimed : carriedDebug;
+                syncResolvedDebugPortToConfig(this.resolvedDebugPort);
             }
             logResolutionChanges(changes);
             return;
@@ -262,6 +264,8 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                         + " claimed by a concurrent instance, resolved to " + this.resolvedDebugPort);
             }
             this.resolvedPorts = rp;
+            syncResolvedPortsToConfig(rp);
+            syncResolvedDebugPortToConfig(this.resolvedDebugPort);
             logResolutionChanges(resolution.getChanges());
         } else {
             PortConflictDetector.PortResolution resolution =
@@ -270,7 +274,69 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             PortConfig rp = resolution.getResolvedConfig();
             claimAndTrack(rp, registry, configName, resolution.getChanges());
             this.resolvedPorts = rp;
+            syncResolvedPortsToConfig(rp);
             logResolutionChanges(resolution.getChanges());
+        }
+    }
+
+    private void syncResolvedPortsToConfig(@NotNull PortConfig rp) {
+        writeBackResolvedPorts(configuration, rp);
+    }
+
+    private void syncResolvedDebugPortToConfig(int resolvedDebug) {
+        writeBackResolvedDebugPort(configuration, resolvedDebug);
+    }
+
+    /**
+     * Writes the resolved ports back to the configuration's {@link PortConfig}
+     * so it becomes the single source of truth for every downstream read — the
+     * config dialog, the browser URL generation, the Services panel, and the
+     * serializer. Prior to this sync the resolved ports lived only on the
+     * process handler, and the dialog kept showing stale pre-resolution values
+     * until the user manually edited them.
+     *
+     * <p>No-op in parallel-run mode: two simultaneous launches of the same
+     * configuration would race on the shared {@code PortConfig}, last-writer-
+     * wins. In parallel mode per-launch ports stay on the handler; the config
+     * represents the user's seed values for the next fresh launch.
+     *
+     * <p>Static + package-private so unit tests can exercise it without
+     * constructing a full {@link ExecutionEnvironment}.
+     */
+    static void writeBackResolvedPorts(@NotNull TomcatRunConfiguration configuration,
+                                        @NotNull PortConfig resolved) {
+        if (configuration.isParallelRunEffective()) {
+            return;
+        }
+        PortConfig target = configuration.getConfigData().getPortConfig();
+        target.setHttp(resolved.getHttp());
+        target.setShutdown(resolved.getShutdown());
+        if (target.isHttpsEnabled()) {
+            target.setHttps(resolved.getHttps());
+        }
+        if (target.isJmxEnabled()) {
+            target.setJmx(resolved.getJmx());
+        }
+        if (target.isAjpEnabled()) {
+            target.setAjp(resolved.getAjp());
+        }
+    }
+
+    /**
+     * Writes the resolved debug port back to {@code DebugConfig} so the config
+     * dialog and serializer agree on the port the JVM actually bound. Same
+     * parallel-run caveat as {@link #writeBackResolvedPorts}: skipped when
+     * multiple launches of one configuration could race.
+     */
+    static void writeBackResolvedDebugPort(@NotNull TomcatRunConfiguration configuration,
+                                            int resolvedDebug) {
+        if (configuration.isParallelRunEffective()) {
+            return;
+        }
+        if (resolvedDebug <= 0) return;
+        var debugConfig = configuration.getConfigData().getDebugConfig();
+        if (debugConfig != null) {
+            debugConfig.setPort(resolvedDebug);
         }
     }
 
@@ -525,14 +591,19 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             // can include them. Without this, debug + custom script silently fails to attach.
             boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
             if (isDebug) {
+                DebugConfig dc = configuration.getConfigData().getDebugConfig();
                 int debugPort = resolvedDebugPort > 0 ? resolvedDebugPort
-                        : (configuration.getConfigData().getDebugConfig() != null
-                            ? configuration.getConfigData().getDebugConfig().getPort()
-                            : DebugConfig.DEFAULT_DEBUG_PORT);
+                        : (dc != null ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT);
+                // Honor the configured transport — today this is always dt_socket (UI locks it),
+                // but deriving from DebugConfig keeps the custom-script path aligned with the
+                // attach path in TomcatDebugger, so both evolve together.
+                String transportName = (dc != null
+                        && TomcatConstants.TRANSPORT_SHARED_MEMORY.equalsIgnoreCase(dc.getTransport()))
+                        ? TomcatConstants.JDWP_TRANSPORT_SHMEM
+                        : TomcatConstants.JDWP_TRANSPORT_SOCKET;
                 commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));
                 String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT,
-                            TomcatConstants.JDWP_TRANSPORT_SOCKET, debugPort);
+                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, transportName, debugPort);
                 commandLine.withEnvironment(TomcatConstants.ENV_JDWP_OPTS, jdwpArg);
                 deploymentLogger.logServerInfo("Debug mode with custom script: add $TOMCAT_JDWP_OPTS to your CATALINA_OPTS or JAVA_OPTS");
             }
