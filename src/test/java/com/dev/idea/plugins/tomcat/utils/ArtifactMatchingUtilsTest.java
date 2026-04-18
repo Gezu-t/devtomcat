@@ -90,6 +90,45 @@ class ArtifactMatchingUtilsTest {
         assertNull(matched);
     }
 
+    @Test
+    @DisplayName("EXTERNAL source never matches a project artifact (provenance guard)")
+    void externalSourceNeverMatches() {
+        // An external WAR chosen via "External Source..." that happens to share
+        // the project artifact's name/path/base-module must stay decoupled from
+        // the project artifact model. Otherwise Before Launch would rebuild the
+        // project artifact and overwrite the external file the user pointed at.
+        DeploymentArtifact deployment = new DeploymentArtifact("portal", "/build/portal", "war");
+        deployment.setSource(DeploymentArtifact.Source.EXTERNAL);
+
+        Artifact exactName = artifact("portal", "/build/portal");
+        Artifact pathMatch = artifact("renamed", "/build/portal");
+        Artifact baseNameMatch = artifact("portal:war exploded", "/other");
+
+        Artifact matched = ArtifactMatchingUtils.findMatchingArtifact(
+                new Artifact[]{exactName, pathMatch, baseNameMatch},
+                deployment,
+                null
+        );
+
+        assertNull(matched);
+    }
+
+    @Test
+    @DisplayName("AUTO_DETECTED source still matches (treated like IntelliJ artifact)")
+    void autoDetectedSourceStillMatches() {
+        // AUTO_DETECTED comes from ProjectArtifactDetector scanning web-module
+        // layout — the source module is still part of the project, so rename
+        // tracking and Before Launch wiring should treat it like INTELLIJ_ARTIFACT.
+        DeploymentArtifact deployment = new DeploymentArtifact("portal", "/build/portal", "exploded");
+        deployment.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
+
+        Artifact exact = artifact("portal", "/build/portal");
+        Artifact matched = ArtifactMatchingUtils.findMatchingArtifact(
+                new Artifact[]{exact}, deployment, null);
+
+        assertEquals(exact, matched);
+    }
+
     private static Artifact artifact(String name, String outputPath) {
         Artifact artifact = mock(Artifact.class);
         when(artifact.getName()).thenReturn(name);

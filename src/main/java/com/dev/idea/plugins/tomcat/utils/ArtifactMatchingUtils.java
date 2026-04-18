@@ -11,6 +11,15 @@ import org.jetbrains.annotations.Nullable;
  *
  * <p>Matching order is significant and must remain:
  * exact name, case-insensitive name, output path, then base module name.
+ *
+ * <p>{@link DeploymentArtifact.Source#EXTERNAL} deployments never match a
+ * project-backed {@link Artifact}. The {@code source} field was introduced
+ * precisely to distinguish user-supplied file paths ("External Source...")
+ * from IntelliJ-backed artifacts; without this short-circuit, an EXTERNAL
+ * entry that coincidentally shared a name/path/base-name with a project
+ * artifact would be wired into {@code BuildArtifactsBeforeRunTask}, causing
+ * Before Launch to rebuild a project artifact the user did not intend to
+ * link to — and silently overwrite the output path the user pointed at.
  */
 public final class ArtifactMatchingUtils {
 
@@ -22,6 +31,13 @@ public final class ArtifactMatchingUtils {
                                                 @Nullable DeploymentArtifact deploymentArtifact,
                                                 @Nullable Logger logger) {
         if (deploymentArtifact == null) {
+            return null;
+        }
+
+        // Provenance short-circuit — see class javadoc. This is the single
+        // chokepoint both callers route through, so guarding here keeps the
+        // Before Launch wiring honest no matter which surface asked.
+        if (deploymentArtifact.getSource() == DeploymentArtifact.Source.EXTERNAL) {
             return null;
         }
 
