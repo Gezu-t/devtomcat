@@ -27,7 +27,6 @@ public class UpdateActionsSection implements ConfigurationSection {
     private ComboBox<String> updateActionCombo;
     private JBCheckBox showDialogCheckBox;
     private ComboBox<String> frameDeactivationCombo;
-    private JBCheckBox showFrameDialogCheckBox;
     private JPanel panel;
 
     @Override
@@ -44,17 +43,14 @@ public class UpdateActionsSection implements ConfigurationSection {
             gbc.gridx = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
             gbc.insets = JBUI.insets(2, 4, 2, 4);
             showDialogCheckBox = new JBCheckBox("Show dialog");
+            showDialogCheckBox.setToolTipText(
+                    "Show a confirmation dialog before running the update or frame-deactivation action");
             showDialogCheckBox.setSelected(true);
             panel.add(showDialogCheckBox, gbc);
 
             frameDeactivationCombo = new ComboBox<>();
             ConfigurationSection.addLabelAndField(panel, gbc, 1,
                     new JBLabel("On frame deactivation:"), frameDeactivationCombo);
-            gbc.gridx = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-            gbc.insets = JBUI.insets(2, 4, 2, 4);
-            showFrameDialogCheckBox = new JBCheckBox("Show dialog");
-            showFrameDialogCheckBox.setSelected(false);
-            panel.add(showFrameDialogCheckBox, gbc);
         }
         return panel;
     }
@@ -75,26 +71,29 @@ public class UpdateActionsSection implements ConfigurationSection {
             frameDeactivationCombo.addItem(option);
         }
         frameDeactivationCombo.setSelectedItem(TomcatConstants.ACTION_DO_NOTHING);
-        showFrameDialogCheckBox.setSelected(false);
     }
 
     @Override
     public void resetFrom(@NotNull TomcatRunConfiguration configuration) {
         UpdateConfig uc = configuration.getConfigData().getUpdateConfig();
         updateActionCombo.setSelectedItem(mapInternalToDisplay(uc.getOnUpdate()));
-        showDialogCheckBox.setSelected(uc.isShowUpdateDialog());
         frameDeactivationCombo.setSelectedItem(mapInternalToDisplay(uc.getOnFrameDeactivation()));
-        showFrameDialogCheckBox.setSelected(uc.isShowFrameDeactivationDialog());
+        // Consolidated checkbox governs both prompts. OR-read preserves the "ask before acting"
+        // intent of any config (legacy or imported) that had either flag enabled.
+        showDialogCheckBox.setSelected(uc.isShowUpdateDialog() || uc.isShowFrameDeactivationDialog());
     }
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
         UpdateConfig uc = configuration.getConfigData().getUpdateConfig();
         uc.setOnUpdate(mapDisplayToInternal(getSelectedAction()));
-        uc.setShowUpdateDialog(isShowDialogEnabled());
         String frameAction = (String) frameDeactivationCombo.getSelectedItem();
         uc.setOnFrameDeactivation(mapDisplayToInternal(frameAction));
-        uc.setShowFrameDeactivationDialog(showFrameDialogCheckBox.isSelected());
+        // Single UI switch drives both persisted flags so the runtime listeners
+        // (TomcatApplicationUpdater, TomcatFrameDeactivationListener) stay in sync.
+        boolean show = isShowDialogEnabled();
+        uc.setShowUpdateDialog(show);
+        uc.setShowFrameDeactivationDialog(show);
     }
 
     @Override
@@ -111,10 +110,12 @@ public class UpdateActionsSection implements ConfigurationSection {
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         UpdateConfig uc = config.getConfigData().getUpdateConfig();
         if (!Objects.equals(mapInternalToDisplay(uc.getOnUpdate()), getSelectedAction())) return true;
-        if (uc.isShowUpdateDialog() != isShowDialogEnabled()) return true;
         String frameAction = (String) frameDeactivationCombo.getSelectedItem();
         if (!Objects.equals(mapInternalToDisplay(uc.getOnFrameDeactivation()), frameAction)) return true;
-        return uc.isShowFrameDeactivationDialog() != showFrameDialogCheckBox.isSelected();
+        // Modified if the UI checkbox doesn't match BOTH persisted flags — forces an apply
+        // that re-syncs them, even when they were out-of-sync in storage (legacy/imported).
+        boolean show = isShowDialogEnabled();
+        return uc.isShowUpdateDialog() != show || uc.isShowFrameDeactivationDialog() != show;
     }
 
     @Override
