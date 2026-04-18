@@ -40,8 +40,12 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Builds the Tomcat process command line and manages process lifecycle.
@@ -136,6 +140,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // Tomcat install to register.
         if (!configuration.isRemoteMode()) {
             requireRegisteredTomcatServer();
+            // Kill any orphan Tomcats left over from prior runs of THIS config so
+            // their ports free up before the port-conflict detector sees them.
+            // Without this, a zombie on the seed port pushes us onto the next free
+            // port, and the user sees the dialog's seed permanently disagree with
+            // the Services panel's actually-bound port. Runs after the registration
+            // gate so we don't waste cycles scanning for a launch that's about to
+            // fail anyway.
+            reclaimOrphanTomcats();
         }
 
         checkCompatibility();
@@ -491,6 +503,107 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     public int getResolvedDebugPort() {
         return resolvedDebugPort;
+    }
+
+    /**
+     * Kill any orphan Tomcat processes left over from prior runs of THIS run
+     * configuration so their ports free up before the port-conflict detector
+     * ever sees them. When the IDE exits without cleanly stopping a launch
+     * (crash, force-quit, sandbox restart), the JVM keeps running and holds
+     * its HTTP/shutdown/JMX ports. Every subsequent launch then bumps up to
+     * the next free slot, and the user sees the dialog's seed permanently
+     * drift away from the actually-bound port shown in Services.
+     *
+     * <p>Identification is via {@code -Dcatalina.base=<this config's base>}
+     * in the process command line. The base path is per-configuration
+     * (derived from {@link TomcatProjectUtils#getCatalinaBase}), so nothing
+     * else on the machine can legitimately match — this is safe to run
+     * unconditionally before every launch. Both single-instance and
+     * parallel-run orphans are caught because parallel-run per-launch dirs
+     * live under the config base prefix.
+     *
+     * <p>Sends {@link ProcessHandle#destroy} first and upgrades to
+     * {@link ProcessHandle#destroyForcibly} after a short grace period if
+     * Tomcat ignored the polite signal (which it does without its shutdown
+     * port). Failures at any step are logged and swallowed — this is a
+     * best-effort reclaim, not a gate.
+     */
+    private void reclaimOrphanTomcats() {
+        Path configBase;
+        try {
+            // Pass runId=null to get the STABLE config-level base, which is a
+            // prefix for both single-instance and parallel-run .runs/... children.
+            configBase = com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils
+                    .getCatalinaBase(configuration, null);
+        } catch (Exception e) {
+            LOG.debug("Skipping orphan reclaim: catalina.base not resolvable yet", e);
+            return;
+        }
+        if (configBase == null) return;
+
+        String marker = "-Dcatalina.base=" + configBase.toAbsolutePath().toString();
+        long selfPid = ProcessHandle.current().pid();
+
+        List<ProcessHandle> orphans;
+        try (Stream<ProcessHandle> all = ProcessHandle.allProcesses()) {
+            orphans = all
+                    .filter(ProcessHandle::isAlive)
+                    .filter(p -> p.pid() != selfPid)
+                    .filter(p -> p.info().commandLine()
+                            .map(cl -> cl.contains(marker))
+                            .orElse(false))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            LOG.warn("Orphan scan failed; continuing without reclaim", e);
+            return;
+        }
+        if (orphans.isEmpty()) return;
+
+        LOG.warn("Reclaiming " + orphans.size() + " orphan Tomcat process(es) from prior launches"
+                + " of '" + configuration.getName() + "' at base " + configBase);
+
+        // Polite first — Tomcat catches SIGTERM and shuts down cleanly when its
+        // shutdown port is reachable. Most orphans don't have a working shutdown
+        // port (that's exactly why they're orphans), so destroy() rarely works
+        // on its own — but try it anyway so we don't SIGKILL a clean-shutdown-
+        // capable JVM unnecessarily.
+        for (ProcessHandle p : orphans) {
+            try { p.destroy(); } catch (Exception ignored) { /* try next */ }
+        }
+        long graceDeadlineMs = System.currentTimeMillis() + 1500;
+        for (ProcessHandle p : orphans) {
+            long remaining = graceDeadlineMs - System.currentTimeMillis();
+            if (remaining <= 0) break;
+            try {
+                p.onExit().get(remaining, TimeUnit.MILLISECONDS);
+            } catch (Exception ignored) {
+                // Still alive after grace period — will be force-killed below.
+            }
+        }
+        // Force-kill survivors.
+        List<Long> forceKilled = new java.util.ArrayList<>();
+        for (ProcessHandle p : orphans) {
+            if (!p.isAlive()) continue;
+            try {
+                if (p.destroyForcibly()) {
+                    forceKilled.add(p.pid());
+                }
+            } catch (Exception e) {
+                LOG.debug("destroyForcibly failed for pid=" + p.pid(), e);
+            }
+        }
+        // Wait briefly for the OS to release the sockets so the next port probe
+        // doesn't race TIME_WAIT. The SO_REUSEADDR probe in PortUtils.tryBind
+        // makes TIME_WAIT transparent, so 200ms is plenty.
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+
+        deploymentLogger.logServerWarning("Reclaimed " + orphans.size()
+                + " orphan Tomcat process(es) from prior launches of this configuration"
+                + (forceKilled.isEmpty() ? "" : " (force-killed: " + forceKilled + ")"));
     }
 
     /**
