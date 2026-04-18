@@ -105,14 +105,23 @@ public final class TomcatRunnerDelegate {
     /**
      * Handles Case 2: different executor already running → stop + relaunch.
      * Returns {@code true} if a conflict was handled (caller should return null).
+     *
+     * <p>Covers the mid-shutdown window too: if the old-executor handler is already
+     * terminating when the user switches modes, we still route through
+     * {@link #stopAndRelaunch}. Its {@link ProcessStopSupport}-based listener waits
+     * for the in-flight termination to actually finish before the new-executor
+     * launch fires, and carries resolved ports / debug port / launch settings
+     * through to that launch — same contract as the live case. The alternative
+     * (falling through to a fresh launch) would race the terminating process for
+     * ports and the parallel-run {@code CATALINA_BASE} cleanup.
      */
     public boolean handleCrossExecutorConflict(@NotNull TomcatRunConfiguration config,
                                                 @NotNull ExecutionEnvironment env) {
         TomcatProcessHandler conflicting = findConflictingExecutorHandler(config, env);
-        if (conflicting != null && !conflicting.isProcessTerminated()
-                && !conflicting.isProcessTerminating()) {
-            LOG.info("Mode switch: stopping " + conflicting.getExecutorId()
-                    + " instance of " + config.getName());
+        if (conflicting != null && !conflicting.isProcessTerminated()) {
+            LOG.info("Mode switch: "
+                    + (conflicting.isProcessTerminating() ? "waiting for " : "stopping ")
+                    + conflicting.getExecutorId() + " instance of " + config.getName());
             stopAndRelaunch(conflicting, config, env);
             return true;
         }

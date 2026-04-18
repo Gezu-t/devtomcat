@@ -75,6 +75,9 @@ public final class ProcessStopSupport {
                                          @Nullable RunContentDescriptor descriptor,
                                          @Nullable Executor executor,
                                          @NotNull Runnable onCleanedUp) {
+        // Caller must have verified !isProcessTerminated() — a listener attached
+        // after processTerminated has already fired will never be invoked and the
+        // callback would be lost.
         handler.addProcessListener(new ProcessListener() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
@@ -95,6 +98,14 @@ public final class ProcessStopSupport {
                 });
             }
         });
-        handler.destroyProcess();
+        // Skip the destroy call if shutdown is already in flight — re-entering
+        // the graceful shutdown path (custom-script, super.destroyProcessImpl,
+        // cleanup) a second time is not safe. The listener attached above still
+        // fires when the already-in-progress termination completes, so the
+        // relaunch sequencing works either way. Without this guard, a user who
+        // switches executor modes mid-shutdown would trigger double-shutdown.
+        if (!handler.isProcessTerminating()) {
+            handler.destroyProcess();
+        }
     }
 }
