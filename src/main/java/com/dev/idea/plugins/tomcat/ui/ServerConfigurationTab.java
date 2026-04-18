@@ -249,6 +249,14 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         private final JPasswordField passwordField = new JPasswordField();
         private final JButton testButton = new JButton("Test Connection");
         private final JBLabel statusLabel = new JBLabel("");
+        /**
+         * Monotonic counter that tags each in-flight Test Connection so a stale async
+         * response (user kept editing Host/Port while the test was running) can't
+         * overwrite the status label with a result for a URL that no longer reflects
+         * the UI state.
+         */
+        private final java.util.concurrent.atomic.AtomicInteger testGeneration =
+                new java.util.concurrent.atomic.AtomicInteger(0);
 
         RemoteConnectionSection() {
             hostField = new JBTextField();
@@ -314,6 +322,32 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             useCredentialsCheck.addActionListener(e -> updateCredentialFieldsState());
             updateCredentialFieldsState();
             testButton.addActionListener(e -> testConnection());
+
+            // Clear the Test Connection status whenever a field that feeds into the
+            // manager URL changes, so a stale "Connected successfully" doesn't
+            // mislead the user after they retarget the URL.
+            javax.swing.event.DocumentListener urlFieldListener = new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e)  { invalidateTestStatus(); }
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e)  { invalidateTestStatus(); }
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { invalidateTestStatus(); }
+            };
+            hostField.getDocument().addDocumentListener(urlFieldListener);
+            portField.getDocument().addDocumentListener(urlFieldListener);
+            useHttpsCheck.addActionListener(e -> invalidateTestStatus());
+        }
+
+        /**
+         * Marks any pending Test Connection result as stale (by bumping the
+         * generation counter) and wipes the visible status. Called whenever a
+         * URL-component field changes so the user never sees a green
+         * "Connected" tick against a URL they've since edited.
+         */
+        private void invalidateTestStatus() {
+            testGeneration.incrementAndGet();
+            if (!statusLabel.getText().isEmpty()) {
+                statusLabel.setText("");
+                statusLabel.setToolTipText(null);
+            }
         }
 
         private void updateCredentialFieldsState() {
@@ -325,14 +359,25 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         private void testConnection() {
             statusLabel.setText("Testing...");
             statusLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+            statusLabel.setToolTipText(null);
             testButton.setEnabled(false);
 
+            // Claim this test's generation. A later field edit bumps the counter,
+            // so when this async call completes we can detect that the URL has
+            // moved on and suppress our result rather than overwriting whatever
+            // the user is now seeing.
+            final int myGeneration = testGeneration.incrementAndGet();
             RemoteConfig rc = buildCurrentRemoteConfig();
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 TomcatManagerDeployer deployer = new TomcatManagerDeployer(rc);
                 String error = deployer.testConnection();
                 SwingUtilities.invokeLater(() -> {
                     testButton.setEnabled(true);
+                    if (myGeneration != testGeneration.get()) {
+                        // A field changed since this test started; the result no
+                        // longer reflects the URL the user is looking at. Drop it.
+                        return;
+                    }
                     if (error == null) {
                         setStatus("Connected successfully", null,
                                 JBColor.namedColor(
@@ -345,11 +390,56 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             });
         }
 
-        private String buildManagerUrl() {
+        /**
+         * Builds the Tomcat Manager URL from the current field state.
+         *
+         * <p>Sanitises the inputs so IPv6 literals and typo'd hosts don't produce
+         * malformed URLs:
+         * <ul>
+         *   <li>Trailing slashes and leading/trailing whitespace on the host are stripped.</li>
+         *   <li>IPv6 literals that contain a {@code :} (and aren't already bracketed)
+         *       are wrapped in {@code [...]} per RFC 3986 so the port separator
+         *       isn't ambiguous.</li>
+         *   <li>If the user accidentally pasted a scheme into the host field, it is
+         *       stripped — the Use HTTPS checkbox is authoritative.</li>
+         * </ul>
+         */
+        @NotNull
+        String buildManagerUrl() {
             String protocol = useHttpsCheck.isSelected() ? "https" : "http";
-            String host = hostField.getText().trim();
+            String rawHost = hostField.getText().trim();
             String port = portField.getText().trim();
+            String host = normaliseHost(rawHost);
             return protocol + "://" + host + ":" + port + "/manager";
+        }
+
+        @NotNull
+        static String normaliseHost(@NotNull String raw) {
+            String host = raw.trim();
+            // Strip accidental scheme prefix.
+            int schemeEnd = host.indexOf("://");
+            if (schemeEnd > 0) {
+                host = host.substring(schemeEnd + 3);
+            }
+            // Strip trailing path / slash — the Manager endpoint is appended explicitly.
+            int firstSlash = host.indexOf('/');
+            if (firstSlash >= 0) {
+                host = host.substring(0, firstSlash);
+            }
+            // Strip a user-supplied :port suffix so it can't double up with portField.
+            // Detect by "more than one colon and not already bracketed" → IPv6;
+            // otherwise "exactly one colon" → user typed host:port.
+            if (!host.startsWith("[")) {
+                int colons = 0;
+                for (int i = 0; i < host.length(); i++) if (host.charAt(i) == ':') colons++;
+                if (colons == 1) {
+                    host = host.substring(0, host.indexOf(':'));
+                } else if (colons > 1) {
+                    // IPv6 literal — wrap so the outer port separator is unambiguous.
+                    host = "[" + host + "]";
+                }
+            }
+            return host;
         }
 
         private RemoteConfig buildCurrentRemoteConfig() {
@@ -370,10 +460,15 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 String managerUrl = rc.getManagerUrl();
                 if (managerUrl != null && !managerUrl.isEmpty()) {
                     try {
-                        java.net.URL url = java.net.URI.create(managerUrl).toURL();
-                        hostField.setText(url.getHost());
-                        portField.setText(String.valueOf(url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER));
-                        useHttpsCheck.setSelected("https".equalsIgnoreCase(url.getProtocol()));
+                        java.net.URI uri = java.net.URI.create(managerUrl);
+                        // URI.getHost() returns "::1" for http://[::1]:... — no brackets.
+                        // That's exactly what we want in the field; buildManagerUrl()
+                        // re-wraps it on apply so the round-trip is stable.
+                        String uriHost = uri.getHost();
+                        hostField.setText(uriHost != null ? uriHost : TomcatConstants.DEFAULT_HOST);
+                        int uriPort = uri.getPort();
+                        portField.setText(String.valueOf(uriPort > 0 ? uriPort : TomcatConstants.DEFAULT_PORT_NUMBER));
+                        useHttpsCheck.setSelected("https".equalsIgnoreCase(uri.getScheme()));
                     } catch (Exception e) {
                         hostField.setText(TomcatConstants.DEFAULT_HOST);
                         portField.setText(TomcatConstants.DEFAULT_PORT);
@@ -438,10 +533,14 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             }
 
             try {
-                java.net.URL url = java.net.URI.create(managerUrl).toURL();
-                String savedHost = url.getHost();
-                int savedPort = url.getPort() > 0 ? url.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER;
-                boolean savedHttps = "https".equalsIgnoreCase(url.getProtocol());
+                // Use URI.getHost() (returns "::1" for bracketed IPv6) so comparison
+                // is symmetric with resetFrom(), which populates the UI from the same
+                // method. Using URL.getHost() here returned "[::1]" and falsely
+                // reported modified on every open for IPv6 configs.
+                java.net.URI uri = java.net.URI.create(managerUrl);
+                String savedHost = uri.getHost() != null ? uri.getHost() : "";
+                int savedPort = uri.getPort() > 0 ? uri.getPort() : TomcatConstants.DEFAULT_PORT_NUMBER;
+                boolean savedHttps = "https".equalsIgnoreCase(uri.getScheme());
                 if (useHttpsCheck.isSelected() != savedHttps) return true;
                 return !currentHost.equals(savedHost) || !currentPort.equals(String.valueOf(savedPort));
             } catch (Exception e) {
