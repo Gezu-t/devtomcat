@@ -36,6 +36,53 @@ class PortConflictDetectorTest {
             assertFalse(PortConflictDetector.isPortAvailable(0));
             assertFalse(PortConflictDetector.isPortAvailable(70000));
         }
+
+        @Test
+        @DisplayName("actively-bound port returns false (SO_REUSEADDR probe must still detect real conflicts)")
+        void activeListenerReportedUnavailable() throws IOException {
+            // Regression guard: the SO_REUSEADDR change to tryBind lets the
+            // probe ignore TIME_WAIT (just-released ports), but it must still
+            // report false when another process is actively bound. Without
+            // this guarantee the port-conflict detector would silently let
+            // Tomcat try to bind over a live service.
+            int port;
+            try (ServerSocket occupying = boundWithReuse(0)) {
+                port = occupying.getLocalPort();
+                assertFalse(PortConflictDetector.isPortAvailable(port),
+                        "probe must detect an actively-bound port as unavailable");
+            }
+            // After close, the port becomes available again — no TIME_WAIT
+            // because nothing ever accepted a connection on it.
+            assertTrue(PortConflictDetector.isPortAvailable(port),
+                    "probe must see a just-closed idle port as available");
+        }
+
+        @Test
+        @DisplayName("probe does not leak TIME_WAIT state between calls")
+        void probeIsSafeToCallRepeatedly() throws IOException {
+            // The probe binds briefly and closes without ever accepting a
+            // connection, so no TIME_WAIT is created. Back-to-back probes on
+            // the same free port must all return true. A regression here
+            // would mean the probe's own cycling creates false negatives.
+            int port;
+            try (ServerSocket reserved = boundWithReuse(0)) {
+                port = reserved.getLocalPort();
+            }
+            for (int i = 0; i < 5; i++) {
+                assertTrue(PortConflictDetector.isPortAvailable(port),
+                        "iteration " + i + ": probe must report free port as available");
+            }
+        }
+
+        private static ServerSocket boundWithReuse(int port) throws IOException {
+            // Matches PortConflictDetector.tryBind's binding style: set
+            // SO_REUSEADDR before bind so tests don't accidentally leave
+            // ports unreachable to subsequent runs.
+            ServerSocket s = new ServerSocket();
+            s.setReuseAddress(true);
+            s.bind(new java.net.InetSocketAddress(port));
+            return s;
+        }
     }
 
     @Nested

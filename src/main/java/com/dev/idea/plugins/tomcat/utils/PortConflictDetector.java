@@ -6,6 +6,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.util.*;
 
@@ -105,10 +106,31 @@ public final class PortConflictDetector {
         return true;
     }
 
+    /**
+     * Probes whether {@code port} is bindable on {@code address}.
+     *
+     * <p>The probe sets {@code SO_REUSEADDR} before binding. Without it, a port
+     * that Tomcat just released sits in the OS's {@code TIME_WAIT} state for
+     * 30–120 seconds — long enough that the user's next rerun would have
+     * treated it as occupied and bumped to the next port. Combined with the
+     * port writeback ({@code TomcatCommandLineState.writeBackResolvedPorts}),
+     * that bump became permanent and the configured HTTP port ratcheted upward
+     * every restart (8083 → 8084 → 8085 …) even when nothing else was actually
+     * listening.
+     *
+     * <p>With {@code SO_REUSEADDR} the probe succeeds over a {@code TIME_WAIT}
+     * socket (which Tomcat's own bind will also succeed through) but still
+     * fails if another process is <em>actively listening</em> — which is the
+     * real conflict we want to detect. Net effect: the probe stops reporting
+     * false positives on just-released ports while remaining strict about
+     * genuine contention.
+     */
     private static boolean tryBind(int port, String address) {
         try {
             InetAddress addr = address != null ? InetAddress.getByName(address) : null;
-            try (ServerSocket socket = new ServerSocket(port, 1, addr)) {
+            try (ServerSocket socket = new ServerSocket()) {
+                socket.setReuseAddress(true);
+                socket.bind(new InetSocketAddress(addr, port), 1);
                 return true;
             }
         } catch (IOException e) {
