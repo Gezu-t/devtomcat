@@ -131,4 +131,40 @@ public class ParallelRunBasePlatformTest extends BasePlatformTestCase {
         assertFalse(workPerRun.equals(workShared));
         assertFalse(confPerRun.equals(confShared));
     }
+
+    // =========================================================================
+    // isParallelRunEffective() — the single authoritative predicate
+    // =========================================================================
+
+    public void testParallelRunEffectiveOnlyWhenCheckboxOnAndBaseNotPinned() throws IOException {
+        TomcatRunConfiguration cfg = createConfig("Predicate");
+
+        // Default: checkbox off, no pin → not effective
+        assertFalse("checkbox off => not effective", cfg.isParallelRunEffective());
+
+        // Checkbox on, no pin → effective
+        cfg.setAllowMultipleInstances(true);
+        assertTrue("checkbox on + no pin => effective", cfg.isParallelRunEffective());
+
+        // Checkbox on, base pinned → NOT effective (isolation impossible)
+        Path pinned = Files.createTempDirectory("devtomcat-pred-pin-");
+        cfg.getConfigData().setCatalinaBase(pinned.toString());
+        assertFalse("checkbox on + pin => not effective", cfg.isParallelRunEffective());
+
+        // Checkbox on, base pinned to empty string → treat as no pin
+        cfg.getConfigData().setCatalinaBase("");
+        assertTrue("checkbox on + empty-string pin => effective",
+                cfg.isParallelRunEffective());
+
+        // Checkbox on, base pinned to whitespace → treat as no pin
+        cfg.getConfigData().setCatalinaBase("   ");
+        assertTrue("checkbox on + whitespace-only pin => effective",
+                cfg.isParallelRunEffective());
+
+        // Checkbox off, base pinned → not effective regardless of pin
+        cfg.getConfigData().setCatalinaBase(pinned.toString());
+        cfg.setAllowMultipleInstances(false);
+        assertFalse("checkbox off => not effective even if pinned",
+                cfg.isParallelRunEffective());
+    }
 }

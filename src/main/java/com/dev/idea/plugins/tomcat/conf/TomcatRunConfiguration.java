@@ -432,6 +432,31 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     public boolean isAllowMultipleInstances()              { return configData.isAllowMultipleInstances(); }
     public void setAllowMultipleInstances(boolean allow)   { configData.setAllowMultipleInstances(allow); }
 
+    /**
+     * Returns {@code true} when "Allow parallel run" is checked <em>and</em>
+     * per-run isolation is actually achievable — i.e. the user has not pinned
+     * an explicit {@code CATALINA_BASE}.
+     *
+     * <p>This is the authoritative predicate for every code path that decides
+     * whether to treat this configuration as "parallel". A naive check against
+     * {@link #isAllowMultipleInstances()} alone would skip the same-executor
+     * rerun intercept and spawn a second process against the pinned base —
+     * sharing {@code conf/}, {@code work/}, {@code webapps/}, and {@code logs/}
+     * between the two live instances. Port auto-bumping masks the symptom until
+     * the two processes collide on a file system resource.
+     *
+     * <p>Callers use this instead of {@link #isAllowMultipleInstances()} so the
+     * pinned-base guard is applied once, consistently, across the launch and
+     * rerun-interception paths.
+     */
+    public boolean isParallelRunEffective() {
+        if (!isAllowMultipleInstances()) {
+            return false;
+        }
+        String pinned = configData.getCatalinaBase();
+        return pinned == null || pinned.trim().isEmpty();
+    }
+
 
     // =====================================================================
     // Log file tabs for Run tool window

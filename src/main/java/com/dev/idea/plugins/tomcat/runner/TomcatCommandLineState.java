@@ -416,17 +416,20 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     /**
      * Resolves (and lazily assigns) the per-launch identifier used to isolate the
-     * CATALINA_BASE when the user enabled <em>Allow parallel run</em>. Returns
-     * {@code null} when parallel-run is disabled <em>or</em> when an explicit
-     * {@code CATALINA_BASE} is pinned — in either case the launch uses the shared
-     * base and historical single-instance behaviour is preserved.
+     * CATALINA_BASE. Returns {@code null} whenever parallel-run isolation is not
+     * <em>effective</em> — either the checkbox is off, or the user pinned an
+     * explicit CATALINA_BASE so isolation would be impossible anyway. See
+     * {@link TomcatRunConfiguration#isParallelRunEffective()} for the single
+     * authoritative predicate; this method and
+     * {@link TomcatRunnerDelegate#handleSameExecutorRerun} both consult it so
+     * the launch path and the rerun-intercept path agree on whether this
+     * configuration should behave as parallel.
      *
      * <p>The pinned-base guard is critical: {@link TomcatProjectUtils#getCatalinaBase}
      * deliberately returns the user's pinned directory regardless of {@code runId},
-     * so if we assigned a runId here the per-run cleanup in
-     * {@link TomcatProcessHandler} would walk and delete the pinned directory on
-     * process exit — data loss. When parallel mode is on and the base is pinned,
-     * parallel isolation is impossible, so we degrade gracefully and warn.
+     * so assigning a runId here would cause the per-run cleanup in
+     * {@link TomcatProcessHandler} to walk and delete the pinned directory on
+     * process exit — data loss.
      *
      * <p>The id is derived from {@link ExecutionEnvironment#getExecutionId()} —
      * unique per launch within the IDE session and stable across the lifetime of
@@ -435,19 +438,20 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     @Nullable
     private String resolveRunId() {
-        if (!configuration.isAllowMultipleInstances()) {
-            return null;
-        }
-        String pinned = configuration.getConfigData().getCatalinaBase();
-        if (StringUtil.isNotEmpty(pinned)) {
-            LOG.warn("Allow parallel run: CATALINA_BASE is pinned to '" + pinned
-                    + "' — per-run isolation disabled to prevent data loss on cleanup. "
-                    + "Parallel launches will share the pinned base.");
-            if (deploymentLogger != null) {
-                deploymentLogger.logServerWarning(
-                        "Allow parallel run is ignored because CATALINA_BASE is pinned — "
-                        + "parallel instances would collide on the shared directory. "
-                        + "Unset the pinned base to enable per-run isolation.");
+        if (!configuration.isParallelRunEffective()) {
+            if (configuration.isAllowMultipleInstances()) {
+                // Checkbox is on but isolation is impossible because of a pin.
+                // Warn once — the same rerun will keep landing in the Update dialog
+                // path instead of spawning parallel instances.
+                String pinned = configuration.getConfigData().getCatalinaBase();
+                LOG.warn("Allow parallel run: CATALINA_BASE is pinned to '" + pinned
+                        + "' — parallel isolation disabled, using single-instance semantics "
+                        + "(Update dialog on rerun) to prevent shared-directory collisions.");
+                if (deploymentLogger != null) {
+                    deploymentLogger.logServerWarning(
+                            "Allow parallel run is ignored because CATALINA_BASE is pinned — "
+                            + "unset the pinned base to enable per-run isolation.");
+                }
             }
             return null;
         }
