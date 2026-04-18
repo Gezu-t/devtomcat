@@ -119,30 +119,62 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
                 "canonical-id", cfg.getTomcatInfo().getId());
     }
 
-    public void testDanglingReferenceIsSelectedAndFlagged() {
-        // Registered list does not contain the persisted server at all.
+    public void testBrokenReferenceIsSelectedAndBlocksRun() {
+        // Persisted server is unresolved AND its path is missing from disk —
+        // the runtime can't launch, so the UI matches with a hard error.
         state.setTomcatInfos(List.of(server("other-id", "Other Server", "/opt/other")));
 
-        TomcatInfo danglingSnapshot = server("ghost-id", "Ghost Tomcat", "/missing/path");
-        TomcatRunConfiguration cfg = createConfig("Dangling");
-        cfg.setTomcatInfo(danglingSnapshot);
+        TomcatInfo brokenSnapshot = server("ghost-id", "Ghost Tomcat", "/missing/path");
+        TomcatRunConfiguration cfg = createConfig("Broken");
+        cfg.setTomcatInfo(brokenSnapshot);
 
         ApplicationServerSection section = createdSection();
         section.resetFrom(cfg);
 
         TomcatInfo selected = section.getSelectedTomcatServer();
-        assertNotNull("dangling snapshot must be injected and selected, not silently dropped",
+        assertNotNull("broken snapshot must be injected and selected, not silently dropped",
                 selected);
         assertEquals("ghost-id", selected.getId());
+        assertFalse("broken selection must block Run",
+                section.isConfigurationValid());
 
         List<ValidationInfo> errors = section.validateSettings();
-        assertEquals("dangling selection must block validation with exactly one error",
+        assertEquals("broken selection must block validation with exactly one error",
                 1, errors.size());
         String message = errors.get(0).message;
-        assertTrue("error must name the dangling server so the user knows what's missing"
-                        + " (was: " + message + ")",
+        assertTrue("error must name the broken server and the path problem (was: " + message + ")",
                 message.contains("Ghost Tomcat")
-                        && message.toLowerCase().contains("no longer registered"));
+                        && message.toLowerCase().contains("cannot be launched"));
+    }
+
+    public void testUnregisteredButUsablePathIsWarningNotBlocker() throws IOException {
+        // Regression guard for the UI/runtime split: the embedded TomcatInfo is a
+        // portability mechanism. When a teammate pulls a run config via VCS, the
+        // snapshot points at their local install even though they haven't added
+        // it to Application Servers yet. The runtime launches it (the path
+        // exists); the UI must NOT block with a hard error, or the toolbar and
+        // dialog would disagree again. The warning decoration on the combo is
+        // enough to nudge the user toward registration.
+        String usablePath = tempServerPath("usable");
+        state.setTomcatInfos(List.of(
+                server("other-id", "Other Server", tempServerPath("other"))));
+
+        TomcatInfo portable = server("foreign-id", "Imported Tomcat", usablePath);
+        TomcatRunConfiguration cfg = createConfig("UsableUnregistered");
+        cfg.setTomcatInfo(portable);
+
+        ApplicationServerSection section = createdSection();
+        section.resetFrom(cfg);
+
+        TomcatInfo selected = section.getSelectedTomcatServer();
+        assertNotNull("portable snapshot must be injected, not silently dropped",
+                selected);
+        assertEquals("foreign-id", selected.getId());
+        assertTrue("usable-but-unregistered must NOT block Run — the runtime will launch it",
+                section.isConfigurationValid());
+        assertTrue("validator must return no errors for usable-but-unregistered"
+                        + " (the warning lives in the renderer, not the validator)",
+                section.validateSettings().isEmpty());
     }
 
     public void testNullPersistedLeavesCombSelectionClearWithValidationError() {
@@ -160,22 +192,28 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
                 errors.get(0).message.toLowerCase().contains("no tomcat server"));
     }
 
-    public void testLoadConfigurationClearsDanglingSetAcrossReopens() throws IOException {
-        // After a dangling open, re-registering the server and reopening must
-        // drop the dangling marker — otherwise the live entry would render
-        // with a warning icon forever.
+    public void testReregisterCycleClearsUnresolvedMarkersAcrossReopens() throws IOException {
+        // First open: the server is unregistered but its path is usable — the
+        // section injects it as a warning-state item. After re-registering and
+        // reopening, the resolver must find the canonical instance and the
+        // injected marker must be gone (otherwise the live entry would render
+        // with a warning icon forever).
         String canonicalPath = tempServerPath("canon");
-        TomcatInfo danglingSnapshot = server("ghost-id", "Tomcat", canonicalPath);
+        TomcatInfo unregisteredSnapshot = server("ghost-id", "Tomcat", canonicalPath);
         state.setTomcatInfos(List.of(
                 server("other-id", "Other", tempServerPath("other"))));
 
         TomcatRunConfiguration cfg = createConfig("ReregisterCycle");
-        cfg.setTomcatInfo(danglingSnapshot);
+        cfg.setTomcatInfo(unregisteredSnapshot);
 
         ApplicationServerSection section = createdSection();
         section.resetFrom(cfg);
-        assertFalse("first open: dangling error present",
+        assertSame("first open: the injected snapshot is selected",
+                unregisteredSnapshot, section.getSelectedTomcatServer());
+        assertTrue("first open: usable path means no hard validator error",
                 section.validateSettings().isEmpty());
+        assertTrue("first open: isConfigurationValid must be true (warning only)",
+                section.isConfigurationValid());
 
         // User re-registers via the global settings.
         TomcatInfo registered = server("new-canonical-id", "Tomcat", canonicalPath);
@@ -187,7 +225,9 @@ public class ApplicationServerSectionPlatformTest extends BasePlatformTestCase {
 
         assertSame("after re-register + reopen, selection must be the canonical instance",
                 registered, section.getSelectedTomcatServer());
-        assertTrue("dangling marker must not leak across reloads",
+        assertTrue("after re-register: no validator error",
                 section.validateSettings().isEmpty());
+        assertTrue("after re-register: fully valid (no warning)",
+                section.isConfigurationValid());
     }
 }

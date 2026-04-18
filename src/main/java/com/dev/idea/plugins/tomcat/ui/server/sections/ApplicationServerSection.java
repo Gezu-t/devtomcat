@@ -20,6 +20,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -31,17 +32,24 @@ import java.util.Set;
  * Application Server section.
  *
  * <p>The run configuration persists an embedded {@link TomcatInfo} snapshot so it can
- * survive cross-machine transport. That snapshot can drift from the registered list
- * (IDs regenerate, paths change, XML gets hand-edited). This section goes through
- * {@link TomcatServerManagerState#resolve(TomcatInfo)} for every read so the combo,
- * validator, and downstream callers share a single interpretation:
+ * survive cross-machine transport (VCS imports). That snapshot can drift from the
+ * registered list (IDs regenerate, paths change, XML gets hand-edited). Every read
+ * goes through {@link TomcatServerManagerState#resolve(TomcatInfo)} so the combo,
+ * validator, and downstream callers share a single interpretation. Three UI states
+ * match the three runtime outcomes:
  * <ul>
- *   <li>Resolver hits a registered instance → the UI selects that live instance and
- *       {@link #applyTo} writes it back, upgrading any drifted ID.</li>
- *   <li>Resolver misses → the persisted snapshot is injected into the combo as a
- *       <b>dangling</b> item (warning-styled, blocked by the validator). The UI never
- *       silently misrepresents saved state; the user sees what's there and can either
- *       re-register via Configure or pick a different server.</li>
+ *   <li><b>Registered</b> — resolver hits a registered instance. The UI selects it
+ *       and {@link #applyTo} writes it back, upgrading any drifted ID.</li>
+ *   <li><b>Unregistered-but-usable</b> — resolver misses, yet the snapshot's path
+ *       exists on disk. This matches the runtime's policy in
+ *       {@link com.dev.idea.plugins.tomcat.runner.TomcatJavaParametersBuilder},
+ *       which accepts the embedded snapshot for portability. The UI shows a
+ *       <b>warning decoration</b> (icon + "(not registered)" suffix + tooltip) but
+ *       does <b>not</b> block Run — a validator error here would contradict the
+ *       toolbar's willingness to launch.</li>
+ *   <li><b>Broken</b> — resolver misses <i>and</i> the path is empty or missing
+ *       on disk. The runtime can't launch; the UI matches with a hard validator
+ *       error, red decoration, and an explicit message.</li>
  * </ul>
  */
 public class ApplicationServerSection implements ConfigurationSection {
@@ -53,12 +61,15 @@ public class ApplicationServerSection implements ConfigurationSection {
     private JPanel panel;
 
     /**
-     * Identity-keyed set of dangling items currently shown in the combo. Identity
-     * (not equals) because {@link TomcatInfo#equals} is ID-based and a dangling
-     * snapshot may share an ID with a registered entry that merely hasn't reloaded yet —
-     * we don't want a live item falsely flagged as dangling from a previous open.
+     * Identity-keyed sets of injected snapshots currently shown in the combo.
+     * Identity (not equals) because {@link TomcatInfo#equals} is ID-based — a
+     * snapshot may share an ID with a registered entry from an older reload
+     * and we don't want a live item falsely decorated. Membership is mutually
+     * exclusive: an item is either usable-but-unregistered, or broken.
      */
-    private final Set<TomcatInfo> danglingItems =
+    private final Set<TomcatInfo> unregisteredButUsable =
+            Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<TomcatInfo> brokenItems =
             Collections.newSetFromMap(new IdentityHashMap<>());
 
     public ApplicationServerSection(Project project) {
@@ -74,7 +85,7 @@ public class ApplicationServerSection implements ConfigurationSection {
 
             GridBagConstraints gbc = new GridBagConstraints();
             serverComboBox = new ComboBox<>();
-            serverComboBox.setRenderer(new TomcatInfoRenderer(danglingItems));
+            serverComboBox.setRenderer(new TomcatInfoRenderer(unregisteredButUsable, brokenItems));
             ConfigurationSection.addLabelAndField(panel, gbc, 0,
                     new JBLabel("Application server:"), serverComboBox);
 
@@ -87,7 +98,8 @@ public class ApplicationServerSection implements ConfigurationSection {
     @Override
     public void loadConfiguration() {
         serverComboBox.removeAllItems();
-        danglingItems.clear();
+        unregisteredButUsable.clear();
+        brokenItems.clear();
 
         TomcatServerManagerState serverManager = TomcatServerManagerState.getInstance();
         List<TomcatInfo> tomcatServers = serverManager.getTomcatInfos();
@@ -116,10 +128,11 @@ public class ApplicationServerSection implements ConfigurationSection {
             return;
         }
 
-        // Dangling: the persisted server is not in the registered list by any key.
-        // Inject the snapshot so the UI reflects what's saved; the validator will
-        // block Run/Apply until the user re-registers it or picks another server.
-        injectAsDangling(persisted);
+        // Unresolved. Classify by whether the runtime could actually launch it:
+        // the runtime accepts any snapshot whose path exists on disk (portable VCS
+        // imports), so a usable path means "warning" not "error". Only an empty or
+        // missing path is a hard block.
+        injectUnresolved(persisted);
     }
 
     @Override
@@ -127,18 +140,18 @@ public class ApplicationServerSection implements ConfigurationSection {
         TomcatInfo selected = getSelectedTomcatServer();
         if (selected == null) return;
 
-        // Whether the selection is live or dangling, write it back verbatim. A live
-        // selection with a drifted persisted ID gets automatically canonicalized here
-        // (because resetFrom selected the registered instance). A dangling selection
-        // is preserved so the user doesn't silently lose state — validateSettings()
-        // will have already blocked Apply in that case, but defense in depth.
+        // Whether the selection is live, usable-but-unregistered, or broken, write
+        // it back verbatim. A live selection with a drifted persisted ID gets
+        // canonicalized here (resetFrom already selected the registered instance).
+        // A broken selection is preserved so the user doesn't silently lose state —
+        // validateSettings() blocks Apply for broken, not for usable.
         configuration.setTomcatInfo(selected);
     }
 
     @Override
     public boolean isConfigurationValid() {
         TomcatInfo selected = getSelectedTomcatServer();
-        return selected != null && !danglingItems.contains(selected);
+        return selected != null && !brokenItems.contains(selected);
     }
 
     @Override
@@ -162,16 +175,22 @@ public class ApplicationServerSection implements ConfigurationSection {
             return errors;
         }
 
-        if (danglingItems.contains(selected)) {
+        if (brokenItems.contains(selected)) {
             String name = selected.getName();
             String path = selected.getPath();
             String displayName = !name.isEmpty() ? name : (!path.isEmpty() ? path : "(unnamed)");
+            String pathClause = path.isEmpty() ? "no path is set" : "path '" + path + "' does not exist";
             errors.add(new ValidationInfo(
-                    "Tomcat server '" + displayName + "' is no longer registered."
-                            + " Open Configure to add it, or select a different server.",
+                    "Tomcat server '" + displayName + "' cannot be launched — " + pathClause + "."
+                            + " Open Configure to register a server, or select a different one.",
                     serverComboBox));
             return errors;
         }
+
+        // Usable-but-unregistered is intentionally NOT returned as an error:
+        // the runtime will launch it, so blocking Run here would be a worse UX
+        // than the toolbar. The renderer surfaces the state via warning icon +
+        // tooltip so the user still knows to reconcile.
 
         try {
             selected.validate();
@@ -219,30 +238,50 @@ public class ApplicationServerSection implements ConfigurationSection {
             serverComboBox.setSelectedItem(resolved);
             return;
         }
-        // Previous server is no longer registered after the Configure edit.
-        // Surface it as dangling rather than silently picking another.
-        injectAsDangling(previous);
-    }
-
-    private void injectAsDangling(@NotNull TomcatInfo snapshot) {
-        serverComboBox.addItem(snapshot);
-        danglingItems.add(snapshot);
-        serverComboBox.setSelectedItem(snapshot);
-        LOG.warn("Persisted Tomcat server is not registered (id=" + snapshot.getId()
-                + ", name=" + snapshot.getName() + ", path=" + snapshot.getPath()
-                + "); shown as dangling");
+        injectUnresolved(previous);
     }
 
     /**
-     * List cell renderer that styles dangling items distinctly (warning icon,
-     * red foreground, parenthetical suffix, and a tooltip explaining the state).
-     * Live items render unchanged.
+     * Inject a snapshot the resolver couldn't match, classifying it by whether
+     * the runtime will accept it. Path-exists → usable (warning). Path-empty
+     * or path-missing → broken (error).
+     */
+    private void injectUnresolved(@NotNull TomcatInfo snapshot) {
+        serverComboBox.addItem(snapshot);
+        String path = snapshot.getPath();
+        boolean usable = !path.isEmpty() && new File(path).isDirectory();
+        if (usable) {
+            unregisteredButUsable.add(snapshot);
+            LOG.info("Persisted Tomcat server is not registered but path is usable"
+                    + " (id=" + snapshot.getId() + ", name=" + snapshot.getName()
+                    + ", path=" + path + "); showing warning");
+        } else {
+            brokenItems.add(snapshot);
+            LOG.warn("Persisted Tomcat server is not registered and path is not usable"
+                    + " (id=" + snapshot.getId() + ", name=" + snapshot.getName()
+                    + ", path=" + path + "); blocking Run");
+        }
+        serverComboBox.setSelectedItem(snapshot);
+    }
+
+    /**
+     * List cell renderer that styles unresolved items distinctly:
+     * <ul>
+     *   <li>Usable-but-unregistered → yellow-ish warning icon + "(not registered)"
+     *       suffix + tooltip suggesting re-registration. Text stays default color
+     *       so it doesn't read as an error.</li>
+     *   <li>Broken → red text + warning icon + "(not launchable)" suffix + tooltip
+     *       explaining the path problem.</li>
+     *   <li>Registered → unchanged default rendering.</li>
+     * </ul>
      */
     private static class TomcatInfoRenderer extends SimpleListCellRenderer<TomcatInfo> {
-        private final Set<TomcatInfo> dangling;
+        private final Set<TomcatInfo> usable;
+        private final Set<TomcatInfo> broken;
 
-        TomcatInfoRenderer(@NotNull Set<TomcatInfo> dangling) {
-            this.dangling = dangling;
+        TomcatInfoRenderer(@NotNull Set<TomcatInfo> usable, @NotNull Set<TomcatInfo> broken) {
+            this.usable = usable;
+            this.broken = broken;
         }
 
         @Override
@@ -262,15 +301,24 @@ public class ApplicationServerSection implements ConfigurationSection {
             } else {
                 label = name;
             }
-            boolean isDangling = dangling.contains(value);
-            if (isDangling) {
-                setText(label + "  (not registered)");
+
+            if (broken.contains(value)) {
+                setText(label + "  (not launchable)");
                 setIcon(AllIcons.General.Warning);
                 setForeground(JBColor.RED);
+                setToolTipText("<html>This server is saved in the run configuration but cannot be"
+                        + " launched — the path is empty or does not exist on disk.<br/>"
+                        + "Path: " + (value.getPath().isEmpty() ? "(empty)" : value.getPath()) + "<br/>"
+                        + "Open <b>Configure…</b> to register a server, or select a different one.</html>");
+            } else if (usable.contains(value)) {
+                setText(label + "  (not registered)");
+                setIcon(AllIcons.General.Warning);
+                setForeground(selected ? list.getSelectionForeground() : list.getForeground());
                 setToolTipText("<html>This server is saved in the run configuration but is not"
-                        + " registered in <b>Application Servers</b>.<br/>"
-                        + "Path: " + value.getPath() + "<br/>"
-                        + "Open <b>Configure…</b> to re-register it, or select a different server.</html>");
+                        + " registered in <b>Application Servers</b>. Run will still launch it"
+                        + " (the path exists on disk), but registering it is recommended so IDE"
+                        + " features that enumerate servers can see it.<br/>"
+                        + "Path: " + value.getPath() + "</html>");
             } else {
                 setText(label);
                 setIcon(null);
