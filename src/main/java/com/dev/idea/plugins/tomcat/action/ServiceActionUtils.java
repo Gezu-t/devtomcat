@@ -8,10 +8,7 @@ import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.dashboard.RunDashboardRunConfigurationNode;
 import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.runners.ExecutionEnvironment;
-import com.intellij.execution.runToolbar.RunToolbarData;
 import com.intellij.execution.ui.RunContentDescriptor;
-import com.intellij.execution.ui.RunContentManager;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
@@ -54,12 +51,6 @@ final class ServiceActionUtils {
             }
         }
 
-        // Tertiary: Run widget rows publish RunToolbarData instead of NAVIGATABLE
-        // or SELECTED_ITEMS. Required for Restart/Redeploy/Update to appear next
-        // to Run/Stop in the top-right Run widget dropdown.
-        TomcatRunConfiguration fromRunToolbar = extractFromRunToolbar(e);
-        if (fromRunToolbar != null) return fromRunToolbar;
-
         return null;
     }
 
@@ -81,10 +72,7 @@ final class ServiceActionUtils {
             }
         }
 
-        // Run widget context: neither NAVIGATABLE nor SELECTED_ITEMS is set —
-        // the widget publishes RunToolbarData which carries the active
-        // RunnerAndConfigurationSettings + ExecutionEnvironment for its slot.
-        return extractProcessHandlerFromRunToolbar(e);
+        return null;
     }
 
     /**
@@ -250,61 +238,5 @@ final class ServiceActionUtils {
         } catch (Exception ignored) {
             return null;
         }
-    }
-
-    /**
-     * Extract our Tomcat config from a Run-widget action event.
-     *
-     * <p>Actions contributed to {@code RunToolbarProcessActionGroup} / {@code
-     * RunToolbarProcessMainActionGroup} don't receive {@link CommonDataKeys#NAVIGATABLE}
-     * or {@link PlatformCoreDataKeys#SELECTED_ITEMS} — the run widget publishes
-     * its active slot state under {@link RunToolbarData#RUN_TOOLBAR_DATA_KEY}
-     * instead. That key carries the {@link RunnerAndConfigurationSettings} bound
-     * to the slot, which is the config the user clicked Restart against.
-     */
-    @Nullable
-    private static TomcatRunConfiguration extractFromRunToolbar(@NotNull AnActionEvent e) {
-        RunToolbarData runData = e.getData(RunToolbarData.RUN_TOOLBAR_DATA_KEY);
-        if (runData == null) return null;
-        RunnerAndConfigurationSettings settings = runData.getConfiguration();
-        if (settings == null) return null;
-        RunConfiguration rc = settings.getConfiguration();
-        return rc instanceof TomcatRunConfiguration tomcat ? tomcat : null;
-    }
-
-    /**
-     * Extract the {@link ProcessHandler} bound to the Run-widget slot's active
-     * {@link ExecutionEnvironment}. Preferred over {@link RunContentManager}
-     * enumeration because it identifies <em>this</em> slot's handler rather than
-     * picking "any matching running Tomcat", which breaks when the user runs
-     * the same config twice with Allow parallel run.
-     */
-    @Nullable
-    private static ProcessHandler extractProcessHandlerFromRunToolbar(@NotNull AnActionEvent e) {
-        RunToolbarData runData = e.getData(RunToolbarData.RUN_TOOLBAR_DATA_KEY);
-        if (runData == null) return null;
-        ExecutionEnvironment env = runData.getEnvironment();
-        if (env == null) return null;
-        RunContentDescriptor descriptor = env.getContentToReuse();
-        if (descriptor != null) {
-            ProcessHandler handler = descriptor.getProcessHandler();
-            if (handler != null) return handler;
-        }
-        // Fall back to the RunContentManager lookup keyed by the slot's config —
-        // needed when getContentToReuse() hasn't been wired (happens on the
-        // very first launch after the slot is seeded).
-        Project project = e.getProject();
-        RunnerAndConfigurationSettings settings = runData.getConfiguration();
-        if (project == null || settings == null) return null;
-        for (RunContentDescriptor d : RunContentManager.getInstance(project).getAllDescriptors()) {
-            ProcessHandler handler = d.getProcessHandler();
-            if (handler == null || handler.isProcessTerminated()) continue;
-            if (handler instanceof TomcatProcessHandler th
-                    && th.getConfiguration() != null
-                    && th.getConfiguration().equals(settings.getConfiguration())) {
-                return handler;
-            }
-        }
-        return null;
     }
 }
