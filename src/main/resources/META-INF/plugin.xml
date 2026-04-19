@@ -315,6 +315,23 @@
             <add-to-group group-id="ServiceViewItemToolbar" anchor="last"/>
         </group>
 
+        <!-- Run widget (top-right run toolbar): contribute Restart so the main
+             widget icon swaps to the circular-arrow Restart glyph when a Tomcat
+             process is running, matching IntelliJ Ultimate's bundled Tomcat
+             integration. RunToolbarProcessMainActionGroup feeds the main
+             toolbar slot; RunToolbarProcessActionGroup feeds the per-config
+             rows in the dropdown. Both are platform-provided extension points
+             under PlatformExecutionActions.xml, sitting between Rerun and Stop
+             in the action sequence. The action's own update() gates visibility
+             via applyStartupGate() so the icon appears only when a Tomcat
+             handler is attached AND not in mid-start/stop transitions. -->
+        <reference ref="DevTomcat.Service.Restart">
+            <add-to-group group-id="RunToolbarProcessMainActionGroup" anchor="first"/>
+        </reference>
+        <reference ref="DevTomcat.Service.Restart">
+            <add-to-group group-id="RunToolbarProcessActionGroup" anchor="first"/>
+        </reference>
+
         <!-- Tools menu group -->
         <group id="DevTomcat.ToolsMenu" text="DevTomcat" popup="true"
                icon="AllIcons.Nodes.Deploy">
