@@ -65,8 +65,8 @@ intellijPlatform {
             // gradle.properties as platformVersion) plus one newer stable so
             // until-build compatibility is still covered. If you're running in
             // CI with plenty of disk, swap this for `recommended()`.
-            ide(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
-            ide(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1.7")
+            create(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1.7")
         }
     }
 
@@ -88,6 +88,10 @@ tasks {
     }
 
     buildSearchableOptions {
+        enabled = false
+    }
+
+    jarSearchableOptions {
         enabled = false
     }
 

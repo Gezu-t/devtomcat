@@ -1,7 +1,9 @@
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
+import com.intellij.configurationStore.XmlSerializer;
 import com.intellij.execution.configurations.LogFileOptions;
+import com.intellij.execution.configurations.coverage.CoverageEnabledConfiguration;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import org.jdom.Element;
 
@@ -215,6 +217,53 @@ public class TomcatConfigurationClonerPlatformTest extends BasePlatformTestCase 
         assertFalse(clone.isShowConsoleOnStdErr());
         assertTrue(clone.isSaveOutputToFile());
         assertEquals(myFixture.getTempDirFixture().getTempDirPath() + "/console.log", clone.getOutputFilePath());
+    }
+
+    public void testBuildArtifactsTaskPersistentStateRoundTripPreservesEnabledAndArtifacts() {
+        TomcatBuildArtifactsTask original = new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
+        original.setEnabled(false);
+        original.setArtifactNames(List.of("app.war", "admin.war"));
+
+        Element element = new Element("option");
+        XmlSerializer.serializeStateInto(original, element);
+
+        TomcatBuildArtifactsTask restored = new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
+        XmlSerializer.deserializeAndLoadState(restored, element);
+
+        assertFalse("disabled state must survive serializer round-trip", restored.isEnabled());
+        assertEquals(List.of("app.war", "admin.war"), restored.getArtifactNames());
+    }
+
+    public void testWriteReadRoundTripPreservesPlatformCoverageState() throws Exception {
+        TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+        TomcatRunConfiguration original = new TomcatRunConfiguration(
+                getProject(),
+                type.getConfigurationFactories()[0],
+                "Tomcat"
+        );
+
+        CoverageEnabledConfiguration originalCoverage = CoverageEnabledConfiguration.getOrCreate(original);
+        Element coverageState = new Element("coverage");
+        coverageState.setAttribute("enabled", "true");
+        coverageState.setAttribute("track_test_folders", "true");
+        originalCoverage.readExternal(coverageState);
+
+        Element element = new Element("configuration");
+        original.writeExternal(element);
+
+        TomcatRunConfiguration restored = new TomcatRunConfiguration(
+                getProject(),
+                type.getConfigurationFactories()[0],
+                "Tomcat"
+        );
+        restored.readExternal(element);
+
+        CoverageEnabledConfiguration restoredCoverage = CoverageEnabledConfiguration.getOrCreate(restored);
+        Element restoredCoverageState = new Element("coverage");
+        restoredCoverage.writeExternal(restoredCoverageState);
+
+        assertEquals("true", restoredCoverageState.getAttributeValue("enabled"));
+        assertEquals("true", restoredCoverageState.getAttributeValue("track_test_folders"));
     }
 
     private static LogFileOptions findLogFile(TomcatRunConfiguration configuration, String name) {

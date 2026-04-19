@@ -72,11 +72,6 @@ public final class CoverageAgentAttacher {
 
             syncPatterns(jcec, config.getConfigData().getCoverageConfig());
 
-            // The platform reads this flag in multiple places (tool window
-            // activation, suite chooser, persistence); keeping it explicit
-            // avoids depending on whether getOrCreate() flipped it for us.
-            jcec.setCoverageEnabled(true);
-
             // Suite bookkeeping via the platform helper — see class javadoc
             // for why we do NOT manually call addCoverageSuite /
             // setCurrentCoverageSuite here. The helper nulls the current
