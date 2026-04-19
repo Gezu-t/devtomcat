@@ -166,9 +166,25 @@ final class ServiceActionUtils {
         return extractViaReflection(obj);
     }
 
+    /**
+     * Hard cap on the unwrap recursion. IntelliJ wrappers rarely nest deeper
+     * than 2–3 levels in practice; 8 is generous headroom and cheap insurance
+     * against a pathological wrapper whose {@code getValue()} (or one of the
+     * other probe methods) returns itself or forms a short cycle. Without this
+     * guard such a wrapper would stack-overflow the EDT — low likelihood, high
+     * blast radius, so we cap unconditionally rather than trust every wrapper
+     * on the Services bus to be well-behaved.
+     */
+    private static final int MAX_UNWRAP_DEPTH = 8;
+
     @Nullable
     private static ProcessHandler extractProcessHandler(@Nullable Object obj) {
-        if (obj == null) return null;
+        return extractProcessHandler(obj, 0);
+    }
+
+    @Nullable
+    private static ProcessHandler extractProcessHandler(@Nullable Object obj, int depth) {
+        if (obj == null || depth >= MAX_UNWRAP_DEPTH) return null;
 
         if (obj instanceof ProcessHandler handler) {
             return handler;
@@ -183,11 +199,11 @@ final class ServiceActionUtils {
             if (desc != null) return desc.getProcessHandler();
         }
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
-            return extractProcessHandler(mutable.getUserObject());
+            return extractProcessHandler(mutable.getUserObject(), depth + 1);
         }
         for (String methodName : new String[]{"getDescriptor", "getNode", "getValue", "getData"}) {
             Object result = tryInvokeMethod(obj, methodName);
-            ProcessHandler handler = extractProcessHandler(result);
+            ProcessHandler handler = extractProcessHandler(result, depth + 1);
             if (handler != null) return handler;
         }
         return null;

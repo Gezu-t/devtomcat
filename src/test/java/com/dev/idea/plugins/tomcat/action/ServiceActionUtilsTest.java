@@ -181,6 +181,39 @@ class ServiceActionUtilsTest {
 
             assertSame(handler, ServiceActionUtils.findTomcatProcessHandler(event));
         }
+
+        @Test
+        @DisplayName("self-referencing wrapper does not stack-overflow")
+        void selfReferencingWrapperDoesNotLoop() {
+            // Pathological wrapper: getValue() returns itself. Without the
+            // MAX_UNWRAP_DEPTH guard this recurses forever and SOEs the EDT.
+            // The guard must make extractProcessHandler bail cleanly with null.
+            AnActionEvent event = mock(AnActionEvent.class);
+            when(event.getData(CommonDataKeys.NAVIGATABLE)).thenReturn(null);
+            when(event.getData(PlatformCoreDataKeys.SELECTED_ITEMS))
+                    .thenReturn(new Object[]{new SelfReferencingWrapper()});
+
+            // Completes and returns null — the important thing is no StackOverflowError.
+            assertNull(ServiceActionUtils.findTomcatProcessHandler(event));
+        }
+
+        @Test
+        @DisplayName("two-node wrapper cycle does not stack-overflow")
+        void cycleBetweenTwoWrappersDoesNotLoop() {
+            // A getValue() B, B getValue() A — also unbounded without the guard.
+            // Most realistic cycle shape after a single-node self-ref.
+            CycleWrapper a = new CycleWrapper();
+            CycleWrapper b = new CycleWrapper();
+            a.peer = b;
+            b.peer = a;
+
+            AnActionEvent event = mock(AnActionEvent.class);
+            when(event.getData(CommonDataKeys.NAVIGATABLE)).thenReturn(null);
+            when(event.getData(PlatformCoreDataKeys.SELECTED_ITEMS))
+                    .thenReturn(new Object[]{a});
+
+            assertNull(ServiceActionUtils.findTomcatProcessHandler(event));
+        }
     }
 
     /**
@@ -268,6 +301,25 @@ class ServiceActionUtilsTest {
 
         public RunContentDescriptor getDescriptor() {
             return descriptor;
+        }
+    }
+
+    /** Wrapper whose {@code getValue()} returns itself — exercises the depth cap. */
+    private static final class SelfReferencingWrapper {
+        public Object getValue() {
+            return this;
+        }
+    }
+
+    /**
+     * Wrapper pair {@code a.getValue() == b}, {@code b.getValue() == a} — the
+     * shortest possible wrapper cycle after a single-node self-ref.
+     */
+    private static final class CycleWrapper {
+        CycleWrapper peer;
+
+        public Object getValue() {
+            return peer;
         }
     }
 }
