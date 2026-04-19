@@ -752,17 +752,18 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // leading '-' in the directory name on pathological IDs.
         current = "run-" + Long.toUnsignedString(id, 36);
         runId = current;
-        // Known limitation: IntelliJ's LogFileOptions are attached to the run
-        // configuration, not the process, so all parallel launches of this
-        // config share one set of Log tabs pointing at the shared per-config
-        // logs directory. The actual per-instance logs are written under the
-        // isolated CATALINA_BASE; tell the user where to find them.
+        // LogFileOptions live on the run configuration (shared across parallel
+        // launches), but alignLogFilePathsWithRuntimeBase() is called right
+        // before process start to repoint them at this launch's isolated
+        // .runs/<runId>/logs/ directory. IntelliJ's RunContentBuilder reads
+        // those updated paths and creates tabs pointing at the correct files.
+        // Two perfectly-simultaneous parallel launches race on the shared list
+        // (later writer wins labelling), but this is cosmetic — logs are
+        // always written to the correct per-run directory regardless.
         if (deploymentLogger != null) {
             deploymentLogger.logServerInfo(
                     "Parallel run active — isolated CATALINA_BASE under .runs/" + current
-                    + "/. Log tabs continue to reflect the shared per-config logs/ "
-                    + "directory; per-instance logs for this launch live under the "
-                    + "isolated base's logs/ subfolder (shown in the server output on startup).");
+                    + "/. Log tabs for this launch point at the isolated base's logs/ subfolder.");
         }
         return current;
     }
@@ -770,6 +771,57 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     @Nullable
     String getRunId() {
         return runId;
+    }
+
+    /**
+     * Realigns plugin-managed {@code LogFileOptions} paths on the run configuration
+     * so they point at the catalina.base this launch actually uses — per-run
+     * ({@code <config>/.runs/<runId>/logs/}) for parallel mode, config-level
+     * ({@code <config>/logs/}) for single-instance. Runs after the base has been
+     * prepared on disk (via {@link TomcatConfigPreparer}) and before
+     * {@link Process#createProcess()} so IntelliJ's {@code RunContentBuilder}
+     * reads the correct paths when it builds the Log tabs.
+     *
+     * <p>{@link TomcatRunConfiguration#getAllLogFiles()} already has a refresh pass
+     * that aligns paths to the config-level logs directory, but that's the wrong
+     * target in parallel mode — tabs end up pointing at a directory Tomcat never
+     * writes to, so the "Logs" tab silently disappears from Services. This method
+     * is the per-launch override that substitutes the correct runtime directory.
+     *
+     * <p>User-customised paths (anything outside the devtomcat system tree for
+     * this configuration) are preserved verbatim. Only entries whose stored path
+     * matches the plugin-managed shape get rewritten.
+     */
+    private void alignLogFilePathsWithRuntimeBase() {
+        java.nio.file.Path runtimeLogsDir =
+                com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils.getLogsDirectory(configuration, runId);
+        if (runtimeLogsDir == null) return;
+
+        java.nio.file.Path configRoot =
+                com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils.getCatalinaBase(configuration, null);
+        if (configRoot == null) return;
+        String configRootPrefix = configRoot.toString() + java.io.File.separator;
+
+        java.util.Map<String, com.dev.idea.plugins.tomcat.model.TomcatLogFile> byId = new java.util.HashMap<>();
+        for (com.dev.idea.plugins.tomcat.model.TomcatLogFile lf :
+                com.dev.idea.plugins.tomcat.model.TomcatLogFile.getStandardLogFiles()) {
+            byId.put(lf.getId(), lf);
+        }
+
+        for (com.intellij.execution.configurations.LogFileOptions opt : configuration.getAllLogFiles()) {
+            com.dev.idea.plugins.tomcat.model.TomcatLogFile lf = byId.get(opt.getName());
+            if (lf == null) continue; // unknown or user-added entry
+            String path = opt.getPathPattern();
+            if (path == null || !path.startsWith(configRootPrefix)) {
+                // Outside the plugin's managed tree — treat as user customisation.
+                continue;
+            }
+            String aligned = lf.resolveFullPath(runtimeLogsDir);
+            if (!aligned.equals(path)) {
+                opt.setPathPattern(aligned);
+                LOG.debug("Aligned log path for '" + opt.getName() + "': " + path + " -> " + aligned);
+            }
+        }
     }
 
     private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
@@ -837,6 +889,15 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // Re-sync log files after catalina.base is prepared (log files now exist on disk)
         // so RunContentBuilder creates tabs for them
         configuration.syncTomcatLogFiles();
+
+        // Realign plugin-managed LogFileOptions paths with the ACTUAL catalina.base
+        // this launch will use. Without this, parallel runs (whose base is
+        // <config>/.runs/<runId>/) have their log tabs pointing at the shared
+        // <config>/logs/ directory that never gets written to, so "Logs" never
+        // shows up in the Services panel. Single-instance mode also benefits
+        // because a stale .runs/<id>/ path left over from a prior parallel run
+        // gets realigned back to the config-level logs dir.
+        alignLogFilePathsWithRuntimeBase();
 
         Process process = commandLine.createProcess();
 
