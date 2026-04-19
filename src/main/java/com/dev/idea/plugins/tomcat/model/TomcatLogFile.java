@@ -112,7 +112,10 @@ public class TomcatLogFile {
 
         try {
             String path = resolveFullPath(logsDirPath);
-            LogFileOptions opts = new LogFileOptions(id, path, enabledByDefault);
+            // skipContent=true, showAll=false — Tomcat logs append across launches,
+            // so each new tab should start from the tail (new content only) rather
+            // than reloading accumulated history from prior runs.
+            LogFileOptions opts = new LogFileOptions(id, path, enabledByDefault, true, false);
             LOG.debug("Created LogFileOptions: id=" + id + ", path=" + path);
             return opts;
         } catch (Exception e) {
@@ -129,7 +132,7 @@ public class TomcatLogFile {
 
         try {
             String path = resolveFullPath(logsDirPath);
-            LogFileOptions opts = new LogFileOptions(file.getId(), path, file.isEnabled());
+            LogFileOptions opts = new LogFileOptions(file.getId(), path, file.isEnabled(), true, false);
             LOG.debug("Created LogFileOptions from PredefinedLogFile: id=" + file.getId());
             return opts;
         } catch (Exception e) {

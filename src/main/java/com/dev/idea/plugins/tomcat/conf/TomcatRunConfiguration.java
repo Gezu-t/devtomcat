@@ -594,6 +594,16 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             String path = logFile.resolveFullPath(logsDir);
             addLogFile(path, logFile.getId(), logFile.isEnabledByDefault());
         }
+        // Skip Content is FALSE on the 3-arg LogFileOptions constructor that
+        // addLogFile() uses, meaning every Log tab would reload the full history
+        // of the file on each launch — noisy for Tomcat logs that accumulate
+        // across runs. Flip it on for our standard entries so each launch's tab
+        // starts fresh from the tail. Users can still un-check Skip Content in
+        // the Logs editor if they want historical content for a specific file;
+        // this only sets the initial seed default.
+        for (LogFileOptions opt : super.getAllLogFiles()) {
+            opt.setSkipContent(true);
+        }
         logsSeeded = true;
     }
 

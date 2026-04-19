@@ -62,11 +62,15 @@ intellijPlatform {
             // recommended() pulls seven IDE builds (~35GB of DMG downloads) which
             // exceeds available disk on developer laptops. Verify against a
             // tighter, meaningful set: our exact build target (pinned in
-            // gradle.properties as platformVersion) plus one newer stable so
-            // until-build compatibility is still covered. If you're running in
-            // CI with plenty of disk, swap this for `recommended()`.
+            // gradle.properties as platformVersion), one newer stable, plus the
+            // upper bound of our pluginUntilBuild claim so we catch API drift
+            // before the Marketplace does. If you're running in CI with plenty
+            // of disk, swap this for `recommended()`.
             create(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
             create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1.7")
+            // IntelliJ IDEA Community was merged into the unified IDEA product at
+            // 2025.3 (build 253), so the upper-bound target uses the unified type.
+            create(IntelliJPlatformType.IntellijIdea, "2026.1")
         }
     }
 
