@@ -24,6 +24,7 @@ import com.intellij.execution.impl.ConfigurationSettingsEditorWrapper;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
@@ -1036,7 +1037,13 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             deploymentTab.dispose();
         }
         deploymentTab = null;
-        logsPanel = null;
+        if (logsPanel != null) {
+            // LogConfigurationPanel's no-parent SettingsEditor constructor registers itself
+            // with ROOT_DISPOSABLE. We own its lifecycle, so dispose it explicitly here —
+            // nulling the field alone leaks the Disposer registration until app shutdown.
+            Disposer.dispose(logsPanel);
+            logsPanel = null;
+        }
         startupConnectionTab = null;
         codeCoverageTab = null;
         deploymentTableManager = null;
