@@ -1,7 +1,8 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.intellij.coverage.CoverageHelper;
+import com.dev.idea.plugins.tomcat.coverage.CoverageAgentAttacher;
+import com.intellij.coverage.CoverageDataManager;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.configurations.RunProfileState;
@@ -27,7 +28,7 @@ import org.jetbrains.annotations.NotNull;
  *       synchronises DevTomcat's include/exclude patterns into
  *       {@code JavaCoverageEnabledConfiguration} and appends the coverage
  *       {@code -javaagent} argument during JVM parameter construction.</li>
- *   <li>{@link CoverageHelper#attachToProcess} below, which registers the
+ *   <li>{@link CoverageDataManager#attachToProcess} below, which registers the
  *       post-run report loader so the IDE picks up the {@code .ec} output
  *       when Tomcat exits.</li>
  * </ol>
@@ -72,11 +73,16 @@ public class TomcatCoverageRunner extends DefaultJavaProgramRunner {
         if (descriptor != null) {
             ProcessHandler handler = descriptor.getProcessHandler();
             if (handler != null) {
-                // Registers the suite with CoverageDataManager so the IDE
-                // loads the .ec output and annotates the editor once Tomcat
-                // exits. Without this, the agent would write the file but
-                // IntelliJ would never consume it.
-                CoverageHelper.attachToProcess(config, handler, env.getRunnerSettings());
+                // The pre-launch agent path already selected the current suite.
+                // Attach the process listener directly so we don't reset the
+                // suite again on the EDT and lose identity/file-path alignment.
+                if (CoverageAgentAttacher.ensureCoverageSuite(config) != null) {
+                    CoverageDataManager.getInstance(config.getProject())
+                            .attachToProcess(handler, config, env.getRunnerSettings());
+                } else {
+                    LOG.warn("Coverage suite missing after launch for '" + config.getName()
+                            + "' — coverage results may not be collected");
+                }
             }
             LOG.info("Tomcat coverage session started: " + config.getName());
         }
