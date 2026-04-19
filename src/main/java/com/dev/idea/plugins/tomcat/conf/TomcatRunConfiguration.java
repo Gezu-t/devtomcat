@@ -637,21 +637,25 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     /**
-     * Tests whether a stored log path still conforms to the plugin-managed
-     * shape for a given {@link TomcatLogFile} — {@code logsDir/<filenamePattern>}
-     * with the {@code *} wildcard expanded to any non-empty substring. User
-     * customisations (different directory, renamed file, hand-typed literal)
-     * fall outside the pattern and are preserved verbatim.
+     * Tests whether a stored log path conforms to the plugin-managed filename
+     * shape for a given {@link TomcatLogFile}. Matches on the <b>filename</b>
+     * only (e.g. {@code catalina.*.log}) rather than {@code logsDir + filename}
+     * so that a path persisted with a different IDE instance's system dir —
+     * a sandbox path surviving into a real-IDE install or vice versa — is
+     * still recognised as ours and realigned on the next launch. User
+     * customisations that rename the file fall outside the filename pattern
+     * and are preserved verbatim.
+     *
+     * <p>The {@code logsDir} parameter is retained for API stability but no
+     * longer participates in the decision. Callers may pass any value.
      */
     private static boolean isPluginManagedPath(@Nullable String currentPath,
                                                @NotNull Path logsDir,
                                                @NotNull TomcatLogFile logFile) {
         if (currentPath == null || currentPath.isEmpty()) return true;
 
-        String expectedPrefix = logsDir.toString() + java.io.File.separator;
-        if (!currentPath.startsWith(expectedPrefix)) return false;
-
-        String filename = currentPath.substring(expectedPrefix.length());
+        int lastSep = currentPath.lastIndexOf(java.io.File.separator);
+        String filename = lastSep < 0 ? currentPath : currentPath.substring(lastSep + 1);
         String pattern = logFile.getFilenamePattern();
         int wildcardIdx = pattern.indexOf('*');
         if (wildcardIdx < 0) {

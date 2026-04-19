@@ -797,11 +797,6 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils.getLogsDirectory(configuration, runId);
         if (runtimeLogsDir == null) return;
 
-        java.nio.file.Path configRoot =
-                com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils.getCatalinaBase(configuration, null);
-        if (configRoot == null) return;
-        String configRootPrefix = configRoot.toString() + java.io.File.separator;
-
         java.util.Map<String, com.dev.idea.plugins.tomcat.model.TomcatLogFile> byId = new java.util.HashMap<>();
         for (com.dev.idea.plugins.tomcat.model.TomcatLogFile lf :
                 com.dev.idea.plugins.tomcat.model.TomcatLogFile.getStandardLogFiles()) {
@@ -811,17 +806,45 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         for (com.intellij.execution.configurations.LogFileOptions opt : configuration.getAllLogFiles()) {
             com.dev.idea.plugins.tomcat.model.TomcatLogFile lf = byId.get(opt.getName());
             if (lf == null) continue; // unknown or user-added entry
-            String path = opt.getPathPattern();
-            if (path == null || !path.startsWith(configRootPrefix)) {
-                // Outside the plugin's managed tree — treat as user customisation.
+            String currentPath = opt.getPathPattern();
+            // Detect our own standard entry by filename pattern rather than by
+            // directory prefix. The old prefix test was wrong: a LogFileOptions
+            // that was persisted with a different IDE instance's system path
+            // (sandbox vs real IDE) would slip past the prefix check and keep
+            // pointing at a non-existent file forever — breaking Log tabs for
+            // any config that moved between sandbox and production installs.
+            if (!matchesStandardFilename(currentPath, lf)) {
                 continue;
             }
             String aligned = lf.resolveFullPath(runtimeLogsDir);
-            if (!aligned.equals(path)) {
+            if (!aligned.equals(currentPath)) {
                 opt.setPathPattern(aligned);
-                LOG.debug("Aligned log path for '" + opt.getName() + "': " + path + " -> " + aligned);
+                LOG.debug("Aligned log path for '" + opt.getName()
+                        + "': " + currentPath + " -> " + aligned);
             }
         }
+    }
+
+    /**
+     * Filename-pattern test that identifies a {@link com.intellij.execution.configurations.LogFileOptions}
+     * entry as one of our standard Tomcat logs regardless of which directory it
+     * currently points at. This replaces the old directory-prefix test, which
+     * failed when the persisted path referenced a different IDE's system dir
+     * (sandbox path surviving into a real-IDE install, or vice versa).
+     */
+    private static boolean matchesStandardFilename(String currentPath,
+                                                   com.dev.idea.plugins.tomcat.model.TomcatLogFile lf) {
+        if (currentPath == null || currentPath.isEmpty()) return true;
+        int lastSep = currentPath.lastIndexOf(java.io.File.separator);
+        String filename = lastSep < 0 ? currentPath : currentPath.substring(lastSep + 1);
+        String pattern = lf.getFilenamePattern();
+        int wildcardIdx = pattern.indexOf('*');
+        if (wildcardIdx < 0) return filename.equals(pattern);
+        String prefix = pattern.substring(0, wildcardIdx);
+        String suffix = pattern.substring(wildcardIdx + 1);
+        return filename.length() >= prefix.length() + suffix.length()
+                && filename.startsWith(prefix)
+                && filename.endsWith(suffix);
     }
 
     private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
