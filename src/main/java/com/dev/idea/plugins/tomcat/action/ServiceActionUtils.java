@@ -61,15 +61,13 @@ final class ServiceActionUtils {
     @Nullable
     static ProcessHandler findProcessHandler(@NotNull AnActionEvent e) {
         Navigatable navigatable = e.getData(CommonDataKeys.NAVIGATABLE);
-        if (navigatable instanceof RunDashboardRunConfigurationNode node) {
-            RunContentDescriptor descriptor = node.getDescriptor();
-            if (descriptor != null) return descriptor.getProcessHandler();
-        }
+        ProcessHandler handler = extractProcessHandler(navigatable);
+        if (handler != null) return handler;
 
         Object[] items = e.getData(PlatformCoreDataKeys.SELECTED_ITEMS);
         if (items != null) {
             for (Object item : items) {
-                ProcessHandler handler = extractProcessHandler(item);
+                handler = extractProcessHandler(item);
                 if (handler != null) return handler;
             }
         }
@@ -170,6 +168,16 @@ final class ServiceActionUtils {
 
     @Nullable
     private static ProcessHandler extractProcessHandler(@Nullable Object obj) {
+        if (obj == null) return null;
+
+        if (obj instanceof ProcessHandler handler) {
+            return handler;
+        }
+
+        if (obj instanceof RunContentDescriptor desc) {
+            return desc.getProcessHandler();
+        }
+
         if (obj instanceof RunDashboardRunConfigurationNode node) {
             RunContentDescriptor desc = node.getDescriptor();
             if (desc != null) return desc.getProcessHandler();
@@ -177,15 +185,10 @@ final class ServiceActionUtils {
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
             return extractProcessHandler(mutable.getUserObject());
         }
-        for (String methodName : new String[]{"getDescriptor", "getNode"}) {
+        for (String methodName : new String[]{"getDescriptor", "getNode", "getValue", "getData"}) {
             Object result = tryInvokeMethod(obj, methodName);
-            if (result instanceof RunContentDescriptor desc) {
-                return desc.getProcessHandler();
-            }
-            if (result instanceof RunDashboardRunConfigurationNode node) {
-                RunContentDescriptor desc = node.getDescriptor();
-                if (desc != null) return desc.getProcessHandler();
-            }
+            ProcessHandler handler = extractProcessHandler(result);
+            if (handler != null) return handler;
         }
         return null;
     }

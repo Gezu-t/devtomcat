@@ -2,7 +2,12 @@ package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
+import com.intellij.execution.ui.RunContentDescriptor;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.execution.process.ProcessHandler;
+import com.intellij.pom.Navigatable;
 import com.intellij.openapi.actionSystem.Presentation;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -143,6 +148,41 @@ class ServiceActionUtilsTest {
         }
     }
 
+    @Nested
+    @DisplayName("findTomcatProcessHandler")
+    class FindTomcatProcessHandlerTests {
+
+        @Test
+        @DisplayName("resolves wrapped navigatable values from Services selection")
+        void resolvesWrappedNavigatableValues() {
+            TomcatProcessHandler handler = mock(TomcatProcessHandler.class);
+            RunContentDescriptor descriptor = mock(RunContentDescriptor.class);
+            when(descriptor.getProcessHandler()).thenReturn(handler);
+
+            AnActionEvent event = mock(AnActionEvent.class);
+            when(event.getData(CommonDataKeys.NAVIGATABLE))
+                    .thenReturn(new ValueNavigatable(new DescriptorWrapper(descriptor)));
+            when(event.getData(PlatformCoreDataKeys.SELECTED_ITEMS)).thenReturn(null);
+
+            assertSame(handler, ServiceActionUtils.findTomcatProcessHandler(event));
+        }
+
+        @Test
+        @DisplayName("resolves wrapped selected items when navigatable is absent")
+        void resolvesWrappedSelectedItems() {
+            TomcatProcessHandler handler = mock(TomcatProcessHandler.class);
+            RunContentDescriptor descriptor = mock(RunContentDescriptor.class);
+            when(descriptor.getProcessHandler()).thenReturn(handler);
+
+            AnActionEvent event = mock(AnActionEvent.class);
+            when(event.getData(CommonDataKeys.NAVIGATABLE)).thenReturn(null);
+            when(event.getData(PlatformCoreDataKeys.SELECTED_ITEMS))
+                    .thenReturn(new Object[]{new ValueWrapper(descriptor)});
+
+            assertSame(handler, ServiceActionUtils.findTomcatProcessHandler(event));
+        }
+    }
+
     /**
      * Minimal ProcessHandler stub for testing isRunning() logic.
      */
@@ -179,6 +219,55 @@ class ServiceActionUtilsTest {
         @Override
         public OutputStream getProcessInput() {
             return null;
+        }
+    }
+
+    private static final class ValueNavigatable implements Navigatable {
+        private final Object value;
+
+        private ValueNavigatable(Object value) {
+            this.value = value;
+        }
+
+        public Object getValue() {
+            return value;
+        }
+
+        @Override
+        public void navigate(boolean requestFocus) {}
+
+        @Override
+        public boolean canNavigate() {
+            return false;
+        }
+
+        @Override
+        public boolean canNavigateToSource() {
+            return false;
+        }
+    }
+
+    private static final class ValueWrapper {
+        private final Object value;
+
+        private ValueWrapper(Object value) {
+            this.value = value;
+        }
+
+        public Object getValue() {
+            return value;
+        }
+    }
+
+    private static final class DescriptorWrapper {
+        private final RunContentDescriptor descriptor;
+
+        private DescriptorWrapper(RunContentDescriptor descriptor) {
+            this.descriptor = descriptor;
+        }
+
+        public RunContentDescriptor getDescriptor() {
+            return descriptor;
         }
     }
 }
