@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -61,6 +62,8 @@ public final class TomcatOutputPipeline {
          * by {@link DeploymentAnalyzer}. {@link StartupAnalyzer} skips these to avoid double-firing.
          */
         final Set<String> notifiedArtifacts = ConcurrentHashMap.newKeySet();
+        /** Artifact display names already marked failed. */
+        final Set<String> failedArtifacts = ConcurrentHashMap.newKeySet();
         private final AtomicInteger errorCount;
         private final AtomicInteger warningCount;
         /** Set when shutdown begins — suppresses error/warning counter increments
@@ -139,6 +142,8 @@ public final class TomcatOutputPipeline {
         analyzers.add(new DeploymentAnalyzer());
         analyzers.add(new ContextAnalyzer());
         analyzers.add(new ReloadAnalyzer());
+        analyzers.add(new ArtifactFailureAnalyzer());
+        analyzers.add(new ServerDeploymentSummaryFailureAnalyzer());
         if (context.jmxEnabled) {
             analyzers.add(new JmxAnalyzer());
         }
@@ -259,6 +264,78 @@ public final class TomcatOutputPipeline {
                 } else {
                     ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
                 }
+            }
+        }
+    }
+
+    /**
+     * Detects per-artifact deployment failures from Tomcat startup logs.
+     */
+    static final class ArtifactFailureAnalyzer implements Analyzer {
+        private static final Pattern DEPLOY_FAILURE_PATTERN = Pattern.compile(
+                "(?i)Error deploying (?:deployment descriptor|web application(?: archive| directory)?)\\s*\\[.*?([^/\\\\\\]]+?)(?:\\.(?:xml|war))?\\]");
+        private static final Pattern CONTEXT_FAILURE_PATTERN = Pattern.compile(
+                "(?i)(?:LifecycleException:.*StandardContext\\[|Context \\[)(/[^\\]]+)](?:.*Failed to start component| startup failed due to previous errors)");
+
+        @Override
+        public void analyze(@NotNull String text, @NotNull Context ctx) {
+            String artifactName = resolveFailedArtifactName(text, ctx);
+            if (artifactName == null || artifactName.isBlank()) {
+                return;
+            }
+            if (ctx.failedArtifacts.add(artifactName)) {
+                ctx.lifecycleListener.onArtifactFailed(ctx.configName, artifactName);
+            }
+        }
+
+        @Nullable
+        private static String resolveFailedArtifactName(@NotNull String text, @NotNull Context ctx) {
+            Matcher deployFailure = DEPLOY_FAILURE_PATTERN.matcher(text);
+            if (deployFailure.find()) {
+                String contextName = deployFailure.group(1);
+                return ctx.contextToArtifactName.getOrDefault(contextName, contextName);
+            }
+
+            Matcher contextFailure = CONTEXT_FAILURE_PATTERN.matcher(text);
+            if (contextFailure.find()) {
+                String rawContext = contextFailure.group(1);
+                String normalizedContext = rawContext.startsWith("/") ? rawContext.substring(1) : rawContext;
+                return ctx.contextToArtifactName.getOrDefault(normalizedContext, rawContext);
+            }
+
+            return null;
+        }
+    }
+
+    /**
+     * Catches Tomcat's server-level deployment-summary failure signals —
+     * messages like {@code "One or more Contexts did not start successfully"}
+     * that Tomcat emits when at least one web application failed to start,
+     * but whose per-context detail lines didn't match
+     * {@link ArtifactFailureAnalyzer}. Without this fallback a partially-
+     * failed deployment slipped past the status service as all-success and
+     * the Services panel reported RUNNING for a broken config.
+     *
+     * <p>Fires at most once per launch: the first matching line sets the
+     * sticky {@code reported} flag so repeated summary messages (Tomcat
+     * sometimes logs it multiple times across threads) don't spam listeners.
+     */
+    static final class ServerDeploymentSummaryFailureAnalyzer implements Analyzer {
+        private static final Pattern SUMMARY_FAILURE_PATTERN = Pattern.compile(
+                "(?i)"
+                        + "(?:one or more contexts did not start successfully"
+                        + "|one or more listeners failed to start"
+                        + "|full application server startup failed"
+                        + "|server startup failed)");
+
+        private final AtomicBoolean reported = new AtomicBoolean(false);
+
+        @Override
+        public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (reported.get()) return;
+            if (SUMMARY_FAILURE_PATTERN.matcher(text).find()
+                    && reported.compareAndSet(false, true)) {
+                ctx.lifecycleListener.onDeploymentSummaryFailed(ctx.configName);
             }
         }
     }

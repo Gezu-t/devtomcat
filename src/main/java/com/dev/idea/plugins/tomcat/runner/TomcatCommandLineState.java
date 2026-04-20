@@ -42,6 +42,7 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -227,6 +228,67 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         return end >= vmOptions.length()
                 || vmOptions.charAt(end) == '='
                 || Character.isWhitespace(vmOptions.charAt(end));
+    }
+
+    static boolean isCatalinaCommand(@NotNull List<String> tokens) {
+        if (tokens.isEmpty()) return false;
+        String command = Path.of(tokens.get(0)).getFileName().toString().toLowerCase(Locale.ROOT);
+        return command.startsWith(TomcatConstants.CATALINA_SCRIPT);
+    }
+
+    static boolean usesCatalinaJpda(@NotNull List<String> tokens) {
+        return tokens.stream().anyMatch(token -> TomcatConstants.CATALINA_JPDA.equalsIgnoreCase(token));
+    }
+
+    static @NotNull List<String> enableCatalinaJpda(@NotNull List<String> tokens) {
+        if (!isCatalinaCommand(tokens) || usesCatalinaJpda(tokens)) {
+            return tokens;
+        }
+        java.util.ArrayList<String> adjusted = new java.util.ArrayList<>(tokens.size() + 1);
+        boolean inserted = false;
+        for (String token : tokens) {
+            if (!inserted && (TomcatConstants.CATALINA_RUN.equalsIgnoreCase(token)
+                    || TomcatConstants.CATALINA_START.equalsIgnoreCase(token))) {
+                adjusted.add(TomcatConstants.CATALINA_JPDA);
+                inserted = true;
+            }
+            adjusted.add(token);
+        }
+        return inserted ? List.copyOf(adjusted) : tokens;
+    }
+
+    static @NotNull String appendVmOptIfMissing(@Nullable String currentValue, @NotNull String vmOpt) {
+        if (hasManualJdwpAgent(currentValue)) {
+            return StringUtil.notNullize(currentValue).trim();
+        }
+        String existing = StringUtil.notNullize(currentValue).trim();
+        return existing.isEmpty() ? vmOpt : existing + " " + vmOpt;
+    }
+
+    static void applyCustomScriptDebugSupport(@NotNull GeneralCommandLine commandLine,
+                                              @NotNull List<String> startupTokens,
+                                              int debugPort) {
+        String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
+                + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT,
+                TomcatConstants.JDWP_TRANSPORT_SOCKET, debugPort);
+
+        commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));
+        commandLine.withEnvironment(TomcatConstants.ENV_JDWP_OPTS, jdwpArg);
+
+        if (isCatalinaCommand(startupTokens)) {
+            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_ADDRESS, String.valueOf(debugPort));
+            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_TRANSPORT, TomcatConstants.JDWP_TRANSPORT_SOCKET);
+            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_SUSPEND, "n");
+            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_OPTS, jdwpArg);
+        }
+
+        String catalinaOpts = appendVmOptIfMissing(
+                commandLine.getEnvironment().get(TomcatConstants.ENV_CATALINA_OPTS), jdwpArg);
+        commandLine.withEnvironment(TomcatConstants.ENV_CATALINA_OPTS, catalinaOpts);
+
+        String javaOpts = appendVmOptIfMissing(
+                commandLine.getEnvironment().get(TomcatConstants.ENV_JAVA_OPTS), jdwpArg);
+        commandLine.withEnvironment(TomcatConstants.ENV_JAVA_OPTS, javaOpts);
     }
 
     /**
@@ -871,6 +933,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (!runnerSettings.isUseDefaultStartup() && !StringUtil.isEmptyOrSpaces(runnerSettings.getStartupScript())) {
             List<String> tokens = ParametersListUtil.parse(
                     runnerSettings.getStartupScript());
+            boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
+            if (isDebug) {
+                tokens = enableCatalinaJpda(tokens);
+            }
             commandLine = new GeneralCommandLine(tokens);
             commandLine.withEnvironment(runnerSettings.getEnvironmentVariables());
             commandLine.withParentEnvironmentType(runnerSettings.isPassParentEnvs() ?
@@ -887,16 +953,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
             // In debug mode, propagate the JDWP agent arg and port so custom scripts
             // can include them. Without this, debug + custom script silently fails to attach.
-            boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
             if (isDebug) {
                 DebugConfig dc = configuration.getConfigData().getDebugConfig();
                 int debugPort = resolvedDebugPort > 0 ? resolvedDebugPort
                         : (dc != null ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT);
-                commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));
-                String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                        + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, TomcatConstants.JDWP_TRANSPORT_SOCKET, debugPort);
-                commandLine.withEnvironment(TomcatConstants.ENV_JDWP_OPTS, jdwpArg);
-                deploymentLogger.logServerInfo("Debug mode with custom script: add $TOMCAT_JDWP_OPTS to your CATALINA_OPTS or JAVA_OPTS");
+                applyCustomScriptDebugSupport(commandLine, tokens, debugPort);
+                deploymentLogger.logServerInfo(
+                        "Debug mode with custom startup: JDWP injected via environment variables"
+                                + (isCatalinaCommand(tokens) ? " and catalina jpda mode" : ""));
             }
 
             if (configuration.getTomcatInfo() != null) {

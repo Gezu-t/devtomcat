@@ -58,6 +58,15 @@ public final class TomcatDeploymentStatusService {
         private final AtomicInteger warningCount = new AtomicInteger();
         private volatile boolean startupComplete;
         private volatile long startupTimeMs;
+        /**
+         * Sticky flag for server-level deployment failures — Tomcat emitted
+         * "One or more Contexts did not start successfully" or an equivalent
+         * summary, but the per-artifact analyzer couldn't pin down which one.
+         * Blocks {@link #restoreRunningStateIfIdle} from clearing FAILED back
+         * to RUNNING even when every known artifact state is non-FAILED,
+         * because we know something actually failed.
+         */
+        private volatile boolean deploymentSummaryFailed;
 
         public ServerState getServerState() { return serverState; }
         public Map<String, ArtifactState> getArtifactStates() { return artifactStates; }
@@ -117,6 +126,7 @@ public final class TomcatDeploymentStatusService {
             s.startupComplete = false;
             s.startupTimeMs = 0;
             s.artifactStates.clear();
+            s.deploymentSummaryFailed = false;
         }
         refreshDashboard();
     }
@@ -124,7 +134,9 @@ public final class TomcatDeploymentStatusService {
     public void onArtifactDeploying(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            s.serverState = ServerState.DEPLOYING;
+            if (!hasFailedArtifacts(s)) {
+                s.serverState = ServerState.DEPLOYING;
+            }
             s.artifactStates.put(artifactName, ArtifactState.DEPLOYING);
         }
         refreshDashboard();
@@ -145,7 +157,37 @@ public final class TomcatDeploymentStatusService {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
             s.artifactStates.put(artifactName, ArtifactState.FAILED);
-            restoreRunningStateIfIdle(s);
+            s.serverState = ServerState.FAILED;
+        }
+        refreshDashboard();
+    }
+
+    /**
+     * Tomcat emitted a server-level deployment-summary failure
+     * ("One or more Contexts did not start successfully" or similar) — at
+     * least one artifact failed but the per-artifact pattern matcher couldn't
+     * identify which. Without this hook the sticky-FAILED-on-per-artifact
+     * path never fires and the server state is restored to RUNNING by
+     * {@link #restoreRunningStateIfIdle}, leaving the Services panel
+     * reporting all-green for a partially-broken deployment — the exact bug
+     * we were seeing with mixed success/failure showing as success.
+     */
+    public void onDeploymentSummaryFailed(@NotNull String configName) {
+        ConfigStatus s = getOrCreate(configName);
+        synchronized (s.lock) {
+            s.deploymentSummaryFailed = true;
+            s.serverState = ServerState.FAILED;
+            // Any artifact still in DEPLOYING/RELOADING when the server says
+            // the deployment failed is a victim of the failure — promote them
+            // to FAILED so the Services tree renders them correctly. Already-
+            // DEPLOYED artifacts stay DEPLOYED because they truly succeeded
+            // before the failure was declared.
+            for (Map.Entry<String, ArtifactState> entry : s.artifactStates.entrySet()) {
+                ArtifactState current = entry.getValue();
+                if (current == ArtifactState.DEPLOYING || current == ArtifactState.RELOADING) {
+                    entry.setValue(ArtifactState.FAILED);
+                }
+            }
         }
         refreshDashboard();
     }
@@ -153,7 +195,9 @@ public final class TomcatDeploymentStatusService {
     public void onArtifactReloading(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            s.serverState = ServerState.DEPLOYING;
+            if (!hasFailedArtifacts(s)) {
+                s.serverState = ServerState.DEPLOYING;
+            }
             s.artifactStates.put(artifactName, ArtifactState.RELOADING);
         }
         refreshDashboard();
@@ -163,8 +207,8 @@ public final class TomcatDeploymentStatusService {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
             s.startupComplete = true;
-            s.serverState = ServerState.RUNNING;
             s.startupTimeMs = startupTimeMs;
+            restoreRunningStateIfIdle(s);
         }
         refreshDashboard();
     }
@@ -239,6 +283,10 @@ public final class TomcatDeploymentStatusService {
     }
 
     private static void restoreRunningStateIfIdle(@NotNull ConfigStatus status) {
+        if (hasFailedArtifacts(status) || status.deploymentSummaryFailed) {
+            status.serverState = ServerState.FAILED;
+            return;
+        }
         if (!status.startupComplete) {
             return;
         }
@@ -247,5 +295,9 @@ public final class TomcatDeploymentStatusService {
         if (!deploymentInProgress) {
             status.serverState = ServerState.RUNNING;
         }
+    }
+
+    private static boolean hasFailedArtifacts(@NotNull ConfigStatus status) {
+        return status.artifactStates.values().stream().anyMatch(state -> state == ArtifactState.FAILED);
     }
 }

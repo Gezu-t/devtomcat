@@ -72,6 +72,36 @@ public class TomcatJavaParametersBuilder {
         return this;
     }
 
+    /**
+     * Port to use when {@link #resolvedDebugPort} has not been set (no port
+     * conflict resolution ran, typical for coverage-only or run-only executors).
+     * Reads the persisted {@link DebugConfig} port, falling back to the default.
+     */
+    private int effectiveDebugPort() {
+        com.dev.idea.plugins.tomcat.model.debug.DebugConfig dc =
+                configuration.getConfigData().getDebugConfig();
+        return dc != null && dc.isValid()
+                ? dc.getPort()
+                : com.dev.idea.plugins.tomcat.model.debug.DebugConfig.DEFAULT_DEBUG_PORT;
+    }
+
+    /**
+     * Appends the JDWP agent argument to a VM parameter list in a canonical
+     * {@code -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:port}
+     * form. Extracted to a package-private static helper so unit tests can
+     * verify the injection without standing up the full {@code build()} pipeline
+     * (which needs a real Tomcat install, artifacts, etc.). Callers are
+     * responsible for gating the call on {@link #debugMode}.
+     */
+    static void injectJdwpAgent(@NotNull ParametersList vmParams, int port) {
+        String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
+                + String.format(
+                        TomcatConstants.JDWP_CONNECTION_FORMAT,
+                        TomcatConstants.JDWP_TRANSPORT_SOCKET,
+                        port);
+        vmParams.add(jdwpArg);
+    }
+
     public TomcatJavaParametersBuilder setResolvedPorts(@Nullable PortConfig resolvedPorts) {
         this.resolvedPorts = resolvedPorts;
         return this;
@@ -429,17 +459,27 @@ public class TomcatJavaParametersBuilder {
                                 @NotNull Sdk jdk) {
         ParametersList vmParams = params.getVMParametersList();
 
-        // Do NOT add -agentlib:jdwp here. In debug mode, GenericDebuggerRunner's
-        // DebugProcessImpl patches the JavaParameters with the JDWP agent based on
-        // the RemoteConnection created by TomcatDebugger. Adding it here would create
-        // a DUPLICATE agent — the JVM assigns the second one a different port, causing
-        // a mismatch between what the debugger connects to and what Tomcat listens on.
-        // The resolved debug port flows: TomcatCommandLineState.resolvedDebugPort
-        //   → TomcatDebugger reads it → creates RemoteConnection
-        //   → GenericDebuggerRunner patches params with matching JDWP arg.
+        // Inject -agentlib:jdwp ourselves in debug mode. The previous comment here
+        // claimed GenericDebuggerRunner's patcher would inject the agent, but that
+        // only runs from its super.doExecute() — and TomcatDebugger.doExecute()
+        // bypasses super entirely to call attachVirtualMachine() directly. With no
+        // JDWP agent on the JVM, the debugger tried to attach to a port nothing was
+        // listening on and every breakpoint was silently skipped.
+        //
+        // Single source of truth for the port: resolvedDebugPort (set by
+        // TomcatCommandLineState's port-conflict resolver) falling back to the
+        // persisted DebugConfig. TomcatDebugger reads the same value to create the
+        // RemoteConnection, so attach and agent always agree on the port. The
+        // manual-JDWP warning in TomcatCommandLineState.warnIfManualJdwpInDebugMode
+        // still fires if the user also added -agentlib:jdwp to VM options, which
+        // would create two agents and break the attach.
         if (debugMode) {
-            LOG.info("Debug mode: JDWP agent will be injected by GenericDebuggerRunner " +
-                    "(resolved debug port: " + resolvedDebugPort + ")");
+            int port = resolvedDebugPort > 0
+                    ? resolvedDebugPort
+                    : effectiveDebugPort();
+            injectJdwpAgent(vmParams, port);
+            LOG.info("Debug mode: injected JDWP agent on port " + port
+                    + " (resolvedDebugPort=" + resolvedDebugPort + ")");
         }
 
         TomcatVmOptionsConfigurator.configure(

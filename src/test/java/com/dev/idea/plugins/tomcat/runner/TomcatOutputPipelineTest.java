@@ -373,6 +373,186 @@ class TomcatOutputPipelineTest {
     }
 
     @Nested
+    @DisplayName("ArtifactFailureAnalyzer")
+    class ArtifactFailureAnalyzerTests {
+
+        private final TomcatOutputPipeline.ArtifactFailureAnalyzer analyzer =
+                new TomcatOutputPipeline.ArtifactFailureAnalyzer();
+
+        @Test
+        @DisplayName("maps deployment descriptor failure to artifact display name")
+        void mapsDescriptorFailureToArtifact() {
+            contextToArtifact.put("myapp", "My Web App");
+            List<String> failedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            analyzer.analyze(
+                    "SEVERE [main] org.apache.catalina.startup.HostConfig.deployDescriptor Error deploying deployment descriptor [/conf/Catalina/localhost/myapp.xml]",
+                    testContext);
+
+            assertEquals(List.of("My Web App"), failedArtifacts);
+        }
+
+        @Test
+        @DisplayName("detects context startup failure")
+        void detectsContextStartupFailure() {
+            contextToArtifact.put("myapp", "My Web App");
+            List<String> failedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            analyzer.analyze(
+                    "10-Mar-2026 08:16:54.579 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal Context [/myapp] startup failed due to previous errors",
+                    testContext);
+
+            assertEquals(List.of("My Web App"), failedArtifacts);
+        }
+
+        @Test
+        @DisplayName("deduplicates repeated failure lines for the same artifact")
+        void deduplicatesRepeatedFailures() {
+            contextToArtifact.put("myapp", "My Web App");
+            List<String> failedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            String failure =
+                    "SEVERE [main] org.apache.catalina.startup.HostConfig.deployDescriptor Error deploying deployment descriptor [/conf/Catalina/localhost/myapp.xml]";
+            analyzer.analyze(failure, testContext);
+            analyzer.analyze(failure, testContext);
+
+            assertEquals(List.of("My Web App"), failedArtifacts);
+        }
+    }
+
+    @Nested
+    @DisplayName("ServerDeploymentSummaryFailureAnalyzer")
+    class ServerDeploymentSummaryFailureTests {
+
+        private TomcatOutputPipeline.Context summaryContext(
+                AtomicInteger summaryFailedCount) {
+            return new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onDeploymentSummaryFailed(@NotNull String configName) {
+                            summaryFailedCount.incrementAndGet();
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set);
+        }
+
+        @Test
+        @DisplayName("fires on \"One or more Contexts did not start successfully\"")
+        void firesOnContextSummary() {
+            AtomicInteger count = new AtomicInteger();
+            TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer analyzer =
+                    new TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer();
+
+            analyzer.analyze(
+                    "19-Apr-2026 20:00:00.000 SEVERE [main] org.apache.catalina.startup.Catalina.start "
+                            + "One or more Contexts did not start successfully",
+                    summaryContext(count));
+
+            assertEquals(1, count.get(),
+                    "Tomcat's summary message must trigger onDeploymentSummaryFailed so the "
+                            + "Services panel shows the server as FAILED even when the per-artifact "
+                            + "pattern matcher couldn't identify which artifact failed.");
+        }
+
+        @Test
+        @DisplayName("fires at most once per launch")
+        void firesAtMostOncePerLaunch() {
+            AtomicInteger count = new AtomicInteger();
+            TomcatOutputPipeline.Context ctx = summaryContext(count);
+            TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer analyzer =
+                    new TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer();
+
+            String line = "SEVERE One or more Contexts did not start successfully";
+            analyzer.analyze(line, ctx);
+            analyzer.analyze(line, ctx);
+            analyzer.analyze(line, ctx);
+
+            assertEquals(1, count.get(),
+                    "Tomcat sometimes logs the summary repeatedly across threads; the analyzer "
+                            + "must suppress duplicates so listeners aren't spammed.");
+        }
+
+        @Test
+        @DisplayName("doesn't fire on unrelated SEVERE lines")
+        void ignoresUnrelatedSevereLines() {
+            AtomicInteger count = new AtomicInteger();
+            TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer analyzer =
+                    new TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer();
+
+            analyzer.analyze("SEVERE some unrelated error about JDBC pool", summaryContext(count));
+
+            assertEquals(0, count.get());
+        }
+    }
+
+    @Nested
     @DisplayName("full pipeline")
     class FullPipeline {
 

@@ -38,6 +38,16 @@ public interface TomcatLifecycleListener {
 
     default void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {}
 
+    /**
+     * Tomcat emitted a server-level deployment-summary failure such as
+     * "One or more Contexts did not start successfully" — something failed but
+     * the per-artifact pattern didn't identify which one. Listeners should
+     * treat this as "at least one artifact failed" and mark the server state
+     * as FAILED so the Services panel doesn't render green when the deployment
+     * is actually broken.
+     */
+    default void onDeploymentSummaryFailed(@NotNull String configName) {}
+
     default void onArtifactReloading(@NotNull String configName, @NotNull String artifactName) {}
 
     default void onError(@NotNull String configName) {}
@@ -57,6 +67,7 @@ public interface TomcatLifecycleListener {
             @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactDeploying(c, a); }
             @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactDeployed(c, a); }
             @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactFailed(c, a); }
+            @Override public void onDeploymentSummaryFailed(@NotNull String c) { for (var l : copy) l.onDeploymentSummaryFailed(c); }
             @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactReloading(c, a); }
             @Override public void onError(@NotNull String c) { for (var l : copy) l.onError(c); }
             @Override public void onWarning(@NotNull String c) { for (var l : copy) l.onWarning(c); }
@@ -75,6 +86,7 @@ public interface TomcatLifecycleListener {
             @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { service.onArtifactDeploying(c, a); }
             @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { service.onArtifactDeployed(c, a); }
             @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { service.onArtifactFailed(c, a); }
+            @Override public void onDeploymentSummaryFailed(@NotNull String c) { service.onDeploymentSummaryFailed(c); }
             @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { service.onArtifactReloading(c, a); }
             @Override public void onError(@NotNull String c) { service.onError(c); }
             @Override public void onWarning(@NotNull String c) { service.onWarning(c); }

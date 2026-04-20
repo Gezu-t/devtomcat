@@ -59,6 +59,12 @@ public final class TomcatConstants {
     public static final String ENV_AJP_PORT = "TOMCAT_AJP_PORT";
     public static final String ENV_DEBUG_PORT = "TOMCAT_DEBUG_PORT";
     public static final String ENV_JDWP_OPTS = "TOMCAT_JDWP_OPTS";
+    public static final String ENV_JAVA_OPTS = "JAVA_OPTS";
+    public static final String ENV_CATALINA_OPTS = "CATALINA_OPTS";
+    public static final String ENV_JPDA_OPTS = "JPDA_OPTS";
+    public static final String ENV_JPDA_ADDRESS = "JPDA_ADDRESS";
+    public static final String ENV_JPDA_TRANSPORT = "JPDA_TRANSPORT";
+    public static final String ENV_JPDA_SUSPEND = "JPDA_SUSPEND";
 
     // --- Artifact Naming Suffixes (IntelliJ convention) ---
     public static final String ARTIFACT_SUFFIX_WAR_EXPLODED = ":war exploded";
@@ -74,7 +80,9 @@ public final class TomcatConstants {
 
     // --- Catalina ---
     public static final String CATALINA_SCRIPT = "catalina";
+    public static final String CATALINA_JPDA = "jpda";
     public static final String CATALINA_RUN = "run";
+    public static final String CATALINA_START = "start";
     public static final String CATALINA_STOP = "stop";
 
     // --- CATALINA_BASE directory layout ---

@@ -82,6 +82,21 @@ class TomcatDeploymentStatusServiceTest {
         }
 
         @Test
+        @DisplayName("serverStarted keeps FAILED when an artifact already failed")
+        void serverStartedKeepsFailedState() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "broken.war");
+            service.onArtifactFailed("cfg", "broken.war");
+
+            service.onServerStarted("cfg", 1234);
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState());
+            assertEquals(1234, status.getStartupTimeMs());
+        }
+
+        @Test
         @DisplayName("onServerStopped with exit 0 sets STOPPED")
         void serverStoppedNormally() {
             service.onServerStarting("cfg");
@@ -203,7 +218,7 @@ class TomcatDeploymentStatusServiceTest {
                     service.getStatus("cfg").getServerState());
 
             service.onArtifactFailed("cfg", "app2.war");
-            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING,
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED,
                     service.getStatus("cfg").getServerState());
         }
 
@@ -422,6 +437,84 @@ class TomcatDeploymentStatusServiceTest {
         @DisplayName("expected states exist")
         void expectedStatesExist() {
             assertEquals(5, TomcatDeploymentStatusService.ServerState.values().length);
+        }
+    }
+
+    @Nested
+    @DisplayName("onDeploymentSummaryFailed — server-level failure fallback")
+    class DeploymentSummaryFailedTests {
+
+        @Test
+        @DisplayName("marks server FAILED and sticks across onServerStarted")
+        void summaryFailureStickyAcrossStartedEvent() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "app-a");
+            // Tomcat emits the summary failure — the per-artifact analyzer
+            // didn't identify which one. We still must surface FAILED.
+            service.onDeploymentSummaryFailed("cfg");
+            // Simulate a benign onServerStarted that would otherwise flip the
+            // state back to RUNNING via restoreRunningStateIfIdle.
+            service.onServerStarted("cfg", 3200);
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState(),
+                    "Server state must remain FAILED after a summary failure even when "
+                            + "onServerStarted fires — otherwise the Services panel goes green "
+                            + "while Tomcat literally told us something failed.");
+        }
+
+        @Test
+        @DisplayName("promotes in-flight DEPLOYING/RELOADING artifacts to FAILED")
+        void promotesInFlightArtifacts() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "app-a");
+            service.onArtifactDeploying("cfg", "app-b");
+            service.onArtifactDeployed("cfg", "app-b");
+
+            service.onDeploymentSummaryFailed("cfg");
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            // app-a was still DEPLOYING when the summary failure fired — it's a
+            // victim of the failure. app-b completed earlier so it stays DEPLOYED.
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.FAILED,
+                    status.getArtifactStates().get("app-a"));
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.DEPLOYED,
+                    status.getArtifactStates().get("app-b"));
+        }
+
+        @Test
+        @DisplayName("cleared on next launch so prior failures don't persist")
+        void clearedOnNextLaunch() {
+            service.onServerStarting("cfg");
+            service.onDeploymentSummaryFailed("cfg");
+            // New launch — ConfigStatus must be reset, not carry the sticky flag.
+            service.onServerStarting("cfg");
+            service.onServerStarted("cfg", 2500);
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState(),
+                    "A subsequent clean launch must NOT inherit the previous launch's "
+                            + "deploymentSummaryFailed flag.");
+        }
+
+        @Test
+        @DisplayName("mixed success/failure reported by analyzer stays FAILED")
+        void mixedSuccessFailureStaysFailed() {
+            // Exact scenario the user reported: one artifact failed (summary
+            // fired), another succeeded, Services panel showed all-success.
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "webapp-portal");
+            service.onArtifactDeploying("cfg", "webapp-features");
+            service.onDeploymentSummaryFailed("cfg");
+            service.onArtifactDeployed("cfg", "webapp-features");
+            service.onServerStarted("cfg", 4100);
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState());
         }
     }
 

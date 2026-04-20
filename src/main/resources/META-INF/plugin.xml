@@ -53,6 +53,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.0.7</h3>
+    <ul>
+        <li><b>Debug mode now actually hits breakpoints</b> — the JDWP agent is injected directly onto the JVM's VM parameters in <code>TomcatJavaParametersBuilder</code> instead of relying on <code>GenericDebuggerRunner</code>'s patcher, which was being bypassed because <code>TomcatDebugger.doExecute()</code> skips <code>super.doExecute()</code>. Port sourced from the command-line state's resolved debug port so the agent and the <code>RemoteConnection</code> attach agree on a single port even under conflict resolution.</li>
+        <li><b>Services panel now reports mixed deployment failures correctly</b> — a new <code>ServerDeploymentSummaryFailureAnalyzer</code> catches Tomcat's server-level summary messages ("One or more Contexts did not start successfully" and similar) and marks the server state as FAILED even when the per-artifact pattern matcher can't identify which artifact failed. Previously a partial-failure deployment would flip back to RUNNING via <code>restoreRunningStateIfIdle</code> and the Services panel rendered all-green for a broken config.</li>
+        <li><b>Regression coverage</b> — JDWP agent injection round-trip; server-level summary dedup + ignore-unrelated tests; sticky-FAILED across <code>onServerStarted</code>; in-flight DEPLOYING/RELOADING artifacts auto-promoted to FAILED on summary failure; flag cleared on next launch.</li>
+    </ul>
+
     <h3>Version 1.0.6</h3>
     <ul>
         <li><b>Server tab overhaul</b> — Configure… button preserves selection; canonical tab order (Code Coverage before Startup/Connection); single <b>Show dialog</b> checkbox replaces the duplicate pair; JavaScript debugger checkbox hidden on Community rather than shown disabled; layout migrated to <code>VerticalLayout</code> so form rows reflow correctly under font/theme changes; shared Configure… button helper removes copy-paste</li>
