@@ -16,12 +16,10 @@ Resilience release. No new features — every change either reduces the surface 
 - **Artifact state stickiness** — per-artifact `FAILED` is now sticky across a late `onArtifactDeployed` for the same artifact within a launch; stickiness also applies across cancellation and reload events.
 
 ### Added
-- **Integration test harness** (`TomcatPipelineHarness`) that replays canned Tomcat output through the full `pipeline → lifecycle → status service` chain and asserts the final `ConfigStatus`. Four seed fixtures (clean startup, per-artifact-matched failure, summary-only failure, healthy-with-SEVERE-noise) drive the harness end-to-end. Catches cross-layer regressions that per-analyzer unit tests can't see — the `onDeploymentSummaryFailed` over-promotion bug was found by this harness on its first run.
+- **Integration test harness** (`TomcatPipelineHarness`) — replays Tomcat output fixtures through the full pipeline → lifecycle → status-service chain. Caught the summary-failure over-promotion bug on first run.
 
 ### Tests
-- Four fixture-driven integration tests in `TomcatPipelineFixtureTest`
-- State-machine invariant tests: summary-failure does NOT promote in-flight artifacts; late deploy after summary-failure lands DEPLOYED; explicit per-artifact FAILED sticks across a later deploy
-- Seven unit tests for `resolveOrAutoRegister`: null input, already-registered no-op, valid-path auto-register with name preservation, empty path, missing path, non-Tomcat directory, idempotent on second call
+- 4 fixture-driven integration tests, 3 state-machine invariants, 7 `resolveOrAutoRegister` units.
 
 ## [1.0.7]
 
