@@ -58,6 +58,8 @@ class TomcatLifecycleListenerTest {
                 @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { events.add("deploying"); }
                 @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { events.add("deployed"); }
                 @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { events.add("failed"); }
+                @Override public void onArtifactCancelled(@NotNull String c, @NotNull String a) { events.add("cancelled"); }
+                @Override public void onDeploymentSummaryFailed(@NotNull String c) { events.add("summaryFailed"); }
                 @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { events.add("reloading"); }
                 @Override public void onError(@NotNull String c) { events.add("error"); }
                 @Override public void onWarning(@NotNull String c) { events.add("warning"); }
@@ -69,13 +71,16 @@ class TomcatLifecycleListenerTest {
             composite.onArtifactDeploying("c", "a");
             composite.onArtifactDeployed("c", "a");
             composite.onArtifactFailed("c", "a");
+            composite.onArtifactCancelled("c", "a");
+            composite.onDeploymentSummaryFailed("c");
             composite.onArtifactReloading("c", "a");
             composite.onError("c");
             composite.onWarning("c");
             composite.onServerStopped("c", 0, 1000, 1, 2, 100);
 
             assertEquals(List.of("starting", "started", "deploying", "deployed",
-                    "failed", "reloading", "error", "warning", "stopped"), events);
+                    "failed", "cancelled", "summaryFailed", "reloading",
+                    "error", "warning", "stopped"), events);
         }
     }
 
@@ -158,6 +163,23 @@ class TomcatLifecycleListenerTest {
             assertNotNull(entry);
             assertEquals(List.of("app.war"), entry.artifactNames,
                     "Artifact should appear only once despite duplicate onArtifactDeploying calls");
+        }
+
+        @Test
+        @DisplayName("marks session failed on deployment summary failure even without named artifact")
+        void summaryFailureMarksHistoryFailed() {
+            TomcatDeploymentHistory history = new TomcatDeploymentHistory();
+            TomcatLifecycleListener consumer = TomcatLifecycleListener.historyConsumer(history);
+
+            consumer.onServerStarting("cfg");
+            consumer.onDeploymentSummaryFailed("cfg");
+            consumer.onServerStopped("cfg", 0, 1000, 1, 0, 500);
+
+            var entry = history.getLastEntry("cfg");
+            assertNotNull(entry);
+            assertFalse(entry.success);
+            assertTrue(entry.artifactFailure);
+            assertEquals(0, entry.exitCode);
         }
 
         @Test

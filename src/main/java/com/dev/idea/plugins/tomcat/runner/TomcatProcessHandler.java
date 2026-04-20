@@ -600,20 +600,28 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     CredentialResolver.ensureResolved(remoteConfig);
 
                     TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
+                    List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts().stream()
+                            .filter(artifact -> artifact != null && artifact.isValid())
+                            .toList();
+                    if (artifacts.isEmpty()) {
+                        deploymentLogger.logServerInfo("Remote mode active, but no valid artifacts are configured for deployment");
+                        return;
+                    }
 
                     indicator.setText("Testing remote connection...");
                     String error = deployer.testConnection();
                     if (error != null) {
                         deploymentLogger.logServerError("Remote connection failed: " + error);
+                        for (DeploymentArtifact artifact : artifacts) {
+                            lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
+                        }
                         return;
                     }
 
-                    List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
                     int successCount = 0;
                     int total = artifacts.size();
                     for (int i = 0; i < total; i++) {
                         DeploymentArtifact artifact = artifacts.get(i);
-                        if (artifact == null || !artifact.isValid()) continue;
                         if (indicator.isCanceled()) {
                             deploymentLogger.logServerWarning("Remote deployment cancelled by user");
                             return;
@@ -630,7 +638,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                             }
                             case CANCELLED -> {
                                 deploymentLogger.logServerWarning("Deployment cancelled: " + artifact.getDisplayName());
-                                // Don't mark as failed — user chose to cancel
+                                lifecycleListener.onArtifactCancelled(configurationName, artifact.getDisplayName());
                                 return;
                             }
                             case FAILED ->

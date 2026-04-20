@@ -84,22 +84,17 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         if (isRemote) {
             RunnerSettings rs = config.getConfigData()
                     .getRunnerSettings(DefaultDebugExecutor.EXECUTOR_ID);
-            debugHost = rs.getDebugHost().isEmpty() ? "127.0.0.1" : rs.getDebugHost();
-            debugPort = rs.getDebugPort() > 0 ? rs.getDebugPort() : DebugConfig.DEFAULT_DEBUG_PORT;
+            debugHost = resolveDebugHostForAttach(true, rs);
+            debugPort = resolveDebugPortForAttach(true, rs, -1, null);
         } else if (state instanceof TomcatCommandLineState tomcatState) {
             tomcatState.getJavaParameters();
-            debugHost = "127.0.0.1";
-            int resolved = tomcatState.getResolvedDebugPort();
-            if (resolved > 0) {
-                debugPort = resolved;
-            } else {
-                DebugConfig dc = config.getConfigData().getDebugConfig();
-                debugPort = (dc != null && dc.isValid()) ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT;
-            }
+            debugHost = resolveDebugHostForAttach(false, null);
+            debugPort = resolveDebugPortForAttach(
+                    false, null, tomcatState.getResolvedDebugPort(), config.getConfigData().getDebugConfig());
         } else {
-            debugHost = "127.0.0.1";
+            debugHost = resolveDebugHostForAttach(false, null);
             DebugConfig dc = config.getConfigData().getDebugConfig();
-            debugPort = (dc != null && dc.isValid()) ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT;
+            debugPort = resolveDebugPortForAttach(false, null, -1, dc);
             LOG.warn("Unexpected RunProfileState type: " + state.getClass().getName()
                     + " — using config debug port " + debugPort);
         }
@@ -116,5 +111,33 @@ public class TomcatDebugger extends GenericDebuggerRunner {
         }
 
         return descriptor;
+    }
+
+    static @NotNull String resolveDebugHostForAttach(boolean isRemote,
+                                                     @Nullable RunnerSettings runnerSettings) {
+        if (!isRemote) {
+            return "127.0.0.1";
+        }
+        if (runnerSettings == null || runnerSettings.getDebugHost().isEmpty()) {
+            return "127.0.0.1";
+        }
+        return runnerSettings.getDebugHost();
+    }
+
+    static int resolveDebugPortForAttach(boolean isRemote,
+                                         @Nullable RunnerSettings runnerSettings,
+                                         int resolvedDebugPort,
+                                         @Nullable DebugConfig debugConfig) {
+        if (isRemote) {
+            return runnerSettings != null && runnerSettings.getDebugPort() > 0
+                    ? runnerSettings.getDebugPort()
+                    : DebugConfig.DEFAULT_DEBUG_PORT;
+        }
+        if (resolvedDebugPort > 0) {
+            return resolvedDebugPort;
+        }
+        return debugConfig != null && debugConfig.isValid()
+                ? debugConfig.getPort()
+                : DebugConfig.DEFAULT_DEBUG_PORT;
     }
 }

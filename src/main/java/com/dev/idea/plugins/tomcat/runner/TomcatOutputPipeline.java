@@ -69,6 +69,23 @@ public final class TomcatOutputPipeline {
         /** Set when shutdown begins — suppresses error/warning counter increments
          *  so Tomcat's classloader cleanup noise doesn't inflate the dashboard badge. */
         private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
+        /**
+         * Authoritative signal from Tomcat that at least one artifact failed to
+         * deploy — set by {@link ServerDeploymentSummaryFailureAnalyzer} when it
+         * matches Tomcat's server-level summary messages ("One or more Contexts
+         * did not start successfully" and peers). Consumed by
+         * {@link StartupAnalyzer}: when it's true at startup time, artifacts
+         * with no per-artifact deploy/fail log are resolved as FAILED rather
+         * than DEPLOYED, so the Services tree never renders green for a
+         * partially-broken deployment.
+         *
+         * <p>Not gated on the generic error counter — Tomcat routinely logs
+         * non-fatal SEVERE lines on healthy startups (JDBC driver registration
+         * noise, JULI warnings), and using that as a proxy would flip clean
+         * deploys to FAILED. Only Tomcat's own deployment-summary failure
+         * messages set this flag.
+         */
+        final AtomicBoolean deploymentFailureDetected = new AtomicBoolean(false);
         private final boolean jmxEnabled;
 
         /** Called with startup duration when server startup is detected. */
@@ -172,12 +189,25 @@ public final class TomcatOutputPipeline {
                     long duration = Long.parseLong(m.group(1).replaceAll("[,._]", ""));
                     ctx.logger.logServerStartup(duration);
 
-                    // Mark remaining artifacts as deployed. DeploymentAnalyzer already fired
-                    // onArtifactDeployed for each artifact whose individual completion message
-                    // was logged; skip those to avoid double-firing the same notification.
-                    // This is resilient to Tomcat version differences in deployment log format.
+                    // Tomcat does not log per-artifact completion consistently across
+                    // versions. Clean startup → unresolved artifacts are treated as
+                    // deployed. If Tomcat emitted a summary-failure message
+                    // (deploymentFailureDetected), unresolved artifacts are treated
+                    // as failed instead, so the Services tree does not render green
+                    // for a broken deployment.
+                    boolean deploymentFailed = ctx.deploymentFailureDetected.get();
                     for (String artifactName : new LinkedHashSet<>(ctx.contextToArtifactName.values())) {
-                        if (ctx.notifiedArtifacts.add(artifactName)) {
+                        boolean alreadyResolved = ctx.notifiedArtifacts.contains(artifactName)
+                                || ctx.failedArtifacts.contains(artifactName);
+                        if (alreadyResolved) {
+                            continue;
+                        }
+
+                        if (deploymentFailed) {
+                            if (ctx.failedArtifacts.add(artifactName)) {
+                                ctx.lifecycleListener.onArtifactFailed(ctx.configName, artifactName);
+                            }
+                        } else if (ctx.notifiedArtifacts.add(artifactName)) {
                             ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
                         }
                     }
@@ -335,6 +365,12 @@ public final class TomcatOutputPipeline {
             if (reported.get()) return;
             if (SUMMARY_FAILURE_PATTERN.matcher(text).find()
                     && reported.compareAndSet(false, true)) {
+                // Flip the shared failure flag first so StartupAnalyzer sees it
+                // if the summary message arrives on the same line-processing
+                // pass or any subsequent one. Only after that do we notify
+                // listeners — prevents a race where the lifecycle callback
+                // refreshes UI before the analyzer knows a failure occurred.
+                ctx.deploymentFailureDetected.set(true);
                 ctx.lifecycleListener.onDeploymentSummaryFailed(ctx.configName);
             }
         }

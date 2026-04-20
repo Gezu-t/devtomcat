@@ -124,6 +124,88 @@ class TomcatOutputPipelineTest {
             assertFalse(startupDetected.get());
             assertEquals(-1, capturedStartupTime.get());
         }
+
+        @Test
+        @DisplayName("marks unresolved artifacts failed when Tomcat reported a summary-level deployment failure")
+        void startupAfterSummaryFailureMarksUnresolvedArtifactsFailed() {
+            contextToArtifact.put("webapp-deploy", "webapp-deploy:war exploded");
+            List<String> failedArtifacts = new ArrayList<>();
+            List<String> deployedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+
+                        @Override
+                        public void onArtifactDeployed(@NotNull String configName, @NotNull String artifactName) {
+                            deployedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    false,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            new TomcatOutputPipeline.ServerDeploymentSummaryFailureAnalyzer().analyze(
+                    "SEVERE One or more Contexts did not start successfully", testContext);
+            analyzer.analyze("Server startup in 1234 ms", testContext);
+
+            assertEquals(List.of("webapp-deploy:war exploded"), failedArtifacts);
+            assertTrue(deployedArtifacts.isEmpty(), "Startup fallback must not mark failed deployments as deployed");
+        }
+
+        @Test
+        @DisplayName("non-fatal SEVERE noise on a clean startup does not flip unresolved artifacts to failed")
+        void nonFatalErrorsDoNotPoisonCleanStartup() {
+            contextToArtifact.put("webapp-deploy", "webapp-deploy:war exploded");
+            List<String> failedArtifacts = new ArrayList<>();
+            List<String> deployedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+
+                        @Override
+                        public void onArtifactDeployed(@NotNull String configName, @NotNull String artifactName) {
+                            deployedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    false,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            // Simulate the kind of non-fatal SEVERE noise Tomcat logs on a
+            // healthy startup (JDBC driver de-registration warnings etc.).
+            errorCount.set(3);
+
+            analyzer.analyze("Server startup in 1234 ms", testContext);
+
+            assertEquals(List.of("webapp-deploy:war exploded"), deployedArtifacts,
+                    "Without a summary-failure signal, unresolved artifacts must still be treated as deployed.");
+            assertTrue(failedArtifacts.isEmpty(),
+                    "Generic error counter must not be used as a proxy for deployment failure.");
+        }
     }
 
     @Nested

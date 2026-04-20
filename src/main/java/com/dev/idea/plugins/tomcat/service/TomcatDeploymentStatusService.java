@@ -162,6 +162,15 @@ public final class TomcatDeploymentStatusService {
         refreshDashboard();
     }
 
+    public void onArtifactCancelled(@NotNull String configName, @NotNull String artifactName) {
+        ConfigStatus s = getOrCreate(configName);
+        synchronized (s.lock) {
+            s.artifactStates.put(artifactName, ArtifactState.PENDING);
+            restoreRunningStateIfIdle(s);
+        }
+        refreshDashboard();
+    }
+
     /**
      * Tomcat emitted a server-level deployment-summary failure
      * ("One or more Contexts did not start successfully" or similar) — at

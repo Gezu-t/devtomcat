@@ -39,6 +39,13 @@ public interface TomcatLifecycleListener {
     default void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {}
 
     /**
+     * Deployment of a specific artifact was cancelled by the user.
+     * The artifact should no longer appear in-progress, but this is not a
+     * deployment failure and must not be counted as one.
+     */
+    default void onArtifactCancelled(@NotNull String configName, @NotNull String artifactName) {}
+
+    /**
      * Tomcat emitted a server-level deployment-summary failure such as
      * "One or more Contexts did not start successfully" — something failed but
      * the per-artifact pattern didn't identify which one. Listeners should
@@ -67,6 +74,7 @@ public interface TomcatLifecycleListener {
             @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactDeploying(c, a); }
             @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactDeployed(c, a); }
             @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactFailed(c, a); }
+            @Override public void onArtifactCancelled(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactCancelled(c, a); }
             @Override public void onDeploymentSummaryFailed(@NotNull String c) { for (var l : copy) l.onDeploymentSummaryFailed(c); }
             @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactReloading(c, a); }
             @Override public void onError(@NotNull String c) { for (var l : copy) l.onError(c); }
@@ -86,6 +94,7 @@ public interface TomcatLifecycleListener {
             @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { service.onArtifactDeploying(c, a); }
             @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { service.onArtifactDeployed(c, a); }
             @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { service.onArtifactFailed(c, a); }
+            @Override public void onArtifactCancelled(@NotNull String c, @NotNull String a) { service.onArtifactCancelled(c, a); }
             @Override public void onDeploymentSummaryFailed(@NotNull String c) { service.onDeploymentSummaryFailed(c); }
             @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { service.onArtifactReloading(c, a); }
             @Override public void onError(@NotNull String c) { service.onError(c); }
@@ -125,6 +134,16 @@ public interface TomcatLifecycleListener {
                         if (!e.artifactNames.contains(artifactName)) {
                             e.artifactNames.add(artifactName);
                         }
+                        e.artifactFailure = true;
+                    }
+                }
+            }
+
+            @Override
+            public void onDeploymentSummaryFailed(@NotNull String configName) {
+                synchronized (entryLock) {
+                    TomcatDeploymentHistory.HistoryEntry e = entry;
+                    if (e != null) {
                         e.artifactFailure = true;
                     }
                 }

@@ -176,6 +176,21 @@ class TomcatDeploymentStatusServiceTest {
         }
 
         @Test
+        @DisplayName("onArtifactCancelled clears in-progress state back to PENDING")
+        void artifactCancelled() {
+            service.onServerStarting("cfg");
+            service.onServerStarted("cfg", 1000);
+            service.onArtifactDeploying("cfg", "myapp.war");
+
+            service.onArtifactCancelled("cfg", "myapp.war");
+
+            var status = service.getStatus("cfg");
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState());
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.PENDING,
+                    status.getArtifactStates().get("myapp.war"));
+        }
+
+        @Test
         @DisplayName("onArtifactReloading sets parent to DEPLOYING and artifact to RELOADING")
         void artifactReloading() {
             service.onServerStarting("cfg");
