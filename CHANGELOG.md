@@ -1,5 +1,39 @@
 # DevTomcat Changelog
 
+## [1.0.8]
+
+Resilience release. No new features — every change either reduces the surface area of future bugs or locks in a past fix with an end-to-end test.
+
+### Changed
+- **Minimum IntelliJ version raised to 2025.1.** `pluginSinceBuild=251.29188.11`, compile against 2025.1.7. The 2024.1 permutation added verifier cost without unlocking anything (the 2026.1 dashboard builder API is not available on 2024.1/2025.1 anyway). Halves the verifier matrix and paves the road for the dashboard migration once the floor bumps again.
+- **IntelliJ Platform Gradle Plugin bump deferred** — 2.14.0 requires Gradle 9+, which is a larger migration than this release should carry. Pinned at 2.11.0 for 1.0.8; the Gradle 9 + plugin bump is a dedicated 1.0.9 task.
+- **State machine in `TomcatDeploymentStatusService`** refactored to derive the server state from a single authoritative function (`recomputeServerState`) instead of scattered ad-hoc assignments. Every event handler now updates the per-artifact state, then recomputes. `restoreRunningStateIfIdle` and the duplicated `serverState = …` writes are gone. Invariants are documented in the source.
+- **`DashboardCompat` simplified** — dead speculative-reflection fallbacks removed (the guessed replacement method names never landed on the interface; the real 2026.1 replacement is a parameter-based `updatePresentation` overload, not a new accessor). Kept as a one-file boundary with a concrete migration checklist for the eventual 2026.1 floor bump.
+
+### Fixed
+- **`onDeploymentSummaryFailed` no longer speculatively promotes DEPLOYING/RELOADING artifacts to FAILED.** Real Tomcat emits the summary-failure line while other contexts are still starting; those contexts frequently succeed afterward. Per-artifact failure signals + the `StartupAnalyzer` fallback continue to decide which artifacts actually failed, precisely. Surfaced by the new integration harness running a realistic fixture.
+- **Self-healing for persisted-but-unregistered Tomcat references.** `TomcatServerManagerState.resolveOrAutoRegister` auto-registers a server when its persisted path points to a valid Tomcat install on disk. Fresh IDE installs, VCS-imported projects, and wiped sandbox profiles no longer block Run with a "Persisted Tomcat server is not registered" warning for an install that's physically present. Wired into the UI load path, the launcher, and the pre-launch validator. Broken references (empty path, missing directory, non-Tomcat directory) still block Run with a precise error.
+- **Artifact state stickiness** — per-artifact `FAILED` is now sticky across a late `onArtifactDeployed` for the same artifact within a launch; stickiness also applies across cancellation and reload events.
+
+### Added
+- **Integration test harness** (`TomcatPipelineHarness`) that replays canned Tomcat output through the full `pipeline → lifecycle → status service` chain and asserts the final `ConfigStatus`. Four seed fixtures (clean startup, per-artifact-matched failure, summary-only failure, healthy-with-SEVERE-noise) drive the harness end-to-end. Catches cross-layer regressions that per-analyzer unit tests can't see — the `onDeploymentSummaryFailed` over-promotion bug was found by this harness on its first run.
+
+### Tests
+- Four fixture-driven integration tests in `TomcatPipelineFixtureTest`
+- State-machine invariant tests: summary-failure does NOT promote in-flight artifacts; late deploy after summary-failure lands DEPLOYED; explicit per-artifact FAILED sticks across a later deploy
+- Seven unit tests for `resolveOrAutoRegister`: null input, already-registered no-op, valid-path auto-register with name preservation, empty path, missing path, non-Tomcat directory, idempotent on second call
+
+## [1.0.7]
+
+### Fixed
+- **Debug mode breakpoints** — JDWP agent is now injected directly onto the JVM's VM parameters; the old path via `GenericDebuggerRunner`'s patcher was silently bypassed, so Tomcat launched without the agent and every breakpoint was skipped
+- **Services panel mixed-success-as-success** — a new `ServerDeploymentSummaryFailureAnalyzer` catches Tomcat's summary messages ("One or more Contexts did not start successfully" and peers) and keeps the server state FAILED even when the per-artifact pattern can't name which artifact broke. Signaling is gated on this authoritative signal rather than the generic error counter, so non-fatal SEVERE noise on healthy startups no longer causes false positives
+- **Cancellation vs. failure** — user-cancelled remote deployments reset to PENDING via a new `onArtifactCancelled` hook instead of being sticky-FAILED
+- **Remote deploy failure visibility** — invalid artifacts are filtered up front; manager-connection failures fire `onArtifactFailed` for every configured artifact so the Services tree reflects the failure instead of leaving artifacts stuck in DEPLOYING
+
+### Changed
+- **2026.1 deprecation cleanup** — all 14 `ReadAction.compute(ThrowableComputable)` call sites migrated to a centralised `TomcatReadActions.compute` helper; eliminates the scheduled-for-removal warnings reported by Plugin Verifier against IU-261 while staying source-compatible with 2024.1+
+
 ## [1.0.6]
 
 ### Added

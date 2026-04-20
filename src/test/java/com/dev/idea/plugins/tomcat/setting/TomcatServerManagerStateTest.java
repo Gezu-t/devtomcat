@@ -285,6 +285,112 @@ class TomcatServerManagerStateTest {
         }
     }
 
+    @Nested
+    @DisplayName("resolveOrAutoRegister() — self-heal for persisted-but-unregistered references")
+    class ResolveOrAutoRegister {
+
+        @Test
+        @DisplayName("null persisted returns null without side effects")
+        void nullPersistedReturnsNull() {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+
+            TomcatInfo resolved = state.resolveOrAutoRegister(null);
+
+            assertNull(resolved);
+            assertTrue(state.getTomcatInfos().isEmpty());
+        }
+
+        @Test
+        @DisplayName("already-registered reference resolves without adding a duplicate")
+        void alreadyRegisteredResolvesWithoutDuplicate() {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+            TomcatInfo registered = new TomcatInfo("Tomcat 10", "10.1.28", "/opt/tomcat10");
+            state.addTomcatInfo(registered);
+
+            TomcatInfo resolved = state.resolveOrAutoRegister(registered);
+
+            assertSame(registered, resolved);
+            assertEquals(1, state.getTomcatInfos().size());
+        }
+
+        @Test
+        @DisplayName("valid on-disk path not in registry triggers auto-registration preserving the persisted name")
+        void autoRegistersWhenPathValid(@TempDir Path tempDir) throws IOException {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+            Path tomcatHome = createTomcatHome(tempDir, "Apache Tomcat/11.0.15", "11.0.15");
+            // A persisted reference whose ID does not match any registered server and
+            // whose path was never registered — typical of a fresh IDE / VCS import.
+            TomcatInfo persisted = new TomcatInfo("Tomcat", "11.0.15", tomcatHome.toString());
+            // Drift: give persisted a wrong registered-id so ID lookup can't possibly
+            // match and it has to go through the auto-registration path.
+            state.addTomcatInfo(new TomcatInfo("Unrelated", "9.0.82", "/nope"));
+
+            TomcatInfo resolved = state.resolveOrAutoRegister(persisted);
+
+            assertNotNull(resolved);
+            assertEquals("Tomcat", resolved.getName(),
+                    "Auto-registration must preserve the persisted name so the user keeps their label");
+            assertEquals(tomcatHome.toString(), resolved.getPath());
+            assertEquals(2, state.getTomcatInfos().size(),
+                    "Auto-registration must persist the new server via addTomcatInfo");
+        }
+
+        @Test
+        @DisplayName("empty path returns null without auto-registering")
+        void emptyPathReturnsNull() {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+            TomcatInfo persisted = new TomcatInfo("Tomcat", "11.0.15", "");
+
+            TomcatInfo resolved = state.resolveOrAutoRegister(persisted);
+
+            assertNull(resolved);
+            assertTrue(state.getTomcatInfos().isEmpty(),
+                    "An empty path is not a Tomcat install — must not be auto-registered");
+        }
+
+        @Test
+        @DisplayName("path missing on disk returns null without auto-registering")
+        void missingPathReturnsNull(@TempDir Path tempDir) {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+            TomcatInfo persisted = new TomcatInfo(
+                    "Tomcat", "11.0.15", tempDir.resolve("does-not-exist").toString());
+
+            TomcatInfo resolved = state.resolveOrAutoRegister(persisted);
+
+            assertNull(resolved);
+            assertTrue(state.getTomcatInfos().isEmpty());
+        }
+
+        @Test
+        @DisplayName("path exists but is not a Tomcat install returns null without auto-registering")
+        void pathExistsButNotTomcat(@TempDir Path tempDir) throws IOException {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+            Path notTomcat = Files.createDirectory(tempDir.resolve("some-other-dir"));
+            TomcatInfo persisted = new TomcatInfo("Tomcat", "11.0.15", notTomcat.toString());
+
+            TomcatInfo resolved = state.resolveOrAutoRegister(persisted);
+
+            assertNull(resolved,
+                    "A directory with no catalina.jar is not a Tomcat install — must not be auto-registered");
+            assertTrue(state.getTomcatInfos().isEmpty());
+        }
+
+        @Test
+        @DisplayName("auto-registered entry is resolvable by path on subsequent calls")
+        void subsequentCallsResolveWithoutReRegistering(@TempDir Path tempDir) throws IOException {
+            TomcatServerManagerState state = new TomcatServerManagerState();
+            Path tomcatHome = createTomcatHome(tempDir, "Apache Tomcat/11.0.15", "11.0.15");
+            TomcatInfo persisted = new TomcatInfo("Tomcat", "11.0.15", tomcatHome.toString());
+
+            TomcatInfo first = state.resolveOrAutoRegister(persisted);
+            TomcatInfo second = state.resolveOrAutoRegister(persisted);
+
+            assertNotNull(first);
+            assertSame(first, second, "Second call must resolve the already-auto-registered instance, not add another");
+            assertEquals(1, state.getTomcatInfos().size());
+        }
+    }
+
     private static Path createTomcatHome(Path tempDir, String serverInfo, String serverNumber) throws IOException {
         Path tomcatHome = Files.createDirectory(tempDir.resolve("apache-tomcat"));
         Path catalinaJar = tomcatHome.resolve("lib").resolve("catalina.jar");

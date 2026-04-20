@@ -8,7 +8,7 @@ import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -257,7 +257,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // read action so the snapshot is internally consistent. After this call every value
         // is a plain Java object (Module reference + String maps/lists); no further model
         // access is needed and no threading constraint applies to the rest of this method.
-        ArtifactModelSnapshot snapshot = ReadAction.compute(
+        ArtifactModelSnapshot snapshot = TomcatReadActions.compute(
                 () -> collectModelSnapshot(artifact, project));
         if (snapshot == null) {
             LOG.info("No module found for artifact '" + artifact.getName() + "', skipping extra classpath");
@@ -721,7 +721,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * <p><strong>Must be called under a read action</strong> — all accessed APIs
      * (ArtifactManager, ModuleManager, ModuleRootManager) require one.
      * The sole caller is {@link #collectModelSnapshot}, which is always invoked
-     * inside {@code ReadAction.compute()}.
+     * inside {@link TomcatReadActions#compute}.
      */
     @Nullable
     private static Module resolveModuleForArtifact(@NotNull DeploymentArtifact artifact,

@@ -293,7 +293,7 @@ public class TomcatJavaParametersBuilder {
                     + " Open the run configuration and select a server from Application Servers.");
         }
 
-        TomcatInfo resolved = TomcatServerManagerState.getInstance().resolve(persisted);
+        TomcatInfo resolved = TomcatServerManagerState.getInstance().resolveOrAutoRegister(persisted);
         if (resolved == null) {
             String name = !persisted.getName().isEmpty() ? persisted.getName() : "(unnamed)";
             String path = persisted.getPath();

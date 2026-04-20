@@ -115,11 +115,25 @@ public class ApplicationServerSection implements ConfigurationSection {
             return;
         }
 
-        TomcatInfo resolved = TomcatServerManagerState.getInstance().resolve(persisted);
+        TomcatInfo resolved = TomcatServerManagerState.getInstance().resolveOrAutoRegister(persisted);
         if (resolved != null) {
             // Select the canonical live instance. If the persisted reference had a
             // drifted ID, applyTo() will write back the canonical one next time the
             // user hits Apply — self-healing reconciliation.
+            //
+            // resolveOrAutoRegister may have just added a brand-new entry for a
+            // persisted-but-unregistered Tomcat; our combo was populated from
+            // loadConfiguration() before that, so top it up now.
+            boolean present = false;
+            for (int i = 0; i < serverComboBox.getItemCount(); i++) {
+                if (Objects.equals(serverComboBox.getItemAt(i), resolved)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) {
+                serverComboBox.addItem(resolved);
+            }
             serverComboBox.setSelectedItem(resolved);
             return;
         }

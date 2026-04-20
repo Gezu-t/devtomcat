@@ -6,7 +6,7 @@ fun prop(key: String): String = project.findProperty(key)?.toString()
 
 plugins {
     id("java")
-    id("org.jetbrains.intellij.platform") version "2.14.0"
+    id("org.jetbrains.intellij.platform") version "2.11.0"
 }
 
 group = prop("pluginGroup")

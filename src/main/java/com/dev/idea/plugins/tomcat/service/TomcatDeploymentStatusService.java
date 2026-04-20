@@ -10,6 +10,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 
 /**
  * Project-level service that tracks live deployment status for each Tomcat run configuration.
@@ -116,17 +117,30 @@ public final class TomcatDeploymentStatusService {
     }
 
     // --- State transitions called by TomcatProcessHandler ---
+    //
+    // Invariants enforced by this section:
+    //   1. Server state is DERIVED, not SET, except for the terminal STOPPED
+    //      state written by onServerStopped. Every handler updates the
+    //      per-artifact state, then calls recomputeServerState(s) which is
+    //      the only authority for STARTING / DEPLOYING / RUNNING / FAILED.
+    //   2. onDeploymentSummaryFailed never touches artifact state. Tomcat
+    //      emits this summary while other contexts are still starting up,
+    //      so DEPLOYING is not implicit evidence of failure. Per-artifact
+    //      analyzer signals and the StartupAnalyzer fallback in the output
+    //      pipeline decide which artifacts actually failed.
+    //   3. Per-artifact FAILED is sticky within a launch. Launch boundaries
+    //      (onServerStarting) are the only place artifact state is reset.
 
     public void onServerStarting(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            s.serverState = ServerState.STARTING;
             s.errorCount.set(0);
             s.warningCount.set(0);
             s.startupComplete = false;
             s.startupTimeMs = 0;
             s.artifactStates.clear();
             s.deploymentSummaryFailed = false;
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -134,10 +148,8 @@ public final class TomcatDeploymentStatusService {
     public void onArtifactDeploying(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            if (!hasFailedArtifacts(s)) {
-                s.serverState = ServerState.DEPLOYING;
-            }
-            s.artifactStates.put(artifactName, ArtifactState.DEPLOYING);
+            s.artifactStates.merge(artifactName, ArtifactState.DEPLOYING, EXISTING_FAILED_WINS);
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -145,10 +157,11 @@ public final class TomcatDeploymentStatusService {
     public void onArtifactDeployed(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            // Don't overwrite FAILED — an artifact that failed deployment stays failed
-            s.artifactStates.merge(artifactName, ArtifactState.DEPLOYED,
-                    (existing, incoming) -> existing == ArtifactState.FAILED ? existing : incoming);
-            restoreRunningStateIfIdle(s);
+            // An artifact that has already been marked FAILED within this launch
+            // stays FAILED — a late "has finished" message cannot erase an
+            // explicit per-artifact failure signal.
+            s.artifactStates.merge(artifactName, ArtifactState.DEPLOYED, EXISTING_FAILED_WINS);
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -157,7 +170,7 @@ public final class TomcatDeploymentStatusService {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
             s.artifactStates.put(artifactName, ArtifactState.FAILED);
-            s.serverState = ServerState.FAILED;
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -165,8 +178,9 @@ public final class TomcatDeploymentStatusService {
     public void onArtifactCancelled(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            s.artifactStates.put(artifactName, ArtifactState.PENDING);
-            restoreRunningStateIfIdle(s);
+            // FAILED is sticky for the launch; a cancel does not undo an explicit failure.
+            s.artifactStates.merge(artifactName, ArtifactState.PENDING, EXISTING_FAILED_WINS);
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -174,29 +188,23 @@ public final class TomcatDeploymentStatusService {
     /**
      * Tomcat emitted a server-level deployment-summary failure
      * ("One or more Contexts did not start successfully" or similar) — at
-     * least one artifact failed but the per-artifact pattern matcher couldn't
-     * identify which. Without this hook the sticky-FAILED-on-per-artifact
-     * path never fires and the server state is restored to RUNNING by
-     * {@link #restoreRunningStateIfIdle}, leaving the Services panel
-     * reporting all-green for a partially-broken deployment — the exact bug
-     * we were seeing with mixed success/failure showing as success.
+     * least one artifact failed, possibly one the per-artifact regex did not
+     * identify. Flips the server state to FAILED via the sticky
+     * {@code deploymentSummaryFailed} flag.
+     *
+     * <p>This handler intentionally does NOT mutate per-artifact state.
+     * Real Tomcat emits the summary line while other contexts are still
+     * starting up, so DEPLOYING/RELOADING is not implicit evidence of
+     * failure; those artifacts frequently deploy successfully afterward.
+     * Per-artifact analyzer signals ({@link #onArtifactFailed}) and the
+     * {@code StartupAnalyzer} unresolved-artifact fallback in the output
+     * pipeline decide which artifacts actually failed, precisely.
      */
     public void onDeploymentSummaryFailed(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
             s.deploymentSummaryFailed = true;
-            s.serverState = ServerState.FAILED;
-            // Any artifact still in DEPLOYING/RELOADING when the server says
-            // the deployment failed is a victim of the failure — promote them
-            // to FAILED so the Services tree renders them correctly. Already-
-            // DEPLOYED artifacts stay DEPLOYED because they truly succeeded
-            // before the failure was declared.
-            for (Map.Entry<String, ArtifactState> entry : s.artifactStates.entrySet()) {
-                ArtifactState current = entry.getValue();
-                if (current == ArtifactState.DEPLOYING || current == ArtifactState.RELOADING) {
-                    entry.setValue(ArtifactState.FAILED);
-                }
-            }
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -204,10 +212,8 @@ public final class TomcatDeploymentStatusService {
     public void onArtifactReloading(@NotNull String configName, @NotNull String artifactName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            if (!hasFailedArtifacts(s)) {
-                s.serverState = ServerState.DEPLOYING;
-            }
-            s.artifactStates.put(artifactName, ArtifactState.RELOADING);
+            s.artifactStates.merge(artifactName, ArtifactState.RELOADING, EXISTING_FAILED_WINS);
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -217,7 +223,7 @@ public final class TomcatDeploymentStatusService {
         synchronized (s.lock) {
             s.startupComplete = true;
             s.startupTimeMs = startupTimeMs;
-            restoreRunningStateIfIdle(s);
+            s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
     }
@@ -291,22 +297,67 @@ public final class TomcatDeploymentStatusService {
         }
     }
 
-    private static void restoreRunningStateIfIdle(@NotNull ConfigStatus status) {
-        if (hasFailedArtifacts(status) || status.deploymentSummaryFailed) {
-            status.serverState = ServerState.FAILED;
-            return;
+    /**
+     * Merge function used by {@link Map#merge} when an event handler wants to
+     * update an artifact's state but must not erase an explicit per-artifact
+     * failure that already occurred within the current launch.
+     *
+     * <p>Rule: if the artifact is already {@link ArtifactState#FAILED}, the
+     * existing value wins; otherwise the incoming value is written.
+     * {@link #onArtifactFailed} is the one handler that bypasses this — an
+     * explicit failure signal is authoritative and always writes
+     * {@code FAILED} directly via {@code put}.
+     */
+    private static final BiFunction<ArtifactState, ArtifactState, ArtifactState> EXISTING_FAILED_WINS =
+            (existing, incoming) -> existing == ArtifactState.FAILED ? existing : incoming;
+
+    /**
+     * Single authority for deriving the {@link ServerState} from a
+     * {@link ConfigStatus}'s current facts. Every mutating handler (except
+     * {@link #onServerStopped}, which writes terminal states directly)
+     * updates the per-artifact state and then calls this method to set
+     * {@code serverState}, so the derivation logic lives in one place.
+     *
+     * <p>Priority order (highest first):
+     * <ol>
+     *   <li>{@link ServerState#FAILED} — any explicit per-artifact failure
+     *       OR the sticky {@code deploymentSummaryFailed} flag is set.
+     *       Failure dominates every other observation until
+     *       {@link #onServerStarting} resets the launch.</li>
+     *   <li>{@link ServerState#DEPLOYING} — at least one artifact is
+     *       {@code DEPLOYING} or {@code RELOADING}. The server is mid-launch.</li>
+     *   <li>{@link ServerState#RUNNING} — Tomcat reported "Server startup in
+     *       N ms" and no artifact is still in-flight and no failure is known.</li>
+     *   <li>{@link ServerState#STARTING} — default when a launch is in progress
+     *       but no artifact-level work has begun yet.</li>
+     * </ol>
+     *
+     * <p>Caller must hold {@code status.lock}.
+     */
+    private static @NotNull ServerState recomputeServerState(@NotNull ConfigStatus status) {
+        if (status.deploymentSummaryFailed || hasFailedArtifacts(status)) {
+            return ServerState.FAILED;
         }
-        if (!status.startupComplete) {
-            return;
+        if (hasInFlightArtifacts(status)) {
+            return ServerState.DEPLOYING;
         }
-        boolean deploymentInProgress = status.artifactStates.values().stream().anyMatch(
-                state -> state == ArtifactState.DEPLOYING || state == ArtifactState.RELOADING);
-        if (!deploymentInProgress) {
-            status.serverState = ServerState.RUNNING;
+        if (status.startupComplete) {
+            return ServerState.RUNNING;
         }
+        // Launch still underway. If we've observed any artifact activity we
+        // stay on {@code DEPLOYING} rather than regress to {@code STARTING}
+        // during the gap between the last artifact's completion line and
+        // Tomcat's final "Server startup in N ms" line — the user should
+        // never see the label walk backwards.
+        return status.artifactStates.isEmpty() ? ServerState.STARTING : ServerState.DEPLOYING;
     }
 
     private static boolean hasFailedArtifacts(@NotNull ConfigStatus status) {
         return status.artifactStates.values().stream().anyMatch(state -> state == ArtifactState.FAILED);
+    }
+
+    private static boolean hasInFlightArtifacts(@NotNull ConfigStatus status) {
+        return status.artifactStates.values().stream().anyMatch(
+                state -> state == ArtifactState.DEPLOYING || state == ArtifactState.RELOADING);
     }
 }

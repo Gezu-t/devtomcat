@@ -28,7 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 
 public class ArtifactSelectionHandler {
@@ -221,7 +221,7 @@ public class ArtifactSelectionHandler {
      */
     private Set<String> detectPomModuleNames() {
         try {
-            return ReadAction.compute(() -> {
+            return TomcatReadActions.compute(() -> {
                 Set<String> pomNames = new HashSet<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     for (VirtualFile root :
@@ -303,7 +303,7 @@ public class ArtifactSelectionHandler {
 
             // artifactManager.getArtifacts() accesses the project model —
             // snapshot the names+refs under a read action, then filter outside.
-            List<Artifact> allPlatformArtifacts = ReadAction.compute(
+            List<Artifact> allPlatformArtifacts = TomcatReadActions.compute(
                     () -> List.of(artifactManager.getArtifacts()));
 
             // Show ALL IntelliJ artifacts (not just web-typed), because Community Edition
@@ -478,7 +478,7 @@ public class ArtifactSelectionHandler {
     @NotNull
     private Set<String> getActiveModuleNames() {
         try {
-            return ReadAction.compute(() -> {
+            return TomcatReadActions.compute(() -> {
                 Set<String> names = new HashSet<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     names.add(module.getName().toLowerCase());
@@ -512,7 +512,7 @@ public class ArtifactSelectionHandler {
         if (artifactManager == null) return null;
 
         try {
-            Artifact[] allArtifacts = ReadAction.compute(artifactManager::getArtifacts);
+            Artifact[] allArtifacts = TomcatReadActions.compute(artifactManager::getArtifacts);
             for (Artifact artifact : allArtifacts) {
                 if (artifact.getName().equals(name)) {
                     return artifact;

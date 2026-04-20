@@ -53,11 +53,22 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.0.8</h3>
+    <p>Resilience release — no new features; every change either reduces the surface area of future bugs or locks in a past fix with an end-to-end test.</p>
+    <ul>
+        <li><b>Minimum IntelliJ version raised to 2025.1</b> — <code>pluginSinceBuild</code> 241 → 251, compile against 2025.1.7. Halves the verifier matrix without losing any capability (the 2026.1 dashboard builder API is not reachable from 2024.1/2025.1 anyway).</li>
+        <li><b>Services-panel state machine tightened</b> — server state is now derived from a single authoritative function instead of scattered ad-hoc writes. Eliminates a class of regressions where fixing one handler broke another. The old over-aggressive "summary failure promotes every in-flight artifact to FAILED" behaviour is gone: real Tomcat emits that summary while later-successful contexts are still starting, and those contexts now show their true DEPLOYED state.</li>
+        <li><b>Self-healing for persisted-but-unregistered Tomcat references</b> — when a run config references a Tomcat install that exists on disk but isn't in Application Servers (fresh IDE, VCS-imported project, wiped sandbox), the plugin now auto-registers it on first access instead of blocking Run. Broken references (missing directory, non-Tomcat path) still block with a clear error.</li>
+        <li><b>Integration test harness</b> — canned Tomcat output fixtures now drive the full pipeline → lifecycle → status-service chain end-to-end, so cross-layer regressions can't hide behind analyzer-level unit tests.</li>
+        <li><b>Dashboard compat boundary simplified</b> — dead speculative-reflection fallbacks removed; kept as a one-file boundary with a concrete migration checklist for the next floor bump.</li>
+    </ul>
+
     <h3>Version 1.0.7</h3>
     <ul>
-        <li><b>Debug mode now actually hits breakpoints</b> — the JDWP agent is injected directly onto the JVM's VM parameters in <code>TomcatJavaParametersBuilder</code> instead of relying on <code>GenericDebuggerRunner</code>'s patcher, which was being bypassed because <code>TomcatDebugger.doExecute()</code> skips <code>super.doExecute()</code>. Port sourced from the command-line state's resolved debug port so the agent and the <code>RemoteConnection</code> attach agree on a single port even under conflict resolution.</li>
-        <li><b>Services panel now reports mixed deployment failures correctly</b> — a new <code>ServerDeploymentSummaryFailureAnalyzer</code> catches Tomcat's server-level summary messages ("One or more Contexts did not start successfully" and similar) and marks the server state as FAILED even when the per-artifact pattern matcher can't identify which artifact failed. Previously a partial-failure deployment would flip back to RUNNING via <code>restoreRunningStateIfIdle</code> and the Services panel rendered all-green for a broken config.</li>
-        <li><b>Regression coverage</b> — JDWP agent injection round-trip; server-level summary dedup + ignore-unrelated tests; sticky-FAILED across <code>onServerStarted</code>; in-flight DEPLOYING/RELOADING artifacts auto-promoted to FAILED on summary failure; flag cleared on next launch.</li>
+        <li><b>Debug mode breakpoints</b> — JDWP agent is injected directly onto the JVM's VM parameters; the old path via <code>GenericDebuggerRunner</code>'s patcher was silently bypassed.</li>
+        <li><b>Services panel mixed-success-as-success</b> — a new summary-failure analyzer catches Tomcat's "One or more Contexts did not start successfully" messages and keeps the server state FAILED even when the per-artifact pattern can't name which artifact broke. Signaling is gated on this authoritative signal, not the generic error counter, so non-fatal SEVERE noise on healthy startups no longer causes false positives.</li>
+        <li><b>Cancellation vs. failure</b> — user-cancelled remote deployments reset to PENDING instead of sticky-FAILED; manager-connection failures now mark every configured artifact as FAILED instead of leaving them stuck in DEPLOYING.</li>
+        <li><b>2026.1 deprecation cleanup</b> — 14 <code>ReadAction.compute</code> call sites migrated to a centralised helper; eliminates the scheduled-for-removal warnings against IU-261 while staying source-compatible with 2024.1+.</li>
     </ul>
 
     <h3>Version 1.0.6</h3>

@@ -1,0 +1,11 @@
+21-Apr-2026 15:30:10.100 INFO [main] org.apache.catalina.startup.VersionLoggerListener.log Server version name: Apache Tomcat/11.0.15
+21-Apr-2026 15:30:11.200 INFO [main] org.apache.catalina.startup.HostConfig.deployDescriptor Deploying deployment descriptor [/Users/dev/apache-tomcat-11.0.15/conf/Catalina/localhost/webapp-deploy.xml]
+21-Apr-2026 15:30:12.500 SEVERE [main] org.apache.catalina.core.ContainerBase.addChildInternal ContainerBase.addChild: start: org.apache.catalina.LifecycleException: A child container failed during start
+21-Apr-2026 15:30:12.500 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal One or more listeners failed to start. Full details will be found in the appropriate container log file
+21-Apr-2026 15:30:12.505 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal Context [/webapp-deploy] startup failed due to previous errors
+21-Apr-2026 15:30:12.510 SEVERE [main] org.apache.catalina.startup.HostConfig.deployDescriptor Error deploying deployment descriptor [/Users/dev/apache-tomcat-11.0.15/conf/Catalina/localhost/webapp-deploy.xml]
+21-Apr-2026 15:30:12.515 INFO [main] org.apache.catalina.startup.HostConfig.deployDescriptor Deploying deployment descriptor [/Users/dev/apache-tomcat-11.0.15/conf/Catalina/localhost/webapp-features.xml]
+21-Apr-2026 15:30:14.380 INFO [main] org.apache.catalina.startup.HostConfig.deployDescriptor Deployment of deployment descriptor [/Users/dev/apache-tomcat-11.0.15/conf/Catalina/localhost/webapp-features.xml] has finished in [1,865] ms
+21-Apr-2026 15:30:14.385 INFO [main] org.apache.catalina.startup.HostConfig.deployDescriptor Deploying deployment descriptor [/Users/dev/apache-tomcat-11.0.15/conf/Catalina/localhost/webapp-portal.xml]
+21-Apr-2026 15:30:16.250 INFO [main] org.apache.catalina.startup.HostConfig.deployDescriptor Deployment of deployment descriptor [/Users/dev/apache-tomcat-11.0.15/conf/Catalina/localhost/webapp-portal.xml] has finished in [1,865] ms
+21-Apr-2026 15:30:16.400 INFO [main] org.apache.catalina.startup.Catalina.start Server startup in [6,300] milliseconds

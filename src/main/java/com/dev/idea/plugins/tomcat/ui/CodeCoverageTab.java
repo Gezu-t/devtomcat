@@ -6,7 +6,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.PackageChooserDialog;
 import com.intellij.ide.util.TreeClassChooser;
 import com.intellij.ide.util.TreeClassChooserFactory;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
@@ -160,7 +160,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         chooser.showDialog();
         PsiClass selected = chooser.getSelected();
         if (selected == null) return;
-        String fqn = ReadAction.compute(selected::getQualifiedName);
+        String fqn = TomcatReadActions.compute(selected::getQualifiedName);
         if (fqn == null || fqn.isEmpty()) return;
         insertPattern(isInclude, fqn);
     }
@@ -181,7 +181,7 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         if (!dialog.showAndGet()) return;
         PsiPackage selected = dialog.getSelectedPackage();
         if (selected == null) return;
-        String fqn = ReadAction.compute(selected::getQualifiedName);
+        String fqn = TomcatReadActions.compute(selected::getQualifiedName);
         if (fqn == null) return;
         if (fqn.isEmpty()) {
             int choice = Messages.showYesNoDialog(

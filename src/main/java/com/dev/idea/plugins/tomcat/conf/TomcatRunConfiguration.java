@@ -24,7 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.RunManagerEx;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
@@ -334,7 +334,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 // ArtifactManager.getInstance() and getArtifacts() both access the
                 // project model and require a read action. The read action covers
                 // only model access; list mutations happen outside.
-                List<Artifact> matchedArtifacts = ReadAction.compute(() -> {
+                List<Artifact> matchedArtifacts = TomcatReadActions.compute(() -> {
                     ArtifactManager artifactManager = ArtifactManager.getInstance(project);
                     if (deploymentArtifacts == null || deploymentArtifacts.isEmpty()) {
                         return Collections.<Artifact>emptyList();

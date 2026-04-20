@@ -480,8 +480,8 @@ class TomcatDeploymentStatusServiceTest {
         }
 
         @Test
-        @DisplayName("promotes in-flight DEPLOYING/RELOADING artifacts to FAILED")
-        void promotesInFlightArtifacts() {
+        @DisplayName("does not speculatively promote in-flight artifacts to FAILED")
+        void doesNotPromoteInFlightArtifacts() {
             service.onServerStarting("cfg");
             service.onArtifactDeploying("cfg", "app-a");
             service.onArtifactDeploying("cfg", "app-b");
@@ -491,12 +491,49 @@ class TomcatDeploymentStatusServiceTest {
 
             var status = service.getStatus("cfg");
             assertNotNull(status);
-            // app-a was still DEPLOYING when the summary failure fired — it's a
-            // victim of the failure. app-b completed earlier so it stays DEPLOYED.
-            assertEquals(TomcatDeploymentStatusService.ArtifactState.FAILED,
-                    status.getArtifactStates().get("app-a"));
+            // Real Tomcat emits the summary-failure line while other contexts
+            // are still starting up — those contexts can legitimately succeed
+            // afterward. Per-artifact failure signals (onArtifactFailed) and
+            // the StartupAnalyzer fallback decide which artifacts truly failed.
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.DEPLOYING,
+                    status.getArtifactStates().get("app-a"),
+                    "app-a was still in-flight; summary-failure must not speculatively mark it FAILED");
             assertEquals(TomcatDeploymentStatusService.ArtifactState.DEPLOYED,
                     status.getArtifactStates().get("app-b"));
+            // The sticky flag surfaces on the server state instead.
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState());
+        }
+
+        @Test
+        @DisplayName("summary failure + later explicit per-artifact success lands artifact DEPLOYED, server FAILED")
+        void lateDeployedAfterSummaryFailure() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "app-a");
+            service.onDeploymentSummaryFailed("cfg");
+            service.onArtifactDeployed("cfg", "app-a");
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.DEPLOYED,
+                    status.getArtifactStates().get("app-a"),
+                    "A later per-artifact success after summary-failure must not be masked — it was a real success");
+            assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState(),
+                    "Server stays FAILED via the sticky deploymentSummaryFailed flag");
+        }
+
+        @Test
+        @DisplayName("summary failure + explicit per-artifact FAILED is sticky across a later success for same artifact")
+        void perArtifactFailureStickyAcrossLaterSuccess() {
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "app-a");
+            service.onArtifactFailed("cfg", "app-a");
+            service.onArtifactDeployed("cfg", "app-a");
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.FAILED,
+                    status.getArtifactStates().get("app-a"),
+                    "An explicit per-artifact failure is authoritative — a later deploy message cannot erase it");
         }
 
         @Test

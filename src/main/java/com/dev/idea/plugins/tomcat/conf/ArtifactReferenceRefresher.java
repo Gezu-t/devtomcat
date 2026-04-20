@@ -3,7 +3,7 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
@@ -119,7 +119,7 @@ public final class ArtifactReferenceRefresher {
     public static RefreshResult refresh(@NotNull TomcatRunConfiguration config) {
         Objects.requireNonNull(config, "Configuration cannot be null");
 
-        PlatformArtifactSnapshot[] snapshots = ReadAction.compute(
+        PlatformArtifactSnapshot[] snapshots = TomcatReadActions.compute(
                 () -> collectArtifactSnapshots(config.getProject()));
 
         if (snapshots == null || snapshots.length == 0) {
@@ -152,7 +152,7 @@ public final class ArtifactReferenceRefresher {
             return RefreshResult.EMPTY;
         }
 
-        PlatformArtifactSnapshot[] snapshots = ReadAction.compute(
+        PlatformArtifactSnapshot[] snapshots = TomcatReadActions.compute(
                 () -> collectArtifactSnapshots(project));
 
         if (snapshots == null || snapshots.length == 0) {

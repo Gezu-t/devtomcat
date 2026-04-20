@@ -5,7 +5,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.intellij.coverage.CoverageSuite;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.coverage.JavaCoverageEnabledConfiguration;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
 public class CoverageAgentAttacherPlatformTest extends BasePlatformTestCase {
@@ -22,7 +22,7 @@ public class CoverageAgentAttacherPlatformTest extends BasePlatformTestCase {
     public void testAttachSucceedsInsideReadActionAndKeepsCurrentSuite() {
         TomcatRunConfiguration config = createConfig("Coverage");
 
-        JavaParameters params = ReadAction.compute(() -> {
+        JavaParameters params = TomcatReadActions.compute(() -> {
             JavaParameters javaParameters = new JavaParameters();
             CoverageAgentAttacher.attach(config, javaParameters);
             return javaParameters;

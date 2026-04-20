@@ -255,6 +255,58 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     }
 
     /**
+     * {@link #resolve} with a self-healing fallback: when the persisted
+     * reference does not match any registered server, but its {@code path}
+     * points to a valid Tomcat installation on disk, auto-register the
+     * installation and return the newly-registered instance.
+     *
+     * <p>This is the default resolver for code paths that can tolerate —
+     * and benefit from — self-healing: UI load, pre-launch validation, and
+     * the launcher itself. Fresh IDE installs, VCS-imported projects, and
+     * wiped sandbox profiles no longer demand a manual "add server" step as
+     * long as the referenced Tomcat install is actually present on disk.
+     *
+     * <p>No-op when the path is empty, missing, or not a valid Tomcat
+     * installation (no {@code catalina.jar}); in those cases the method
+     * returns {@code null} exactly like {@link #resolve}, so validators
+     * can still surface a useful error.
+     *
+     * <p>When auto-registration happens, the new instance is persisted via
+     * the normal {@link #addTomcatInfo} path and is immediately returned —
+     * subsequent calls will find it via {@link #resolve}'s path / ID tiers.
+     *
+     * @param persisted the embedded reference (may be null)
+     * @return a registered instance when one exists or was auto-registered;
+     *         {@code null} when neither resolution nor auto-registration is
+     *         possible
+     */
+    @Nullable
+    public TomcatInfo resolveOrAutoRegister(@Nullable TomcatInfo persisted) {
+        TomcatInfo resolved = resolve(persisted);
+        if (resolved != null) return resolved;
+        if (persisted == null) return null;
+
+        String path = persisted.getPath();
+        if (path.isEmpty()) return null;
+
+        // Preserve the persisted name when present so auto-registration
+        // doesn't silently rename a server the user had already labelled.
+        UnaryOperator<String> nameGenerator = persisted.getName().isEmpty()
+                ? null
+                : ignored -> persisted.getName();
+        Optional<TomcatInfo> created = tryCreateTomcatInfo(path, nameGenerator);
+        if (created.isEmpty()) return null;
+
+        TomcatInfo toAdd = created.get();
+        addTomcatInfo(toAdd);
+        LOG.info("Auto-registered Tomcat server from persisted reference"
+                + " (name=" + persisted.getName()
+                + ", path=" + path + ")"
+                + " — self-heal for fresh install / imported project.");
+        return toAdd;
+    }
+
+    /**
      * Path match with three tiers (exact → normalized → {@link Files#isSameFile}).
      * Kept private so callers flow through {@link #resolve}.
      */

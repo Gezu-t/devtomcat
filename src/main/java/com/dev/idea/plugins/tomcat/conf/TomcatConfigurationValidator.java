@@ -10,7 +10,7 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.dev.idea.plugins.tomcat.utils.PortValidator;
         import com.intellij.execution.configurations.RuntimeConfigurationException;
         import com.intellij.execution.configurations.RuntimeConfigurationWarning;
-        import com.intellij.openapi.application.ReadAction;
+        import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
         import com.intellij.openapi.diagnostic.Logger;
         import com.intellij.openapi.util.text.StringUtil;
         import com.intellij.packaging.artifacts.Artifact;
@@ -114,7 +114,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     LOG.debug("Skipping registration check: service unavailable", t);
                     return;
                 }
-                TomcatInfo resolved = state.resolve(persisted);
+                TomcatInfo resolved = state.resolveOrAutoRegister(persisted);
                 if (resolved == null) {
                     String name = persisted.getName();
                     String path = persisted.getPath();
@@ -292,7 +292,7 @@ package com.dev.idea.plugins.tomcat.conf;
             // then validate outside.
             Set<String> platformArtifactNames;
             try {
-                platformArtifactNames = ReadAction.compute(() -> {
+                platformArtifactNames = TomcatReadActions.compute(() -> {
                     ArtifactManager artifactManager =
                             ArtifactManager.getInstance(config.getProject());
                     Artifact[] platformArtifacts = artifactManager.getArtifacts();

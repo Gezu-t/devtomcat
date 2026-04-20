@@ -11,6 +11,7 @@ import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.ConfigExportImport;
 import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentTableManager;
@@ -29,7 +30,6 @@ import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.ui.Messages;
@@ -311,7 +311,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
             ArtifactManager artifactMgr = null;
             try {
-                artifactMgr = ReadAction.compute(() -> ArtifactManager.getInstance(project));
+                artifactMgr = TomcatReadActions.compute(() -> ArtifactManager.getInstance(project));
                 LOG.info("DevTomcat: ArtifactManager obtained: " + (artifactMgr != null));
             } catch (Throwable t) {
                 LOG.warn("DevTomcat: ArtifactManager not available: " + t.getMessage());
@@ -725,7 +725,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (tabbedPane == null) return;
 
         try {
-            ArtifactManager artifactManager = ReadAction.compute(
+            ArtifactManager artifactManager = TomcatReadActions.compute(
                     () -> ArtifactManager.getInstance(project));
             syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
         } catch (Throwable t) {
@@ -836,7 +836,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     @Nullable
     private Artifact findMatchingArtifact(@Nullable DeploymentArtifact deployment,
                                           @NotNull ArtifactManager artifactManager) {
-        Artifact[] allArtifacts = ReadAction.compute(artifactManager::getArtifacts);
+        Artifact[] allArtifacts = TomcatReadActions.compute(artifactManager::getArtifacts);
         return ArtifactMatchingUtils.findMatchingArtifact(allArtifacts, deployment, LOG);
     }
 
