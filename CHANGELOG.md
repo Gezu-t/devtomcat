@@ -1,5 +1,20 @@
 # DevTomcat Changelog
 
+## [1.0.9]
+
+Structural cleanup release. Smaller, more testable units behind the launcher; a long-standing URL bug fixed in the Services tree.
+
+### Changed
+- **Port resolution extracted from `TomcatJavaParametersBuilder`.** The 3-stage algorithm (defaults → internal duplicates → external conflicts) now lives in a focused, package-private `PortResolver`. The builder's `build()` method is one line shorter and one responsibility lighter; the resolver is independently unit-testable without standing up the rest of the launch pipeline.
+
+### Fixed
+- **Services tree URL ignored HTTPS.** Even with HTTPS enabled, the artifact URL displayed (and opened on click) was always `http://localhost:<httpPort>/...`. The URL now uses `https://` and the configured (or live-resolved) HTTPS port when HTTPS is enabled, matching the connector the user actually intended. Falls back to HTTP when HTTPS is disabled or the HTTPS port hasn't been resolved.
+
+### Tests
+- New `PortResolverTest` — 7 cases covering pre-resolved pass-through, internal port conflicts, externally bound ports, and per-connector resolution gating.
+- Existing `TomcatJavaParametersBuilderTest` slimmed to the JDWP injection cases that genuinely belong there.
+- New HTTPS coverage in `TomcatDeploymentNodeTest` — `formatUrl` and `formatTooltip` exercised with `https=true`.
+
 ## [1.0.8]
 
 Resilience release. No new features — every change either reduces the surface area of future bugs or locks in a past fix with an end-to-end test.

@@ -20,20 +20,24 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  * Represents a deployed artifact as a child node in the Services tool window tree.
  * Mirrors IntelliJ Ultimate's behavior of showing artifacts under the server node.
  *
- * <p>Double-clicking the node opens the artifact in the browser using
- * its context path and configured HTTP port (via inherited {@code Navigatable}).
+ * <p>Double-clicking the node opens the artifact in the browser using its
+ * context path and the resolved scheme/port — HTTPS when the configuration
+ * (or live process) has HTTPS enabled, HTTP otherwise.
  */
 public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
-    private final int httpPort;
+    private final boolean https;
+    private final int port;
     private final String configurationName;
 
     public TomcatDeploymentNode(@NotNull Project project,
                                  @NotNull DeploymentArtifact artifact,
-                                 int httpPort,
+                                 boolean https,
+                                 int port,
                                  @Nullable String configurationName) {
         super(project, artifact);
-        this.httpPort = httpPort > 0 ? httpPort : Integer.parseInt(DEFAULT_PORT);
+        this.https = https;
+        this.port = port > 0 ? port : Integer.parseInt(DEFAULT_PORT);
         this.configurationName = configurationName;
     }
 
@@ -115,36 +119,36 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
     @NotNull
     private String buildTooltip(@NotNull DeploymentArtifact artifact) {
-        return formatTooltip(artifact, httpPort);
+        return formatTooltip(artifact, https, port);
     }
 
     @NotNull
     private String buildUrl(@NotNull DeploymentArtifact artifact) {
-        return formatUrl(artifact, httpPort);
+        return formatUrl(artifact, https, port);
     }
 
     /** Builds the tooltip text for a deployment node. Package-visible for testing. */
     @NotNull
-    static String formatTooltip(@NotNull DeploymentArtifact artifact, int httpPort) {
+    static String formatTooltip(@NotNull DeploymentArtifact artifact, boolean https, int port) {
         StringBuilder sb = new StringBuilder();
         sb.append(artifact.getDisplayName());
         String typeBadge = DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
                 ? " (Exploded)" : " (WAR)";
         sb.append(typeBadge);
-        if (httpPort > 0) {
-            sb.append("\n").append(formatUrl(artifact, httpPort));
+        if (port > 0) {
+            sb.append("\n").append(formatUrl(artifact, https, port));
         }
         return sb.toString();
     }
 
     /** Builds the browser URL for a deployment artifact. Package-visible for testing. */
     @NotNull
-    static String formatUrl(@NotNull DeploymentArtifact artifact, int httpPort) {
+    static String formatUrl(@NotNull DeploymentArtifact artifact, boolean https, int port) {
         String context = artifact.getContextPath();
         if (context == null || context.isEmpty()) {
             context = DEFAULT_CONTEXT_PATH;
         }
-        return "http://" + DEFAULT_HOST + ":" + httpPort + context;
+        return (https ? "https" : "http") + "://" + DEFAULT_HOST + ":" + port + context;
     }
 
     /** Returns the type badge string for display. Package-visible for testing. */
@@ -166,7 +170,7 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
     @Override
     public boolean canNavigate() {
-        return canNavigate(httpPort, resolveCurrentArtifactState());
+        return canNavigate(port, resolveCurrentArtifactState());
     }
 
     @Override
@@ -181,9 +185,9 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
     }
 
     /** Returns true only when the artifact has a valid port and is confirmed deployed. */
-    static boolean canNavigate(int httpPort,
+    static boolean canNavigate(int port,
                                @Nullable TomcatDeploymentStatusService.ArtifactState artifactState) {
-        return httpPort > 0 && artifactState == TomcatDeploymentStatusService.ArtifactState.DEPLOYED;
+        return port > 0 && artifactState == TomcatDeploymentStatusService.ArtifactState.DEPLOYED;
     }
 
     @Nullable
@@ -191,7 +195,11 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
         return configurationName;
     }
 
-    public int getHttpPort() {
-        return httpPort;
+    public int getPort() {
+        return port;
+    }
+
+    public boolean isHttps() {
+        return https;
     }
 }

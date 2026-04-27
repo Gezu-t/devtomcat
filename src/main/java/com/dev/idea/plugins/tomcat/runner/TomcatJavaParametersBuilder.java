@@ -9,7 +9,6 @@ import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
-import com.dev.idea.plugins.tomcat.utils.PortUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
@@ -143,7 +142,7 @@ public class TomcatJavaParametersBuilder {
         try {
             Path catalinaBase = getCatalinaBase();
             Path catalinaHome = getCatalinaHome();
-            PortConfig ports = resolvePortsIfNeeded();
+            PortConfig ports = new PortResolver(configuration, resolvedPorts, deploymentLogger).resolve();
 
             prepareCatalinaBase(catalinaBase, catalinaHome, ports);
 
@@ -169,95 +168,6 @@ public class TomcatJavaParametersBuilder {
         } catch (IOException e) {
             throw new ExecutionException("Failed to prepare Tomcat directories", e);
         }
-    }
-
-    /**
-     * Returns conflict-free ports for all Tomcat connectors.
-     *
-     * <p>If ports were pre-resolved atomically by {@link TomcatCommandLineState} via
-     * {@link com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry}, returns them directly.
-     * Otherwise falls back to per-launch resolution (non-atomic — concurrent launches may
-     * collide; the registry path is always preferred).
-     *
-     * @throws ExecutionException if any required port cannot be resolved
-     */
-    @NotNull
-    PortConfig resolvePortsIfNeeded() throws ExecutionException {
-        if (resolvedPorts != null) {
-            LOG.info("Using pre-resolved ports: HTTP=" + resolvedPorts.getHttp()
-                    + ", shutdown=" + resolvedPorts.getShutdown());
-            return resolvedPorts;
-        }
-
-        // Fallback: resolve here. Non-atomic — prefer the TomcatCommandLineState path.
-        int httpPort     = getConfigPort(configuration.getHttpPort(),     PortUtils.DEFAULT_HTTP);
-        int shutdownPort = getConfigPort(configuration.getShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
-        int jmxPort      = getConfigPort(configuration.getJmxPort(),      PortUtils.DEFAULT_JMX);
-        int httpsPort    = getConfigPort(configuration.getHttpsPort(),     PortUtils.DEFAULT_HTTPS);
-        int ajpPort      = getConfigPort(configuration.getAjpPort(),       PortUtils.DEFAULT_AJP);
-
-        // Resolve internal conflicts first (same value assigned to multiple connectors)
-        Set<Integer> assigned = new HashSet<>();
-        assigned.add(httpPort);
-        if (assigned.contains(shutdownPort)) { shutdownPort = PortUtils.findNextAvailableExcluding(shutdownPort, assigned); }
-        assigned.add(shutdownPort);
-        if (assigned.contains(jmxPort))      { jmxPort      = PortUtils.findNextAvailableExcluding(jmxPort, assigned); }
-        assigned.add(jmxPort);
-        if (assigned.contains(httpsPort))    { httpsPort    = PortUtils.findNextAvailableExcluding(httpsPort, assigned); }
-        assigned.add(httpsPort);
-        if (assigned.contains(ajpPort))      { ajpPort      = PortUtils.findNextAvailableExcluding(ajpPort, assigned); }
-
-        // Resolve external conflicts (port already bound by another process)
-        httpPort     = resolvePortWithLogging("HTTP",     httpPort,     true);
-        shutdownPort = resolvePortWithLogging("Shutdown", shutdownPort, true);
-        jmxPort      = resolvePortWithLogging("JMX",      jmxPort,      configuration.isJmxEnabled());
-        httpsPort    = resolvePortWithLogging("HTTPS",    httpsPort,    configuration.isHttpsEnabled());
-        ajpPort      = resolvePortWithLogging("AJP",      ajpPort,      configuration.isAjpEnabled());
-
-        if (httpPort <= 0 || shutdownPort <= 0
-                || (configuration.isJmxEnabled()   && jmxPort   <= 0)
-                || (configuration.isHttpsEnabled()  && httpsPort <= 0)
-                || (configuration.isAjpEnabled()    && ajpPort   <= 0)) {
-            throw new ExecutionException("Unable to find available ports for Tomcat run configuration");
-        }
-
-        PortConfig ports = new PortConfig();
-        ports.setHttp(httpPort);
-        ports.setShutdown(shutdownPort);
-        ports.setJmx(jmxPort);
-        ports.setHttps(httpsPort);
-        ports.setAjp(ajpPort);
-        return ports;
-    }
-
-    private static int getConfigPort(@Nullable Integer configValue, int defaultValue) {
-        if (configValue != null && PortUtils.isValid(configValue)) {
-            return configValue;
-        }
-        return defaultValue;
-    }
-
-    private int resolvePortWithLogging(@NotNull String serviceName, int port, boolean enabled) {
-        if (!enabled) return port;
-        if (PortUtils.isAvailable(port)) return port;
-
-        int resolved = PortUtils.findNextAvailable(port);
-        if (resolved > 0) {
-            String msg = serviceName + " port " + port + " in use, auto-resolved to " + resolved;
-            LOG.info(msg);
-            if (deploymentLogger != null) {
-                deploymentLogger.logServerWarning(msg);
-            }
-            return resolved;
-        }
-        // No available port found — return -1 so the port guard (httpPort <= 0 check) catches it
-        // and throws a clear ExecutionException instead of passing a conflicted port to Tomcat.
-        String msg = serviceName + " port " + port + " in use and no available port could be found";
-        LOG.warn(msg);
-        if (deploymentLogger != null) {
-            deploymentLogger.logServerError(msg);
-        }
-        return -1;
     }
 
     @NotNull

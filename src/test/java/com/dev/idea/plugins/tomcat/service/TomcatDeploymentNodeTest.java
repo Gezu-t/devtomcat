@@ -21,7 +21,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/myapp");
 
             assertEquals("http://localhost:8080/myapp",
-                    TomcatDeploymentNode.formatUrl(artifact, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
         }
 
         @Test
@@ -31,7 +31,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/");
 
             assertEquals("http://localhost:8080/",
-                    TomcatDeploymentNode.formatUrl(artifact, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
         }
 
         @Test
@@ -41,7 +41,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/app");
 
             assertEquals("http://localhost:9090/app",
-                    TomcatDeploymentNode.formatUrl(artifact, 9090));
+                    TomcatDeploymentNode.formatUrl(artifact, false, 9090));
         }
 
         @Test
@@ -51,7 +51,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("");
 
             assertEquals("http://localhost:8080/",
-                    TomcatDeploymentNode.formatUrl(artifact, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
         }
 
         @Test
@@ -61,7 +61,27 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/api/v2");
 
             assertEquals("http://localhost:8080/api/v2",
-                    TomcatDeploymentNode.formatUrl(artifact, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
+        }
+
+        @Test
+        @DisplayName("HTTPS scheme and port are used when https=true")
+        void httpsScheme() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            assertEquals("https://localhost:8443/app",
+                    TomcatDeploymentNode.formatUrl(artifact, true, 8443));
+        }
+
+        @Test
+        @DisplayName("HTTPS with root context")
+        void httpsRootContext() {
+            DeploymentArtifact artifact = new DeploymentArtifact("root", "/tmp/root", "war");
+            artifact.setContextPath("/");
+
+            assertEquals("https://localhost:8443/",
+                    TomcatDeploymentNode.formatUrl(artifact, true, 8443));
         }
     }
 
@@ -75,7 +95,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("myapp", "/tmp/myapp", "exploded");
             artifact.setContextPath("/myapp");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, 8080);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, 8080);
 
             assertTrue(tooltip.contains("myapp"));
             assertTrue(tooltip.contains("(Exploded)"));
@@ -88,7 +108,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("myapp", "/tmp/myapp.war", "war");
             artifact.setContextPath("/myapp");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, 8080);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, 8080);
 
             assertTrue(tooltip.contains("myapp"));
             assertTrue(tooltip.contains("(WAR)"));
@@ -101,7 +121,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
             artifact.setContextPath("/app");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, 0);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, 0);
 
             assertTrue(tooltip.contains("app"));
             assertTrue(tooltip.contains("(WAR)"));
@@ -114,9 +134,22 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "exploded");
             artifact.setContextPath("/app");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, -1);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, -1);
 
             assertFalse(tooltip.contains("http://"));
+        }
+
+        @Test
+        @DisplayName("HTTPS tooltip uses https scheme and port")
+        void httpsTooltip() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, true, 8443);
+
+            assertTrue(tooltip.contains("https://localhost:8443/app"));
+            assertFalse(tooltip.contains("http://localhost"),
+                    "Should not contain http:// when HTTPS is enabled");
         }
     }
 

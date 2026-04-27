@@ -55,13 +55,14 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                 statusText.append("Tomcat ").append(tomcatInfo.getVersion());
             }
 
-            // HTTP port — prefer the live resolved port from the running process
+            // Endpoint — prefer the live resolved port from the running process
             // so auto-resolved ports (e.g. 8080 → 8082 on conflict) are displayed,
-            // not the stale configured value.
-            Integer httpPort = resolveLiveHttpPort(node, tomcatConfig);
-            if (httpPort != null && httpPort > 0) {
+            // not the stale configured value. When HTTPS is enabled, the dashboard
+            // shows the HTTPS port so the label matches the URL on the artifact rows.
+            Endpoint endpoint = resolveLiveEndpoint(node, tomcatConfig);
+            if (endpoint.port() > 0) {
                 if (!statusText.isEmpty()) statusText.append(" · ");
-                statusText.append(":").append(httpPort);
+                statusText.append(":").append(endpoint.port());
             }
 
             // Live deployment status from the status service
@@ -141,15 +142,17 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
             List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData()
                     .getDeploymentConfig().getArtifacts();
             if (artifacts != null) {
-                // Use the resolved port from the live process handler when available,
-                // so auto-resolved ports appear correctly in child node URLs.
-                Integer httpPort = resolveLiveHttpPort(node, tomcatConfig);
-                int port = httpPort != null ? httpPort : 8080;
+                // Use the resolved endpoint from the live process handler when available,
+                // so auto-resolved ports appear correctly in child node URLs and the
+                // scheme matches the configured (or live) HTTPS state.
+                Endpoint endpoint = resolveLiveEndpoint(node, tomcatConfig);
+                int port = endpoint.port() > 0 ? endpoint.port() : 8080;
                 String configName = tomcatConfig.getName();
 
                 for (DeploymentArtifact artifact : artifacts) {
                     if (artifact != null) {
-                        children.add(new TomcatDeploymentNode(project, artifact, port, configName));
+                        children.add(new TomcatDeploymentNode(
+                                project, artifact, endpoint.https(), port, configName));
                     }
                 }
             }
@@ -162,24 +165,49 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
     }
 
     /**
-     * Resolves the HTTP port to display for a run configuration node.
-     *
-     * <p>If a live process handler exists for the given config, returns its
-     * resolved port (which reflects any auto-increment on port conflict).
-     * Falls back to the stored {@code configuration.getHttpPort()} for
-     * stopped configurations so the dashboard still shows a sensible value.
+     * (https, port) pair — what the URL displayed in the Services tree should
+     * point at. {@code https=true} means render the URL with the {@code https://}
+     * scheme and the port the HTTPS connector listens on; {@code false} means
+     * the plain HTTP connector and port. Port {@code 0} signals "no port info"
+     * — callers fall back to a default or hide the URL.
      */
-    @Nullable
-    private static Integer resolveLiveHttpPort(@NotNull RunDashboardRunConfigurationNode node,
-                                                @NotNull TomcatRunConfiguration tomcatConfig) {
+    private record Endpoint(boolean https, int port) {}
+
+    /**
+     * Resolves the endpoint (scheme + port) to display for a run configuration node.
+     *
+     * <p>Order of preference:
+     * <ol>
+     *   <li>The live {@link com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler}'s
+     *       resolved {@link com.dev.idea.plugins.tomcat.model.PortConfig} — picks up
+     *       auto-resolved ports (8080 → 8082) and the actual HTTPS state the JVM
+     *       was launched with, even if the user has since edited the config.</li>
+     *   <li>The configured value when stopped — HTTPS port when HTTPS is enabled,
+     *       HTTP port otherwise — so an apply-while-stopped is reflected immediately.</li>
+     * </ol>
+     */
+    @NotNull
+    private static Endpoint resolveLiveEndpoint(@NotNull RunDashboardRunConfigurationNode node,
+                                                 @NotNull TomcatRunConfiguration tomcatConfig) {
         RunContentDescriptor descriptor = node.getDescriptor();
         if (descriptor != null && descriptor.getProcessHandler()
                 instanceof com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler th
                 && !th.isProcessTerminated()) {
-            int port = th.getHttpPort();
-            if (port > 0) return port;
+            com.dev.idea.plugins.tomcat.model.PortConfig live = th.getResolvedPorts();
+            if (live != null && live.isHttpsEnabled() && live.getHttps() > 0) {
+                return new Endpoint(true, live.getHttps());
+            }
+            int httpPort = th.getHttpPort();
+            if (httpPort > 0) return new Endpoint(false, httpPort);
         }
-        return tomcatConfig.getHttpPort();
+        if (tomcatConfig.isHttpsEnabled()) {
+            Integer httpsPort = tomcatConfig.getHttpsPort();
+            if (httpsPort != null && httpsPort > 0) {
+                return new Endpoint(true, httpsPort);
+            }
+        }
+        Integer httpPort = tomcatConfig.getHttpPort();
+        return new Endpoint(false, httpPort != null ? httpPort : 0);
     }
 
     /**
