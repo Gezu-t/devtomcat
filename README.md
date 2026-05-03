@@ -422,3 +422,14 @@ If this plugin helps you in your development workflow, please consider leaving a
 [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/30721-devtomcat). Your feedback helps improve the project.
 
 Bug reports, feature requests, and contributions are welcome.
+
+## Inspiration & Credits
+
+DevTomcat was inspired by [Smart Tomcat](https://plugins.jetbrains.com/plugin/9492-smart-tomcat) —
+a lightweight Tomcat plugin for IntelliJ IDEA Community Edition by Victor Zheng.
+Smart Tomcat demonstrated that first-class Tomcat support was possible outside of IntelliJ Ultimate,
+and served as the original motivation for building DevTomcat.
+
+DevTomcat has since taken a different direction — adding multi-artifact deployment, port conflict
+auto-resolution, CATALINA_BASE isolation, remote deployment, a state-machine process handler, and
+full IntelliJ Platform API integration — but the credit for the idea belongs to the Smart Tomcat project.
