@@ -480,7 +480,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
      */
     private void subscribeToRenameEvents() {
         try {
-            messageBusConnection = project.getMessageBus().connect();
+            // connect(this) ties the subscription to the editor's lifecycle so it
+            // disconnects automatically on disposeEditor and avoids the platform's
+            // "use application as a parent disposable" warning.
+            messageBusConnection = project.getMessageBus().connect(this);
 
             messageBusConnection.subscribe(ArtifactManager.TOPIC, new ArtifactListener() {
                 @Override

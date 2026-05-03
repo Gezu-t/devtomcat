@@ -171,7 +171,8 @@ public class DeploymentHistoryDialog extends DialogWrapper {
         if (ms <= 0) return "—";
         if (ms < 1000) return ms + "ms";
         double seconds = ms / 1000.0;
-        if (seconds < 60) return String.format("%.1fs", seconds);
+        // Locale.ROOT — stable '.' decimal separator across IDE locales.
+        if (seconds < 60) return String.format(java.util.Locale.ROOT, "%.1fs", seconds);
         long minutes = (long) (seconds / 60);
         long secs = (long) (seconds % 60);
         return minutes + "m " + secs + "s";

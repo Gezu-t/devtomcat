@@ -145,7 +145,14 @@ public final class TomcatOutputPipeline {
     public void processLine(@NotNull String text, @NotNull Context context) {
         if (text.isEmpty()) return;
         for (Analyzer analyzer : analyzers) {
-            analyzer.analyze(text, context);
+            try {
+                analyzer.analyze(text, context);
+            } catch (Throwable t) {
+                // One analyzer must not silence the others — without isolation a
+                // malformed line could derail startup detection, deployment
+                // tracking, or error counting downstream of the failure.
+                LOG.warn("Analyzer " + analyzer.getClass().getSimpleName() + " threw on line: " + text, t);
+            }
         }
     }
 

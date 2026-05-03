@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
 import java.util.List;
@@ -126,8 +127,12 @@ public final class TomcatModuleUtils {
             moduleName = moduleName.substring(lastDot + 1);
         }
 
-        // Clean up the name
-        moduleName = moduleName.toLowerCase()
+        // Locale.ROOT — without it, a Turkish-locale user with a module named
+        // "WebApi" would have lowercase produce "webapı" (dotless ı). The
+        // [^a-z0-9-] regex then replaces 'ı' with '-' (because ı is outside
+        // the ASCII a-z range), and the final context path becomes "/webap"
+        // instead of "/webapi". Browser hits 404 on the wrong path.
+        moduleName = moduleName.toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9-]", "-")
                 .replaceAll("-+", "-")
                 .replaceAll("^-|-$", "");
@@ -172,7 +177,7 @@ public final class TomcatModuleUtils {
         for (VirtualFile child : dir.getChildren()) {
             if (child.isValid() && !child.isDirectory()) {
                 String extension = child.getExtension();
-                if (extension != null && WEB_FILE_EXTENSIONS.contains(extension.toLowerCase())) {
+                if (extension != null && WEB_FILE_EXTENSIONS.contains(extension.toLowerCase(Locale.ROOT))) {
                     return true;
                 }
             }
@@ -190,7 +195,11 @@ public final class TomcatModuleUtils {
      * Also checks Gradle composite build naming (e.g., "project.test").
      */
     private static boolean isTestModule(@NotNull Module module) {
-        String name = module.getName().toLowerCase();
+        // Locale.ROOT for consistency with extractContextPath and the rest of the
+        // module-matching pipeline. The current suffix list happens not to contain
+        // characters affected by tr_TR I-folding, but pinning here keeps the rule
+        // local and survives any future suffix that does.
+        String name = module.getName().toLowerCase(Locale.ROOT);
 
         // Suffix-based checks (precise)
         if (name.endsWith(".test") || name.endsWith(".tests") ||

@@ -70,13 +70,50 @@ class DeploymentArtifactTest {
     }
 
     @Test
-    @DisplayName("setContextPath preserves non-empty paths")
+    @DisplayName("setContextPath preserves a slash-prefixed path verbatim")
     void setContextPathPreservesNonEmpty() {
         DeploymentArtifact art = new DeploymentArtifact();
         art.setContextPath("/myapp");
         assertEquals("/myapp", art.getContextPath());
-        art.setContextPath("portal");   // no leading slash — stored as-is
-        assertEquals("portal", art.getContextPath());
+    }
+
+    @Test
+    @DisplayName("setContextPath adds the leading slash when missing — TomcatDeploymentNode#formatUrl concatenates host:port+context")
+    void setContextPathPrefixesSlash() {
+        // The bug fix this test pins. Pre-fix, setContextPath stored "portal"
+        // verbatim. TomcatDeploymentNode.formatUrl then concatenated to produce
+        // {@code http://localhost:8080portal} — a broken URL that browsers
+        // silently fail on. Routing through ContextPathUtils.normalizeContextPath
+        // guarantees every stored value is canonical.
+        DeploymentArtifact art = new DeploymentArtifact();
+        art.setContextPath("portal");
+
+        assertEquals("/portal", art.getContextPath(),
+                "context path must be canonicalized to slash-prefixed form on the way in");
+    }
+
+    @Test
+    @DisplayName("setContextPath collapses duplicate slashes")
+    void setContextPathCollapsesDoubleSlashes() {
+        // Defensive: a hand-edited XML or third-party importer might
+        // produce "//myapp//" — normalizeContextPath squeezes that to
+        // "/myapp" so the URL is correct.
+        DeploymentArtifact art = new DeploymentArtifact();
+        art.setContextPath("//myapp//");
+
+        assertEquals("/myapp", art.getContextPath());
+    }
+
+    @Test
+    @DisplayName("setContextPath strips trailing slash (except for the root '/')")
+    void setContextPathStripsTrailingSlash() {
+        DeploymentArtifact art = new DeploymentArtifact();
+        art.setContextPath("/myapp/");
+        assertEquals("/myapp", art.getContextPath());
+
+        // The root context "/" is allowed to keep its lone slash.
+        art.setContextPath("/");
+        assertEquals("/", art.getContextPath());
     }
 
     @Test

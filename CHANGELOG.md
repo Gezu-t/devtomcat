@@ -2,18 +2,53 @@
 
 ## [1.0.9]
 
-Structural cleanup release. Smaller, more testable units behind the launcher; a long-standing URL bug fixed in the Services tree.
+Deep deployment audit. Security hardening, port resolver fixes, and many smaller correctness fixes around launch, Debug on 2025.1, and remote deploy.
 
 ### Changed
-- **Port resolution extracted from `TomcatJavaParametersBuilder`.** The 3-stage algorithm (defaults → internal duplicates → external conflicts) now lives in a focused, package-private `PortResolver`. The builder's `build()` method is one line shorter and one responsibility lighter; the resolver is independently unit-testable without standing up the rest of the launch pipeline.
+- Extracted `PortResolver` from `TomcatJavaParametersBuilder` for testability.
+
+### Security
+- AJP without `address` reproduced CVE-2020-1938 (Ghostcat). IDE-injected AJP now binds `127.0.0.1`.
+- JMX exposed without host binding. JMX and RMI registry now bind `127.0.0.1` by default; override via VM options.
+
+### Fixed (data loss)
+- `copyConfDirectory` wiped the user's `conf/` when `CATALINA_BASE` equalled `CATALINA_HOME`. Now refused with a clear error.
+- Stale-deployment cleanup wiped pinned `CATALINA_BASE`. Cleanup gated to the IDE-managed system directory.
+- Parallel-run cleanup followed a symlink at the run-base root. Now `NOFOLLOW_LINKS` + explicit refusal.
 
 ### Fixed
-- **Services tree URL ignored HTTPS.** Even with HTTPS enabled, the artifact URL displayed (and opened on click) was always `http://localhost:<httpPort>/...`. The URL now uses `https://` and the configured (or live-resolved) HTTPS port when HTTPS is enabled, matching the connector the user actually intended. Falls back to HTTP when HTTPS is disabled or the HTTPS port hasn't been resolved.
+- Services tree URL ignored HTTPS; uses HTTPS port when enabled.
+- Tomcat 7 `No rules found matching 'Context/Resources/PreResources'` warning. Generator skips PreResources on Tomcat 7.
+- Restart in Debug on 2025.1 threw `IllegalStateException: Running sync tasks on pure EDT`. `destroyProcess` now off-EDT.
+- Services-panel Stop in Debug had the same EDT trap.
+- Remote-deploy URL injection: `?path=` paths now URL-encoded.
+- Liquibase cleanup missed under `tr_TR` (capital I to ı). Pinned `Locale.ROOT`.
+- Multi-module artifact-to-module matching broken under `tr_TR`. Both sides pinned to `Locale.ROOT`.
+- Run-config editor leaked its message-bus listener; now scoped to the editor disposable.
+- Remote-deploy progress used JVM-default decimal separator. `formatSize` pinned to `Locale.ROOT`. Same fix in run-history and trend dialogs.
+- Port resolver displaced peer services with their own preferred ports. Search is now peer-aware.
+- `TomcatConfigurationData.setContextPath` skipped slash canonicalization. Now uses `ContextPathUtils.normalizeContextPath`.
+- Smart-error console dropped the detected message. Format now includes `Category: Message. Suggestion`.
+- Manager URL with trailing slash silently fell back to localhost. Setter strips trailing slashes.
+- `CredentialResolver`, `RemoteCredentialStore.retrievePassword`, `TomcatNotifier`, `TomcatRunConfiguration.getState`, and `syncBeforeLaunchWithDeployments` swallowed `ProcessCanceledException`. PCE now rethrows.
+- `hasManualJdwpAgent` masked real `-agentlib:jdwp=` by a leading `-agentlib:jdwp_other`. Scans past rejected matches.
+- Context.xml writes were non-atomic. New `atomicWriteString` helper.
+- Renaming a running config leaked its ports. `TomcatPortRegistry` now migrates entries on rename.
+- Carry-over relaunch lost JDWP exhaustion warnings. Now logs the same warnings as the first-time debug path.
+- Silent JRE fallback when configured JRE was unregistered. Now surfaced in the run console.
+- One throwing listener silenced its peers in `TomcatLifecycleListener.composite` and `TomcatOutputPipeline.processLine`. Both isolate per-listener with WARN.
+- Remote-deploy task outlived its process and posted stale dashboard updates. Short-circuits on terminate.
+- Bundled-app mirror produced malformed `context.xml` for directories containing `--`. Dir name is now sanitised in the comment.
+
+### Diagnostics
+- `TomcatServerManagerState.resolveOrAutoRegister` logs the specific failure reason (missing path, missing `catalina.jar`, IOException).
+- `runIde` sets `idea.is.internal=true` for stacktrace coverage on Disposable warnings.
 
 ### Tests
-- New `PortResolverTest` — 7 cases covering pre-resolved pass-through, internal port conflicts, externally bound ports, and per-connector resolution gating.
-- Existing `TomcatJavaParametersBuilderTest` slimmed to the JDWP injection cases that genuinely belong there.
-- New HTTPS coverage in `TomcatDeploymentNodeTest` — `formatUrl` and `formatTooltip` exercised with `https=true`.
+- New `PortResolverTest` (7 cases) and slimmed `TomcatJavaParametersBuilderTest`.
+- HTTPS coverage in `TomcatDeploymentNodeTest`.
+- `TomcatVersionGate` group in `LocalDeploymentStrategyTest` pins Tomcat-7 PreResources omission.
+- Regression tests: `peerAllocationDoesNotAbortSearch`, `refusesSamePathCase`, `rejectedLeadingMatchDoesNotMaskRealAgent`, `trailingSlashAccepted`, `missingLeadingSlashCanonicalized`, plus `formatForConsole` extension.
 
 ## [1.0.8]
 

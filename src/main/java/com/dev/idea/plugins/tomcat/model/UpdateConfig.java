@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.dev.idea.plugins.tomcat.utils.TomcatStrings;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.Serial;
@@ -50,7 +50,7 @@ public class UpdateConfig implements Serializable, Cloneable {
     }
 
     @NotNull
-    public String getOnUpdate() { return StringUtil.notNullize(onUpdate, DEFAULT_ON_UPDATE); }
+    public String getOnUpdate() { return TomcatStrings.defaultIfBlank(onUpdate, DEFAULT_ON_UPDATE); }
 
     public void setOnUpdate(@NotNull String action) {
         Objects.requireNonNull(action, "Update action cannot be null");
@@ -58,7 +58,7 @@ public class UpdateConfig implements Serializable, Cloneable {
     }
 
     @NotNull
-    public String getOnFrameDeactivation() { return StringUtil.notNullize(onFrameDeactivation, DEFAULT_ON_FRAME_DEACTIVATION); }
+    public String getOnFrameDeactivation() { return TomcatStrings.defaultIfBlank(onFrameDeactivation, DEFAULT_ON_FRAME_DEACTIVATION); }
 
     public void setOnFrameDeactivation(@NotNull String action) {
         Objects.requireNonNull(action, "Frame deactivation action cannot be null");

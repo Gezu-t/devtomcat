@@ -1,8 +1,8 @@
 package com.dev.idea.plugins.tomcat.model.remote;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.utils.TomcatStrings;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.net.URI;
@@ -71,12 +71,19 @@ public class RemoteConfig {
 
     @NotNull
     public String getManagerUrl() {
-        return StringUtil.notNullize(managerUrl, DEFAULT_MANAGER_URL).trim();
+        return TomcatStrings.defaultIfBlank(managerUrl, DEFAULT_MANAGER_URL).trim();
     }
 
     public void setManagerUrl(@NotNull String url) {
         Objects.requireNonNull(url, "Manager URL cannot be null");
         String normalized = url.trim();
+        // Strip trailing '/' before validation — natural to type, accepted by
+        // Tomcat itself, but the regex below requires '/manager' to be the
+        // terminal path segment with no trailing slash. Without this strip the
+        // setter silently falls back to the default URL and loses user input.
+        while (normalized.endsWith("/") && normalized.length() > 1) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
 
         if (normalized.isEmpty()) {
             LOG.warn("Manager URL is empty, using default: " + DEFAULT_MANAGER_URL);
@@ -91,7 +98,11 @@ public class RemoteConfig {
 
     @NotNull
     public String getUsername() {
-        return StringUtil.notNullize(username, DEFAULT_USERNAME);
+        // Empty username is a legitimate state for no-credentials mode (see
+        // RemoteConfigTest#emptyUsernameAccepted). Only null normalizes to
+        // the default — preserve the empty signal so callers can distinguish
+        // "user cleared the field" from "default applies".
+        return username == null ? DEFAULT_USERNAME : username;
     }
 
     public void setUsername(@NotNull String username) {

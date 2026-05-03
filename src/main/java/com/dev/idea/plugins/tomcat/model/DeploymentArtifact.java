@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -135,10 +136,10 @@ public class DeploymentArtifact implements Serializable, Cloneable {
     public String getContextPath() { return contextPath; }
 
     public void setContextPath(@Nullable String contextPath) {
-        // StringUtil.notNullize(s, "/") only substitutes null, not empty string — so we
-        // normalize explicitly: null, "", and whitespace-only all mean the root context "/".
-        String s = contextPath == null ? "" : contextPath.trim();
-        this.contextPath = s.isEmpty() ? "/" : s;
+        // Canonicalize at the model boundary — guarantees slash-prefix, no double slashes,
+        // no trailing slash (except root). Defends against non-UI callers (XML deserializer,
+        // imported configs) that would otherwise produce broken URLs in formatUrl.
+        this.contextPath = ContextPathUtils.normalizeContextPath(contextPath);
     }
 
     /**
@@ -187,8 +188,10 @@ public class DeploymentArtifact implements Serializable, Cloneable {
         setContextPath(serverPath);
     }
 
-            public boolean isUsingDefaultContext() {
-        return contextPath.isEmpty() || contextPath.equals("/");
+    public boolean isUsingDefaultContext() {
+        // contextPath is canonicalised by the setter to a non-empty, slash-prefixed
+        // form, so the default-context check is just an equality test against "/".
+        return contextPath.equals("/");
     }
 
     public boolean isValid() {

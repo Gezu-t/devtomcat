@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
@@ -99,7 +100,18 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         try {
             Files.createDirectories(webappsDir);
             Files.createDirectories(confCatalinaLocalhost);
-            cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
+            // Stale-deployment cleanup is destructive (deletes every .war and every
+            // descriptor .xml). Only safe inside the IDE-managed system directory.
+            // When the user has pinned an explicit CATALINA_BASE (e.g. their real
+            // Tomcat install at /opt/tomcat), those files are theirs to manage —
+            // wiping them on launch would erase hand-deployed apps.
+            if (isIdeManagedCatalinaBase(catalinaBase, configuration)) {
+                cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
+            } else if (logger != null) {
+                logger.logServerInfo(
+                        "Skipping stale-deployment cleanup — CATALINA_BASE is user-pinned ("
+                                + catalinaBase + "). Manage existing deployments yourself.");
+            }
         } catch (IOException e) {
             throw new ExecutionException("Failed to create deployment directories", e);
         }
@@ -124,9 +136,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             try {
                 if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
                         || Files.isDirectory(artifactPath)) {
-                    String contextXml = buildContextXml(artifact, artifactPath, preserveSessions, project, logger);
+                    String contextXml = buildContextXml(artifact, artifactPath, preserveSessions,
+                            project, configuration.getTomcatInfo(), logger);
                     Path contextFile = confCatalinaLocalhost.resolve(contextName + ".xml");
-                    Files.writeString(contextFile, contextXml);
+                    TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
                 } else {
                     Path targetWar = webappsDir.resolve(contextName + ".war");
@@ -144,8 +157,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                   @NotNull Path artifactPath,
                                   boolean preserveSessions,
                                   @NotNull Project project,
+                                  @Nullable TomcatInfo tomcatInfo,
                                   @Nullable TomcatDeploymentLogger logger) {
-        String extraResources = buildExtraResourcesXml(artifact, artifactPath, project, logger);
+        String extraResources = buildExtraResourcesXml(artifact, artifactPath, project, tomcatInfo, logger);
         String jarScanFilter = buildJarScanFilter(artifactPath);
 
         StringBuilder xml = new StringBuilder();
@@ -206,6 +220,21 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         return String.join(",", skipPatterns);
     }
 
+    /**
+     * True when {@code catalinaBase} is inside the IDE's managed system directory
+     * (the standard fallback path), so destructive cleanup of {@code webapps/} and
+     * {@code conf/Catalina/localhost/} is safe. False when the user has pinned an
+     * explicit {@code CATALINA_BASE} — those files are user-managed and must not
+     * be wiped between launches.
+     */
+    static boolean isIdeManagedCatalinaBase(@NotNull Path catalinaBase,
+                                            @NotNull TomcatRunConfiguration configuration) {
+        String pinned = configuration.getConfigData() != null
+                ? configuration.getConfigData().getCatalinaBase()
+                : null;
+        return pinned == null || pinned.isBlank();
+    }
+
     private void cleanStaleDeployments(@NotNull Path webappsDir, @NotNull Path confDir) {
         // Remove previous context XML descriptors to prevent conflicts with new deployments
         try (var stream = Files.list(confDir)) {
@@ -252,8 +281,26 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
                                           @NotNull Path artifactPath,
                                           @NotNull Project project,
+                                          @Nullable TomcatInfo tomcatInfo,
                                           @Nullable TomcatDeploymentLogger logger) {
-        // Phase 1 — Model access: collect all IntelliJ project model data under a single
+        // PreResources/PostResources are Tomcat 8+; Tomcat 7's Digester emits
+        // 'No rules found matching Context/Resources/PreResources' and drops them.
+        // Major version 0 = unknown — treat as modern (don't accidentally regress modern users).
+        if (tomcatInfo != null
+                && tomcatInfo.getMajorVersion() > 0
+                && tomcatInfo.getMajorVersion() < 8) {
+            if (logger != null) {
+                logger.logServerInfo(
+                        "Tomcat " + tomcatInfo.getMajorVersion()
+                                + " does not support <PreResources>/<PostResources> (added in Tomcat 8). "
+                                + "Multi-module classpath additions for '" + artifact.getName()
+                                + "' will not be applied. Package any required JARs into "
+                                + "WEB-INF/lib if your application depends on them.");
+            }
+            return "";
+        }
+
+        // Phase 1, Model access: collect all IntelliJ project model data under a single
         // read action so the snapshot is internally consistent. After this call every value
         // is a plain Java object (Module reference + String maps/lists); no further model
         // access is needed and no threading constraint applies to the rest of this method.
@@ -781,10 +828,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
             if (webModules.size() == 1) return webModules.get(0);
 
-            // 5. Partial name match against web modules
+            // 5. Partial name match — Locale.ROOT keeps 'WebApi' matchable across tr_TR / en_US.
             for (Module m : webModules) {
-                String mName = m.getName().toLowerCase();
-                String lowerBase = baseName.toLowerCase();
+                String mName = m.getName().toLowerCase(Locale.ROOT);
+                String lowerBase = baseName.toLowerCase(Locale.ROOT);
                 if (mName.contains(lowerBase) || lowerBase.contains(mName)) {
                     return m;
                 }

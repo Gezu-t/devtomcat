@@ -298,6 +298,31 @@ public class DeploymentTableManager {
         return false;
     }
 
+    /**
+     * Checks if {@code contextPath} is already used by an artifact OTHER than
+     * {@code except}. Identity-based ({@code ==}) so the comparison is robust
+     * to mutations of {@code except}'s own context — the dialog mutates the
+     * deployment in place and validates after, so reference identity is the
+     * only stable "this is the one being edited" signal we have.
+     *
+     * <p>Exposed package-visible so {@code DeploymentConfigurationPanel} can
+     * supply the same duplicate-check to the edit dialog that the inline
+     * context-path field already uses, closing the asymmetry where dialog
+     * edits could create duplicate context paths that the inline field
+     * would have rejected.
+     */
+    boolean isContextPathTakenByOthers(@NotNull String contextPath,
+                                        @NotNull DeploymentArtifact except) {
+        for (int i = 0; i < listModel.getSize(); i++) {
+            DeploymentArtifact other = listModel.getElementAt(i);
+            if (other == except) continue;
+            if (contextPath.equals(other.getApplicationContext())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void updateSelectionAfterRemoval(int removedIndex) {
         if (listModel.getSize() > 0) {
             int newSelection = Math.min(removedIndex, listModel.getSize() - 1);

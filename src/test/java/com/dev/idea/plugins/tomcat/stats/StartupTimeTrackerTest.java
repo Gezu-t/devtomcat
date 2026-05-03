@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -214,6 +215,29 @@ class StartupTimeTrackerTest {
         void seconds() {
             assertEquals("3.0s", StartupTimeTracker.formatDuration(3000));
             assertEquals("3.5s", StartupTimeTracker.formatDuration(3500));
+        }
+
+        @Test
+        @DisplayName("decimal separator stays '.' under non-English locales (Locale.ROOT contract)")
+        void decimalSeparatorStableAcrossLocales() {
+            // The bug this regression-guards: String.format("%.1fs", x) without an
+            // explicit Locale uses the JVM default. In de_DE / fr_FR / es_ES /
+            // most non-English locales the decimal separator is ',' — so the
+            // user would see "↑ 3,5s slower than last run" while every other
+            // log line and test assertion uses "."s.
+            //
+            // Pin both directions: under a German default, output must STILL
+            // be "3.5s", proving the production code passes Locale.ROOT.
+            Locale previousDefault = Locale.getDefault();
+            try {
+                Locale.setDefault(Locale.GERMANY);
+                assertEquals("3.5s", StartupTimeTracker.formatDuration(3500),
+                        "formatDuration must use Locale.ROOT — German locale must NOT mangle '.' to ','");
+                assertEquals("3.0s", StartupTimeTracker.formatDuration(3000),
+                        "formatDuration must use Locale.ROOT — German locale must NOT mangle '.' to ','");
+            } finally {
+                Locale.setDefault(previousDefault);
+            }
         }
     }
 

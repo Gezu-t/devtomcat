@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBLabel;
@@ -119,7 +120,13 @@ class AutoDetectJdkDialog extends DialogWrapper {
     }
 
     private static boolean isValidJdk(File dir) {
-        String exe = System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java";
+        // Use IntelliJ's SystemInfo rather than ad-hoc parsing of os.name. The
+        // previous implementation called {@code os.name.toLowerCase()} without
+        // a locale argument: under a Turkish locale, "Windows" lowercases to
+        // "wındows" (dotless ı) and the {@code .contains("win")} check returned
+        // false — JDK auto-detection then looked for "bin/java" instead of
+        // "bin/java.exe" and reported every Windows JDK as invalid.
+        String exe = SystemInfo.isWindows ? "java.exe" : "java";
         return new File(dir, "bin/" + exe).exists();
     }
 

@@ -62,6 +62,9 @@ public final class RemoteCredentialStore {
             if (credentials != null && credentials.getPasswordAsString() != null) {
                 return credentials.getPasswordAsString();
             }
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            // Honour IntelliJ cancellation: never swallow PCE in a broad catch.
+            throw pce;
         } catch (Exception e) {
             LOG.warn("Failed to retrieve password from credential store", e);
         }

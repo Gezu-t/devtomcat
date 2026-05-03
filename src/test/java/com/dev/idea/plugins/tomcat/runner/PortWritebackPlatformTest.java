@@ -7,7 +7,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
 /**
  * Pins the port-writeback contract:
- * {@link TomcatCommandLineState#writeBackResolvedPorts} persists runtime-resolved
+ * {@link LaunchPortClaimer#writeBackResolvedPorts} persists runtime-resolved
  * ports back into the authoritative {@link PortConfig} so the next read (UI dialog,
  * serializer, Services panel, browser-URL derivation) sees runtime reality — but
  * only in single-instance mode.
@@ -45,7 +45,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
 
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
 
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         assertEquals("HTTP port must reflect the resolved value",
                 Integer.valueOf(8087), cfg.getHttpPort());
@@ -65,7 +65,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         cfg.setShutdownPort(8009);
 
         PortConfig same = resolvedPorts(8087, 8009, 8443, 1099, 8009);
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, same);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, same);
 
         // Still the same values. The real invariant here is that the code path
         // detects "nothing changed" and avoids the dashboard refresh — the
@@ -87,7 +87,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
 
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
 
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         assertEquals("parallel-run mode must leave HTTP port as the user's seed",
                 Integer.valueOf(8083), cfg.getHttpPort());
@@ -106,7 +106,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         cfg.setAllowMultipleInstances(true);
 
         PortConfig firstResolved = resolvedPorts(8090, 8005, 8443, 1099, 8009);
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, firstResolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, firstResolved);
 
         // Seed is preserved in parallel mode — this is the invariant under test.
         assertEquals("transient conflict must not ratchet the parallel-run seed",
@@ -115,7 +115,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         // Second launch after the conflict clears: resolver sees 8083 is free
         // and stays at 8083. If the seed had ratcheted, this would be 8090.
         PortConfig secondResolved = resolvedPorts(8083, 8005, 8443, 1099, 8009);
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, secondResolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, secondResolved);
 
         assertEquals("the second launch must still see the user's original seed",
                 Integer.valueOf(8083), cfg.getHttpPort());
@@ -132,7 +132,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
 
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
 
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         assertEquals("pin + checkbox-on still behaves as single-instance for writeback",
                 Integer.valueOf(8087), cfg.getHttpPort());
@@ -152,7 +152,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
 
         PortConfig resolved = resolvedPorts(8087, 8009, 9443, 1099, 9009);
 
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         assertEquals("https port must not be mutated while connector is disabled",
                 httpsBefore, target.getHttps());
@@ -164,7 +164,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         TomcatRunConfiguration cfg = createConfig("DebugWriteback");
         cfg.getConfigData().getDebugConfig().setPort(5005);
 
-        TomcatCommandLineState.writeBackResolvedDebugPort(cfg, 5007);
+        LaunchPortClaimer.writeBackResolvedDebugPort(cfg, 5007);
 
         assertEquals(5007, cfg.getConfigData().getDebugConfig().getPort());
     }
@@ -176,7 +176,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         cfg.getConfigData().getDebugConfig().setPort(5005);
         cfg.setAllowMultipleInstances(true);
 
-        TomcatCommandLineState.writeBackResolvedDebugPort(cfg, 5007);
+        LaunchPortClaimer.writeBackResolvedDebugPort(cfg, 5007);
 
         assertEquals("parallel-run must leave the debug seed alone",
                 5005, cfg.getConfigData().getDebugConfig().getPort());
@@ -192,7 +192,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         cfg.setBrowserUrl("http://localhost:8083/app"); // auto, stored as empty
 
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         assertEquals("browser URL must reflect the resolved port after writeback",
                 "http://localhost:8087/app", cfg.getBrowserUrl());
@@ -212,7 +212,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         cfg.setBrowserUrl("http://localhost:8083/app"); // auto, stored empty
 
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         // Writeback was skipped — config still holds the seed value.
         assertEquals("parallel-run config must NOT be mutated by writeback",
@@ -235,7 +235,7 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
         cfg.setBrowserUrl("http://proxy.example.com:9090/route");
 
         PortConfig resolved = resolvedPorts(8087, 8009, 8443, 1099, 8009);
-        TomcatCommandLineState.writeBackResolvedPorts(cfg, resolved);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
 
         // Config-level: custom URL preserved verbatim (single-source-of-truth contract).
         assertEquals("http://proxy.example.com:9090/route", cfg.getBrowserUrl());

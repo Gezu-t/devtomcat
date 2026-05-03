@@ -334,11 +334,14 @@ public final class TomcatErrorDiagnostics {
     }
 
     /**
-     * Formats a diagnostic for console display with the [DIAGNOSTIC] prefix.
+     * Formats a diagnostic for console display with the [SEVERITY] prefix.
+     * Shows the detected message followed by the actionable suggestion so the
+     * user sees both <em>what</em> was detected and <em>how</em> to fix it.
      */
     @NotNull
     public static String formatForConsole(@NotNull Diagnostic diagnostic) {
         return "[" + diagnostic.getSeverity() + "] " + diagnostic.getCategory()
+                + ": " + diagnostic.getMessage()
                 + " — " + diagnostic.getSuggestion();
     }
 }

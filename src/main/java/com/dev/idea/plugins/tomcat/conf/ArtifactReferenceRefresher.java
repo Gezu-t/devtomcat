@@ -184,13 +184,13 @@ public final class ArtifactReferenceRefresher {
             if (platformArtifacts.length == 0) return null;
 
             // Collect active module names to exclude orphaned IntelliJ artifacts.
-            // When a user renames a module, IntelliJ may keep the OLD artifact definition
-            // alongside the new one. Without this filter, Strategy 1 (exact name match)
-            // would match the orphaned artifact, leaving deployment pointing at stale output.
+            // Renaming a module leaves an old artifact definition; without this filter,
+            // exact-name match would point deployment at stale output.
+            // Locale.ROOT keeps 'WebApi' matching 'webapi' across tr_TR / en_US.
             Set<String> activeModules = new HashSet<>();
             try {
                 for (Module m : ModuleManager.getInstance(project).getModules()) {
-                    activeModules.add(m.getName().toLowerCase());
+                    activeModules.add(m.getName().toLowerCase(java.util.Locale.ROOT));
                 }
             } catch (Exception e) {
                 LOG.debug("ArtifactReferenceRefresher: Could not read modules, skipping orphan filter");
@@ -199,7 +199,8 @@ public final class ArtifactReferenceRefresher {
             List<PlatformArtifactSnapshot> filtered = new ArrayList<>();
             for (Artifact pa : platformArtifacts) {
                 PlatformArtifactSnapshot snap = PlatformArtifactSnapshot.fromPlatform(pa);
-                String baseName = ContextPathUtils.extractBaseModuleName(snap.name()).toLowerCase();
+                String baseName = ContextPathUtils.extractBaseModuleName(snap.name())
+                        .toLowerCase(java.util.Locale.ROOT);
                 if (activeModules.isEmpty() || baseName.isEmpty() || activeModules.contains(baseName)) {
                     filtered.add(snap);
                 } else {

@@ -259,6 +259,14 @@ public final class ServerXmlMutator {
         ajpConnector.setAttribute("port", String.valueOf(port));
         ajpConnector.setAttribute("protocol", TomcatConstants.PROTOCOL_AJP);
         ajpConnector.setAttribute("secretRequired", "false");
+        // CVE-2020-1938 (Ghostcat) is mitigated by either secretRequired or
+        // a loopback bind. The IDE-injected connector intentionally omits the
+        // secret for local-dev convenience, so pin the bind to 127.0.0.1
+        // instead. Users who need network-reachable AJP can either configure
+        // their own <Connector> with an explicit secret in the conf overlay
+        // (the existing-AJP path leaves user attributes untouched) or remove
+        // this attribute manually.
+        ajpConnector.setAttribute("address", "127.0.0.1");
         // Use the resolved HTTPS port when HTTPS is enabled; otherwise use the HTTP
         // connector's redirectPort if one exists, falling back to the AJP port itself.
         int redirectPort = httpsEnabled ? httpsPort : resolveRedirectPort(doc, port);

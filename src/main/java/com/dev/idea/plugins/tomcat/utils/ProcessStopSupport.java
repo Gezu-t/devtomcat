@@ -98,14 +98,13 @@ public final class ProcessStopSupport {
                 });
             }
         });
-        // Skip the destroy call if shutdown is already in flight — re-entering
-        // the graceful shutdown path (custom-script, super.destroyProcessImpl,
-        // cleanup) a second time is not safe. The listener attached above still
-        // fires when the already-in-progress termination completes, so the
-        // relaunch sequencing works either way. Without this guard, a user who
-        // switches executor modes mid-shutdown would trigger double-shutdown.
+        // Skip if already terminating — the listener above still fires when the in-flight
+        // termination completes, so the relaunch sequencing works either way.
+        // Dispatch off-EDT: destroyProcess fires processWillTerminate synchronously, and
+        // the platform's debugger listener calls runProcessWithProgressSynchronously
+        // which IntelliJ 2025.1 forbids on EDT (IllegalStateException: ... w/o IW lock).
         if (!handler.isProcessTerminating()) {
-            handler.destroyProcess();
+            ApplicationManager.getApplication().executeOnPooledThread(handler::destroyProcess);
         }
     }
 }

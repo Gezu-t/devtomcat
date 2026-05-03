@@ -63,22 +63,32 @@ public interface TomcatLifecycleListener {
 
     // --- Composite ---
 
-    /** Fans out every event to all listeners in order. */
+    /**
+     * Fans out every event to all listeners in order. A throwing listener is logged
+     * and skipped so peer consumers (status, history, startup tracker) stay in sync.
+     */
     @NotNull
     static TomcatLifecycleListener composite(@NotNull List<TomcatLifecycleListener> listeners) {
         List<TomcatLifecycleListener> copy = List.copyOf(listeners);
+        Logger log = Logger.getInstance(TomcatLifecycleListener.class);
         return new TomcatLifecycleListener() {
-            @Override public void onServerStarting(@NotNull String c) { for (var l : copy) l.onServerStarting(c); }
-            @Override public void onServerStarted(@NotNull String c, long t) { for (var l : copy) l.onServerStarted(c, t); }
-            @Override public void onServerStopped(@NotNull String c, int ex, long d, int e, int w, long s) { for (var l : copy) l.onServerStopped(c, ex, d, e, w, s); }
-            @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactDeploying(c, a); }
-            @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactDeployed(c, a); }
-            @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactFailed(c, a); }
-            @Override public void onArtifactCancelled(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactCancelled(c, a); }
-            @Override public void onDeploymentSummaryFailed(@NotNull String c) { for (var l : copy) l.onDeploymentSummaryFailed(c); }
-            @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { for (var l : copy) l.onArtifactReloading(c, a); }
-            @Override public void onError(@NotNull String c) { for (var l : copy) l.onError(c); }
-            @Override public void onWarning(@NotNull String c) { for (var l : copy) l.onWarning(c); }
+            private void dispatch(@NotNull String event, @NotNull java.util.function.Consumer<TomcatLifecycleListener> call) {
+                for (var l : copy) {
+                    try { call.accept(l); }
+                    catch (Throwable t) { log.warn("Lifecycle listener " + l.getClass().getName() + " threw on " + event, t); }
+                }
+            }
+            @Override public void onServerStarting(@NotNull String c) { dispatch("onServerStarting", l -> l.onServerStarting(c)); }
+            @Override public void onServerStarted(@NotNull String c, long t) { dispatch("onServerStarted", l -> l.onServerStarted(c, t)); }
+            @Override public void onServerStopped(@NotNull String c, int ex, long d, int e, int w, long s) { dispatch("onServerStopped", l -> l.onServerStopped(c, ex, d, e, w, s)); }
+            @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { dispatch("onArtifactDeploying", l -> l.onArtifactDeploying(c, a)); }
+            @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { dispatch("onArtifactDeployed", l -> l.onArtifactDeployed(c, a)); }
+            @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { dispatch("onArtifactFailed", l -> l.onArtifactFailed(c, a)); }
+            @Override public void onArtifactCancelled(@NotNull String c, @NotNull String a) { dispatch("onArtifactCancelled", l -> l.onArtifactCancelled(c, a)); }
+            @Override public void onDeploymentSummaryFailed(@NotNull String c) { dispatch("onDeploymentSummaryFailed", l -> l.onDeploymentSummaryFailed(c)); }
+            @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { dispatch("onArtifactReloading", l -> l.onArtifactReloading(c, a)); }
+            @Override public void onError(@NotNull String c) { dispatch("onError", l -> l.onError(c)); }
+            @Override public void onWarning(@NotNull String c) { dispatch("onWarning", l -> l.onWarning(c)); }
         };
     }
 

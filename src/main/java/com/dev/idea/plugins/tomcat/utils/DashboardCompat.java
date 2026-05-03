@@ -39,7 +39,7 @@ import org.jetbrains.annotations.Nullable;
  * deprecated-for-removal there; this is expected and documented as accepted
  * tech debt until the floor bump.
  *
- * <h3>Migration plan for 1.0.9+ (minimum platform = 2026.1)</h3>
+ * <h3>Migration plan (when the minimum platform reaches 2026.1)</h3>
  *
  * <ol>
  *   <li>Delete this class.</li>

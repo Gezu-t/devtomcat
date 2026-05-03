@@ -9,23 +9,18 @@ import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
-import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
-import com.intellij.execution.RunManager;
-import com.intellij.execution.RunManagerListener;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.JavaCommandLineState;
 import com.intellij.execution.configurations.JavaParameters;
-import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
@@ -42,11 +37,7 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Builds the Tomcat process command line and manages process lifecycle.
@@ -73,15 +64,11 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     private volatile PortConfig resolvedPorts;
     private volatile int resolvedDebugPort = -1;
     /**
-     * Per-launch identifier assigned when "Allow parallel run" is active so this
-     * instance gets an isolated CATALINA_BASE. {@code null} means "shared per-config
-     * base" — the historical single-instance behaviour.
-     *
-     * <p>Assigned once at first {@link #createJavaParameters()} / {@link #startProcess()}
-     * and reused by the handler so post-launch consumers (updater, Services panel)
-     * resolve the same directory.
+     * Per-launch ID assigner. Holds the single source of truth for "what runId
+     * does this launch use" — see {@link RunIdAssigner} for the parallel-run
+     * effectiveness rules and the warning-once guarantees.
      */
-    @Nullable private volatile String runId;
+    private final RunIdAssigner runIdAssigner;
     private final AtomicBoolean preLaunchDone = new AtomicBoolean(false);
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
@@ -89,6 +76,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         super(environment);
         this.configuration = configuration;
         this.deploymentLogger = new TomcatDeploymentLogger(environment.getProject());
+        this.runIdAssigner = new RunIdAssigner(configuration, environment, deploymentLogger);
     }
 
     @Override
@@ -200,7 +188,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         if (configuration.isRemoteMode()) return;
 
         String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
-        if (hasManualJdwpAgent(vmOptions)) {
+        if (CatalinaScriptSupport.hasManualJdwpAgent(vmOptions)) {
             deploymentLogger.logServerWarning(
                     "Manual -agentlib:jdwp detected in VM options. " +
                     "In Debug mode, the IDE injects its own JDWP agent automatically. " +
@@ -213,350 +201,24 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         }
     }
 
-    /**
-     * Returns true if the given VM options string contains a manual JDWP agent argument.
-     * Matches {@code -agentlib:jdwp} followed by {@code =} or end-of-string/whitespace,
-     * avoiding false positives on unrelated agents like {@code -agentlib:jdwp_other}.
-     * Package-visible for testing.
-     */
-    static boolean hasManualJdwpAgent(@Nullable String vmOptions) {
-        if (vmOptions == null) return false;
-        int idx = vmOptions.indexOf("-agentlib:jdwp");
-        if (idx < 0) return false;
-        int end = idx + "-agentlib:jdwp".length();
-        // Must be followed by '=', whitespace, or end of string
-        return end >= vmOptions.length()
-                || vmOptions.charAt(end) == '='
-                || Character.isWhitespace(vmOptions.charAt(end));
-    }
-
-    static boolean isCatalinaCommand(@NotNull List<String> tokens) {
-        if (tokens.isEmpty()) return false;
-        String command = Path.of(tokens.get(0)).getFileName().toString().toLowerCase(Locale.ROOT);
-        return command.startsWith(TomcatConstants.CATALINA_SCRIPT);
-    }
-
-    static boolean usesCatalinaJpda(@NotNull List<String> tokens) {
-        return tokens.stream().anyMatch(token -> TomcatConstants.CATALINA_JPDA.equalsIgnoreCase(token));
-    }
-
-    static @NotNull List<String> enableCatalinaJpda(@NotNull List<String> tokens) {
-        if (!isCatalinaCommand(tokens) || usesCatalinaJpda(tokens)) {
-            return tokens;
-        }
-        java.util.ArrayList<String> adjusted = new java.util.ArrayList<>(tokens.size() + 1);
-        boolean inserted = false;
-        for (String token : tokens) {
-            if (!inserted && (TomcatConstants.CATALINA_RUN.equalsIgnoreCase(token)
-                    || TomcatConstants.CATALINA_START.equalsIgnoreCase(token))) {
-                adjusted.add(TomcatConstants.CATALINA_JPDA);
-                inserted = true;
-            }
-            adjusted.add(token);
-        }
-        return inserted ? List.copyOf(adjusted) : tokens;
-    }
-
-    static @NotNull String appendVmOptIfMissing(@Nullable String currentValue, @NotNull String vmOpt) {
-        if (hasManualJdwpAgent(currentValue)) {
-            return StringUtil.notNullize(currentValue).trim();
-        }
-        String existing = StringUtil.notNullize(currentValue).trim();
-        return existing.isEmpty() ? vmOpt : existing + " " + vmOpt;
-    }
-
-    static void applyCustomScriptDebugSupport(@NotNull GeneralCommandLine commandLine,
-                                              @NotNull List<String> startupTokens,
-                                              int debugPort) {
-        String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT,
-                TomcatConstants.JDWP_TRANSPORT_SOCKET, debugPort);
-
-        commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));
-        commandLine.withEnvironment(TomcatConstants.ENV_JDWP_OPTS, jdwpArg);
-
-        if (isCatalinaCommand(startupTokens)) {
-            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_ADDRESS, String.valueOf(debugPort));
-            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_TRANSPORT, TomcatConstants.JDWP_TRANSPORT_SOCKET);
-            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_SUSPEND, "n");
-            commandLine.withEnvironment(TomcatConstants.ENV_JPDA_OPTS, jdwpArg);
-        }
-
-        String catalinaOpts = appendVmOptIfMissing(
-                commandLine.getEnvironment().get(TomcatConstants.ENV_CATALINA_OPTS), jdwpArg);
-        commandLine.withEnvironment(TomcatConstants.ENV_CATALINA_OPTS, catalinaOpts);
-
-        String javaOpts = appendVmOptIfMissing(
-                commandLine.getEnvironment().get(TomcatConstants.ENV_JAVA_OPTS), jdwpArg);
-        commandLine.withEnvironment(TomcatConstants.ENV_JAVA_OPTS, javaOpts);
-    }
+    // Static command-line / JDWP / JPDA helpers moved to {@link CatalinaScriptSupport}.
+    // The remaining instance pipeline below delegates to that class via fully-qualified
+    // calls in startProcess() and warnIfManualJdwpInDebugMode().
 
     /**
-     * Detects port conflicts before launch and auto-resolves them.
-     *
-     * <p>Uses {@link TomcatPortRegistry} to
-     * atomically claim all ports (Tomcat + JDWP) before the process starts.
-     * This closes the race window where two configurations start simultaneously,
-     * both observe a port as free before either JVM has bound to it, and both
-     * end up on the same port.
-     *
-     * <p>The resolved ports are stored in {@link #resolvedPorts} and used
-     * by the builder via {@link #createJavaParameters()}. All claimed ports
-     * are released automatically when the process terminates.
+     * Resolve and atomically claim all ports for this launch, then store the
+     * results in this state's instance fields. Delegates to
+     * {@link LaunchPortClaimer}; see that class for the full carry-over /
+     * conflict-detection / writeback contract. The fields it sets
+     * ({@link #resolvedPorts}, {@link #resolvedDebugPort}) are read by
+     * {@link #createJavaParameters()} and the process handler.
      */
     private void resolvePortConflicts() {
-        String configName = configuration.getName();
-        TomcatPortRegistry registry = TomcatPortRegistry.getInstance();
-
-        // Carryover path: the previous process (stopped by stopAndRelaunch) handed
-        // its resolved ports down via ExecutionEnvironment user data. Re-use them
-        // atomically instead of re-running conflict detection, which would see the
-        // OS's TIME_WAIT socket state on the just-released port and bump it up.
-        PortConfig carried = getEnvironment().getUserData(CARRIED_PORTS_KEY);
-        if (carried != null) {
-            List<String> changes = new java.util.ArrayList<>();
-            claimAndTrack(carried, registry, configName, changes);
-            this.resolvedPorts = carried;
-            syncResolvedPortsToConfig(carried);
-
-            Integer carriedDebug = getEnvironment().getUserData(CARRIED_DEBUG_PORT_KEY);
-            if (carriedDebug != null && carriedDebug > 0) {
-                int claimed = registry.claimPort(carriedDebug, configName);
-                this.resolvedDebugPort = claimed > 0 ? claimed : carriedDebug;
-                syncResolvedDebugPortToConfig(this.resolvedDebugPort);
-            }
-            logResolutionChanges(changes);
-            return;
-        }
-
-        PortConfig originalPorts = configuration.getConfigData().getPortConfig();
-        boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
-                getEnvironment().getExecutor().getId());
-
-        if (isDebug) {
-            var debugConfig = configuration.getConfigData().getDebugConfig();
-            int debugPort = debugConfig != null ? debugConfig.getPort()
-                    : DebugConfig.DEFAULT_DEBUG_PORT;
-
-            PortConflictDetector.DebugPortResolution resolution =
-                    PortConflictDetector.resolveConflictsWithDebug(originalPorts, debugPort);
-
-            // Atomically claim all resolved ports through the registry to prevent
-            // a second concurrent launcher from grabbing the same ports
-            PortConfig rp = resolution.getResolvedConfig();
-            claimAndTrack(rp, registry, configName, resolution.getChanges());
-            int preClaimDebug = resolution.getDebugPort();
-            this.resolvedDebugPort = registry.claimPort(preClaimDebug, configName);
-            if (this.resolvedDebugPort == -1) {
-                resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
-                        + ": all ports in search range exhausted — debugger may fail to attach");
-                this.resolvedDebugPort = preClaimDebug; // keep original; JVM will fail with a clear error
-            } else if (this.resolvedDebugPort != preClaimDebug) {
-                resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
-                        + " claimed by a concurrent instance, resolved to " + this.resolvedDebugPort);
-            }
-            this.resolvedPorts = rp;
-            syncResolvedPortsToConfig(rp);
-            syncResolvedDebugPortToConfig(this.resolvedDebugPort);
-            logResolutionChanges(resolution.getChanges());
-        } else {
-            PortConflictDetector.PortResolution resolution =
-                    PortConflictDetector.resolveConflicts(originalPorts);
-
-            PortConfig rp = resolution.getResolvedConfig();
-            claimAndTrack(rp, registry, configName, resolution.getChanges());
-            this.resolvedPorts = rp;
-            syncResolvedPortsToConfig(rp);
-            logResolutionChanges(resolution.getChanges());
-        }
-    }
-
-    private void syncResolvedPortsToConfig(@NotNull PortConfig rp) {
-        writeBackResolvedPorts(configuration, rp);
-    }
-
-    private void syncResolvedDebugPortToConfig(int resolvedDebug) {
-        writeBackResolvedDebugPort(configuration, resolvedDebug);
-    }
-
-    /**
-     * Writes the resolved ports back to the configuration's {@link PortConfig}
-     * so it becomes the single source of truth for every downstream read — the
-     * config dialog (via RunManager clone on next open), the browser URL generation,
-     * the Services panel, and the serializer.
-     *
-     * <p><b>No-op in effective parallel-run mode.</b> The config represents the
-     * user's seed; overwriting it with whatever a transient conflict happened to
-     * pick would ratchet it permanently away from intent (a one-off bump
-     * {@code 8083 → 8090} would survive the conflict clearing and make 8090 the
-     * new base). Per-launch ports stay on the handler via {@link #CARRIED_PORTS_KEY};
-     * the Services panel and runtime consumers read from there.
-     *
-     * <p>After mutation in single-instance mode, publishes
-     * {@link RunManagerListener#runConfigurationChanged} on the project message
-     * bus so listeners (Run Dashboard, currently-open dialogs on reload, icon
-     * caches) requery the configuration. Without this, mutations stayed in-memory
-     * only and the dialog read stale clones.
-     *
-     * <p>Static + package-private so unit tests can exercise it without
-     * constructing a full {@link ExecutionEnvironment}.
-     */
-    static void writeBackResolvedPorts(@NotNull TomcatRunConfiguration configuration,
-                                        @NotNull PortConfig resolved) {
-        if (configuration.isParallelRunEffective()) {
-            return;
-        }
-        PortConfig target = configuration.getConfigData().getPortConfig();
-        boolean changed = false;
-        if (target.getHttp() != resolved.getHttp()) {
-            target.setHttp(resolved.getHttp());
-            changed = true;
-        }
-        if (target.getShutdown() != resolved.getShutdown()) {
-            target.setShutdown(resolved.getShutdown());
-            changed = true;
-        }
-        if (target.isHttpsEnabled() && target.getHttps() != resolved.getHttps()) {
-            target.setHttps(resolved.getHttps());
-            changed = true;
-        }
-        if (target.isJmxEnabled() && target.getJmx() != resolved.getJmx()) {
-            target.setJmx(resolved.getJmx());
-            changed = true;
-        }
-        if (target.isAjpEnabled() && target.getAjp() != resolved.getAjp()) {
-            target.setAjp(resolved.getAjp());
-            changed = true;
-        }
-        if (changed) {
-            notifyConfigurationChanged(configuration);
-        }
-    }
-
-    /**
-     * Writes the resolved debug port back to {@code DebugConfig} so the config
-     * dialog and serializer agree on the port the JVM actually bound. Same
-     * parallel-run skip as {@link #writeBackResolvedPorts} — the seed stays
-     * stable across transient conflicts.
-     */
-    static void writeBackResolvedDebugPort(@NotNull TomcatRunConfiguration configuration,
-                                            int resolvedDebug) {
-        if (configuration.isParallelRunEffective()) {
-            return;
-        }
-        if (resolvedDebug <= 0) return;
-        var debugConfig = configuration.getConfigData().getDebugConfig();
-        if (debugConfig != null && debugConfig.getPort() != resolvedDebug) {
-            debugConfig.setPort(resolvedDebug);
-            notifyConfigurationChanged(configuration);
-        }
-    }
-
-    /**
-     * Publish {@link RunManagerListener#runConfigurationChanged} on the project's
-     * message bus so every interested listener re-reads the now-resolved port
-     * values: the editor (on its next reset), the Run Dashboard, the Services
-     * panel, and anything else subscribed to the standard IntelliJ change channel.
-     * Also forces a dashboard rebuild as a belt-and-braces — some listeners rely
-     * on it rather than subscribing to the topic. All UI work runs on the EDT.
-     */
-    private static void notifyConfigurationChanged(@NotNull TomcatRunConfiguration configuration) {
-        Project project = configuration.getProject();
-        if (project == null || project.isDisposed()) return;
-        ApplicationManager.getApplication().invokeLater(() -> {
-            if (project.isDisposed()) return;
-            try {
-                RunnerAndConfigurationSettings settings =
-                        RunManager.getInstance(project).findSettings(configuration);
-                if (settings != null) {
-                    project.getMessageBus()
-                            .syncPublisher(RunManagerListener.TOPIC)
-                            .runConfigurationChanged(settings);
-                }
-            } catch (Exception e) {
-                LOG.debug("RunManager change notification after port writeback failed", e);
-            }
-            try {
-                RunDashboardManager.getInstance(project).updateDashboard(true);
-            } catch (Exception e) {
-                LOG.debug("Dashboard refresh after port writeback failed", e);
-            }
-        });
-    }
-
-    /**
-     * Claims all ports in the resolved {@link PortConfig} through the registry and
-     * appends a change entry for any port the registry bumped further (i.e., a
-     * concurrent instance already claimed the port that {@link PortConflictDetector}
-     * picked).
-     */
-    private void claimAndTrack(@NotNull PortConfig rp,
-                               @NotNull TomcatPortRegistry registry,
-                               @NotNull String configName,
-                               @NotNull List<String> changes) {
-        int orig, claimed;
-
-        orig = rp.getHttp();
-        claimed = registry.claimPort(orig, configName);
-        if (claimed == -1) {
-            changes.add("HTTP port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
-        } else if (claimed != orig) {
-            changes.add("HTTP port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
-            rp.setHttp(claimed);
-        }
-
-        orig = rp.getShutdown();
-        claimed = registry.claimPort(orig, configName);
-        if (claimed == -1) {
-            changes.add("Shutdown port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
-        } else if (claimed != orig) {
-            changes.add("Shutdown port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
-            rp.setShutdown(claimed);
-        }
-
-        if (rp.isHttpsEnabled()) {
-            orig = rp.getHttps();
-            claimed = registry.claimPort(orig, configName);
-            if (claimed == -1) {
-                changes.add("HTTPS port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
-            } else if (claimed != orig) {
-                changes.add("HTTPS port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
-                rp.setHttps(claimed);
-            }
-        }
-
-        if (rp.isJmxEnabled()) {
-            orig = rp.getJmx();
-            claimed = registry.claimPort(orig, configName);
-            if (claimed == -1) {
-                changes.add("JMX port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
-            } else if (claimed != orig) {
-                changes.add("JMX port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
-                rp.setJmx(claimed);
-            }
-        }
-
-        if (rp.isAjpEnabled()) {
-            orig = rp.getAjp();
-            claimed = registry.claimPort(orig, configName);
-            if (claimed == -1) {
-                changes.add("AJP port " + orig + ": all ports in search range exhausted — Tomcat may fail to bind");
-            } else if (claimed != orig) {
-                changes.add("AJP port " + orig + " claimed by a concurrent instance, resolved to " + claimed);
-                rp.setAjp(claimed);
-            }
-        }
-    }
-
-    private void logResolutionChanges(@NotNull List<String> changes) {
-        if (!changes.isEmpty()) {
-            deploymentLogger.logServerWarning("Port conflicts detected and auto-resolved:");
-            for (String change : changes) {
-                deploymentLogger.logServerWarning("  " + change);
-            }
-            notifyUser("DevTomcat: Port Auto-Resolved",
-                    String.join("\n", changes),
-                    NotificationType.WARNING);
+        LaunchPortClaimer.Resolution result =
+                new LaunchPortClaimer(configuration, getEnvironment(), deploymentLogger).claim();
+        this.resolvedPorts = result.ports();
+        if (result.hasDebugPort()) {
+            this.resolvedDebugPort = result.debugPort();
         }
     }
 
@@ -568,104 +230,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     }
 
     /**
-     * Kill any orphan Tomcat processes left over from prior runs of THIS run
-     * configuration so their ports free up before the port-conflict detector
-     * ever sees them. When the IDE exits without cleanly stopping a launch
-     * (crash, force-quit, sandbox restart), the JVM keeps running and holds
-     * its HTTP/shutdown/JMX ports. Every subsequent launch then bumps up to
-     * the next free slot, and the user sees the dialog's seed permanently
-     * drift away from the actually-bound port shown in Services.
-     *
-     * <p>Identification is via {@code -Dcatalina.base=<this config's base>}
-     * in the process command line. The base path is per-configuration
-     * (derived from {@link TomcatProjectUtils#getCatalinaBase}), so nothing
-     * else on the machine can legitimately match — this is safe to run
-     * unconditionally before every launch. Both single-instance and
-     * parallel-run orphans are caught because parallel-run per-launch dirs
-     * live under the config base prefix.
-     *
-     * <p>Sends {@link ProcessHandle#destroy} first and upgrades to
-     * {@link ProcessHandle#destroyForcibly} after a short grace period if
-     * Tomcat ignored the polite signal (which it does without its shutdown
-     * port). Failures at any step are logged and swallowed — this is a
-     * best-effort reclaim, not a gate.
+     * Kill orphan Tomcat processes left over from prior launches of this
+     * configuration before port-conflict detection runs. Delegates to
+     * {@link OrphanTomcatReclaimer} — see that class for the full identification
+     * contract (including the boundary-aware matcher that prevents same-prefix
+     * config-name collisions) and the polite/grace/force termination strategy.
      */
     private void reclaimOrphanTomcats() {
-        Path configBase;
-        try {
-            // Pass runId=null to get the STABLE config-level base, which is a
-            // prefix for both single-instance and parallel-run .runs/... children.
-            configBase = com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils
-                    .getCatalinaBase(configuration, null);
-        } catch (Exception e) {
-            LOG.debug("Skipping orphan reclaim: catalina.base not resolvable yet", e);
-            return;
-        }
-        if (configBase == null) return;
-
-        String marker = "-Dcatalina.base=" + configBase.toAbsolutePath().toString();
-        long selfPid = ProcessHandle.current().pid();
-
-        List<ProcessHandle> orphans;
-        try (Stream<ProcessHandle> all = ProcessHandle.allProcesses()) {
-            orphans = all
-                    .filter(ProcessHandle::isAlive)
-                    .filter(p -> p.pid() != selfPid)
-                    .filter(p -> p.info().commandLine()
-                            .map(cl -> cl.contains(marker))
-                            .orElse(false))
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            LOG.warn("Orphan scan failed; continuing without reclaim", e);
-            return;
-        }
-        if (orphans.isEmpty()) return;
-
-        LOG.warn("Reclaiming " + orphans.size() + " orphan Tomcat process(es) from prior launches"
-                + " of '" + configuration.getName() + "' at base " + configBase);
-
-        // Polite first — Tomcat catches SIGTERM and shuts down cleanly when its
-        // shutdown port is reachable. Most orphans don't have a working shutdown
-        // port (that's exactly why they're orphans), so destroy() rarely works
-        // on its own — but try it anyway so we don't SIGKILL a clean-shutdown-
-        // capable JVM unnecessarily.
-        for (ProcessHandle p : orphans) {
-            try { p.destroy(); } catch (Exception ignored) { /* try next */ }
-        }
-        long graceDeadlineMs = System.currentTimeMillis() + 1500;
-        for (ProcessHandle p : orphans) {
-            long remaining = graceDeadlineMs - System.currentTimeMillis();
-            if (remaining <= 0) break;
-            try {
-                p.onExit().get(remaining, TimeUnit.MILLISECONDS);
-            } catch (Exception ignored) {
-                // Still alive after grace period — will be force-killed below.
-            }
-        }
-        // Force-kill survivors.
-        List<Long> forceKilled = new java.util.ArrayList<>();
-        for (ProcessHandle p : orphans) {
-            if (!p.isAlive()) continue;
-            try {
-                if (p.destroyForcibly()) {
-                    forceKilled.add(p.pid());
-                }
-            } catch (Exception e) {
-                LOG.debug("destroyForcibly failed for pid=" + p.pid(), e);
-            }
-        }
-        // Wait briefly for the OS to release the sockets so the next port probe
-        // doesn't race TIME_WAIT. The SO_REUSEADDR probe in PortUtils.tryBind
-        // makes TIME_WAIT transparent, so 200ms is plenty.
-        try {
-            Thread.sleep(200);
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
-        }
-
-        deploymentLogger.logServerWarning("Reclaimed " + orphans.size()
-                + " orphan Tomcat process(es) from prior launches of this configuration"
-                + (forceKilled.isEmpty() ? "" : " (force-killed: " + forceKilled + ")"));
+        new OrphanTomcatReclaimer(configuration, deploymentLogger).reclaim();
     }
 
     /**
@@ -766,147 +338,26 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     }
 
     /**
-     * Resolves (and lazily assigns) the per-launch identifier used to isolate the
-     * CATALINA_BASE. Returns {@code null} whenever parallel-run isolation is not
-     * <em>effective</em> — either the checkbox is off, or the user pinned an
-     * explicit CATALINA_BASE so isolation would be impossible anyway. See
-     * {@link TomcatRunConfiguration#isParallelRunEffective()} for the single
-     * authoritative predicate; this method and
-     * {@link TomcatRunnerDelegate#handleSameExecutorRerun} both consult it so
-     * the launch path and the rerun-intercept path agree on whether this
-     * configuration should behave as parallel.
-     *
-     * <p>The pinned-base guard is critical: {@link TomcatProjectUtils#getCatalinaBase}
-     * deliberately returns the user's pinned directory regardless of {@code runId},
-     * so assigning a runId here would cause the per-run cleanup in
-     * {@link TomcatProcessHandler} to walk and delete the pinned directory on
-     * process exit — data loss.
-     *
-     * <p>The id is derived from {@link ExecutionEnvironment#getExecutionId()} —
-     * unique per launch within the IDE session and stable across the lifetime of
-     * this {@code TomcatCommandLineState} so the builder, the process handler,
-     * and post-launch consumers (updater, Services panel) all see the same path.
+     * Resolve the per-launch run ID for parallel-run mode. Idempotent —
+     * subsequent calls return the same value within a single launch.
+     * Delegates to {@link RunIdAssigner}; see that class for the
+     * parallel-run-effective predicate, the pinned-base guard, and the
+     * warning-once policy.
      */
     @Nullable
     private String resolveRunId() {
-        if (!configuration.isParallelRunEffective()) {
-            if (configuration.isAllowMultipleInstances()) {
-                // Checkbox is on but isolation is impossible because of a pin.
-                // Warn once — the same rerun will keep landing in the Update dialog
-                // path instead of spawning parallel instances.
-                String pinned = configuration.getConfigData().getCatalinaBase();
-                LOG.warn("Allow parallel run: CATALINA_BASE is pinned to '" + pinned
-                        + "' — parallel isolation disabled, using single-instance semantics "
-                        + "(Update dialog on rerun) to prevent shared-directory collisions.");
-                if (deploymentLogger != null) {
-                    deploymentLogger.logServerWarning(
-                            "Allow parallel run is ignored because CATALINA_BASE is pinned — "
-                            + "unset the pinned base to enable per-run isolation.");
-                }
-            }
-            return null;
-        }
-        String current = runId;
-        if (current != null) return current;
-        long id = getEnvironment().getExecutionId();
-        // Prefix so the directory is easy to identify on disk and never collides
-        // with legitimate config names. The absolute value is used to avoid a
-        // leading '-' in the directory name on pathological IDs.
-        current = "run-" + Long.toUnsignedString(id, 36);
-        runId = current;
-        // LogFileOptions live on the run configuration (shared across parallel
-        // launches), but alignLogFilePathsWithRuntimeBase() is called right
-        // before process start to repoint them at this launch's isolated
-        // .runs/<runId>/logs/ directory. IntelliJ's RunContentBuilder reads
-        // those updated paths and creates tabs pointing at the correct files.
-        // Two perfectly-simultaneous parallel launches race on the shared list
-        // (later writer wins labelling), but this is cosmetic — logs are
-        // always written to the correct per-run directory regardless.
-        if (deploymentLogger != null) {
-            deploymentLogger.logServerInfo(
-                    "Parallel run active — isolated CATALINA_BASE under .runs/" + current
-                    + "/. Log tabs for this launch point at the isolated base's logs/ subfolder.");
-        }
-        return current;
-    }
-
-    @Nullable
-    String getRunId() {
-        return runId;
+        return runIdAssigner.resolve();
     }
 
     /**
-     * Realigns plugin-managed {@code LogFileOptions} paths on the run configuration
-     * so they point at the catalina.base this launch actually uses — per-run
-     * ({@code <config>/.runs/<runId>/logs/}) for parallel mode, config-level
-     * ({@code <config>/logs/}) for single-instance. Runs after the base has been
-     * prepared on disk (via {@link TomcatConfigPreparer}) and before
-     * {@link Process#createProcess()} so IntelliJ's {@code RunContentBuilder}
-     * reads the correct paths when it builds the Log tabs.
-     *
-     * <p>{@link TomcatRunConfiguration#getAllLogFiles()} already has a refresh pass
-     * that aligns paths to the config-level logs directory, but that's the wrong
-     * target in parallel mode — tabs end up pointing at a directory Tomcat never
-     * writes to, so the "Logs" tab silently disappears from Services. This method
-     * is the per-launch override that substitutes the correct runtime directory.
-     *
-     * <p>User-customised paths (anything outside the devtomcat system tree for
-     * this configuration) are preserved verbatim. Only entries whose stored path
-     * matches the plugin-managed shape get rewritten.
+     * Realign plugin-managed log paths so the IDE's {@code RunContentBuilder}
+     * creates Log tabs that point at files this launch actually writes to.
+     * Delegates to {@link LogFilePathAligner} — see that class for the full
+     * filename-matching contract and the parallel-run vs single-instance
+     * directory selection.
      */
     private void alignLogFilePathsWithRuntimeBase() {
-        java.nio.file.Path runtimeLogsDir =
-                com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils.getLogsDirectory(configuration, runId);
-        if (runtimeLogsDir == null) return;
-
-        java.util.Map<String, com.dev.idea.plugins.tomcat.model.TomcatLogFile> byId = new java.util.HashMap<>();
-        for (com.dev.idea.plugins.tomcat.model.TomcatLogFile lf :
-                com.dev.idea.plugins.tomcat.model.TomcatLogFile.getStandardLogFiles()) {
-            byId.put(lf.getId(), lf);
-        }
-
-        for (com.intellij.execution.configurations.LogFileOptions opt : configuration.getAllLogFiles()) {
-            com.dev.idea.plugins.tomcat.model.TomcatLogFile lf = byId.get(opt.getName());
-            if (lf == null) continue; // unknown or user-added entry
-            String currentPath = opt.getPathPattern();
-            // Detect our own standard entry by filename pattern rather than by
-            // directory prefix. The old prefix test was wrong: a LogFileOptions
-            // that was persisted with a different IDE instance's system path
-            // (sandbox vs real IDE) would slip past the prefix check and keep
-            // pointing at a non-existent file forever — breaking Log tabs for
-            // any config that moved between sandbox and production installs.
-            if (!matchesStandardFilename(currentPath, lf)) {
-                continue;
-            }
-            String aligned = lf.resolveFullPath(runtimeLogsDir);
-            if (!aligned.equals(currentPath)) {
-                opt.setPathPattern(aligned);
-                LOG.debug("Aligned log path for '" + opt.getName()
-                        + "': " + currentPath + " -> " + aligned);
-            }
-        }
-    }
-
-    /**
-     * Filename-pattern test that identifies a {@link com.intellij.execution.configurations.LogFileOptions}
-     * entry as one of our standard Tomcat logs regardless of which directory it
-     * currently points at. This replaces the old directory-prefix test, which
-     * failed when the persisted path referenced a different IDE's system dir
-     * (sandbox path surviving into a real-IDE install, or vice versa).
-     */
-    private static boolean matchesStandardFilename(String currentPath,
-                                                   com.dev.idea.plugins.tomcat.model.TomcatLogFile lf) {
-        if (currentPath == null || currentPath.isEmpty()) return true;
-        int lastSep = currentPath.lastIndexOf(java.io.File.separator);
-        String filename = lastSep < 0 ? currentPath : currentPath.substring(lastSep + 1);
-        String pattern = lf.getFilenamePattern();
-        int wildcardIdx = pattern.indexOf('*');
-        if (wildcardIdx < 0) return filename.equals(pattern);
-        String prefix = pattern.substring(0, wildcardIdx);
-        String suffix = pattern.substring(wildcardIdx + 1);
-        return filename.length() >= prefix.length() + suffix.length()
-                && filename.startsWith(prefix)
-                && filename.endsWith(suffix);
+        new LogFilePathAligner(configuration).align(runIdAssigner.resolve());
     }
 
     private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
@@ -935,7 +386,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     runnerSettings.getStartupScript());
             boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
             if (isDebug) {
-                tokens = enableCatalinaJpda(tokens);
+                tokens = CatalinaScriptSupport.enableCatalinaJpda(tokens);
             }
             commandLine = new GeneralCommandLine(tokens);
             commandLine.withEnvironment(runnerSettings.getEnvironmentVariables());
@@ -957,10 +408,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 DebugConfig dc = configuration.getConfigData().getDebugConfig();
                 int debugPort = resolvedDebugPort > 0 ? resolvedDebugPort
                         : (dc != null ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT);
-                applyCustomScriptDebugSupport(commandLine, tokens, debugPort);
+                CatalinaScriptSupport.applyCustomScriptDebugSupport(commandLine, tokens, debugPort);
                 deploymentLogger.logServerInfo(
                         "Debug mode with custom startup: JDWP injected via environment variables"
-                                + (isCatalinaCommand(tokens) ? " and catalina jpda mode" : ""));
+                                + (CatalinaScriptSupport.isCatalinaCommand(tokens) ? " and catalina jpda mode" : ""));
             }
 
             if (configuration.getTomcatInfo() != null) {

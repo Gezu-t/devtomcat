@@ -132,6 +132,26 @@ public final class TomcatPortRegistry {
     }
 
     /**
+     * Migrates ownership of all ports from {@code oldName} to {@code newName}.
+     * Call from the run-config rename listener so a running configuration's
+     * ports stay reachable for {@link #releaseAllFor} on stop — without this,
+     * a rename leaks the ports until the IDE restarts (the registry is APP-level).
+     */
+    public synchronized void renameConfiguration(@NotNull String oldName, @NotNull String newName) {
+        if (oldName.equals(newName)) return;
+        int migrated = 0;
+        for (var entry : claimedPorts.entrySet()) {
+            if (oldName.equals(entry.getValue())) {
+                entry.setValue(newName);
+                migrated++;
+            }
+        }
+        if (migrated > 0) {
+            LOG.info("PortRegistry: migrated " + migrated + " port(s) from '" + oldName + "' to '" + newName + "'");
+        }
+    }
+
+    /**
      * Returns the number of currently claimed ports (for diagnostics / tests).
      */
     public int claimedCount() {

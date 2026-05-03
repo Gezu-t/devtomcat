@@ -271,6 +271,28 @@ package com.dev.idea.plugins.tomcat.utils;
          * @param target the destination path (will be replaced atomically)
          * @throws IOException if the copy or rename fails
          */
+        /**
+         * Writes {@code content} to {@code target} via temp-file + atomic move so a
+         * watcher (e.g. Tomcat's context.xml deployer) never observes a partial
+         * truncate-then-write window. Falls back to a non-atomic move on filesystems
+         * that don't support {@code ATOMIC_MOVE}.
+         */
+        public static void atomicWriteString(@NotNull Path target, @NotNull String content) throws IOException {
+            Path tempFile = Files.createTempFile(target.getParent(), ".devtomcat-", ".tmp");
+            try {
+                Files.writeString(tempFile, content);
+                try {
+                    Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING,
+                            StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException e) {
+                safeDelete(tempFile, LOG);
+                throw e;
+            }
+        }
+
         public static void atomicCopy(@NotNull Path source, @NotNull Path target) throws IOException {
             Path tempFile = Files.createTempFile(target.getParent(), ".devtomcat-", ".tmp");
             try {

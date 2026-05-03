@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.dev.idea.plugins.tomcat.utils.TomcatStrings;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
@@ -48,7 +49,7 @@ public class BrowserConfig implements Serializable, Cloneable {
         this.openBrowser = other.openBrowser;
         this.url = StringUtil.notNullize(other.url);
         this.withJsDebugger = other.withJsDebugger;
-        this.browserName = StringUtil.notNullize(other.browserName, DEFAULT_BROWSER_NAME);
+        this.browserName = TomcatStrings.defaultIfBlank(other.browserName, DEFAULT_BROWSER_NAME);
     }
 
     public boolean isOpenBrowser() {
@@ -100,7 +101,7 @@ public class BrowserConfig implements Serializable, Cloneable {
 
     @NotNull
     public String getBrowserName() {
-        return StringUtil.notNullize(browserName, DEFAULT_BROWSER_NAME).trim();
+        return TomcatStrings.defaultIfBlank(browserName, DEFAULT_BROWSER_NAME).trim();
     }
 
     public void setBrowserName(@NotNull String browserName) {

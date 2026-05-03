@@ -93,6 +93,10 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
                     .renameConfiguration(oldName, newName);
             StartupTimeTracker.getInstance(project)
                     .renameConfiguration(oldName, newName);
+            // App-level registry — without migration, ports claimed under the old
+            // name are released by no one and leak until the IDE restarts.
+            com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+                    .renameConfiguration(oldName, newName);
 
             if (!project.isDisposed()) {
                 RunDashboardManager.getInstance(project).updateDashboard(true);

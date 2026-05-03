@@ -5,6 +5,7 @@ import com.intellij.execution.process.ProcessHandler;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.application.ApplicationManager;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -17,7 +18,9 @@ public class StopTomcatAction extends AnAction {
     public void actionPerformed(@NotNull AnActionEvent e) {
         ProcessHandler handler = ServiceActionUtils.findProcessHandler(e);
         if (handler != null && ServiceActionUtils.isRunning(handler)) {
-            handler.destroyProcess();
+            // Off-EDT: same EDT-contract reason as ProcessStopSupport.stopCleanAndThen —
+            // Debug-mode destroyProcess fires a debugger listener that uses sync progress.
+            ApplicationManager.getApplication().executeOnPooledThread(handler::destroyProcess);
         }
     }
 

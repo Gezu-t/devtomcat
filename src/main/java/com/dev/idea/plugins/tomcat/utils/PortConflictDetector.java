@@ -113,7 +113,7 @@ public final class PortConflictDetector {
      * that Tomcat just released sits in the OS's {@code TIME_WAIT} state for
      * 30–120 seconds — long enough that the user's next rerun would have
      * treated it as occupied and bumped to the next port. Combined with the
-     * port writeback ({@code TomcatCommandLineState.writeBackResolvedPorts}),
+     * port writeback ({@code LaunchPortClaimer.writeBackResolvedPorts}),
      * that bump became permanent and the configured HTTP port ratcheted upward
      * every restart (8083 → 8084 → 8085 …) even when nothing else was actually
      * listening.
@@ -218,16 +218,27 @@ public final class PortConflictDetector {
         List<String> changes = new ArrayList<>();
         Set<Integer> allocated = new LinkedHashSet<>();
 
-        resolved.setHttp(resolvePort("HTTP", resolved.getHttp(), allocated, changes));
-        resolved.setShutdown(resolvePort("Shutdown", resolved.getShutdown(), allocated, changes));
+        // Pre-collect every peer's preferred port so a service being resolved
+        // first does not displace a later peer by grabbing the peer's configured
+        // value as its own alternate. Peers are removed from this set as they
+        // are processed (their port is either kept or the slot freed for reuse).
+        Set<Integer> peerPreferred = new LinkedHashSet<>();
+        peerPreferred.add(resolved.getHttp());
+        peerPreferred.add(resolved.getShutdown());
+        if (resolved.isHttpsEnabled()) peerPreferred.add(resolved.getHttps());
+        if (resolved.isJmxEnabled()) peerPreferred.add(resolved.getJmx());
+        if (resolved.isAjpEnabled()) peerPreferred.add(resolved.getAjp());
+
+        resolved.setHttp(resolvePort("HTTP", resolved.getHttp(), allocated, peerPreferred, changes));
+        resolved.setShutdown(resolvePort("Shutdown", resolved.getShutdown(), allocated, peerPreferred, changes));
         if (resolved.isHttpsEnabled()) {
-            resolved.setHttps(resolvePort("HTTPS", resolved.getHttps(), allocated, changes));
+            resolved.setHttps(resolvePort("HTTPS", resolved.getHttps(), allocated, peerPreferred, changes));
         }
         if (resolved.isJmxEnabled()) {
-            resolved.setJmx(resolvePort("JMX", resolved.getJmx(), allocated, changes));
+            resolved.setJmx(resolvePort("JMX", resolved.getJmx(), allocated, peerPreferred, changes));
         }
         if (resolved.isAjpEnabled()) {
-            resolved.setAjp(resolvePort("AJP", resolved.getAjp(), allocated, changes));
+            resolved.setAjp(resolvePort("AJP", resolved.getAjp(), allocated, peerPreferred, changes));
         }
 
         return new PortResolution(resolved, changes);
@@ -256,7 +267,8 @@ public final class PortConflictDetector {
         if (resolved.isJmxEnabled()) allocated.add(resolved.getJmx());
         if (resolved.isAjpEnabled()) allocated.add(resolved.getAjp());
 
-        int resolvedDebugPort = resolvePort("Debug (JDWP)", debugPort, allocated, changes);
+        // Debug port is the last service resolved; no future peers to reserve.
+        int resolvedDebugPort = resolvePort("Debug (JDWP)", debugPort, allocated, java.util.Collections.emptySet(), changes);
 
         return new DebugPortResolution(new PortResolution(resolved, changes), resolvedDebugPort);
     }
@@ -282,9 +294,19 @@ public final class PortConflictDetector {
     /**
      * Resolves a single port: checks for internal conflicts (duplicate among our own services)
      * and external conflicts (port in use by another process).
+     *
+     * <p>The {@code peerPreferred} set carries the configured ports of services that have
+     * not yet been resolved; the search avoids them so an early-resolved service does not
+     * grab a peer's preferred port as its own alternate. The current service's preferred
+     * port is removed from this set on entry so it is not treated as its own peer.
      */
     private static int resolvePort(@NotNull String serviceName, int port,
-                                   @NotNull Set<Integer> allocated, @NotNull List<String> changes) {
+                                   @NotNull Set<Integer> allocated,
+                                   @NotNull Set<Integer> peerPreferred,
+                                   @NotNull List<String> changes) {
+        // This service's own preferred value is no longer a peer reservation.
+        peerPreferred.remove(port);
+
         boolean internalConflict = !allocated.add(port);
         boolean externalConflict = !isPortAvailable(port);
 
@@ -292,14 +314,15 @@ public final class PortConflictDetector {
             String reason = internalConflict
                     ? "conflicts with another configured service"
                     : "is in use by another process";
-            int next = findNextAvailable(port);
-            if (next > 0 && allocated.add(next)) {
+            int next = findNextAvailableExcluding(port, allocated, peerPreferred);
+            if (next > 0) {
                 if (!internalConflict) {
-                    // External conflict only: this service's port was added at line 220 but
-                    // is being replaced, so remove it. Don't remove on internal conflict —
+                    // External conflict only: this service's port was added by allocated.add(port)
+                    // above but is being replaced, so remove it. Don't remove on internal conflict;
                     // the port belongs to a previously resolved service and must stay reserved.
                     allocated.remove(port);
                 }
+                allocated.add(next);
                 changes.add(serviceName + " port " + port + " " + reason + ", resolved to " + next);
                 LOG.info("Port auto-resolved: " + serviceName + " " + port + " -> " + next);
                 return next;
@@ -309,6 +332,23 @@ public final class PortConflictDetector {
             LOG.warn("Port conflict unresolved: " + serviceName + " port " + port);
         }
         return port;
+    }
+
+    /**
+     * Finds the next port in the [startPort+1, startPort+100] range that is OS-available,
+     * not in the {@code allocated} set, and not in the {@code peerPreferred} set.
+     * Skipping peer-preferred ports prevents the first-resolved service from displacing
+     * a later peer by claiming the peer's configured value as its own alternate.
+     */
+    private static int findNextAvailableExcluding(int startPort,
+                                                  @NotNull Set<Integer> allocated,
+                                                  @NotNull Set<Integer> peerPreferred) {
+        for (int port = startPort + 1; port <= Math.min(startPort + 100, 65535); port++) {
+            if (allocated.contains(port)) continue;
+            if (peerPreferred.contains(port)) continue;
+            if (isPortAvailable(port)) return port;
+        }
+        return -1;
     }
 
     private static String getSuggestion(String service, int port) {

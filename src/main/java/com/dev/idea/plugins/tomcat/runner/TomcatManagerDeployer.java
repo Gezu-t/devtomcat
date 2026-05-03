@@ -105,7 +105,8 @@ public final class TomcatManagerDeployer {
     public boolean undeploy(@NotNull String contextPath, @Nullable TomcatDeploymentLogger logger) {
         String normalized = normalizeContextPath(contextPath);
         try {
-            String url = getManagerUrl() + TEXT_ENDPOINT + "/undeploy?path=" + normalized;
+            // Encode the path; isValidContextPath permits '&'/'=' which would inject extra query params.
+            String url = getManagerUrl() + TEXT_ENDPOINT + "/undeploy?path=" + encodePathParam(normalized);
             String response = executeGet(url);
             boolean success = response != null && response.startsWith(OK_PREFIX);
             if (success && logger != null) {
@@ -207,7 +208,8 @@ public final class TomcatManagerDeployer {
             indicator.setFraction(0.0);
         }
 
-        String url = getManagerUrl() + TEXT_ENDPOINT + "/deploy?path=" + contextPath + "&update=true";
+        String url = getManagerUrl() + TEXT_ENDPOINT + "/deploy?path="
+                + encodePathParam(contextPath) + "&update=true";
         HttpURLConnection conn = openConnection(url);
         try {
             conn.setRequestMethod("PUT");
@@ -264,7 +266,7 @@ public final class TomcatManagerDeployer {
         if (docBase.contains("..")) {
             throw new IOException("Deployment path must not contain '..': " + docBase);
         }
-        String url = getManagerUrl() + TEXT_ENDPOINT + "/deploy?path=" + contextPath
+        String url = getManagerUrl() + TEXT_ENDPOINT + "/deploy?path=" + encodePathParam(contextPath)
                 + "&war=" + encodeUrl("file:" + docBase) + "&update=true";
 
         log(logger, "Deploying exploded directory: " + docBase);
@@ -355,11 +357,19 @@ public final class TomcatManagerDeployer {
         return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
+    /** Encodes a context path for {@code path=} query params; preserves '/' which Tomcat Manager prefers raw. */
+    @NotNull
+    private static String encodePathParam(@NotNull String contextPath) {
+        return java.net.URLEncoder.encode(contextPath, StandardCharsets.UTF_8)
+                .replace("%2F", "/")
+                .replace("%2f", "/");
+    }
+
     @NotNull
     private static String formatSize(long bytes) {
         if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
+        if (bytes < 1024 * 1024) return String.format(java.util.Locale.ROOT, "%.1f KB", bytes / 1024.0);
+        return String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
     @NotNull

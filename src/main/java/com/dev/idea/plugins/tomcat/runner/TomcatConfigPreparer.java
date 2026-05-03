@@ -193,7 +193,10 @@ public final class TomcatConfigPreparer {
     }
 
     private static boolean looksLikePersistentAppTempState(@NotNull Path path) {
-        String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase() : "";
+        // Locale.ROOT so 'LIQUIBASE' matches 'liquibase' even under tr_TR (capital I → ı folding).
+        String name = path.getFileName() != null
+                ? path.getFileName().toString().toLowerCase(java.util.Locale.ROOT)
+                : "";
         // Only flag files/directories with names suggesting persistent state —
         // not ALL directories, since Tomcat normally creates temp subdirectories.
         return name.contains("lock")
@@ -300,6 +303,22 @@ public final class TomcatConfigPreparer {
             return;
         }
 
+        // Refuse the same-path case. recreateDirectory(targetConf) below would
+        // delete sourceConf when source and target resolve to the same directory,
+        // wiping the user's server.xml / tomcat-users.xml / policy files, then
+        // the walk would throw NoSuchFileException because the source is gone.
+        // This happens when a user pins CATALINA_BASE to their registered Tomcat
+        // home (a natural misconfiguration). Throw a clear error before any
+        // destructive work runs so the user's conf/ stays intact.
+        if (isSamePath(sourceConf, targetConf)) {
+            throw new IOException(
+                    "CATALINA_BASE conf directory is the same path as CATALINA_HOME conf ("
+                            + sourceConf + "). DevTomcat regenerates conf/ on every launch and "
+                            + "would delete this directory. Either un-pin CATALINA_BASE so the "
+                            + "IDE manages an isolated copy, or point CATALINA_BASE at a "
+                            + "different directory than the registered Tomcat home.");
+        }
+
         recreateDirectory(targetConf);
         Path catalinaLocalhost = sourceConf.resolve("Catalina").resolve("localhost");
 
@@ -357,6 +376,22 @@ public final class TomcatConfigPreparer {
             Files.deleteIfExists(tmp);
             throw e;
         }
+    }
+
+    /**
+     * True when {@code a} and {@code b} resolve to the same filesystem entry.
+     * Falls back to absolute-path comparison if neither path exists yet (so the
+     * check is safe to run before either side has been created).
+     */
+    static boolean isSamePath(@NotNull Path a, @NotNull Path b) {
+        try {
+            if (Files.exists(a) && Files.exists(b)) {
+                return Files.isSameFile(a, b);
+            }
+        } catch (IOException ignored) {
+            // Fall through to path comparison.
+        }
+        return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
     }
 
     private static void recreateDirectory(@NotNull Path dir) throws IOException {
@@ -499,7 +534,7 @@ public final class TomcatConfigPreparer {
         for (String required : REQUIRED_CONF_FILES) {
             if (!Files.exists(catalinaBase.resolve(required))) {
                 warnings.add("Required config file missing: " + required +
-                        " — Tomcat may fail to start");
+                        ". Tomcat may fail to start");
             }
         }
         return warnings;
@@ -532,8 +567,12 @@ public final class TomcatConfigPreparer {
         }
 
         if (ajpEnabled) {
+            // CVE-2020-1938 (Ghostcat) defense: AJP without a secret must not
+            // be exposed on every interface. Bind to 127.0.0.1. Matches the
+            // hardening applied by ServerXmlMutator for the inject-into-existing
+            // server.xml path.
             sb.append("    <Connector port=\"").append(ajpPort).append("\" protocol=\"").append(PROTOCOL_AJP).append("\"\n");
-            sb.append("               secretRequired=\"false\" redirectPort=\"")
+            sb.append("               address=\"127.0.0.1\" secretRequired=\"false\" redirectPort=\"")
                     .append(httpsEnabled ? httpsPort : PortConfig.DEFAULT_HTTPS_PORT)
                     .append("\" />\n");
         }

@@ -359,7 +359,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      * anything is deleted. {@link TomcatProjectUtils#getCatalinaBase} ignores
      * {@code runId} when the user pinned an explicit CATALINA_BASE, so without
      * this check we would recursively delete whatever directory the user pinned.
-     * {@link TomcatCommandLineState#resolveRunId()} already refuses to assign a
+     * {@link RunIdAssigner#resolve()} already refuses to assign a
      * runId when a pin is in effect; this is defense-in-depth against any future
      * code path that constructs a handler with a runId directly.
      */
@@ -368,7 +368,16 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             return;
         }
         Path base = TomcatProjectUtils.getCatalinaBase(configuration, runId);
-        if (base == null || !Files.isDirectory(base)) {
+        if (base == null || !Files.isDirectory(base, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        // Refuse to follow a symlink at the run-base root — otherwise a planted
+        // link under .runs/ could redirect the recursive delete onto an
+        // unrelated tree. The walker handles symlinks for nested entries; this
+        // closes the gap at the root.
+        if (Files.isSymbolicLink(base)) {
+            LOG.warn("Refusing to delete CATALINA_BASE '" + base
+                    + "' on process exit: path is a symbolic link.");
             return;
         }
         Path parent = base.getParent();
@@ -609,7 +618,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     }
 
                     indicator.setText("Testing remote connection...");
+                    if (isProcessTerminatingOrTerminated()) {
+                        return;
+                    }
                     String error = deployer.testConnection();
+                    if (isProcessTerminatingOrTerminated()) {
+                        return;
+                    }
                     if (error != null) {
                         deploymentLogger.logServerError("Remote connection failed: " + error);
                         for (DeploymentArtifact artifact : artifacts) {
@@ -622,8 +637,8 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     int total = artifacts.size();
                     for (int i = 0; i < total; i++) {
                         DeploymentArtifact artifact = artifacts.get(i);
-                        if (indicator.isCanceled()) {
-                            deploymentLogger.logServerWarning("Remote deployment cancelled by user");
+                        if (indicator.isCanceled() || isProcessTerminatingOrTerminated()) {
+                            deploymentLogger.logServerWarning("Remote deployment cancelled");
                             return;
                         }
                         indicator.setText("Deploying " + artifact.getDisplayName() + " (" + (i + 1) + "/" + total + ")");
@@ -650,6 +665,11 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                             successCount + "/" + total + " artifact(s) deployed");
                 }
             });
+    }
+
+    /** True once the local process has begun shutdown — short-circuit for long-running background work. */
+    private boolean isProcessTerminatingOrTerminated() {
+        return isProcessTerminating() || isProcessTerminated();
     }
 
     private void launchBrowserIfEnabled() {

@@ -15,15 +15,30 @@ import com.intellij.ui.components.JBTextField;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.function.Predicate;
 
 public class ArtifactDeploymentEditDialog extends DialogWrapper {
     private final DeploymentArtifact deployment;
+    private final Predicate<String> isDuplicateContext;
     private JBTextField contextField;
     private ComboBox<String> typeCombo;
 
-    public ArtifactDeploymentEditDialog(JComponent parent, @NotNull DeploymentArtifact deployment) {
+    /**
+     * @param parent              parent component used to anchor the dialog window.
+     * @param deployment          artifact whose application context / packaging is being edited.
+     * @param isDuplicateContext  predicate that returns {@code true} when the supplied
+     *                            (already-normalized) context path collides with another
+     *                            artifact's context. Closes the UX asymmetry where the
+     *                            inline context field rejected duplicates but this
+     *                            dialog accepted them silently — only to fail later in
+     *                            {@code DeploymentConfigurationPanel#isConfigurationValid}.
+     */
+    public ArtifactDeploymentEditDialog(JComponent parent,
+                                        @NotNull DeploymentArtifact deployment,
+                                        @NotNull Predicate<String> isDuplicateContext) {
         super(SwingUtilities.getWindowAncestor(parent), true);
         this.deployment = deployment;
+        this.isDuplicateContext = isDuplicateContext;
         setTitle("Edit Deployment");
         setModal(true);
         setResizable(false);
@@ -102,6 +117,16 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         if (!ContextPathUtils.isValidContextPath(normalized)) {
             return new ValidationInfo(
                     "Invalid context path. Must start with '/' and contain only valid URL characters.",
+                    contextField);
+        }
+        // Same duplicate-check the inline context-path field uses. Without this,
+        // the dialog silently accepts a colliding context, the editor's
+        // isConfigurationValid() rejects the whole save, and the user is left
+        // hunting for which two artifacts conflict — an unhelpful failure mode
+        // when the dialog already knew the context was invalid.
+        if (isDuplicateContext.test(normalized)) {
+            return new ValidationInfo(
+                    "Context path already in use by another artifact",
                     contextField);
         }
         return null;

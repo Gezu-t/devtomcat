@@ -43,11 +43,16 @@ public final class TomcatNotifier {
                                @NotNull String title,
                                @NotNull String content,
                                @NotNull NotificationType type) {
+        // Posting to a disposed project produces an AssertionError on some 2025.x
+        // builds — not actionable, just noise on shutdown paths that race the close.
+        if (project.isDisposed()) return;
         try {
             NotificationGroupManager.getInstance()
                     .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
                     .createNotification(title, content, type)
                     .notify(project);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            throw pce;
         } catch (Exception e) {
             LOG.debug("Could not show notification '" + title + "': " + e.getMessage());
         }

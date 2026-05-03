@@ -116,4 +116,6 @@ tasks.withType<org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask>().config
         )
     }
     systemProperty("idea.diagnostic.opentelemetry.file", "false")
+    // Internal-mode: stacktraces on Disposable parentage warnings during sandbox runs.
+    systemProperty("idea.is.internal", "true")
 }

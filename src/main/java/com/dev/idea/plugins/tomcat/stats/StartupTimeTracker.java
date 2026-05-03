@@ -11,6 +11,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.Locale;
 
 
 /**
@@ -203,7 +204,10 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
         long fastest = getFastestStartupTime(configName);
         int runs = getRunCount(configName);
 
-        return String.format("%s (avg: %s, best: %s, runs: %d)",
+        // Locale.ROOT so the run count formats with a stable decimal/grouping
+        // representation regardless of the user's IDE locale — same reason
+        // formatDuration() uses Locale.ROOT below.
+        return String.format(Locale.ROOT, "%s (avg: %s, best: %s, runs: %d)",
                 trend, formatDuration(average), formatDuration(fastest), runs);
     }
 
@@ -243,6 +247,10 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     static String formatDuration(long ms) {
         if (ms < 1000) return ms + "ms";
         double seconds = ms / 1000.0;
-        return String.format("%.1fs", seconds);
+        // Locale.ROOT pins the decimal separator to '.' across every IDE locale.
+        // Without it, German/French/etc. users would see "3,5s" while en_US users
+        // see "3.5s" — and StartupTimeTrackerTest's hard-coded expectation
+        // ("3.5s") would silently break in CI running under a non-English locale.
+        return String.format(Locale.ROOT, "%.1fs", seconds);
     }
 }

@@ -83,6 +83,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     public RunProfileState getState(@NotNull Executor executor, @NotNull ExecutionEnvironment env) {
         try {
             return new TomcatCommandLineState(env, this);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            // Honour IntelliJ cancellation: returning null on PCE would silently
+            // drop the cancellation signal and the platform might keep waiting.
+            throw pce;
         } catch (Exception e) {
             LOG.error("Failed to create run profile state for: " + getName(), e);
             return null;
@@ -363,8 +367,11 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                         ultimateArtifactTaskAdded = true;
                     }
                 }
+            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                // Honour IntelliJ cancellation: never swallow PCE in a broad catch.
+                throw pce;
             } catch (NoClassDefFoundError | Exception ignored) {
-                // ArtifactManager not available on Community Edition — fall through
+                // ArtifactManager not available on Community Edition; fall through.
             }
 
             // 2b. On Community (no ArtifactManager), add our task for visibility and validation.

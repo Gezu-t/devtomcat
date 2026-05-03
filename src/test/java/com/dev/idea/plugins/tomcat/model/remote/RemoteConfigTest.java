@@ -188,6 +188,16 @@ class RemoteConfigTest {
         }
 
         @Test
+        @DisplayName("trailing slash is stripped before validation, not silently dropped")
+        void trailingSlashAccepted() {
+            // Regression: the regex requires '/manager' as the terminal segment with
+            // no trailing slash, so 'http://host:8080/manager/' would fall through
+            // to the default URL and the user's input was silently lost.
+            config.setManagerUrl("http://myserver:9090/manager/");
+            assertEquals("http://myserver:9090/manager", config.getManagerUrl());
+        }
+
+        @Test
         @DisplayName("bracketed IPv6 URL round-trips without silent fallback to localhost")
         void ipv6RoundTrip() {
             // The whole UI pipeline (buildManagerUrl → new RemoteConfig → setManagerUrl)

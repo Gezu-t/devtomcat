@@ -195,8 +195,12 @@ public class TomcatSettingsSection implements ConfigurationSection {
         Integer httpsPort = configuration.getHttpsPort();
         httpsPortField.setText(httpsPort != null ? httpsPort.toString() : "");
 
+        // When JMX is disabled, the field MUST stay empty — pre-filling with the
+        // default port silently re-enables JMX on the next applyTo() because the
+        // applyTo path treats "field has a number" as "user wants this connector
+        // enabled". Mirrors the HTTPS / AJP rows above for the same reason.
         Integer jmxPort = configuration.getJmxPort();
-        jmxPortField.setText(jmxPort != null ? jmxPort.toString() : DynamicTomcatEnvironment.getJmxPort() + "");
+        jmxPortField.setText(jmxPort != null ? jmxPort.toString() : "");
 
         Integer ajpPort = configuration.getConfigData().getPortConfig().isAjpEnabled()
                 ? configuration.getConfigData().getPortConfig().getAjp()

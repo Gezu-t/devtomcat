@@ -130,7 +130,8 @@ public class StartupTimeTrendDialog extends DialogWrapper {
     @NotNull
     private static String formatMs(long ms) {
         if (ms < 1000) return ms + "ms";
-        return String.format("%.1fs", ms / 1000.0);
+        // Locale.ROOT — stable '.' decimal separator across IDE locales.
+        return String.format(java.util.Locale.ROOT, "%.1fs", ms / 1000.0);
     }
 
     @NotNull

@@ -3,6 +3,8 @@ package com.dev.idea.plugins.tomcat.utils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Locale;
+
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
 public final class ContextPathUtils {
@@ -22,11 +24,14 @@ public final class ContextPathUtils {
         }
 
         context = context.replaceAll("-\\d+(\\.\\d+)*(-SNAPSHOT)?$", "");
+        // Locale.ROOT — see TomcatModuleUtils.extractContextPath for the
+        // same Turkish-locale 'I'→'ı' bug. An artifact named "WebApi" must
+        // produce "/webapi", not "/webap".
         context = context
                 .replaceAll("[^a-zA-Z0-9\\-_]", "-")
                 .replaceAll("-+", "-")
                 .replaceAll("^-|-$", "")
-                .toLowerCase();
+                .toLowerCase(Locale.ROOT);
 
         if (context.isEmpty() || context.matches("-+")) {
             return DEFAULT_CONTEXT_PATH;
@@ -47,11 +52,12 @@ public final class ContextPathUtils {
             path = DEFAULT_CONTEXT_PATH + path;
         }
 
+        // Collapse before strip — otherwise '//myapp//' → '//myapp/' → '/myapp/' (trailing /).
+        path = path.replaceAll("/+", "/");
+
         if (path.length() > 1 && path.endsWith("/")) {
             path = path.substring(0, path.length() - 1);
         }
-
-        path = path.replaceAll("/+", "/");
 
         return path;
     }
@@ -74,7 +80,13 @@ public final class ContextPathUtils {
     @NotNull
     public static String extractBaseModuleName(@Nullable String name) {
         if (name == null || name.isEmpty()) return "";
-        String lower = name.toLowerCase();
+        // Locale.ROOT for stable suffix matching across IDE locales — without
+        // it, a name like "MyWebApi:war" lowercased in a Turkish locale becomes
+        // "mywebapı:war" and the downstream `endsWith(":war")` check still
+        // passes, but the returned base "mywebapı" is then compared against
+        // module names that may have been lowercased in a different locale,
+        // causing false negatives in artifact-to-module matching.
+        String lower = name.toLowerCase(Locale.ROOT);
         String[] suffixes = {"_war_exploded", "_war", ":war exploded", ":war", ".war", " (exploded)"};
         for (String suffix : suffixes) {
             if (lower.endsWith(suffix)) {
@@ -111,8 +123,9 @@ public final class ContextPathUtils {
         String baseName = name;
         String resolvedType = type;
 
-        // Strip known suffixes and detect type from the name
-        String lower = name.toLowerCase();
+        // Strip known suffixes and detect type from the name. Locale.ROOT
+        // for the same reason as extractBaseModuleName above.
+        String lower = name.toLowerCase(Locale.ROOT);
         if (lower.endsWith("_war_exploded")) {
             baseName = name.substring(0, name.length() - "_war_exploded".length());
             resolvedType = "exploded";

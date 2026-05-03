@@ -49,6 +49,9 @@ public final class CredentialResolver {
             } else if (remoteConfig.getPassword().isEmpty()) {
                 LOG.warn("No credential found in PasswordSafe or config for: " + managerUrl);
             }
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            // Honour IntelliJ cancellation: never swallow PCE in a broad catch.
+            throw pce;
         } catch (Exception e) {
             LOG.warn("Failed to resolve credential for: " + managerUrl, e);
             // Fall through — whatever password is on the config (legacy or empty) will be used

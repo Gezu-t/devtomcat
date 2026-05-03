@@ -365,12 +365,15 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             try {
                 if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
                     // Generate full context XML with PreResources/PostResources,
-                    // matching initial deployment so multi-module classpath is preserved
+                    // matching initial deployment so multi-module classpath is preserved.
+                    // Pass the configured TomcatInfo so the generator can omit the
+                    // <Resources> block on Tomcat 7 (PreResources is a Tomcat 8 feature).
                     Path artifactPath = Path.of(artifact.getPath());
                     Path contextFile = contextXmlDir.resolve(contextName + ".xml");
                     String contextXml = DeploymentStrategy.buildContextXml(
-                            artifact, artifactPath, preserveSessions, project, logger);
-                    Files.writeString(contextFile, contextXml);
+                            artifact, artifactPath, preserveSessions, project,
+                            configuration.getTomcatInfo(), logger);
+                    TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     logger.logServerInfo("Redeployed (context rewrite): " + artifact.getDisplayName());
                 } else {
                     Path source = Path.of(artifact.getPath());

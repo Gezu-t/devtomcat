@@ -195,6 +195,40 @@ class PortConflictDetectorTest {
     class DebugPortResolution {
 
         @Test
+        @DisplayName("first alternate already taken by peer service does not abort the search")
+        void peerAllocationDoesNotAbortSearch() throws IOException {
+            // Regression: findNextAvailable was unaware of the per-resolution
+            // allocated set, so when the first alternate (e.g. 8081) was already
+            // claimed by Shutdown, resolvePort gave up with "no alternative found"
+            // even though 8082, 8083, ... were free. The fix is a peer-aware
+            // findNextAvailableExcluding inside resolvePort.
+            try (ServerSocket occupied = new ServerSocket(0)) {
+                int busyHttp = occupied.getLocalPort();
+                // Pick a Shutdown port at busyHttp+1 so the naive search would
+                // return it and trip on the allocated-set check.
+                int peerShutdown = busyHttp + 1;
+
+                PortConfig config = new PortConfig();
+                config.setHttp(busyHttp);
+                config.setShutdown(peerShutdown);
+
+                PortConflictDetector.PortResolution resolution =
+                        PortConflictDetector.resolveConflicts(config);
+
+                assertNotEquals(busyHttp, resolution.getResolvedConfig().getHttp(),
+                        "HTTP must move off the externally-bound port");
+                assertNotEquals(peerShutdown, resolution.getResolvedConfig().getHttp(),
+                        "HTTP must not collide with the peer's Shutdown allocation");
+                assertEquals(peerShutdown, resolution.getResolvedConfig().getShutdown(),
+                        "Shutdown should keep its original port");
+                assertTrue(resolution.getChanges().stream().anyMatch(c ->
+                                c.contains("HTTP") && c.contains("resolved to")),
+                        "Expected HTTP resolution to include a 'resolved to N' message, not 'no alternative found': "
+                                + resolution.getChanges());
+            }
+        }
+
+        @Test
         @DisplayName("busy JDWP port is auto-resolved away from configured port")
         void busyDebugPortIsAutoResolved() throws IOException {
             PortConfig config = new PortConfig();

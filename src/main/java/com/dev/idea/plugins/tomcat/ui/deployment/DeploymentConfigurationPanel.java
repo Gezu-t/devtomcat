@@ -198,7 +198,11 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         if (deployment != null) {
             ArtifactDeploymentEditDialog dialog =
                     new ArtifactDeploymentEditDialog(
-                            this, deployment
+                            this, deployment,
+                            // Reject context-path duplicates against every other
+                            // artifact in the list — same contract the inline
+                            // context-path field already enforces.
+                            ctx -> tableManager.isContextPathTakenByOthers(ctx, deployment)
                     );
 
             if (dialog.showAndGet()) {

@@ -211,10 +211,15 @@ public final class TomcatRunnerDelegate {
     /**
      * Returns true when the given handler was launched from the same run
      * configuration identity as the target environment.
+     *
+     * <p>Package-visible (not private) so the matching contract can be unit-
+     * tested directly — this predicate decides which running descriptor a
+     * rerun click targets, and a regression turns toolbar Restart into
+     * "spawn a second instance".
      */
-    private static boolean belongsTo(@NotNull TomcatProcessHandler handler,
-                                      @NotNull TomcatRunConfiguration config,
-                                      @Nullable RunnerAndConfigurationSettings targetSettings) {
+    static boolean belongsTo(@NotNull TomcatProcessHandler handler,
+                              @NotNull TomcatRunConfiguration config,
+                              @Nullable RunnerAndConfigurationSettings targetSettings) {
         RunnerAndConfigurationSettings handlerSettings = handler.getLaunchSettings();
         if (targetSettings != null && handlerSettings != null) {
             return targetSettings == handlerSettings;

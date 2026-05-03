@@ -145,13 +145,17 @@ class TomcatConfigurationValidatorTest {
         }
 
         @Test
-        @DisplayName("context path without leading slash throws")
-        void missingLeadingSlash() {
+        @DisplayName("context path without leading slash is canonicalized by the setter")
+        void missingLeadingSlashCanonicalized() {
+            // Contract: TomcatConfigurationData.setContextPath now canonicalizes via
+            // ContextPathUtils.normalizeContextPath at the model boundary, so a
+            // programmatic 'myapp' becomes '/myapp' before the validator runs.
+            // Previously the validator caught this case ("must start with '/'"),
+            // but the saved value stayed broken — autoBrowserUrl produced
+            // 'http://host:portmyapp'. Now the setter fixes it proactively.
             data.setContextPath("myapp");
-            RuntimeConfigurationException ex = assertThrows(
-                    RuntimeConfigurationException.class,
-                    () -> TomcatConfigurationValidator.validate(data));
-            assertTrue(ex.getLocalizedMessage().contains("must start with '/'"));
+            assertEquals("/myapp", data.getContextPath());
+            assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
         }
 
         @Test

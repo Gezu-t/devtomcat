@@ -78,6 +78,31 @@ class ContextPathUtilsTest {
         void simpleVersion() {
             assertEquals("/api", ContextPathUtils.generateContextPath("api-1.0"));
         }
+
+        @Test
+        @DisplayName("artifact name with capital 'I' canonicalizes to lowercase 'i' under any locale")
+        void capitalIPreservedAcrossLocales() {
+            // Regression-guard for the Turkish-locale 'I' → 'ı' bug. Pre-fix,
+            // {@code "WebApi".toLowerCase()} called without an argument used the
+            // JVM default locale; under tr_TR it produced "webapı" (dotless ı),
+            // and the trailing regex {@code [^a-zA-Z0-9\-_]} replaced ı with '-',
+            // giving "/webap" — the user's webapp would 404 because they expected
+            // {@code /webapi}.
+            //
+            // Set Locale.GERMANY (or any non-Turkish) to confirm the dot-less-i
+            // behaviour is locale-independent. Then set Locale.forLanguageTag("tr")
+            // explicitly to confirm the Turkish path also succeeds.
+            java.util.Locale prev = java.util.Locale.getDefault();
+            try {
+                java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr"));
+                assertEquals("/webapi", ContextPathUtils.generateContextPath("WebApi"),
+                        "Turkish locale must NOT mangle the capital I to dotless ı");
+                assertEquals("/webapi", ContextPathUtils.generateContextPath("WEBAPI"),
+                        "uppercase WEBAPI must round-trip the same way");
+            } finally {
+                java.util.Locale.setDefault(prev);
+            }
+        }
     }
 
     @Nested
@@ -130,6 +155,27 @@ class ContextPathUtilsTest {
         @DisplayName("already normal path unchanged")
         void alreadyNormalUnchanged() {
             assertEquals("/myapp", ContextPathUtils.normalizeContextPath("/myapp"));
+        }
+
+        @Test
+        @DisplayName("collapses leading and trailing duplicate slashes together")
+        void collapsesLeadingAndTrailingTogether() {
+            // Regression-guard for the slash-strip-vs-collapse order bug.
+            // Pre-fix: "//myapp//" → strip-trailing-once → "//myapp/" →
+            // collapse → "/myapp/" (trailing slash survived).
+            // Post-fix: "//myapp//" → collapse → "/myapp/" → strip-trailing
+            // → "/myapp". The order swap is what makes both transformations
+            // converge on the canonical form regardless of how mangled the
+            // input is.
+            assertEquals("/myapp", ContextPathUtils.normalizeContextPath("//myapp//"));
+        }
+
+        @Test
+        @DisplayName("collapses three or more contiguous slashes")
+        void collapsesManySlashes() {
+            // Belt-and-braces — defends against pathological hand-edited
+            // XML that strung many slashes together.
+            assertEquals("/myapp", ContextPathUtils.normalizeContextPath("////myapp////"));
         }
     }
 

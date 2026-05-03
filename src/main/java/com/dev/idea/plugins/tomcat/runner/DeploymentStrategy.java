@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.openapi.project.Project;
@@ -75,13 +76,21 @@ public interface DeploymentStrategy {
      * Generates a context XML descriptor for an exploded artifact, including
      * {@code <PreResources>} / {@code <PostResources>} for multi-module classpath support.
      * Used by both initial deployment and redeploy to ensure consistent context configuration.
+     *
+     * <p>The {@code tomcatInfo} parameter gates the {@code <Resources>} block: Tomcat 7's
+     * Digester has no rules for {@code <PreResources>} / {@code <PostResources>} (those
+     * elements were added in Tomcat 8), so the block is omitted when
+     * {@code tomcatInfo.getMajorVersion() < 8}. Callers that don't yet know the version
+     * may pass {@code null}; emission then falls back to the modern shape.
      */
     @NotNull
     static String buildContextXml(@NotNull DeploymentArtifact artifact,
                                   @NotNull Path artifactPath,
                                   boolean preserveSessions,
                                   @NotNull Project project,
+                                  @Nullable TomcatInfo tomcatInfo,
                                   @Nullable TomcatDeploymentLogger logger) {
-        return LocalDeploymentStrategy.buildContextXml(artifact, artifactPath, preserveSessions, project, logger);
+        return LocalDeploymentStrategy.buildContextXml(
+                artifact, artifactPath, preserveSessions, project, tomcatInfo, logger);
     }
 }

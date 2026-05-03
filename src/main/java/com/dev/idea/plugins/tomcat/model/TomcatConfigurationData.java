@@ -4,7 +4,7 @@ package com.dev.idea.plugins.tomcat.model;
         import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
         import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
         import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
-        import com.intellij.openapi.util.text.StringUtil;
+        import com.dev.idea.plugins.tomcat.utils.TomcatStrings;
         import org.jetbrains.annotations.NotNull;
         import org.jetbrains.annotations.Nullable;
 
@@ -67,12 +67,16 @@ package com.dev.idea.plugins.tomcat.model;
             public void setTomcatInfo(@Nullable TomcatInfo info) { this.tomcatInfo = info; }
 
             @NotNull public String getContextPath() {
-                String s = StringUtil.notNullize(contextPath, DEFAULT_CONTEXT_PATH);
-                return s.isEmpty() ? DEFAULT_CONTEXT_PATH : s;
+                return TomcatStrings.defaultIfBlank(contextPath, DEFAULT_CONTEXT_PATH);
             }
             public void setContextPath(@Nullable String path) {
-                String s = StringUtil.notNullize(path, DEFAULT_CONTEXT_PATH);
-                this.contextPath = s.isEmpty() ? DEFAULT_CONTEXT_PATH : s;
+                // Canonicalize at the model boundary — guarantees slash-prefix, no
+                // double slashes, no trailing slash (except root). Mirrors the
+                // 1.0.9 DeploymentArtifact.setContextPath fix so non-UI callers
+                // (XML deserializer, imported configs, programmatic edits) cannot
+                // produce broken URLs in autoBrowserUrl().
+                this.contextPath = com.dev.idea.plugins.tomcat.utils.ContextPathUtils
+                        .normalizeContextPath(path);
             }
 
             @NotNull public PortConfig getPortConfig() { return portConfig; }
@@ -102,8 +106,8 @@ package com.dev.idea.plugins.tomcat.model;
             @NotNull public CoverageConfig getCoverageConfig() { return coverageConfig; }
             public void setCoverageConfig(@NotNull CoverageConfig config) { this.coverageConfig = Objects.requireNonNull(config); }
 
-            @NotNull public String getJreSelection() { return StringUtil.notNullize(jreSelection, DEFAULT_JRE_SELECTION); }
-            public void setJreSelection(@Nullable String jre) { this.jreSelection = StringUtil.notNullize(jre, DEFAULT_JRE_SELECTION); }
+            @NotNull public String getJreSelection() { return TomcatStrings.defaultIfBlank(jreSelection, DEFAULT_JRE_SELECTION); }
+            public void setJreSelection(@Nullable String jre) { this.jreSelection = TomcatStrings.defaultIfBlank(jre, DEFAULT_JRE_SELECTION); }
 
             public boolean isAllowMultipleInstances() { return uiConfig.isAllowMultipleInstances(); }
             public void setAllowMultipleInstances(boolean allow) { uiConfig.setAllowMultipleInstances(allow); }
@@ -111,8 +115,8 @@ package com.dev.idea.plugins.tomcat.model;
             public boolean isStoreAsProjectFile() { return storeAsProjectFile; }
             public void setStoreAsProjectFile(boolean store) { this.storeAsProjectFile = store; }
 
-            @NotNull public String getServerMode() { return StringUtil.notNullize(serverMode, DEFAULT_SERVER_MODE); }
-            public void setServerMode(@Nullable String mode) { this.serverMode = StringUtil.notNullize(mode, DEFAULT_SERVER_MODE); }
+            @NotNull public String getServerMode() { return TomcatStrings.defaultIfBlank(serverMode, DEFAULT_SERVER_MODE); }
+            public void setServerMode(@Nullable String mode) { this.serverMode = TomcatStrings.defaultIfBlank(mode, DEFAULT_SERVER_MODE); }
 
             @NotNull
             public TomcatConfigurationData clone() {

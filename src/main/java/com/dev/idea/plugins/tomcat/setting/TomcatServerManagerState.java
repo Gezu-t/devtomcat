@@ -294,7 +294,8 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
         UnaryOperator<String> nameGenerator = persisted.getName().isEmpty()
                 ? null
                 : ignored -> persisted.getName();
-        Optional<TomcatInfo> created = tryCreateTomcatInfo(path, nameGenerator);
+        // Diagnostic variant logs the specific reason if validation fails.
+        Optional<TomcatInfo> created = tryCreateTomcatInfoDiagnostic(path, nameGenerator);
         if (created.isEmpty()) return null;
 
         TomcatInfo toAdd = created.get();
@@ -457,15 +458,38 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     @NotNull
     public static Optional<TomcatInfo> tryCreateTomcatInfo(@NotNull String tomcatHome,
                                                            @Nullable UnaryOperator<String> nameGenerator) {
+        return tryCreateTomcatInfoInternal(tomcatHome, nameGenerator, /* logFailures */ false);
+    }
+
+    /** Self-heal variant — logs WARN explaining which validation step failed. */
+    @NotNull
+    static Optional<TomcatInfo> tryCreateTomcatInfoDiagnostic(@NotNull String tomcatHome,
+                                                              @Nullable UnaryOperator<String> nameGenerator) {
+        return tryCreateTomcatInfoInternal(tomcatHome, nameGenerator, /* logFailures */ true);
+    }
+
+    @NotNull
+    private static Optional<TomcatInfo> tryCreateTomcatInfoInternal(@NotNull String tomcatHome,
+                                                                    @Nullable UnaryOperator<String> nameGenerator,
+                                                                    boolean logFailures) {
         Objects.requireNonNull(tomcatHome, "Tomcat home cannot be null");
 
         Path tomcatPath = Paths.get(tomcatHome);
         if (!Files.exists(tomcatPath) || !Files.isDirectory(tomcatPath)) {
+            if (logFailures) {
+                LOG.warn("Cannot create TomcatInfo for self-heal: path does not exist or is not a directory: "
+                        + tomcatHome);
+            }
             return Optional.empty();
         }
 
         File catalinaJar = tomcatPath.resolve(CATALINA_JAR).toFile();
         if (!catalinaJar.exists()) {
+            if (logFailures) {
+                LOG.warn("Cannot create TomcatInfo for self-heal: missing " + CATALINA_JAR
+                        + " under " + tomcatHome
+                        + " — does this path point to a Tomcat install root?");
+            }
             return Optional.empty();
         }
 
@@ -476,7 +500,12 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
                     : generateTomcatName(serverInfo.serverInfo);
             return Optional.of(new TomcatInfo(name, serverInfo.serverNumber, tomcatHome));
         } catch (IOException e) {
-            LOG.debug("Failed to read Tomcat version from " + tomcatHome, e);
+            if (logFailures) {
+                LOG.warn("Cannot create TomcatInfo for self-heal: failed to read version from "
+                        + tomcatHome + " (" + catalinaJar + "): " + e.getMessage(), e);
+            } else {
+                LOG.debug("Failed to read Tomcat version from " + tomcatHome, e);
+            }
             return Optional.empty();
         }
     }

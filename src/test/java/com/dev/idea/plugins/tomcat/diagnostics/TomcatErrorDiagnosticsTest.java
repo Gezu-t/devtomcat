@@ -213,13 +213,18 @@ class TomcatErrorDiagnosticsTest {
     }
 
     @Test
-    @DisplayName("formatForConsole includes severity and suggestion")
+    @DisplayName("formatForConsole includes severity, category, message, and suggestion")
     void formatForConsole() {
         TomcatErrorDiagnostics.Diagnostic d = TomcatErrorDiagnostics.analyze(
                 "java.lang.ClassNotFoundException: com.example.Foo").get(0);
         String formatted = TomcatErrorDiagnostics.formatForConsole(d);
         assertTrue(formatted.startsWith("[ERROR]"));
         assertTrue(formatted.contains("Missing Class"));
+        // Regression: previously the message field was dropped — the user saw the
+        // suggestion but never *what* was detected. The class name appears in the
+        // message ("Class not found: com.example.Foo"); pin its presence here.
+        assertTrue(formatted.contains("com.example.Foo"),
+                "Diagnostic message must surface the detected class name: " + formatted);
         assertTrue(formatted.contains("WEB-INF/lib"));
     }
 

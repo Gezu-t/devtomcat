@@ -590,4 +590,136 @@ class LocalDeploymentStrategyTest {
             assertEquals("webapp-portal", stripCompound("webapp-portal"));
         }
     }
+
+    // -------------------------------------------------------------------------
+    // buildContextXml — Tomcat 7 vs Tomcat 8+ resource-block emission
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("buildContextXml — version-gated <Resources> emission")
+    class TomcatVersionGate {
+
+        /**
+         * Reproducer for the bug reported on GitHub: deploying a webapp on Tomcat 7
+         * produced
+         *   WARNING: No rules found matching 'Context/Resources/PreResources'
+         * because PreResources / PostResources are Tomcat-8-only elements that
+         * Tomcat 7's Digester does not recognise. The fix is to omit the entire
+         * &lt;Resources&gt; block when the configured Tomcat is older than 8.
+         */
+        @Test
+        @DisplayName("Tomcat 7 omits the <Resources> block entirely")
+        void tomcat7OmitsResourcesBlock(@TempDir Path tempDir) throws IOException {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, /* preserveSessions */ false,
+                    project, tomcat7, /* logger */ null);
+
+            assertFalse(contextXml.contains("<Resources"),
+                    "Tomcat 7 must not receive <Resources> — its Digester logs a WARNING for "
+                            + "PreResources/PostResources and silently drops the elements");
+            assertFalse(contextXml.contains("<PreResources"));
+            assertFalse(contextXml.contains("<PostResources"));
+            // The shell of the descriptor must still be valid so the deployment itself works.
+            assertTrue(contextXml.contains("<Context "),
+                    "the <Context> root must still be present so the webapp deploys");
+        }
+
+        @Test
+        @DisplayName("Tomcat 7 emits a one-time info message explaining the limitation")
+        void tomcat7LogsInfoMessage(@TempDir Path tempDir) throws IOException {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger logger =
+                    org.mockito.Mockito.mock(
+                            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat7, logger);
+
+            // Pin that we surface the limitation to the user. Without this, a Tomcat 7
+            // user with a multi-module project would silently lose classpath additions
+            // and have no idea why their webapp can't find its sibling-module classes.
+            org.mockito.Mockito.verify(logger).logServerInfo(
+                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
+        }
+
+        @Test
+        @DisplayName("Null TomcatInfo emits as before — modern shape (regression: must NOT skip when version is unknown)")
+        void nullTomcatInfoDoesNotTriggerSkip(@TempDir Path tempDir) throws IOException {
+            // The skip path was specifically gated on `tomcatInfo != null` so that
+            // callers that haven't yet propagated the parameter (or test fixtures
+            // without a real install) keep emitting the modern shape. If a future
+            // change inverts that guard, every modern user gets their multi-module
+            // classpath silently dropped — pin the contract here.
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger logger =
+                    org.mockito.Mockito.mock(
+                            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, /* tomcatInfo */ null, logger);
+
+            // The "tomcat 7 limitation" info message must NOT have fired when the
+            // version is simply unknown.
+            org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
+                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
+            // Context shell still present.
+            assertTrue(contextXml.contains("<Context "));
+        }
+
+        @Test
+        @DisplayName("Unparseable version (majorVersion=0) emits as before — not treated as Tomcat 7")
+        void unparseableVersionDoesNotTriggerSkip(@TempDir Path tempDir) throws IOException {
+            // TomcatInfo.getMajorVersion() returns 0 when the version string can't
+            // parse. Treating that as "Tomcat 7" would silently break every user
+            // whose install reports an unusual version string. Pin the contract.
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo unknown =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat", "snapshot", "/opt/tomcat");
+            assertEquals(0, unknown.getMajorVersion(),
+                    "precondition: 'snapshot' version string must yield majorVersion=0");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger logger =
+                    org.mockito.Mockito.mock(
+                            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, unknown, logger);
+
+            // Same regression guard: unknown version must not fire the Tomcat 7 path.
+            org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
+                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
+        }
+    }
 }

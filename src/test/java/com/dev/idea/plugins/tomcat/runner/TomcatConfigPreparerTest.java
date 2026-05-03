@@ -201,6 +201,27 @@ class TomcatConfigPreparerTest {
 
             assertDoesNotThrow(() -> TomcatConfigPreparer.copyConfDirectory(catalinaHome, catalinaBase));
         }
+
+        @Test
+        @DisplayName("refuses same-path case so the user's conf/ is never wiped")
+        void refusesSamePathCase(@TempDir Path tempDir) throws IOException {
+            // Regression: when CATALINA_BASE equals CATALINA_HOME (a natural
+            // misconfiguration when a user pins the base to their registered
+            // Tomcat install), recreateDirectory(targetConf) deleted sourceConf
+            // before the walk, wiping server.xml / tomcat-users.xml / policies.
+            // Refuse instead so destructive work never runs.
+            Path tomcat = tempDir.resolve("tomcat");
+            Files.createDirectories(tomcat.resolve("conf"));
+            Path serverXml = tomcat.resolve("conf").resolve("server.xml");
+            Files.writeString(serverXml, "<Server/>");
+
+            IOException ex = assertThrows(IOException.class,
+                    () -> TomcatConfigPreparer.copyConfDirectory(tomcat, tomcat));
+            assertTrue(ex.getMessage().contains("same path as CATALINA_HOME conf"),
+                    "Expected same-path error: " + ex.getMessage());
+            // User's conf must still be intact after the refusal.
+            assertTrue(Files.exists(serverXml), "Existing server.xml must not be deleted");
+        }
     }
 
     @Nested

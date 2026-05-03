@@ -295,9 +295,24 @@ public class TomcatJavaParametersBuilder {
 
     @NotNull
     private Sdk resolveJdk() throws ExecutionException {
+        String jreSelection = configuration.getConfigData().getJreSelection();
+        boolean explicitSelection = jreSelection != null
+                && !jreSelection.isEmpty()
+                && !TomcatConstants.JRE_PROJECT_DEFAULT.equals(jreSelection);
+
         Sdk sdk = resolveJdkOrNull(configuration, project);
         if (sdk == null) {
             throw new ExecutionException("No JDK configured for the project. Please configure a Project SDK in File → Project Structure.");
+        }
+        // Surface the silent fallback in the run console — without this, removing
+        // a configured JDK launched the project SDK with no user-visible signal.
+        if (explicitSelection
+                && deploymentLogger != null
+                && ProjectJdkTable.getInstance().findJdk(jreSelection) == null) {
+            deploymentLogger.logServerWarning(
+                    "Configured JRE '" + jreSelection + "' is not registered. "
+                            + "Falling back to the project SDK ('" + sdk.getName() + "'). "
+                            + "Open the run configuration to pick a registered JRE.");
         }
         return sdk;
     }
@@ -397,7 +412,6 @@ public class TomcatJavaParametersBuilder {
                 configuration.getConfigData().getVmConfig().getVmOptions(),
                 ports,
                 configuration.isJmxEnabled(),
-                configuration.isHttpsEnabled(),
                 catalinaBase,
                 catalinaHome,
                 jdk
