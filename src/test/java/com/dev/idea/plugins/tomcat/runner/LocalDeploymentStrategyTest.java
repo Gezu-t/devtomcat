@@ -722,4 +722,186 @@ class LocalDeploymentStrategyTest {
                     org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
         }
     }
+
+    // -------------------------------------------------------------------------
+    // buildContextXml — BCEL / module-info JarScanFilter wiring
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("buildContextXml — BCEL/module-info JarScanFilter integration")
+    class BcelModuleInfoJarScanFilter {
+
+        /**
+         * On a Tomcat that has the BCEL module-info bug (7.x, 8.0.x, 8.5.&lt;51,
+         * 9.0.&lt;31), every JAR in WEB-INF/lib that contains a
+         * {@code module-info.class} must end up in the context's
+         * {@code <JarScanFilter pluggabilitySkip="...">}. Without this, Tomcat's
+         * annotation scanner floods the run console with
+         * "Invalid byte tag in constant pool: 19" SEVERE errors per modular JAR.
+         */
+        @Test
+        @DisplayName("Tomcat 7 includes modular JARs in pluggabilitySkip")
+        void tomcat7IncludesModularJarsInSkipList(@TempDir Path tempDir) throws Exception {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
+            // A modular JAR (Multi-Release layout, the common Java 9+ shape).
+            writeJar(libDir.resolve("jackson-core-2.17.0.jar"),
+                    "com/fasterxml/jackson/core/JsonParser.class",
+                    "META-INF/versions/9/module-info.class");
+            // A non-modular JAR alongside, must not be in the filter.
+            writeJar(libDir.resolve("commons-lang3-3.14.0.jar"),
+                    "org/apache/commons/lang3/StringUtils.class");
+
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat7, null);
+
+            assertTrue(contextXml.contains("<JarScanFilter "),
+                    "Affected Tomcat with modular JARs must emit a <JarScanFilter> element");
+            assertTrue(contextXml.contains("jackson-core-2.17.0.jar"),
+                    "Modular JAR must be in pluggabilitySkip on Tomcat 7. XML:\n" + contextXml);
+            assertFalse(contextXml.contains("commons-lang3-3.14.0.jar"),
+                    "Non-modular JAR must NOT be added to pluggabilitySkip merely because Tomcat 7 is in use");
+        }
+
+        @Test
+        @DisplayName("Tomcat 11 leaves modular JARs out of pluggabilitySkip (no BCEL bug, scan must run)")
+        void tomcat11DoesNotSkipModularJars(@TempDir Path tempDir) throws Exception {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
+            writeJar(libDir.resolve("jackson-core-2.17.0.jar"),
+                    "META-INF/versions/9/module-info.class");
+
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat11 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 11", "11.0.0", "/opt/tomcat-11");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat11, null);
+
+            // Modern Tomcat: the modular JAR must be scanned normally.
+            assertFalse(contextXml.contains("jackson-core-2.17.0.jar"),
+                    "Tomcat 11 has no BCEL bug; modular JARs must NOT be added to pluggabilitySkip. XML:\n"
+                            + contextXml);
+        }
+
+        @Test
+        @DisplayName("Boundary: Tomcat 9.0.30 skips, Tomcat 9.0.31 does not")
+        void boundary9_0_30_vs_9_0_31(@TempDir Path tempDir) throws Exception {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
+            writeJar(libDir.resolve("byte-buddy-1.14.9.jar"),
+                    "META-INF/versions/9/module-info.class");
+
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            // 9.0.30 — affected
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo affected =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 9", "9.0.30", "/opt/tomcat-9");
+            String xmlAffected = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, affected, null);
+            assertTrue(xmlAffected.contains("byte-buddy-1.14.9.jar"),
+                    "9.0.30 is < the 9.0.31 BCEL fix; modular JAR must be in pluggabilitySkip");
+
+            // 9.0.31 — fixed
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo fixed =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 9", "9.0.31", "/opt/tomcat-9");
+            String xmlFixed = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, fixed, null);
+            assertFalse(xmlFixed.contains("byte-buddy-1.14.9.jar"),
+                    "9.0.31 has the BCEL fix; modular JAR must NOT be in pluggabilitySkip");
+        }
+
+        @Test
+        @DisplayName("Affected Tomcat with no modular JARs emits no <JarScanFilter>")
+        void affectedTomcatWithNoModularJarsEmitsNothing(@TempDir Path tempDir) throws Exception {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
+            writeJar(libDir.resolve("plain.jar"), "com/example/Foo.class");
+
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat7, null);
+
+            assertFalse(contextXml.contains("<JarScanFilter "),
+                    "No modular JARs and no container-provided JARs means no <JarScanFilter> "
+                            + "element so the user's conf/ scanner config stays in effect");
+        }
+
+        @Test
+        @DisplayName("Affected Tomcat with modular JARs surfaces an info message to the user")
+        void affectedTomcatLogsExplanation(@TempDir Path tempDir) throws Exception {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
+            writeJar(libDir.resolve("snakeyaml-2.2.jar"),
+                    "META-INF/versions/9/module-info.class");
+
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger logger =
+                    org.mockito.Mockito.mock(
+                            com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat7, logger);
+
+            // The user must see, in their run console, why annotation scanning was
+            // skipped for some JARs. Without this they might wonder why @WebServlet
+            // is not picked up from a dependency on this old Tomcat.
+            org.mockito.Mockito.verify(logger).logServerInfo(
+                    org.mockito.ArgumentMatchers.contains("BCEL module-info parser bug"));
+            org.mockito.Mockito.verify(logger).logServerInfo(
+                    org.mockito.ArgumentMatchers.contains("snakeyaml-2.2.jar"));
+        }
+
+        /** Writes a minimal JAR (zip) at {@code path} with the given entry names and empty bodies. */
+        private void writeJar(Path path, String... entries) throws Exception {
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(baos)) {
+                for (String e : entries) {
+                    zos.putNextEntry(new java.util.zip.ZipEntry(e));
+                    zos.closeEntry();
+                }
+            }
+            Files.write(path, baos.toByteArray());
+        }
+    }
 }

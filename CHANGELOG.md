@@ -11,6 +11,9 @@ Deep deployment audit. Security hardening, port resolver fixes, and many smaller
 - AJP without `address` reproduced CVE-2020-1938 (Ghostcat). IDE-injected AJP now binds `127.0.0.1`.
 - JMX exposed without host binding. JMX and RMI registry now bind `127.0.0.1` by default; override via VM options.
 
+### Fixed (Tomcat compatibility)
+- Tomcat 7.x, 8.0.x, 8.5.<51, and 9.0.<31 flooded the run console with `ClassFormatException: Invalid byte tag in constant pool: 19` SEVERE messages when WEB-INF/lib contained Java 9+ modular JARs (jackson, jaxb-api, byte-buddy, snakeyaml, etc.). Cause: their bundled BCEL parser does not recognise `CONSTANT_Module` (tag 19) and chokes on `module-info.class`. New `BcelModuleInfoCompat` shim detects affected versions and adds modular JARs to the context's `<JarScanFilter pluggabilitySkip="...">` so annotation scanning is skipped only for those JARs and only on those Tomcats. Modern Tomcats (10.x, 11.x, 8.5.51+, 9.0.31+) are unaffected. Runtime classloading is unchanged in all cases.
+
 ### Fixed (data loss)
 - `copyConfDirectory` wiped the user's `conf/` when `CATALINA_BASE` equalled `CATALINA_HOME`. Now refused with a clear error.
 - Stale-deployment cleanup wiped pinned `CATALINA_BASE`. Cleanup gated to the IDE-managed system directory.

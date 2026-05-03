@@ -160,7 +160,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                   @Nullable TomcatInfo tomcatInfo,
                                   @Nullable TomcatDeploymentLogger logger) {
         String extraResources = buildExtraResourcesXml(artifact, artifactPath, project, tomcatInfo, logger);
-        String jarScanFilter = buildJarScanFilter(artifactPath);
+        String jarScanFilter = buildJarScanFilter(artifactPath, tomcatInfo, logger);
 
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -191,33 +191,69 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Scans WEB-INF/lib for container-provided jars that could cause duplicate
-     * web-fragment errors (e.g. tomcat-jasper + tomcat-embed-jasper both declaring
-     * org_apache_jasper). Returns a comma-separated skip pattern for JarScanFilter.
+     * Builds the {@code <JarScanFilter pluggabilitySkip="...">} value for the
+     * artifact's context descriptor. Combines two skip sources:
+     * <ol>
+     *   <li><b>Container-provided JARs</b> ({@code servlet-api}, {@code jsp-api},
+     *       {@code jakarta.el}, {@code ecj-*}). Including them in a webapp on
+     *       top of Tomcat's own copies causes duplicate web-fragment errors;
+     *       skipping pluggability scanning for these is always correct.</li>
+     *   <li><b>JARs containing {@code module-info.class}</b>, but only on
+     *       Tomcat versions whose BCEL parser cannot read Java 9+ class
+     *       files (Tomcat 7, 8.0.x, 8.5.&lt;51, 9.0.&lt;31). Annotation
+     *       scanning for these JARs is skipped to suppress the
+     *       {@code "Invalid byte tag in constant pool: 19"} SEVERE noise;
+     *       runtime classloading is unaffected. See {@link BcelModuleInfoCompat}
+     *       for the full rationale and version table.</li>
+     * </ol>
+     * Returns the empty string when nothing needs skipping (the caller then
+     * omits the {@code <JarScanner>} element entirely so user-supplied
+     * scanner configuration in {@code conf/} stays in effect).
      */
     @NotNull
-    private static String buildJarScanFilter(@NotNull Path artifactPath) {
+    private static String buildJarScanFilter(@NotNull Path artifactPath,
+                                             @Nullable TomcatInfo tomcatInfo,
+                                             @Nullable TomcatDeploymentLogger logger) {
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (!Files.isDirectory(webInfLib)) return "";
 
-        List<String> skipPatterns = new ArrayList<>();
+        // LinkedHashSet: deterministic order across the two sources, dedup if a
+        // JAR is both container-provided and modular (rare but possible).
+        java.util.LinkedHashSet<String> skip = new java.util.LinkedHashSet<>();
+
         try (var stream = Files.list(webInfLib)) {
             stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
                   .forEach(p -> {
                       String jarName = p.getFileName().toString();
                       if (isContainerProvidedJar(jarName)) {
-                          skipPatterns.add(jarName);
+                          skip.add(jarName);
                       }
                   });
         } catch (IOException e) {
             LOG.debug("Could not scan WEB-INF/lib for container jars: " + e.getMessage());
         }
 
-        if (skipPatterns.isEmpty()) return "";
+        // Module-info BCEL workaround (only on affected Tomcats).
+        if (BcelModuleInfoCompat.isAffectedByBcelModuleInfoBug(tomcatInfo)) {
+            List<String> modular = BcelModuleInfoCompat.findJarsContainingModuleInfo(webInfLib);
+            if (!modular.isEmpty()) {
+                skip.addAll(modular);
+                String version = tomcatInfo != null ? tomcatInfo.getVersion() : "(unknown)";
+                String summary = "Tomcat " + version + " has the BCEL module-info parser bug; "
+                        + "skipping annotation scan for " + modular.size()
+                        + " modular JAR(s) to suppress 'Invalid byte tag in constant pool: 19' noise. "
+                        + "Runtime classloading is unaffected. JARs: " + modular;
+                LOG.info(summary);
+                if (logger != null) {
+                    logger.logServerInfo(summary);
+                }
+            }
+        }
 
-        LOG.info("JarScanFilter will skip " + skipPatterns.size() +
-                " container-provided jars in WEB-INF/lib: " + skipPatterns);
-        return String.join(",", skipPatterns);
+        if (skip.isEmpty()) return "";
+
+        LOG.info("JarScanFilter pluggabilitySkip (" + skip.size() + " jar(s)): " + skip);
+        return String.join(",", skip);
     }
 
     /**
