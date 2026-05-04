@@ -117,6 +117,23 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         }
 
         boolean preserveSessions = configuration.isPreserveSessions();
+        TomcatInfo tomcatInfo = configuration.getTomcatInfo();
+
+        // BCEL/module-info compatibility: on Tomcats whose BCEL parser cannot
+        // read Java 9+ module-info.class (7.x, 8.0.x, 8.5.<51, 9.0.<31), inject
+        // the modular JARs into catalina.properties' jarsToSkip BEFORE the JVM
+        // starts. The per-context <JarScanFilter> route does not work here:
+        // Tomcat 7's ContextRuleSet has no rule for that element and silently
+        // drops it with a "No rules found" warning. catalina.properties is
+        // loaded into System properties at startup and is honoured by every
+        // affected version.
+        if (BcelModuleInfoCompat.isAffectedByBcelModuleInfoBug(tomcatInfo)) {
+            List<String> modularJars = collectModularJarsAcrossDeployments(configuration);
+            if (!modularJars.isEmpty()) {
+                BcelModuleInfoCompat.applyModuleInfoSkipToCatalinaProperties(
+                        catalinaBase, modularJars, logger);
+            }
+        }
 
         for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
             if (artifact == null || !artifact.isValid()) continue;
@@ -192,23 +209,25 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     /**
      * Builds the {@code <JarScanFilter pluggabilitySkip="...">} value for the
-     * artifact's context descriptor. Combines two skip sources:
-     * <ol>
-     *   <li><b>Container-provided JARs</b> ({@code servlet-api}, {@code jsp-api},
-     *       {@code jakarta.el}, {@code ecj-*}). Including them in a webapp on
-     *       top of Tomcat's own copies causes duplicate web-fragment errors;
-     *       skipping pluggability scanning for these is always correct.</li>
-     *   <li><b>JARs containing {@code module-info.class}</b>, but only on
-     *       Tomcat versions whose BCEL parser cannot read Java 9+ class
-     *       files (Tomcat 7, 8.0.x, 8.5.&lt;51, 9.0.&lt;31). Annotation
-     *       scanning for these JARs is skipped to suppress the
-     *       {@code "Invalid byte tag in constant pool: 19"} SEVERE noise;
-     *       runtime classloading is unaffected. See {@link BcelModuleInfoCompat}
-     *       for the full rationale and version table.</li>
-     * </ol>
-     * Returns the empty string when nothing needs skipping (the caller then
-     * omits the {@code <JarScanner>} element entirely so user-supplied
-     * scanner configuration in {@code conf/} stays in effect).
+     * artifact's context descriptor. Skips container-provided JARs
+     * ({@code servlet-api}, {@code jsp-api}, {@code jakarta.el}, {@code ecj-*})
+     * because shipping them inside a webapp on top of Tomcat's own copies
+     * causes duplicate web-fragment errors.
+     *
+     * <p>The BCEL/module-info workaround is intentionally NOT applied here:
+     * Tomcat 7's {@code ContextRuleSet} has no Digester rule for
+     * {@code Context/JarScanner/JarScanFilter}, so the element is silently
+     * ignored on every affected Tomcat. {@link BcelModuleInfoCompat#applyModuleInfoSkipToCatalinaProperties}
+     * handles that case via {@code catalina.properties}, which works
+     * uniformly across every affected version.
+     *
+     * <p>Returns the empty string when nothing needs skipping; the caller
+     * then omits the {@code <JarScanner>} element entirely so user-supplied
+     * scanner configuration in {@code conf/} stays in effect.
+     *
+     * <p>The {@code tomcatInfo} and {@code logger} parameters are unused
+     * today but kept on the signature so a future per-context-only fix can
+     * surface a version-specific message without touching every call site.
      */
     @NotNull
     private static String buildJarScanFilter(@NotNull Path artifactPath,
@@ -217,10 +236,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (!Files.isDirectory(webInfLib)) return "";
 
-        // LinkedHashSet: deterministic order across the two sources, dedup if a
-        // JAR is both container-provided and modular (rare but possible).
+        // LinkedHashSet for deterministic order in the generated XML.
         java.util.LinkedHashSet<String> skip = new java.util.LinkedHashSet<>();
-
         try (var stream = Files.list(webInfLib)) {
             stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
                   .forEach(p -> {
@@ -233,27 +250,41 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             LOG.debug("Could not scan WEB-INF/lib for container jars: " + e.getMessage());
         }
 
-        // Module-info BCEL workaround (only on affected Tomcats).
-        if (BcelModuleInfoCompat.isAffectedByBcelModuleInfoBug(tomcatInfo)) {
-            List<String> modular = BcelModuleInfoCompat.findJarsContainingModuleInfo(webInfLib);
-            if (!modular.isEmpty()) {
-                skip.addAll(modular);
-                String version = tomcatInfo != null ? tomcatInfo.getVersion() : "(unknown)";
-                String summary = "Tomcat " + version + " has the BCEL module-info parser bug; "
-                        + "skipping annotation scan for " + modular.size()
-                        + " modular JAR(s) to suppress 'Invalid byte tag in constant pool: 19' noise. "
-                        + "Runtime classloading is unaffected. JARs: " + modular;
-                LOG.info(summary);
-                if (logger != null) {
-                    logger.logServerInfo(summary);
-                }
-            }
-        }
-
         if (skip.isEmpty()) return "";
 
         LOG.info("JarScanFilter pluggabilitySkip (" + skip.size() + " jar(s)): " + skip);
         return String.join(",", skip);
+    }
+
+    /**
+     * Walks every deployment's {@code WEB-INF/lib} once and returns the union
+     * of JAR file names that contain a {@code module-info.class} entry. Used
+     * by the BCEL/module-info compatibility shim to populate the global
+     * {@code jarsToSkip} list in {@code catalina.properties}; we collect
+     * across artifacts because that property is process-wide.
+     *
+     * <p>Order is deterministic (alphabetical, deduplicated) so subsequent
+     * launches produce byte-identical {@code catalina.properties} appendices,
+     * which keeps the IDE-managed sandbox tree free of unnecessary churn.
+     */
+    @NotNull
+    private static List<String> collectModularJarsAcrossDeployments(
+            @NotNull TomcatRunConfiguration configuration) {
+        java.util.TreeSet<String> all = new java.util.TreeSet<>();
+        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
+            if (artifact == null || !artifact.isValid()) continue;
+            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
+                // Packaged WARs are scanned by Tomcat after extraction; we do
+                // not pre-extract here. The .war's own content is on disk in
+                // webapps/, but inspecting it would require unzipping the WAR
+                // first. Keep the scope narrow: exploded artifacts only.
+                continue;
+            }
+            Path artifactPath = Paths.get(artifact.getPath());
+            Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
+            all.addAll(BcelModuleInfoCompat.findJarsContainingModuleInfo(webInfLib));
+        }
+        return new ArrayList<>(all);
     }
 
     /**
