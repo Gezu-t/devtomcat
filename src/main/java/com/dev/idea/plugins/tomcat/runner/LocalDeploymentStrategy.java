@@ -135,6 +135,19 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
 
+        // ECJ/class-file compatibility: surface a clear pre-launch warning
+        // when Tomcat's bundled Eclipse JDT compiler is too old to read the
+        // webapp's class files. Detection-only — replacing the user's ECJ
+        // would be invasive. Without this, the user sees a cryptic flood of
+        // 'org.eclipse.jdt.internal.compiler.classfmt.ClassFormatException'
+        // SEVERE messages at JSP-request time with no hint at the cause.
+        if (tomcatInfo != null && !tomcatInfo.getPath().isEmpty()) {
+            EcjVersionCompat.check(
+                    Paths.get(tomcatInfo.getPath()),
+                    collectWebInfDirsAcrossDeployments(configuration),
+                    logger);
+        }
+
         for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
             if (artifact == null || !artifact.isValid()) continue;
 
@@ -285,6 +298,26 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             all.addAll(BcelModuleInfoCompat.findJarsContainingModuleInfo(webInfLib));
         }
         return new ArrayList<>(all);
+    }
+
+    /**
+     * Collects the {@code WEB-INF} directories of every exploded artifact in
+     * the configuration. Used by {@link EcjVersionCompat#check} to sample
+     * class file versions across the entire deployment in one pass.
+     */
+    @NotNull
+    private static List<Path> collectWebInfDirsAcrossDeployments(
+            @NotNull TomcatRunConfiguration configuration) {
+        List<Path> dirs = new ArrayList<>();
+        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
+            if (artifact == null || !artifact.isValid()) continue;
+            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
+            Path webInf = Paths.get(artifact.getPath()).resolve(WEB_INF);
+            if (Files.isDirectory(webInf)) {
+                dirs.add(webInf);
+            }
+        }
+        return dirs;
     }
 
     /**
