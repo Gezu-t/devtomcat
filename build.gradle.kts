@@ -7,6 +7,12 @@ fun prop(key: String): String = project.findProperty(key)?.toString()
 plugins {
     id("java")
     id("org.jetbrains.intellij.platform") version "2.11.0"
+    // Source the Marketplace <change-notes> from CHANGELOG.md at build time so
+    // the published plugin always reflects the actual release notes. Without
+    // this, the <change-notes> in plugin.xml drifts from CHANGELOG.md and a
+    // forgotten manual copy ships stale content (which is what happened in
+    // 1.0.9 before the plugin was wired up).
+    id("org.jetbrains.changelog") version "2.2.1"
 }
 
 group = prop("pluginGroup")
@@ -55,6 +61,24 @@ intellijPlatform {
             sinceBuild = prop("pluginSinceBuild")
             untilBuild = prop("pluginUntilBuild")
         }
+        // Inject <change-notes> from CHANGELOG.md's section matching the
+        // current pluginVersion. Falls back to [Unreleased] when no exact
+        // match exists (useful between releases) and finally to a generic
+        // "see CHANGELOG.md" fallback if neither is present, so a missing
+        // CHANGELOG entry is reported clearly rather than failing the build.
+        changeNotes = provider {
+            // try/catch wraps the whole chain because both getOrNull-then-
+            // getUnreleased and renderItem can throw (missing version, missing
+            // [Unreleased], malformed markdown). A failed render must never
+            // fail the build; degrade to a static fallback instead.
+            try {
+                val version = prop("pluginVersion")
+                val item = changelog.getOrNull(version) ?: changelog.getUnreleased()
+                changelog.renderItem(item, org.jetbrains.changelog.Changelog.OutputType.HTML)
+            } catch (e: Exception) {
+                "<p>See <code>CHANGELOG.md</code> in the plugin source for release details.</p>"
+            }
+        }
     }
 
     pluginVerification {
@@ -78,6 +102,23 @@ intellijPlatform {
         privateKey.set(System.getenv("PRIVATE_KEY"))
         password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
     }
+}
+
+// CHANGELOG.md → Marketplace <change-notes> wiring. Configures the
+// org.jetbrains.changelog plugin to recognise the project's keepachangelog
+// shape (## [VERSION], ### Subsection, - bullets). The 'groups' list is
+// intentionally left empty so any custom subsection names in CHANGELOG.md
+// (e.g. "Fixed (data loss)", "Diagnostics", "Tests") are rendered verbatim
+// rather than being normalised into a fixed taxonomy by patchChangelog.
+changelog {
+    version.set(prop("pluginVersion"))
+    path.set(file("CHANGELOG.md").path)
+    header.set(provider { "[${version.get()}]" })
+    headerParserRegex.set("""(\d+\.\d+(?:\.\d+)*)""".toRegex())
+    itemPrefix.set("-")
+    keepUnreleasedSection.set(true)
+    unreleasedTerm.set("[Unreleased]")
+    groups.set(emptyList())
 }
 
 tasks {
