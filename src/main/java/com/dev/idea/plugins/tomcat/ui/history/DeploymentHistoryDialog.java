@@ -223,9 +223,9 @@ public class DeploymentHistoryDialog extends DialogWrapper {
     @NotNull
     static String dialogTitle(@Nullable String configurationName) {
         if (configurationName == null || configurationName.isBlank()) {
-            return "DevTomcat — Run History";
+            return "DevTomcat: Run History";
         }
-        return "DevTomcat — Run History — " + configurationName;
+        return "DevTomcat: Run History (" + configurationName + ")";
     }
 
     @NotNull

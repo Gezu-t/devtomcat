@@ -57,7 +57,7 @@ class StartupTimeTrendDialogTest {
     @DisplayName("uses a configuration-specific title and empty message when scoped")
     void scopedStringsIncludeConfigurationName() {
         assertEquals(
-                "DevTomcat — Startup Time Trends — Demo",
+                "DevTomcat: Startup Time Trends (Demo)",
                 StartupTimeTrendDialog.dialogTitle("Demo")
         );
         assertEquals(

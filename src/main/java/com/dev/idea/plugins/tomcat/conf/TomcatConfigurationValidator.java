@@ -201,7 +201,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     if (!artifactFile.exists()) {
                         String hint = DeploymentArtifact.TYPE_WAR.equals(artifact.getType())
                                 ? " Build the project (Build → Build Artifacts) to generate the WAR file."
-                                : " Build the project first — the output directory will be created by the 'Build Artifact' Before Launch task.";
+                                : " Build the project first; the output directory will be created by the 'Build Artifact' Before Launch task.";
                         throw new RuntimeConfigurationWarning(
                                 "Artifact output not found: " + path + "." + hint +
                                 " This warning will clear once the artifact is built.");
@@ -217,7 +217,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     if (ctx == null || ctx.isEmpty()) ctx = "/";
                     if (!seen.add(ctx)) {
                         throw new RuntimeConfigurationWarning(
-                                "Duplicate context path '" + ctx + "' — multiple artifacts " +
+                                "Duplicate context path '" + ctx + "': multiple artifacts " +
                                 "deployed to the same path will conflict. Change the context path " +
                                 "of '" + artifact.getDisplayName() + "' in the Deployment tab.");
                     }
@@ -231,7 +231,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     String baseName = ContextPathUtils.extractBaseModuleName(artifact.getName());
                     if (!baseName.isEmpty() && !seenBaseNames.add(baseName)) {
                         throw new RuntimeConfigurationWarning(
-                                "Duplicate deployment for module '" + baseName + "' — the same application " +
+                                "Duplicate deployment for module '" + baseName + "': the same application " +
                                 "appears more than once in the Deployment tab. Remove the extra WAR/exploded " +
                                 "variant to avoid Tomcat redeploy loops and JSP scratchDir errors.");
                     }

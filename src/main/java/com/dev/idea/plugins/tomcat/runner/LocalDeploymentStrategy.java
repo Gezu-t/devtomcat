@@ -109,7 +109,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
             } else if (logger != null) {
                 logger.logServerInfo(
-                        "Skipping stale-deployment cleanup — CATALINA_BASE is user-pinned ("
+                        "Skipping stale-deployment cleanup: CATALINA_BASE is user-pinned ("
                                 + catalinaBase + "). Manage existing deployments yourself.");
             }
         } catch (IOException e) {

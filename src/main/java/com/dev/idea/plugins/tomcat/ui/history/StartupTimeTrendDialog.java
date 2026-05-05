@@ -154,9 +154,9 @@ public class StartupTimeTrendDialog extends DialogWrapper {
     @NotNull
     static String dialogTitle(@Nullable String configurationName) {
         if (configurationName == null || configurationName.isBlank()) {
-            return "DevTomcat — Startup Time Trends";
+            return "DevTomcat: Startup Time Trends";
         }
-        return "DevTomcat — Startup Time Trends — " + configurationName;
+        return "DevTomcat: Startup Time Trends (" + configurationName + ")";
     }
 
     @NotNull

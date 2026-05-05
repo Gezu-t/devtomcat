@@ -128,8 +128,8 @@ final class RunIdAssigner {
                 + "' — parallel isolation disabled, using single-instance semantics "
                 + "(Update dialog on rerun) to prevent shared-directory collisions.");
         deploymentLogger.logServerWarning(
-                "Allow parallel run is ignored because CATALINA_BASE is pinned — "
-                        + "unset the pinned base to enable per-run isolation.");
+                "Allow parallel run is ignored because CATALINA_BASE is pinned. "
+                        + "Unset the pinned base to enable per-run isolation.");
     }
 
     /**
@@ -140,7 +140,7 @@ final class RunIdAssigner {
     private void emitParallelRunInfoOnce(@NotNull String current) {
         if (!parallelInfoEmitted.compareAndSet(false, true)) return;
         deploymentLogger.logServerInfo(
-                "Parallel run active — isolated CATALINA_BASE under .runs/" + current
+                "Parallel run active: isolated CATALINA_BASE under .runs/" + current
                         + "/. Log tabs for this launch point at the isolated base's logs/ subfolder.");
     }
 }

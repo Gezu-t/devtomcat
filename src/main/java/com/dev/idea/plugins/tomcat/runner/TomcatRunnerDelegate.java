@@ -91,7 +91,7 @@ public final class TomcatRunnerDelegate {
                     // silently swallowing the click, so the user sees consistent
                     // feedback across every user-gesture surface.
                     TomcatNotifier.info(env.getProject(),
-                            "Restart Unavailable — " + config.getName(),
+                            "Restart Unavailable: " + config.getName(),
                             blockReason);
                     return true; // suppress launch while gate is closed
                 }

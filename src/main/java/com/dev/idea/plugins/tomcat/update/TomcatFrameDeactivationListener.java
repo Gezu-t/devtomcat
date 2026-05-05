@@ -58,7 +58,7 @@ public class TomcatFrameDeactivationListener implements ApplicationActivationLis
                                 project,
                                 "Apply '" + TomcatApplicationUpdater.mapActionToDisplay(action)
                                         + "' to " + config.getName() + "?",
-                                "DevTomcat — Frame Deactivation",
+                                "DevTomcat: Frame Deactivation",
                                 "Update", "Skip",
                                 Messages.getQuestionIcon());
                         if (result == Messages.YES) {

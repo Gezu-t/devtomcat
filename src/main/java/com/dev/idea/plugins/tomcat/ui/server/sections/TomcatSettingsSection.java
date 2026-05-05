@@ -91,7 +91,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
                     "(e.g. <i>manager</i>, <i>host-manager</i>, <i>ROOT</i>) deploy alongside the " +
                     "artifacts configured in this run configuration.<br>" +
                     "WAR files are hardlinked when the filesystem supports it; exploded web apps " +
-                    "run in place via a synthesized context descriptor — no file duplication. " +
+                    "run in place via a synthesized context descriptor (no file duplication). " +
                     "IDE-managed artifacts always win on context-path collisions.</html>");
             deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
             addCheckBoxColumn(formPanel, gbc, deployAppsCheckBox);

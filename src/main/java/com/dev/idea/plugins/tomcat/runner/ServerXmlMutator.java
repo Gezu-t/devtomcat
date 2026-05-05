@@ -108,7 +108,7 @@ public final class ServerXmlMutator {
 
             // Verify critical ports made it into the output
             if (!result.contains("port=\"" + httpPort + "\"")) {
-                warnings.add("HTTP port " + httpPort + " may not appear in server.xml — the source may have a non-standard format");
+                warnings.add("HTTP port " + httpPort + " may not appear in server.xml; the source may have a non-standard format");
             }
             if (!result.contains("port=\"" + shutdownPort + "\"")) {
                 warnings.add("Shutdown port " + shutdownPort + " may not appear in server.xml");
@@ -118,7 +118,7 @@ public final class ServerXmlMutator {
 
         } catch (Exception e) {
             LOG.warn("DOM-based server.xml mutation failed, returning original", e);
-            warnings.add("XML parsing failed: " + e.getMessage() + " — server.xml was not modified");
+            warnings.add("XML parsing failed: " + e.getMessage() + ". server.xml was not modified.");
             return new MutationResult(serverXml, warnings);
         }
     }
@@ -150,7 +150,7 @@ public final class ServerXmlMutator {
     private static void setHttpConnectorPort(@NotNull Document doc, int port, @NotNull List<String> warnings) {
         Element connector = findHttpConnector(doc);
         if (connector == null) {
-            warnings.add("No HTTP/1.1 Connector found in server.xml — HTTP port not updated");
+            warnings.add("No HTTP/1.1 Connector found in server.xml; HTTP port not updated");
             return;
         }
         connector.setAttribute("port", String.valueOf(port));
@@ -198,7 +198,7 @@ public final class ServerXmlMutator {
         // Inject after the HTTP connector
         Element httpConnector = findHttpConnector(doc);
         if (httpConnector == null) {
-            warnings.add("Cannot inject HTTPS connector — no HTTP connector found as reference point");
+            warnings.add("Cannot inject HTTPS connector: no HTTP connector found as reference point");
             return;
         }
 
@@ -250,7 +250,7 @@ public final class ServerXmlMutator {
         // so we inject a fresh one instead. Place it before the <Engine> element.
         NodeList engines = doc.getElementsByTagName("Engine");
         if (engines.getLength() == 0) {
-            warnings.add("Cannot inject AJP connector — no <Engine> element found");
+            warnings.add("Cannot inject AJP connector: no <Engine> element found");
             return;
         }
 

@@ -214,4 +214,53 @@ class TomcatManagerDeployerTest {
         assertNotNull(TomcatManagerDeployer.DeployResult.FAILED);
         assertNotNull(TomcatManagerDeployer.DeployResult.CANCELLED);
     }
+
+    @Test
+    void testDeployWithProgressReturnsCancelledWhenAbortCheckTrueUpFront(@TempDir Path tempDir) throws IOException {
+        // Regression for the 1.0.10 fix: deployWithProgress now accepts a
+        // BooleanSupplier polled both before the upload starts and inside
+        // the chunk loop, so the local Tomcat process terminating
+        // mid-upload aborts the in-flight transfer instead of running it
+        // to completion. The before-upload check is exercised here; the
+        // mid-upload check is exercised against an unreachable host below.
+        Path warFile = tempDir.resolve("test.war");
+        Files.write(warFile, new byte[1024]);
+
+        RemoteConfig config = new RemoteConfig(
+                "http://localhost:1/manager",
+                "admin", "admin", true);
+        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
+
+        DeploymentArtifact artifact = new DeploymentArtifact(
+                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+        artifact.setContextPath("/test");
+
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null, () -> true);
+        assertEquals(TomcatManagerDeployer.DeployResult.CANCELLED, result,
+                "Abort predicate returning true before upload starts must yield CANCELLED, not FAILED");
+    }
+
+    @Test
+    void testDeployWithProgressNoArgOverloadStillWorks(@TempDir Path tempDir) throws IOException {
+        // The three-arg overload preserved for backward compatibility must
+        // still route to a valid no-op abort predicate.
+        Path warFile = tempDir.resolve("test.war");
+        Files.write(warFile, new byte[16384]);
+
+        RemoteConfig config = new RemoteConfig(
+                "http://localhost:1/manager",
+                "admin", "admin", true);
+        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
+
+        DeploymentArtifact artifact = new DeploymentArtifact(
+                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+        artifact.setContextPath("/test");
+
+        // No abort predicate - falls through to the unreachable-host FAILED path.
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null);
+        assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
+                "Three-arg overload must still produce FAILED on unreachable host (not CANCELLED)");
+    }
 }

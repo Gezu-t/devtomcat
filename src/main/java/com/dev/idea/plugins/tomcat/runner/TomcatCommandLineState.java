@@ -192,7 +192,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             deploymentLogger.logServerWarning(
                     "Manual -agentlib:jdwp detected in VM options. " +
                     "In Debug mode, the IDE injects its own JDWP agent automatically. " +
-                    "Having two agents causes a port mismatch — remove the manual one " +
+                    "Having two agents causes a port mismatch. Remove the manual one " +
                     "from VM options, or switch to Run mode if you want manual JDWP control.");
             notifyUser("DevTomcat: Duplicate JDWP Agent",
                     "Remove -agentlib:jdwp from VM options when using Debug mode.\n" +

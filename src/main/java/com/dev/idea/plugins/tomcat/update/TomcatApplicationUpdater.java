@@ -158,7 +158,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
         CompilerSupport.compileAndThen(project, logger,
                 "Syncing resources...",
-                "Build aborted — resource sync cancelled",
+                "Build aborted; resource sync cancelled",
                 "Build failed",
                 warnings -> logger.logServerInfo("Resources synced" + warningSuffix(warnings)));
     }
@@ -209,8 +209,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling before restart...",
-                "Compilation aborted — restart cancelled",
-                "Compilation failed — restart cancelled",
+                "Compilation aborted; restart cancelled",
+                "Compilation failed; restart cancelled",
                 warnings -> {
             logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", restarting Tomcat...");
 
@@ -218,7 +218,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             Executor resolvedExecutor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
             if (resolvedExecutor == null) {
                 LOG.warn("Executor '" + originalExecutorId + "' not found — falling back to Run mode");
-                logger.logServerWarning("Could not restore executor '" + originalExecutorId + "' — restarting in Run mode");
+                logger.logServerWarning("Could not restore executor '" + originalExecutorId + "'. Restarting in Run mode.");
                 resolvedExecutor = DefaultRunExecutor.getRunExecutorInstance();
             }
             RunContentDescriptor descriptor = ProcessStopSupport.findDescriptor(project, processHandler);
@@ -278,7 +278,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         Path webappsDir = TomcatProjectUtils.getWebappsDirectory(configuration, processHandler.getRunId());
         if (webappsDir == null) {
             LOG.warn("No webapps directory resolved; WAR artifacts will not be updated");
-            logger.logServerWarning("Cannot locate webapps directory — WAR update skipped");
+            logger.logServerWarning("Cannot locate webapps directory; WAR update skipped");
             return;
         }
 

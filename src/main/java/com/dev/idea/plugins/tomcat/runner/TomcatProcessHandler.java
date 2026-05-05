@@ -597,7 +597,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
         RemoteConfig remoteConfig = configuration.getConfigData().getRemoteConfig();
         if (remoteConfig == null || !remoteConfig.isValid()) {
-            deploymentLogger.logServerWarning("Remote mode enabled but configuration is invalid — skipping remote deployment");
+            deploymentLogger.logServerWarning("Remote mode enabled but configuration is invalid; skipping remote deployment");
             return;
         }
 
@@ -644,8 +644,16 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                         indicator.setText("Deploying " + artifact.getDisplayName() + " (" + (i + 1) + "/" + total + ")");
                         indicator.setFraction((double) i / total);
                         lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
+                        // Pass the process-state predicate so the upload chunk
+                        // loop in deployWarViaPut polls termination too. Without
+                        // this, clicking Stop on the local Tomcat mid-upload of a
+                        // large WAR lets the upload run to completion against a
+                        // dead handler (the indicator alone would not cancel).
+                        // Qualified `TomcatProcessHandler.this::` because we're
+                        // inside an anonymous Task.Backgroundable.
                         TomcatManagerDeployer.DeployResult result =
-                                deployer.deployWithProgress(artifact, deploymentLogger, indicator);
+                                deployer.deployWithProgress(artifact, deploymentLogger, indicator,
+                                        TomcatProcessHandler.this::isProcessTerminatingOrTerminated);
                         switch (result) {
                             case SUCCESS -> {
                                 successCount++;
@@ -880,7 +888,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             return "Tomcat is not running";
         }
         if (!startupDetected) {
-            return "Tomcat is still starting — restart will be available once startup completes";
+            return "Tomcat is still starting. Restart will be available once startup completes.";
         }
         return null;
     }

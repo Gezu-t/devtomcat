@@ -105,7 +105,7 @@ final class LaunchPortClaimer {
                 int claimed = registry.claimPort(carriedDebug, configName);
                 if (claimed == -1) {
                     changes.add("Debug (JDWP) port " + carriedDebug
-                            + ": all ports in search range exhausted — debugger may fail to attach");
+                            + ": all ports in search range exhausted; debugger may fail to attach");
                     debugPort = carriedDebug;
                 } else {
                     if (claimed != carriedDebug) {
@@ -146,7 +146,7 @@ final class LaunchPortClaimer {
         int resolvedDebugPort = registry.claimPort(preClaimDebug, configName);
         if (resolvedDebugPort == -1) {
             resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
-                    + ": all ports in search range exhausted — debugger may fail to attach");
+                    + ": all ports in search range exhausted; debugger may fail to attach");
             resolvedDebugPort = preClaimDebug; // keep original; JVM will fail with a clear error
         } else if (resolvedDebugPort != preClaimDebug) {
             resolution.getChanges().add("Debug (JDWP) port " + preClaimDebug
@@ -211,7 +211,7 @@ final class LaunchPortClaimer {
                                      int fallback) {
         int claimed = registry.claimPort(port, configName);
         if (claimed == -1) {
-            changes.add(label + " port " + port + ": all ports in search range exhausted — Tomcat may fail to bind");
+            changes.add(label + " port " + port + ": all ports in search range exhausted; Tomcat may fail to bind");
             return fallback;
         }
         if (claimed != port) {

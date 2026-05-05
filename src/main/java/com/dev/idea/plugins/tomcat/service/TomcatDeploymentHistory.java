@@ -79,7 +79,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
             String status = formatStatus();
             String artifacts = artifactNames.isEmpty() ? "no artifacts" :
                     String.join(", ", artifactNames);
-            return String.format("[%s] %s — %s — %dms — %s — %d errors, %d warnings",
+            return String.format("[%s] %s | %s | %dms | %s | %d errors, %d warnings",
                     getFormattedTimestamp(), configName, status, durationMs,
                     artifacts, errorCount, warningCount);
         }

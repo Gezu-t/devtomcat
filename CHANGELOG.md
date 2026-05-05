@@ -1,5 +1,17 @@
 # DevTomcat Changelog
 
+## [Unreleased]
+
+## [1.0.10]
+
+Resilience finishing touches plus release-engineering hygiene. No new features; every change either closes a residual gap from the 1.0.9 audit or removes a way the plugin can drift out of sync with its release notes.
+
+### Fixed
+- **Remote-deploy upload kept running after the local Tomcat was stopped.** The cancellation check between artifacts in the remote-deploy task did not extend to the chunk-by-chunk upload inside `TomcatManagerDeployer.deployWarViaPut`, so clicking Stop on the local Tomcat mid-transfer of a 50 MB WAR let the upload run to completion against a terminated handler. New `BooleanSupplier` parameter on `deployWithProgress` is polled inside the chunk loop in addition to `indicator.isCanceled`. `TomcatProcessHandler.triggerRemoteDeploymentIfNeeded` passes `isProcessTerminatingOrTerminated` so the upload aborts as soon as the process enters terminating state.
+
+### Changed
+- Em-dashes scrubbed from user-facing strings: dialog titles ("DevTomcat: Run History", "DevTomcat: Startup Time Trends"), run-console warnings (`TomcatApplicationUpdater`, `TomcatProcessHandler`, `ServerXmlMutator`, `LaunchPortClaimer`, `RunIdAssigner`, `TomcatJavaParametersBuilder`, `TomcatCommandLineState`), validator messages (`TomcatConfigurationValidator`, `ApplicationServerSection`), notification titles (`TomcatRunnerDelegate`, `TomcatFrameDeactivationListener`), the build-artifacts task error, and the deployment history summary format. Em-dashes in code comments and `LOG.*` calls (idea.log only) are left intact.
+
 ## [1.0.9]
 
 Deep deployment audit. Security hardening, port resolver fixes, and many smaller correctness fixes around launch, Debug on 2025.1, and remote deploy.

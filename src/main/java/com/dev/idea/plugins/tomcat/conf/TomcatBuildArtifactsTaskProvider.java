@@ -128,7 +128,7 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         if (!allValid) {
             TomcatNotifier.error(tomcatConfig.getProject(),
                     "DevTomcat: Artifacts Not Ready",
-                    "Cannot start Tomcat — the following artifacts are missing:\n" + missing +
+                    "Cannot start Tomcat. The following artifacts are missing:\n" + missing +
                             "\n\nBuild the project first (Build → Build Artifacts).");
         }
         return allValid;

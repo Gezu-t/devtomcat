@@ -252,7 +252,7 @@ public class TomcatJavaParametersBuilder {
             if (overlayActive) {
                 deploymentLogger.logServerWarning(
                         "Using conf overlay from " + confOverlay +
-                        " — files here override CATALINA_HOME defaults");
+                        ": files here override CATALINA_HOME defaults");
             }
             for (String warning : warnings) {
                 deploymentLogger.logServerWarning(warning);

@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.function.BooleanSupplier;
 
 /**
  * Deploys artifacts to a remote Tomcat instance via the Manager API (text interface).
@@ -68,13 +69,42 @@ public final class TomcatManagerDeployer {
     /**
      * Deploys with optional progress reporting for WAR uploads.
      * Returns a tri-state result so callers can distinguish cancellation from failure.
+     *
+     * <p>Equivalent to calling {@link #deployWithProgress(DeploymentArtifact,
+     * TomcatDeploymentLogger, ProgressIndicator, BooleanSupplier)} with a
+     * no-op abort check; preserved for callers that don't have a
+     * process-state predicate to thread through.
      */
     @NotNull
     public DeployResult deployWithProgress(@NotNull DeploymentArtifact artifact,
                                             @Nullable TomcatDeploymentLogger logger,
                                             @Nullable ProgressIndicator indicator) {
+        return deployWithProgress(artifact, logger, indicator, () -> false);
+    }
+
+    /**
+     * Deploys with optional progress reporting and an abort predicate that is
+     * polled <em>during</em> the chunk-by-chunk WAR upload (not just between
+     * artifacts). Use this overload from callers that need to abort an
+     * in-flight upload when something other than the user clicking Cancel
+     * happens (e.g. the local Tomcat process terminating mid-upload from
+     * {@link TomcatProcessHandler}).
+     *
+     * @param abortCheck predicate polled inside the upload loop; returning
+     *                   {@code true} aborts the upload with
+     *                   {@link DeployResult#CANCELLED}. Must not block.
+     */
+    @NotNull
+    public DeployResult deployWithProgress(@NotNull DeploymentArtifact artifact,
+                                            @Nullable TomcatDeploymentLogger logger,
+                                            @Nullable ProgressIndicator indicator,
+                                            @NotNull BooleanSupplier abortCheck) {
         if (indicator != null && indicator.isCanceled()) {
             log(logger, "Deployment skipped (cancelled): " + artifact.getDisplayName());
+            return DeployResult.CANCELLED;
+        }
+        if (abortCheck.getAsBoolean()) {
+            log(logger, "Deployment skipped (process terminating): " + artifact.getDisplayName());
             return DeployResult.CANCELLED;
         }
 
@@ -85,7 +115,7 @@ public final class TomcatManagerDeployer {
             undeploy(contextPath, null);
 
             if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
-                return deployWarViaPut(artifact, contextPath, logger, indicator);
+                return deployWarViaPut(artifact, contextPath, logger, indicator, abortCheck);
             } else {
                 return deployExplodedViaPath(artifact, contextPath, logger)
                         ? DeployResult.SUCCESS : DeployResult.FAILED;
@@ -193,7 +223,8 @@ public final class TomcatManagerDeployer {
     private DeployResult deployWarViaPut(@NotNull DeploymentArtifact artifact,
                                          @NotNull String contextPath,
                                          @Nullable TomcatDeploymentLogger logger,
-                                         @Nullable ProgressIndicator indicator) throws IOException {
+                                         @Nullable ProgressIndicator indicator,
+                                         @NotNull BooleanSupplier abortCheck) throws IOException {
         Path warFile = Path.of(artifact.getPath());
         if (!Files.exists(warFile)) {
             logError(logger, "WAR file not found: " + artifact.getPath());
@@ -225,6 +256,13 @@ public final class TomcatManagerDeployer {
                 while ((read = in.read(buffer)) != -1) {
                     if (indicator != null && indicator.isCanceled()) {
                         log(logger, "Upload cancelled by user");
+                        return DeployResult.CANCELLED;
+                    }
+                    if (abortCheck.getAsBoolean()) {
+                        // Local Tomcat process entered terminating/terminated state
+                        // while the upload was in flight. Stop sending chunks so the
+                        // task is not left holding a half-pushed WAR.
+                        log(logger, "Upload aborted (local Tomcat process terminating)");
                         return DeployResult.CANCELLED;
                     }
                     out.write(buffer, 0, read);

@@ -48,7 +48,7 @@ class DeploymentHistoryDialogTest {
     @DisplayName("uses a configuration-specific title and clear prompt when scoped")
     void scopedStringsIncludeConfigurationName() {
         assertEquals(
-                "DevTomcat — Run History — Demo",
+                "DevTomcat: Run History (Demo)",
                 DeploymentHistoryDialog.dialogTitle("Demo")
         );
         assertEquals(

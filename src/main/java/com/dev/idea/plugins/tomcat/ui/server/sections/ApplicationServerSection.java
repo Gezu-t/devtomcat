@@ -195,7 +195,7 @@ public class ApplicationServerSection implements ConfigurationSection {
             String displayName = !name.isEmpty() ? name : (!path.isEmpty() ? path : "(unnamed)");
             String pathClause = path.isEmpty() ? "no path is set" : "path '" + path + "' does not exist";
             errors.add(new ValidationInfo(
-                    "Tomcat server '" + displayName + "' cannot be launched — " + pathClause + "."
+                    "Tomcat server '" + displayName + "' cannot be launched: " + pathClause + "."
                             + " Open Configure to register a server, or select a different one.",
                     serverComboBox));
             return errors;
@@ -332,7 +332,7 @@ public class ApplicationServerSection implements ConfigurationSection {
                 setIcon(AllIcons.General.Warning);
                 setForeground(JBColor.RED);
                 setToolTipText("<html>This server is saved in the run configuration but cannot be"
-                        + " launched — the path is empty or does not exist on disk.<br/>"
+                        + " launched: the path is empty or does not exist on disk.<br/>"
                         + "Path: " + (value.getPath().isEmpty() ? "(empty)" : value.getPath()) + "<br/>"
                         + "Open <b>Configure…</b> to register a server, or select a different one.</html>");
             } else if (usable.contains(value)) {
@@ -341,7 +341,7 @@ public class ApplicationServerSection implements ConfigurationSection {
                 setForeground(selected ? list.getSelectionForeground() : list.getForeground());
                 setToolTipText("<html>This server is saved in the run configuration but is not"
                         + " registered in <b>Application Servers</b>. Run is blocked until you"
-                        + " register it — the path exists on disk, so adding it via <b>Configure…</b>"
+                        + " register it. The path exists on disk, so adding it via <b>Configure…</b>"
                         + " is enough.<br/>"
                         + "Path: " + value.getPath() + "</html>");
             } else {
