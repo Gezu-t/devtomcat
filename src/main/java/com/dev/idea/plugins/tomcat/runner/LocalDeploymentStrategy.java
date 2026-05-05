@@ -158,15 +158,21 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
         // ECJ/class-file compatibility: surface a clear pre-launch warning
         // when Tomcat's bundled Eclipse JDT compiler is too old to read the
-        // webapp's class files. Detection-only — replacing the user's ECJ
-        // would be invasive. Without this, the user sees a cryptic flood of
+        // webapp's class files. The deployment-logger warning is informational
+        // (in-console diagnostic). The notification with an actionable "Swap
+        // ECJ JAR..." button (see EcjJarSwapPrompt) is the persistent IDE-side
+        // surface the user can act on when convenient. Without this pair, the
+        // user sees a cryptic flood of
         // 'org.eclipse.jdt.internal.compiler.classfmt.ClassFormatException'
         // SEVERE messages at JSP-request time with no hint at the cause.
         if (tomcatInfo != null && !tomcatInfo.getPath().isEmpty()) {
-            EcjVersionCompat.check(
+            EcjVersionCompat.Mismatch mismatch = EcjVersionCompat.check(
                     Paths.get(tomcatInfo.getPath()),
                     collectWebInfDirsAcrossDeployments(configuration),
                     logger);
+            if (mismatch.isMismatch()) {
+                EcjJarSwapPrompt.show(project, mismatch);
+            }
         }
 
         for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
