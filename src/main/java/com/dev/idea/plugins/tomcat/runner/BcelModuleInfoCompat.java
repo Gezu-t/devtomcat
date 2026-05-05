@@ -2,23 +2,17 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
-import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Enumeration;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Properties;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -111,25 +105,6 @@ final class BcelModuleInfoCompat {
 
     /** First Tomcat 9.0.x with the BCEL fix. */
     private static final TomcatVersion TOMCAT_9_0_FIX = new TomcatVersion(9, 0, 31);
-
-    /**
-     * Property names Tomcat reads from {@code catalina.properties} (and
-     * {@link System#getProperty}) to populate the JAR scan skip list. Order
-     * matters: the FIRST name that already exists in the install's
-     * {@code catalina.properties} is the one whose value we extend. Tomcat
-     * 7.x and 8.0.x use {@code DefaultJarScanner}; 8.5+ uses
-     * {@code StandardJarScanFilter}.
-     */
-    static final String[] SKIP_PROPERTY_NAMES = {
-            "tomcat.util.scan.StandardJarScanFilter.jarsToSkip",
-            "tomcat.util.scan.DefaultJarScanner.jarsToSkip"
-    };
-
-    /** Marker so subsequent runs can update our previous appendix in place rather than stacking duplicates. */
-    static final String APPENDIX_MARKER = "# DevTomcat: BCEL/module-info compatibility appendix (auto-generated)";
-
-    /** Closing marker for the auto-generated appendix block. */
-    static final String APPENDIX_END_MARKER = "# DevTomcat: end of BCEL/module-info appendix";
 
     private BcelModuleInfoCompat() {}
 
@@ -235,224 +210,33 @@ final class BcelModuleInfoCompat {
     }
 
     // ------------------------------------------------------------------ //
-    // catalina.properties skip-list injection (the actual workaround)
+    // Catalina.properties injection (delegates file mutation to JarSkipListInjector)
     // ------------------------------------------------------------------ //
 
     /**
-     * Result of an attempted skip-list injection. Returned from
-     * {@link #applyModuleInfoSkipToCatalinaProperties} so callers can decide
-     * what (if anything) to surface in the run console.
+     * Reason header rendered into the appendix comment block when this
+     * shim is the source of the JARs being skipped. Re-used by the
+     * caller-side wiring to label the run-console log message.
      */
-    enum InjectionOutcome {
-        /** No-op: nothing to inject (no modular JARs detected). */
-        NO_MODULAR_JARS,
-        /** No-op: catalina.properties is missing or unreadable. */
-        PROPERTIES_FILE_UNAVAILABLE,
-        /** No-op: every modular JAR is already covered by an existing skip entry. */
-        ALREADY_COVERED,
-        /** Skip list was extended; deployments should now scan past the modular JARs. */
-        APPENDED,
-        /** Existing DevTomcat-managed appendix was refreshed in place (subsequent run). */
-        REFRESHED
-    }
+    static final String REASON_HEADER =
+            "BCEL/module-info compatibility for older Tomcats. Tomcat 7.x, 8.0.x,\n"
+                    + "8.5.<51, and 9.0.<31 ship a BCEL parser that throws ClassFormatException\n"
+                    + "on Java 9+ module-info.class (CONSTANT_Module tag 19). Listing the modular\n"
+                    + "JARs in the skip list lets the annotation scan bypass them. Property name\n"
+                    + "varies by Tomcat version; the right one is detected automatically.";
 
     /**
-     * Extends the {@code jarsToSkip} list in
-     * {@code CATALINA_BASE/conf/catalina.properties} with the given modular
-     * JAR names so Tomcat's JAR scanner skips annotation parsing for them.
-     *
-     * <p>Behavior:
-     * <ol>
-     *   <li>Reads the existing {@code catalina.properties} via
-     *       {@link Properties#load} (handles multi-line {@code \}-continuation,
-     *       comments, and encoding correctly).</li>
-     *   <li>Determines the right property name. The FIRST entry in
-     *       {@link #SKIP_PROPERTY_NAMES} that the file already defines wins;
-     *       on Tomcat 7 / 8.0.x that is {@code DefaultJarScanner...}, on
-     *       Tomcat 8.5+ that is {@code StandardJarScanFilter...}.</li>
-     *   <li>Computes the union of the existing comma-separated entries and
-     *       the modular JAR names, deduplicating, preserving order.</li>
-     *   <li>If a previous DevTomcat-managed appendix block is present (between
-     *       {@link #APPENDIX_MARKER} and {@link #APPENDIX_END_MARKER}), it is
-     *       replaced in place. Otherwise, a fresh appendix block is appended
-     *       to the file via temp-file + atomic move.</li>
-     * </ol>
-     *
-     * <p>{@link Properties#load} applies later-wins semantics, so an override
-     * at the end of the file supersedes the original definition. The original
-     * lines (including the upstream Tomcat skip list of {@code tomcat-*.jar},
-     * {@code el-api.jar}, etc.) are preserved as inline values in our override.
-     *
-     * <p>Never throws. I/O failures, parse errors, and missing files are
-     * logged at warn or debug and the method returns the appropriate
-     * {@link InjectionOutcome} so the caller can react (e.g. log an explanation
-     * to the run console).
-     *
-     * @param catalinaBase the per-launch CATALINA_BASE directory
-     * @param modularJars  modular JAR file names (e.g. {@code "jackson-core-2.17.0.jar"})
-     * @param logger       optional run-console logger; receives a single info
-     *                     line summarising what was injected
-     * @return outcome of the operation
+     * Convenience wrapper retained for callers that haven't migrated to
+     * {@link JarSkipListInjector#applyToCatalinaProperties} directly.
+     * Forwards to that primitive with the BCEL-specific reason header.
      */
     @NotNull
-    static InjectionOutcome applyModuleInfoSkipToCatalinaProperties(
+    static JarSkipListInjector.Outcome applyModuleInfoSkipToCatalinaProperties(
             @NotNull Path catalinaBase,
             @NotNull List<String> modularJars,
             @Nullable TomcatDeploymentLogger logger) {
-        if (modularJars.isEmpty()) {
-            return InjectionOutcome.NO_MODULAR_JARS;
-        }
-        Path props = catalinaBase.resolve("conf").resolve("catalina.properties");
-        if (!Files.isRegularFile(props)) {
-            LOG.debug("catalina.properties not found at " + props
-                    + "; skipping module-info skip injection");
-            return InjectionOutcome.PROPERTIES_FILE_UNAVAILABLE;
-        }
-
-        // Load via Properties.load so we get the merged value of any \-continuation
-        // lines and any later-wins overrides already present.
-        Properties existing = new Properties();
-        try (InputStream is = Files.newInputStream(props)) {
-            existing.load(is);
-        } catch (IOException e) {
-            LOG.warn("Could not read catalina.properties for module-info skip injection: "
-                    + e.getMessage());
-            return InjectionOutcome.PROPERTIES_FILE_UNAVAILABLE;
-        }
-
-        // Pick the property whose name the install already uses. Falls back to
-        // both names when neither is present, which is unusual but defensive.
-        List<String> targetProperties = new ArrayList<>();
-        for (String name : SKIP_PROPERTY_NAMES) {
-            if (existing.containsKey(name)) {
-                targetProperties.add(name);
-            }
-        }
-        if (targetProperties.isEmpty()) {
-            targetProperties = new ArrayList<>(Arrays.asList(SKIP_PROPERTY_NAMES));
-        }
-
-        // Build the merged value for each target property. Skip if every
-        // modular JAR is already in the existing list (idempotent on rerun).
-        List<String> overrideLines = new ArrayList<>();
-        boolean anyChange = false;
-        for (String propName : targetProperties) {
-            String currentValue = existing.getProperty(propName, "");
-            Set<String> entries = new LinkedHashSet<>();
-            for (String e : currentValue.split(",")) {
-                String trimmed = e.trim();
-                if (!trimmed.isEmpty()) entries.add(trimmed);
-            }
-            int before = entries.size();
-            entries.addAll(modularJars);
-            if (entries.size() == before) {
-                // Already covers all our modular JARs.
-                continue;
-            }
-            overrideLines.add(propName + "=" + String.join(",", entries));
-            anyChange = true;
-        }
-        if (!anyChange) {
-            return InjectionOutcome.ALREADY_COVERED;
-        }
-
-        String original;
-        try {
-            original = Files.readString(props);
-        } catch (IOException e) {
-            LOG.warn("Could not read catalina.properties contents: " + e.getMessage());
-            return InjectionOutcome.PROPERTIES_FILE_UNAVAILABLE;
-        }
-
-        String appendix = buildAppendix(overrideLines);
-        String updated = replaceOrAppendAppendix(original, appendix);
-        boolean refreshed = updated.equals(original)
-                ? false
-                : original.contains(APPENDIX_MARKER);
-
-        if (updated.equals(original)) {
-            // No textual change (the appendix was already present and unchanged).
-            return InjectionOutcome.ALREADY_COVERED;
-        }
-
-        try {
-            TomcatProjectUtils.atomicWriteString(props, updated);
-        } catch (IOException e) {
-            LOG.warn("Could not write catalina.properties for module-info skip injection: "
-                    + e.getMessage(), e);
-            return InjectionOutcome.PROPERTIES_FILE_UNAVAILABLE;
-        }
-
-        InjectionOutcome outcome = refreshed
-                ? InjectionOutcome.REFRESHED
-                : InjectionOutcome.APPENDED;
-        if (logger != null) {
-            String summary = "BCEL/module-info compatibility: "
-                    + (refreshed ? "refreshed" : "appended")
-                    + " skip-list override in catalina.properties for "
-                    + modularJars.size() + " modular JAR(s) ("
-                    + String.join(", ", targetProperties) + "). "
-                    + "Annotation scan will bypass: " + modularJars;
-            logger.logServerInfo(summary);
-        }
-        LOG.info("module-info skip injection " + outcome + ": "
-                + modularJars + " into " + targetProperties);
-        return outcome;
-    }
-
-    /**
-     * Builds the auto-generated appendix block, including the begin/end markers
-     * that {@link #replaceOrAppendAppendix} uses to find and replace it on
-     * subsequent runs.
-     */
-    @NotNull
-    private static String buildAppendix(@NotNull List<String> overrideLines) {
-        StringBuilder sb = new StringBuilder();
-        sb.append('\n').append(APPENDIX_MARKER).append('\n');
-        sb.append("# Older Tomcat releases (7.x, 8.0.x, 8.5.<51, 9.0.<31) ship a BCEL\n");
-        sb.append("# parser that throws ClassFormatException on Java 9+ module-info.class\n");
-        sb.append("# (CONSTANT_Module tag 19). The line(s) below merge the modular JARs\n");
-        sb.append("# from deployed webapps into the existing skip list so annotation\n");
-        sb.append("# scanning bypasses them. Property name varies by Tomcat version;\n");
-        sb.append("# Properties.load applies later-wins semantics for the override.\n");
-        for (String line : overrideLines) {
-            sb.append(line).append('\n');
-        }
-        sb.append(APPENDIX_END_MARKER).append('\n');
-        return sb.toString();
-    }
-
-    /**
-     * If {@code original} contains a previous DevTomcat-managed appendix
-     * (delimited by {@link #APPENDIX_MARKER} / {@link #APPENDIX_END_MARKER}),
-     * replaces it with {@code newAppendix}. Otherwise appends
-     * {@code newAppendix} at the end of the content (preserving a trailing
-     * newline). The marker-based replace prevents the file from growing
-     * unboundedly across rebuild cycles in the IDE-managed CATALINA_BASE.
-     */
-    @NotNull
-    static String replaceOrAppendAppendix(@NotNull String original, @NotNull String newAppendix) {
-        int start = original.indexOf(APPENDIX_MARKER);
-        if (start < 0) {
-            // No prior appendix; append. Ensure the previous content ends with a newline.
-            String base = original.endsWith("\n") ? original : original + "\n";
-            return base + newAppendix;
-        }
-        int endMarkerIdx = original.indexOf(APPENDIX_END_MARKER, start);
-        int end = endMarkerIdx < 0
-                ? original.length()
-                : endMarkerIdx + APPENDIX_END_MARKER.length();
-        // Strip an optional trailing newline so we don't double up.
-        if (end < original.length() && original.charAt(end) == '\n') {
-            end++;
-        }
-        String before = original.substring(0, start);
-        // Drop the leading blank-line delimiter we'd otherwise duplicate.
-        if (before.endsWith("\n\n")) {
-            before = before.substring(0, before.length() - 1);
-        }
-        String after = original.substring(end);
-        return before + newAppendix + after;
+        return JarSkipListInjector.applyToCatalinaProperties(
+                catalinaBase, modularJars, REASON_HEADER, logger);
     }
 
     // ------------------------------------------------------------------ //

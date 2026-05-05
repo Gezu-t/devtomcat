@@ -826,10 +826,11 @@ class LocalDeploymentStrategyTest {
         }
 
         @Test
-        @DisplayName("Container-provided JARs continue to flow through per-context <JarScanFilter>")
-        void containerProvidedStillInPerContextXml(@TempDir Path tempDir) throws Exception {
-            // The non-modular skip path is independent of the BCEL fix and must
-            // keep emitting the per-context filter for container-provided JARs.
+        @DisplayName("Modern Tomcat: container-provided JARs flow through per-context <JarScanFilter>")
+        void containerProvidedInPerContextXmlOnModernTomcat(@TempDir Path tempDir) throws Exception {
+            // On 8.5+ the Digester recognises Context/JarScanner/JarScanFilter,
+            // so we keep emitting it for container-provided JARs (the cleaner
+            // per-webapp channel).
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
             writeJar(libDir.resolve("servlet-api-2.5.jar"), "javax/servlet/Servlet.class");
@@ -847,7 +848,45 @@ class LocalDeploymentStrategyTest {
             String contextXml = LocalDeploymentStrategy.buildContextXml(
                     artifact, artifactPath, false, project, tomcat11, null);
             assertTrue(contextXml.contains("servlet-api-2.5.jar"),
-                    "Container-provided servlet-api must remain in pluggabilitySkip. XML:\n" + contextXml);
+                    "Container-provided servlet-api must remain in pluggabilitySkip on modern Tomcat. XML:\n"
+                            + contextXml);
+        }
+
+        @Test
+        @DisplayName("Tomcat 7: container-provided JARs are NOT in per-context XML (would log 'No rules found')")
+        void containerProvidedNotInPerContextXmlOnAffectedTomcat(@TempDir Path tempDir) throws Exception {
+            // The Tomcat 7 ContextRuleSet has no rule for
+            // Context/JarScanner/JarScanFilter, so emitting the element here
+            // causes a "No rules found" Digester warning AND the skip never
+            // takes effect. The configureDeployment path routes container-
+            // provided JARs through catalina.properties on affected Tomcats
+            // instead, so the per-context XML must not duplicate them. This
+            // test pins that buildContextXml omits the JarScanner/JarScanFilter
+            // element entirely on affected Tomcats.
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
+            writeJar(libDir.resolve("servlet-api-2.5.jar"), "javax/servlet/Servlet.class");
+            writeJar(libDir.resolve("jsp-api-2.2.jar"), "javax/servlet/jsp/JspPage.class");
+
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat7, null);
+
+            assertFalse(contextXml.contains("<JarScanner>"),
+                    "Affected Tomcat must omit <JarScanner> entirely. XML:\n" + contextXml);
+            assertFalse(contextXml.contains("servlet-api-2.5.jar"),
+                    "Container-provided JARs must not appear in per-context XML on affected Tomcat. XML:\n"
+                            + contextXml);
+            assertFalse(contextXml.contains("jsp-api-2.2.jar"));
         }
 
         /** Writes a minimal JAR (zip) at {@code path} with the given entry names and empty bodies. */

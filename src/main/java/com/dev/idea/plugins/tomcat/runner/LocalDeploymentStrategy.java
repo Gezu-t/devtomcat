@@ -119,19 +119,40 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         boolean preserveSessions = configuration.isPreserveSessions();
         TomcatInfo tomcatInfo = configuration.getTomcatInfo();
 
-        // BCEL/module-info compatibility: on Tomcats whose BCEL parser cannot
-        // read Java 9+ module-info.class (7.x, 8.0.x, 8.5.<51, 9.0.<31), inject
-        // the modular JARs into catalina.properties' jarsToSkip BEFORE the JVM
-        // starts. The per-context <JarScanFilter> route does not work here:
-        // Tomcat 7's ContextRuleSet has no rule for that element and silently
-        // drops it with a "No rules found" warning. catalina.properties is
-        // loaded into System properties at startup and is honoured by every
-        // affected version.
-        if (BcelModuleInfoCompat.isAffectedByBcelModuleInfoBug(tomcatInfo)) {
-            List<String> modularJars = collectModularJarsAcrossDeployments(configuration);
-            if (!modularJars.isEmpty()) {
-                BcelModuleInfoCompat.applyModuleInfoSkipToCatalinaProperties(
-                        catalinaBase, modularJars, logger);
+        // JAR-scan compatibility on Tomcat versions whose ContextRuleSet has
+        // no rule for Context/JarScanner/JarScanFilter (Tomcat 7.x and 8.0.x,
+        // and the BCEL-affected 8.5.<51 / 9.0.<31). On those releases the
+        // per-context <JarScanFilter> element is silently dropped with a
+        // "No rules found" warning, so any JAR the launcher wants skipped
+        // (modular JARs that would crash the BCEL parser AND container-
+        // provided JARs that would otherwise duplicate web fragments) has to
+        // route through catalina.properties instead, which is loaded into
+        // System properties at JVM startup and is honoured by every affected
+        // version. Modern Tomcats (10+, 11+, 8.5.51+, 9.0.31+) keep the
+        // per-context XML behavior; only the BCEL-affected branch needs the
+        // module-info workaround anyway.
+        boolean affected = BcelModuleInfoCompat.isAffectedByBcelModuleInfoBug(tomcatInfo);
+        if (affected) {
+            java.util.LinkedHashSet<String> jarsToSkip = new java.util.LinkedHashSet<>();
+            // Modular JARs trigger the BCEL bug; without these the run
+            // console floods with 'Invalid byte tag in constant pool: 19'
+            // SEVERE messages.
+            jarsToSkip.addAll(collectModularJarsAcrossDeployments(configuration));
+            // Container-provided JARs would otherwise be silently dropped
+            // from the per-context filter on these Tomcats. Putting them in
+            // catalina.properties keeps the duplicate web-fragment guard
+            // in effect across versions.
+            jarsToSkip.addAll(collectContainerProvidedJarsAcrossDeployments(configuration));
+            if (!jarsToSkip.isEmpty()) {
+                JarSkipListInjector.applyToCatalinaProperties(
+                        catalinaBase,
+                        new ArrayList<>(jarsToSkip),
+                        BcelModuleInfoCompat.REASON_HEADER + "\n"
+                                + "Container-provided JARs (servlet-api, jsp-api, etc.) found in\n"
+                                + "WEB-INF/lib are also routed through this channel because the\n"
+                                + "per-context <JarScanFilter> element is not honoured on this\n"
+                                + "Tomcat version (the Digester rule was added in 8.5).",
+                        logger);
             }
         }
 
@@ -221,31 +242,31 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Builds the {@code <JarScanFilter pluggabilitySkip="...">} value for the
-     * artifact's context descriptor. Skips container-provided JARs
-     * ({@code servlet-api}, {@code jsp-api}, {@code jakarta.el}, {@code ecj-*})
-     * because shipping them inside a webapp on top of Tomcat's own copies
-     * causes duplicate web-fragment errors.
-     *
-     * <p>The BCEL/module-info workaround is intentionally NOT applied here:
-     * Tomcat 7's {@code ContextRuleSet} has no Digester rule for
-     * {@code Context/JarScanner/JarScanFilter}, so the element is silently
-     * ignored on every affected Tomcat. {@link BcelModuleInfoCompat#applyModuleInfoSkipToCatalinaProperties}
-     * handles that case via {@code catalina.properties}, which works
-     * uniformly across every affected version.
+     * Builds the {@code <JarScanFilter pluggabilitySkip="...">} value for
+     * the artifact's context descriptor on Tomcats whose Digester
+     * recognises that element (8.5+). On older Tomcats the element is
+     * silently dropped, so {@code configureDeployment} routes container-
+     * provided JARs through {@code catalina.properties} via
+     * {@link JarSkipListInjector} instead and this method returns the
+     * empty string.
      *
      * <p>Returns the empty string when nothing needs skipping; the caller
-     * then omits the {@code <JarScanner>} element entirely so user-supplied
-     * scanner configuration in {@code conf/} stays in effect.
-     *
-     * <p>The {@code tomcatInfo} and {@code logger} parameters are unused
-     * today but kept on the signature so a future per-context-only fix can
-     * surface a version-specific message without touching every call site.
+     * then omits the {@code <JarScanner>} element entirely so user-
+     * supplied scanner configuration in {@code conf/} stays in effect.
      */
     @NotNull
     private static String buildJarScanFilter(@NotNull Path artifactPath,
                                              @Nullable TomcatInfo tomcatInfo,
                                              @Nullable TomcatDeploymentLogger logger) {
+        // On Tomcat versions where the per-context filter element is
+        // silently dropped, the container-provided skip already went
+        // through catalina.properties at configureDeployment time. Emit
+        // nothing here so the descriptor stays clean and Tomcat's Digester
+        // does not log a "No rules found" warning.
+        if (BcelModuleInfoCompat.isAffectedByBcelModuleInfoBug(tomcatInfo)) {
+            return "";
+        }
+
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (!Files.isDirectory(webInfLib)) return "";
 
@@ -296,6 +317,35 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             Path artifactPath = Paths.get(artifact.getPath());
             Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
             all.addAll(BcelModuleInfoCompat.findJarsContainingModuleInfo(webInfLib));
+        }
+        return new ArrayList<>(all);
+    }
+
+    /**
+     * Walks every exploded artifact's {@code WEB-INF/lib} once and returns
+     * the union of JAR file names that match {@link #isContainerProvidedJar}.
+     * Used on BCEL-affected Tomcats where the per-context
+     * {@code <JarScanFilter>} element is silently dropped, so we have to
+     * route container-provided JARs through {@code catalina.properties}
+     * instead.
+     */
+    @NotNull
+    private static List<String> collectContainerProvidedJarsAcrossDeployments(
+            @NotNull TomcatRunConfiguration configuration) {
+        java.util.TreeSet<String> all = new java.util.TreeSet<>();
+        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
+            if (artifact == null || !artifact.isValid()) continue;
+            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
+            Path webInfLib = Paths.get(artifact.getPath()).resolve(WEB_INF).resolve(WEB_INF_LIB);
+            if (!Files.isDirectory(webInfLib)) continue;
+            try (var stream = Files.list(webInfLib)) {
+                stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+                        .map(p -> p.getFileName().toString())
+                        .filter(LocalDeploymentStrategy::isContainerProvidedJar)
+                        .forEach(all::add);
+            } catch (IOException e) {
+                LOG.debug("Could not scan " + webInfLib + " for container-provided jars: " + e.getMessage());
+            }
         }
         return new ArrayList<>(all);
     }
