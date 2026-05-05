@@ -53,6 +53,56 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>Version 1.0.9</h3>
+    <p>Deep deployment audit. Security hardening, Tomcat-version compatibility shims, port-resolver correctness, and many smaller fixes around launch, Debug on 2025.1, and remote deploy.</p>
+
+    <p><b>Security</b></p>
+    <ul>
+        <li><b>AJP without <code>address</code> reproduced CVE-2020-1938 (Ghostcat)</b> — when the user enabled AJP with no existing connector, the launcher injected one with <code>secretRequired="false"</code> and no host binding, leaving unauthenticated AJP open on every interface. IDE-injected AJP connectors now bind to <code>127.0.0.1</code>; user-configured connectors are untouched.</li>
+        <li><b>JMX exposed without host binding</b> — when JMX was enabled the launcher set <code>local.only=false</code>, <code>authenticate=false</code>, and <code>ssl=false</code>, but did not pin <code>jmxremote.host</code>. JMX and the RMI registry now bind to <code>127.0.0.1</code> by default; an explicit <code>-D</code> in VM options takes precedence.</li>
+    </ul>
+
+    <p><b>Data-loss fixes</b></p>
+    <ul>
+        <li><b><code>copyConfDirectory</code> deleted the user's <code>conf/</code> when <code>CATALINA_BASE</code> equalled <code>CATALINA_HOME</code></b> — pinning the base to the registered Tomcat install hit an unguarded <code>recreateDirectory</code> that wiped <code>server.xml</code>, <code>tomcat-users.xml</code>, and the policy files before the copy walk. Same-path is now refused with a clear error before any destructive work runs.</li>
+        <li><b>Stale-deployment cleanup wiped pinned <code>CATALINA_BASE</code></b> — the launch-time wipe of <code>webapps/*.war</code> and <code>conf/Catalina/localhost/*.xml</code> ran indiscriminately even on user-managed installs. Cleanup is now gated to the IDE-managed system directory.</li>
+        <li><b>Parallel-run cleanup followed a symlink at the run-base root</b> — a symbolic link planted at <code>.runs/{runId}</code> could redirect the recursive delete onto an unrelated tree. Switched to <code>NOFOLLOW_LINKS</code> with explicit refusal.</li>
+    </ul>
+
+    <p><b>Tomcat-version compatibility (new shims)</b></p>
+    <ul>
+        <li><b>BCEL <code>"Invalid byte tag in constant pool: 19"</code> on Tomcat 7.x / 8.0.x / 8.5.&lt;51 / 9.0.&lt;31</b> — their bundled BCEL parser does not recognise Java 9+ <code>module-info.class</code> and floods the run console with one stack trace per modular JAR (jackson, jaxb-api, byte-buddy, snakeyaml, etc.). New <code>BcelModuleInfoCompat</code> shim detects affected versions and appends modular JARs to the appropriate <code>jarsToSkip</code> property in <code>catalina.properties</code> (<code>DefaultJarScanner</code> on 7/8.0, <code>StandardJarScanFilter</code> on 8.5+). Per-context <code>&lt;JarScanFilter&gt;</code> is intentionally not used because Tomcat 7's Digester has no rule for it. Modern Tomcats untouched. Runtime classloading unchanged.</li>
+        <li><b>Pre-launch ECJ-vs-class-file compatibility check</b> — Tomcat's bundled Eclipse JDT compiler is used by Jasper to compile JSPs; older ECJ releases can't read newer Java class files. Tomcat 7.0.30 ships ECJ 3.7.2 (Java 7 max), so any webapp with Java 8+ dependencies hits <code>org.eclipse.jdt.internal.compiler.classfmt.ClassFormatException</code> at request time. New <code>EcjVersionCompat</code> shim parses <code>tomcat/lib/ecj-*.jar</code>, maps version → max Java (table covering Eclipse 3.4 → 4.34), samples class file majors across <code>WEB-INF/classes/**</code> and <code>WEB-INF/lib/*.jar</code> root entries, and surfaces a single warning naming the bundled ECJ, the highest webapp class major, and the resolution paths (upgrade Tomcat / swap the ECJ JAR / lower the target).</li>
+    </ul>
+
+    <p><b>Correctness</b></p>
+    <ul>
+        <li><b>Port resolver displaced peer services with their own configured ports</b> — when HTTP was bound and the next port matched a peer's preferred slot, the resolver either took it (knocking the peer aside) or aborted with "no alternative found". The search is now peer-aware: it skips both the running <code>allocated</code> set and the configured ports of unresolved peers.</li>
+        <li><b>Restart in Debug on IntelliJ 2025.1 threw <code>IllegalStateException: Running sync tasks on pure EDT</code></b> — <code>destroyProcess</code> now runs off-EDT. Same fix applied to the Services-panel Stop action.</li>
+        <li><b>Tomcat 7 deploy warning <code>"No rules found matching 'Context/Resources/PreResources'"</code></b> — <code>&lt;PreResources&gt;</code>/<code>&lt;PostResources&gt;</code> are Tomcat 8+; the generator now skips that block on Tomcat 7 and logs a one-line note instead.</li>
+        <li><b>Manager URL with trailing slash silently became <code>localhost</code></b> — <code>RemoteConfig.setManagerUrl</code> regex required no trailing slash; a natural <code>http://host:8080/manager/</code> failed validation and the setter fell back to default. Setter now strips trailing slashes before validation.</li>
+        <li><b>Remote-deploy URL injection</b> — <code>TomcatManagerDeployer</code> concatenated context paths into <code>?path=</code> raw; a context like <code>/myapp&amp;update=false</code> would inject extra query params. All three call sites now URL-encode the path.</li>
+        <li><b>Smart-error console dropped the detected message</b> — <code>TomcatErrorDiagnostics.formatForConsole</code> showed only the suggestion. Format now includes the message.</li>
+        <li><b>Renaming a running config leaked its ports</b> — the rename listener migrated status/history/startup-tracker but missed <code>TomcatPortRegistry</code>. Registry now exposes a <code>renameConfiguration</code> migration the listener calls alongside the others.</li>
+        <li><b>Carry-over relaunch lost JDWP exhaustion warnings</b> — when the carried debug port couldn't be claimed, the relaunch silently kept the original. Now logs the same exhaustion / bump warnings as the first-time debug path.</li>
+        <li><b>Silent JRE fallback</b> — when the configured JRE was no longer registered, the launcher fell back to project SDK with only an <code>idea.log</code> WARN. Fallback is now surfaced in the run console.</li>
+        <li><b>One throwing listener silenced its peers</b> — <code>TomcatLifecycleListener.composite</code> and <code>TomcatOutputPipeline.processLine</code> ran consumers in a bare for-loop. Both now isolate per-listener with WARN logging.</li>
+        <li><b>Remote-deploy background task outlived its process</b> — stopping the local Tomcat mid-deploy left the task running and posting stale dashboard updates. Task now short-circuits on terminating/terminated state.</li>
+        <li><b><code>TomcatConfigurationData.setContextPath</code> skipped slash canonicalization</b> — programmatic callers (XML deserializer, imported configs) could land non-slash-prefixed paths producing broken URLs. Setter now canonicalizes via <code>ContextPathUtils.normalizeContextPath</code>.</li>
+        <li><b>Manual-JDWP detection masked by a leading <code>-agentlib:jdwp_other</code></b> — <code>hasManualJdwpAgent</code> ran a single <code>indexOf</code>; a near-miss masked a real agent later in the string and the duplicate-agent warning never fired. Now scans past rejected matches.</li>
+        <li><b>Context.xml writes were non-atomic</b> — both initial deploy and Ctrl+F10 redeploy used <code>Files.writeString</code> directly. New <code>atomicWriteString</code> helper (temp + atomic move) at both sites.</li>
+        <li><b>Bundled-app mirror produced malformed <code>context.xml</code> for directories containing <code>--</code></b> — XML 1.0 forbids <code>--</code> inside comments. Dir name is now sanitised before interpolation.</li>
+        <li><b>Liquibase cleanup missed under Turkish locale</b>, <b>multi-module artifact-to-module matching broken under <code>tr_TR</code></b>, and <b>remote-deploy progress used JVM-default decimal separator</b> — all pinned to <code>Locale.ROOT</code>.</li>
+        <li><b>Run-config editor leaked its message-bus listener</b> — <code>subscribeToRenameEvents</code> now passes the editor as parent disposable so it auto-disconnects on <code>disposeEditor</code>.</li>
+        <li><b><code>ProcessCanceledException</code> swallowed in five broad catches</b> (credentials, notifications, run-config getState, Before-Launch sync) — PCE now rethrows; other exceptions still log and fall through.</li>
+    </ul>
+
+    <p><b>Refactoring &amp; tests</b></p>
+    <ul>
+        <li>Extracted <code>PortResolver</code> from <code>TomcatJavaParametersBuilder</code> for independent testability.</li>
+        <li>1546 tests, ~330 new this release. New test groups for <code>PortResolver</code>, BCEL/module-info compatibility, ECJ version compatibility, peer-aware port resolution, same-path <code>conf/</code> refusal, manual-JDWP near-miss, manager-URL trailing slash, and the smart-error message-field regression.</li>
+    </ul>
+
     <h3>Version 1.0.8</h3>
     <p>Resilience release — no new features; every change either reduces the surface area of future bugs or locks in a past fix with an end-to-end test.</p>
     <ul>
