@@ -101,6 +101,53 @@ public final class TomcatCompatibilityChecker {
     }
 
     /**
+     * Returns {@code true} when the given Tomcat install belongs to an
+     * end-of-life branch that no longer receives security updates from the
+     * Apache Tomcat project. Used by the "Tomcat EOL" notification prompt
+     * to recommend an upgrade.
+     *
+     * <p>Branches treated as EOL (sourced from the Apache Tomcat
+     * <i>Which Version</i> page):
+     * <ul>
+     *   <li><b>Tomcat 7.x</b>: EOL March 2021.</li>
+     *   <li><b>Tomcat 8.0.x</b>: EOL June 2018.</li>
+     *   <li><b>Tomcat 8.5.x</b>: EOL March 2024.</li>
+     *   <li><b>Tomcat 10.0.x</b>: EOL October 2023 (replaced by 10.1.x).</li>
+     * </ul>
+     *
+     * <p>Tomcat 9.0.x, 10.1.x, and 11.x are not flagged. Returns
+     * {@code false} when {@code tomcatInfo} is null or its version cannot
+     * be parsed (conservative default; never warns for an unknown shape).
+     */
+    public static boolean isEndOfLifeTomcat(@Nullable TomcatInfo tomcatInfo) {
+        if (tomcatInfo == null) return false;
+        int major = tomcatInfo.getMajorVersion();
+        if (major <= 0) return false;
+        String version = tomcatInfo.getVersion();
+
+        if (major == 7 || major == 8) return true; // 7.x, 8.0.x, 8.5.x all EOL
+        if (major == 10 && version.startsWith("10.0")) return true;
+        return false;
+    }
+
+    /**
+     * Returns a short human-readable EOL date string for the given Tomcat
+     * branch, or {@code null} if the branch is not flagged EOL. Used in
+     * notification copy.
+     */
+    @Nullable
+    public static String endOfLifeDateOrNull(@Nullable TomcatInfo tomcatInfo) {
+        if (!isEndOfLifeTomcat(tomcatInfo)) return null;
+        int major = tomcatInfo.getMajorVersion();
+        String version = tomcatInfo.getVersion();
+        if (major == 7) return "March 2021";
+        if (major == 8 && version.startsWith("8.0")) return "June 2018";
+        if (major == 8) return "March 2024"; // 8.5.x
+        if (major == 10 && version.startsWith("10.0")) return "October 2023";
+        return null;
+    }
+
+    /**
      * Returns the minimum Java feature version required for the given Tomcat version.
      */
     public static int getMinJavaVersion(@NotNull TomcatInfo tomcatInfo) {

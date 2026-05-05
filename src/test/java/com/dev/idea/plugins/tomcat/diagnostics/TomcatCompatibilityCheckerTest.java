@@ -120,4 +120,70 @@ class TomcatCompatibilityCheckerTest {
     void noBlockingIssuesOnEmpty() {
         assertFalse(TomcatCompatibilityChecker.hasBlockingIssues(List.of()));
     }
+
+    // --- isEndOfLifeTomcat / endOfLifeDateOrNull ---
+
+    @Test
+    @DisplayName("Tomcat 7.x is EOL (March 2021)")
+    void tomcat7Eol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 7", "7.0.109", "/opt/tomcat-7");
+        assertTrue(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+        assertEquals("March 2021", TomcatCompatibilityChecker.endOfLifeDateOrNull(info));
+    }
+
+    @Test
+    @DisplayName("Tomcat 8.0.x is EOL (June 2018)")
+    void tomcat80Eol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 8.0", "8.0.53", "/opt/tomcat-8.0");
+        assertTrue(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+        assertEquals("June 2018", TomcatCompatibilityChecker.endOfLifeDateOrNull(info));
+    }
+
+    @Test
+    @DisplayName("Tomcat 8.5.x is EOL (March 2024)")
+    void tomcat85Eol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 8.5", "8.5.99", "/opt/tomcat-8.5");
+        assertTrue(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+        assertEquals("March 2024", TomcatCompatibilityChecker.endOfLifeDateOrNull(info));
+    }
+
+    @Test
+    @DisplayName("Tomcat 9.x is supported (not EOL)")
+    void tomcat9NotEol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 9", "9.0.85", "/opt/tomcat-9");
+        assertFalse(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+        assertNull(TomcatCompatibilityChecker.endOfLifeDateOrNull(info));
+    }
+
+    @Test
+    @DisplayName("Tomcat 10.0.x is EOL (October 2023, replaced by 10.1)")
+    void tomcat10_0Eol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 10.0", "10.0.27", "/opt/tomcat-10.0");
+        assertTrue(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+        assertEquals("October 2023", TomcatCompatibilityChecker.endOfLifeDateOrNull(info));
+    }
+
+    @Test
+    @DisplayName("Tomcat 10.1.x is supported")
+    void tomcat10_1NotEol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 10.1", "10.1.20", "/opt/tomcat-10.1");
+        assertFalse(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+    }
+
+    @Test
+    @DisplayName("Tomcat 11.x is supported")
+    void tomcat11NotEol() {
+        TomcatInfo info = new TomcatInfo("Tomcat 11", "11.0.5", "/opt/tomcat-11");
+        assertFalse(TomcatCompatibilityChecker.isEndOfLifeTomcat(info));
+    }
+
+    @Test
+    @DisplayName("null TomcatInfo and unparseable version are not EOL (conservative)")
+    void unknownIsNotEol() {
+        assertFalse(TomcatCompatibilityChecker.isEndOfLifeTomcat(null));
+        assertFalse(TomcatCompatibilityChecker.isEndOfLifeTomcat(
+                new TomcatInfo("custom", "snapshot", "/opt/custom")));
+        assertFalse(TomcatCompatibilityChecker.isEndOfLifeTomcat(
+                new TomcatInfo("empty", "", "/opt/empty")));
+    }
 }

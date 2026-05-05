@@ -175,6 +175,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
 
+        // Tomcat EOL warning. Fired once per IDE session per install so
+        // legacy-Tomcat users get a periodic nudge to upgrade without
+        // being spammed every launch. Non-blocking; the launch continues.
+        TomcatCompatibilityPrompt.showEolWarningOnce(project, tomcatInfo);
+
         for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
             if (artifact == null || !artifact.isValid()) continue;
 

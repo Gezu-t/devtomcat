@@ -324,11 +324,20 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         }
 
         if (TomcatCompatibilityChecker.hasBlockingIssues(issues)) {
-            throw new ExecutionException(
-                    "Compatibility check failed: " + issues.stream()
-                            .filter(TomcatCompatibilityChecker.CompatibilityIssue::isBlocking)
-                            .map(TomcatCompatibilityChecker.CompatibilityIssue::getMessage)
-                            .findFirst().orElse("Unknown issue"));
+            String firstBlocking = issues.stream()
+                    .filter(TomcatCompatibilityChecker.CompatibilityIssue::isBlocking)
+                    .map(TomcatCompatibilityChecker.CompatibilityIssue::getMessage)
+                    .findFirst().orElse("Unknown issue");
+            // Surface a balloon with a one-click jump to the run-config
+            // editor's Server tab (where the JRE picker lives) AND to
+            // the SDKs page. Console message remains the source of truth
+            // for the precise error; the balloon is the actionable
+            // companion. Fires before throwing so the user sees both
+            // the failure modal AND the balloon stays in the
+            // notification panel after they dismiss the modal.
+            TomcatCompatibilityPrompt.showJdkMismatchPrompt(
+                    configuration.getProject(), configuration, firstBlocking);
+            throw new ExecutionException("Compatibility check failed: " + firstBlocking);
         }
     }
 
