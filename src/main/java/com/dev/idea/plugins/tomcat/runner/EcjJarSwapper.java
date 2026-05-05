@@ -2,16 +2,14 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.util.io.HttpRequests;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -229,11 +227,26 @@ final class EcjJarSwapper {
         if (!Files.isRegularFile(backupPath)) {
             return SwapResult.failed("Backup not found at " + backupPath);
         }
+        // Refuse if the backup path doesn't end in our managed suffix.
+        // Without this check, stripBackupSuffix returns the input unchanged
+        // and the move-to-self below silently no-ops, falsely reporting success.
+        String backupName = backupPath.getFileName().toString();
+        if (!backupName.endsWith(BACKUP_SUFFIX)) {
+            return SwapResult.failed("Backup path does not end in '" + BACKUP_SUFFIX
+                    + "': " + backupPath
+                    + ". restoreBackup only handles files created by EcjJarSwapper.execute.");
+        }
         if (!Files.isRegularFile(activeJar)) {
             return SwapResult.failed("Active ECJ JAR not found at " + activeJar);
         }
-        Path originalLocation = backupPath.resolveSibling(
-                stripBackupSuffix(backupPath.getFileName().toString()));
+        Path originalLocation = backupPath.resolveSibling(stripBackupSuffix(backupName));
+        if (originalLocation.equals(backupPath)) {
+            // Defensive: stripBackupSuffix produced the same name. Should be
+            // impossible after the endsWith check above, but if a future
+            // refactor removes that guard we don't want to fall through to
+            // a destructive move-to-self.
+            return SwapResult.failed("Restore target is the backup itself: " + backupPath);
+        }
         if (Files.exists(originalLocation) && !originalLocation.equals(activeJar)) {
             return SwapResult.failed("Original ECJ location is occupied by another file: "
                     + originalLocation);
@@ -351,69 +364,37 @@ final class EcjJarSwapper {
         }
     }
 
-    /** Default {@link Downloader} that talks to the network via HttpsURLConnection. */
+    /**
+     * Default {@link Downloader} that talks to the network via IntelliJ's
+     * {@link HttpRequests} API. Routed through the platform's HTTP layer so
+     * the swap respects user-configured HTTP proxies (Settings &raquo;
+     * Appearance &amp; Behavior &raquo; System Settings &raquo; HTTP Proxy)
+     * including auth, the platform's TLS trust store, and platform-level
+     * redirect handling. Corporate users behind a proxy could not use this
+     * action when the implementation went directly through
+     * {@code HttpURLConnection}; routing through {@code HttpRequests}
+     * fixes that without expanding the surface area of code we own.
+     */
     private static final class HttpsDownloader implements Downloader {
 
         @Override
         public void download(@NotNull URL url, @NotNull Path target,
                              @Nullable ProgressIndicator indicator) throws IOException {
-            HttpURLConnection conn = openConnection(url);
-            try {
-                int code = conn.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IOException("HTTP " + code + " from " + url);
-                }
-                long contentLength = conn.getContentLengthLong();
-                try (InputStream in = conn.getInputStream()) {
-                    long downloaded = 0;
-                    byte[] buf = new byte[8192];
-                    int read;
-                    try (var out = Files.newOutputStream(target)) {
-                        while ((read = in.read(buf)) != -1) {
-                            if (indicator != null && indicator.isCanceled()) {
-                                throw new IOException("Download cancelled by user");
-                            }
-                            out.write(buf, 0, read);
-                            downloaded += read;
-                            if (indicator != null && contentLength > 0) {
-                                indicator.setFraction((double) downloaded / contentLength);
-                            }
-                        }
-                    }
-                }
-            } finally {
-                conn.disconnect();
-            }
+            HttpRequests.request(url.toString())
+                    .userAgent("DevTomcat-IDE-Plugin/1.0")
+                    .connectTimeout(15_000)
+                    .readTimeout(60_000)
+                    .saveToFile(target.toFile(), indicator);
         }
 
         @Override
         @NotNull
         public String fetchString(@NotNull URL url) throws IOException {
-            HttpURLConnection conn = openConnection(url);
-            try {
-                int code = conn.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IOException("HTTP " + code + " from " + url);
-                }
-                try (InputStream in = conn.getInputStream()) {
-                    return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-                }
-            } finally {
-                conn.disconnect();
-            }
-        }
-
-        @NotNull
-        private static HttpURLConnection openConnection(@NotNull URL url) throws IOException {
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(15_000);
-            conn.setReadTimeout(60_000);
-            conn.setInstanceFollowRedirects(true);
-            // Maven Central tolerates a missing UA but it's good citizenship
-            // to identify ourselves so traffic is attributable.
-            conn.setRequestProperty("User-Agent", "DevTomcat-IDE-Plugin/1.0");
-            return conn;
+            return HttpRequests.request(url.toString())
+                    .userAgent("DevTomcat-IDE-Plugin/1.0")
+                    .connectTimeout(15_000)
+                    .readTimeout(60_000)
+                    .readString(null);
         }
     }
 }

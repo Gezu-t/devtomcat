@@ -328,15 +328,21 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     .filter(TomcatCompatibilityChecker.CompatibilityIssue::isBlocking)
                     .map(TomcatCompatibilityChecker.CompatibilityIssue::getMessage)
                     .findFirst().orElse("Unknown issue");
-            // Surface a balloon with a one-click jump to the run-config
-            // editor's Server tab (where the JRE picker lives) AND to
-            // the SDKs page. Console message remains the source of truth
-            // for the precise error; the balloon is the actionable
-            // companion. Fires before throwing so the user sees both
-            // the failure modal AND the balloon stays in the
-            // notification panel after they dismiss the modal.
-            TomcatCompatibilityPrompt.showJdkMismatchPrompt(
-                    configuration.getProject(), configuration, firstBlocking);
+            // Surface the JDK-mismatch balloon ONLY when the blocking issue
+            // is actually about the JDK. Other blocking issues (e.g. "No
+            // Tomcat server configured") would get the wrong title and a
+            // misleading remediation. Filtering on the "Java" substring
+            // covers the two JDK-related blocking messages produced by
+            // TomcatCompatibilityChecker ("No JDK configured. Tomcat X
+            // requires Java Y+." and "Tomcat X requires Java Y+, but the
+            // configured JDK is Java Z") and excludes the no-server case.
+            // Console message remains the source of truth for the precise
+            // error; the balloon is the actionable companion that persists
+            // in the notification panel after the failure modal closes.
+            if (firstBlocking.contains("Java")) {
+                TomcatCompatibilityPrompt.showJdkMismatchPrompt(
+                        configuration.getProject(), configuration, firstBlocking);
+            }
             throw new ExecutionException("Compatibility check failed: " + firstBlocking);
         }
     }

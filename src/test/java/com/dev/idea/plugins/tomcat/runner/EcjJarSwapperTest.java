@@ -306,6 +306,30 @@ class EcjJarSwapperTest {
             assertEquals("ACTIVE", Files.readString(active),
                     "Active JAR untouched when backup is missing");
         }
+
+        @Test
+        @DisplayName("backup path without .devtomcat-bak suffix is refused (no silent move-to-self)")
+        void wrongSuffixIsRefused(@TempDir Path tmp) throws Exception {
+            // Regression: stripBackupSuffix returns the input unchanged when
+            // the suffix is missing, which would make originalLocation equal
+            // backupPath and turn the atomic-move into a silent no-op that
+            // falsely reported success. Refuse up front instead.
+            Path lib = Files.createDirectories(tmp.resolve("lib"));
+            Path active = lib.resolve("ecj-3.36.0.jar");
+            // A regular JAR file, NOT a .devtomcat-bak — caller passed wrong path.
+            Path notABackup = lib.resolve("ecj-3.7.2.jar");
+            Files.writeString(active, "ACTIVE");
+            Files.writeString(notABackup, "NOT-ACTUALLY-A-BACKUP");
+
+            EcjJarSwapper.SwapResult result = EcjJarSwapper.restoreBackup(notABackup, active);
+
+            assertFalse(result.isSuccess(),
+                    "Refusing a path without our managed suffix protects the user from silent no-ops");
+            assertTrue(result.errorMessage().contains(EcjJarSwapper.BACKUP_SUFFIX),
+                    "Error names the required suffix: " + result.errorMessage());
+            assertEquals("ACTIVE", Files.readString(active));
+            assertEquals("NOT-ACTUALLY-A-BACKUP", Files.readString(notABackup));
+        }
     }
 
     // ---------------------------------------------------------------- //

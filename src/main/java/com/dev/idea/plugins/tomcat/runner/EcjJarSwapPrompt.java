@@ -15,6 +15,9 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * Surfaces the ECJ-version-mismatch warning as an actionable balloon
  * notification with a one-click swap. The deployment-logger warning fires
@@ -46,6 +49,18 @@ final class EcjJarSwapPrompt {
 
     private static final Logger LOG = Logger.getInstance(EcjJarSwapPrompt.class);
 
+    /**
+     * In-memory dedup of swap prompts per IDE session, keyed by ECJ JAR
+     * path plus its detected version. Without this the user sees the
+     * balloon every launch on an affected Tomcat. Resets on IDE restart
+     * so a user who delayed the swap is reminded next session.
+     *
+     * <p>The key includes the version so a manual ECJ change (e.g. user
+     * upgraded the JAR by other means) is recognised as a new state and
+     * the prompt fires again with the fresh version.
+     */
+    private static final Set<String> PROMPTED_THIS_SESSION = ConcurrentHashMap.newKeySet();
+
     private EcjJarSwapPrompt() {}
 
     /**
@@ -64,6 +79,14 @@ final class EcjJarSwapPrompt {
         if (mismatch.ecj() == null) return;
 
         EcjVersionCompat.EcjBundle ecj = mismatch.ecj();
+        // Dedup by JAR path + detected version. Same launch cycle on the
+        // same install gets one balloon; subsequent launches in the same
+        // IDE session are silent. A manual ECJ change between launches
+        // produces a new key and re-fires the prompt.
+        String key = ecj.jarPath().toString() + "|" + ecj.version();
+        if (!PROMPTED_THIS_SESSION.add(key)) {
+            return;
+        }
         EcjJarSwapper.SwapPlan plan = EcjJarSwapper.computePlan(ecj.jarPath());
 
         String title = "DevTomcat: ECJ JAR is too old for this webapp";
@@ -212,5 +235,14 @@ final class EcjJarSwapPrompt {
                 }
             });
         }
+    }
+
+    /**
+     * Test-only: clears the per-session dedup cache. Call from a test
+     * tear-down so a sibling test does not get a stale "already prompted"
+     * hit.
+     */
+    static void clearDedupForTesting() {
+        PROMPTED_THIS_SESSION.clear();
     }
 }
