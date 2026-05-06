@@ -61,20 +61,37 @@ intellijPlatform {
             sinceBuild = prop("pluginSinceBuild")
             untilBuild = prop("pluginUntilBuild")
         }
-        // Inject <change-notes> from CHANGELOG.md's section matching the
-        // current pluginVersion. Falls back to [Unreleased] when no exact
-        // match exists (useful between releases) and finally to a generic
-        // "see CHANGELOG.md" fallback if neither is present, so a missing
-        // CHANGELOG entry is reported clearly rather than failing the build.
+        // Inject <change-notes> from CHANGELOG.md. Renders the latest
+        // RECENT_RELEASE_COUNT released versions concatenated, not just the
+        // current one, so the Marketplace "What's New" panel on the listing
+        // page surfaces a few releases of context. Older releases still have
+        // their own per-version change-notes on the Marketplace "Versions"
+        // tab from when they were uploaded; this is purely about what shows
+        // on the main listing.
+        //
+        // Why 3: keepachangelog renders comfortably under the 64 KB Marketplace
+        // change-notes cap at this depth for our verbose entries (1.0.9 alone
+        // is ~5 KB). Bump only after measuring the rendered size.
+        //
+        // [Unreleased] is filtered out so an in-progress section never leaks
+        // into a published listing.
         changeNotes = provider {
-            // try/catch wraps the whole chain because both getOrNull-then-
-            // getUnreleased and renderItem can throw (missing version, missing
-            // [Unreleased], malformed markdown). A failed render must never
-            // fail the build; degrade to a static fallback instead.
+            // try/catch wraps the whole chain because getAll/renderItem can
+            // throw on malformed markdown. A failed render must never fail the
+            // build; degrade to a static fallback instead.
             try {
-                val version = prop("pluginVersion")
-                val item = changelog.getOrNull(version) ?: changelog.getUnreleased()
-                changelog.renderItem(item, org.jetbrains.changelog.Changelog.OutputType.HTML)
+                val recentReleaseCount = 3
+                val unreleasedTerm = "[Unreleased]"
+                val recent = changelog.getAll().values
+                        .filter { it.version != unreleasedTerm && it.version != "Unreleased" }
+                        .take(recentReleaseCount)
+                if (recent.isEmpty()) {
+                    "<p>See <code>CHANGELOG.md</code> in the plugin source for release details.</p>"
+                } else {
+                    recent.joinToString("\n<hr/>\n") {
+                        changelog.renderItem(it, org.jetbrains.changelog.Changelog.OutputType.HTML)
+                    }
+                }
             } catch (e: Exception) {
                 "<p>See <code>CHANGELOG.md</code> in the plugin source for release details.</p>"
             }

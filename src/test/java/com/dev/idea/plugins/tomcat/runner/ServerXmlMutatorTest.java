@@ -231,6 +231,65 @@ class ServerXmlMutatorTest {
         }
 
         @Test
+        @DisplayName("removes existing AJP connector from source when AJP is disabled (port 8009 BindException repro)")
+        void removesExistingAjpWhenDisabled() {
+            // Bug repro: stock Tomcat server.xml ships with an AJP connector.
+            // If the user has AJP disabled in the run config, the launcher must
+            // strip that connector — otherwise Tomcat tries to bind the AJP
+            // port at startup and fails with BindException when another process
+            // (often a stale Tomcat from a previous launch) already owns it.
+            var result = ServerXmlMutator.customize(SERVER_XML_WITH_AJP,
+                    8005, 8080, 0, false, 9009, false);
+
+            String xml = result.getXml();
+            assertFalse(xml.contains("AJP/1.3"),
+                    "Existing AJP connector must be removed when AJP is disabled");
+            assertFalse(xml.contains("port=\"8009\""),
+                    "Port 8009 must not appear in server.xml when AJP is disabled");
+        }
+
+        @Test
+        @DisplayName("removes AJP connector with variant Coyote protocol class names")
+        void removesVariantAjpProtocols() {
+            String serverXmlWithNioAjp = """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <Server port="8005" shutdown="SHUTDOWN">
+                      <Service name="Catalina">
+                        <Connector port="8080" protocol="HTTP/1.1"
+                                   connectionTimeout="20000" redirectPort="8443" />
+                        <Connector port="8009" protocol="org.apache.coyote.ajp.AjpNioProtocol"
+                                   redirectPort="8443" />
+                        <Engine name="Catalina" defaultHost="localhost">
+                          <Host name="localhost" appBase="webapps" />
+                        </Engine>
+                      </Service>
+                    </Server>
+                    """;
+
+            var result = ServerXmlMutator.customize(serverXmlWithNioAjp,
+                    8005, 8080, 0, false, 9009, false);
+
+            String xml = result.getXml();
+            assertFalse(xml.contains("AjpNioProtocol"),
+                    "AJP connector with Coyote class-name protocol must also be removed");
+            assertFalse(xml.contains("port=\"8009\""),
+                    "Port 8009 must not appear regardless of how AJP protocol is spelled");
+        }
+
+        @Test
+        @DisplayName("disabling AJP leaves HTTP connector intact")
+        void disablingAjpLeavesHttpIntact() {
+            var result = ServerXmlMutator.customize(SERVER_XML_WITH_AJP,
+                    8005, 8080, 0, false, 9009, false);
+
+            String xml = result.getXml();
+            assertTrue(xml.contains("HTTP/1.1"),
+                    "HTTP connector must still be present after AJP removal");
+            assertTrue(xml.contains("port=\"8080\""),
+                    "HTTP port must still be present after AJP removal");
+        }
+
+        @Test
         @DisplayName("injected AJP uses resolved HTTPS port for redirectPort when HTTPS enabled")
         void injectedAjpUsesResolvedHttpsPort() {
             var result = ServerXmlMutator.customize(STANDARD_SERVER_XML,

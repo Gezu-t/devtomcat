@@ -34,7 +34,16 @@ public class TomcatRunConfigurationType implements ConfigurationType {
     public static final String DESCRIPTION = "Apache Tomcat server integration for web application development";
 
     private static final String ICON_PATH_SVG = "/icon/tomcat.svg";
-    private static final String ICON_PATH_PNG = "/icon/tomcat.png";
+    /**
+     * Path of the Tomcat icon that the IntelliJ platform itself ships in
+     * {@code app-client.jar} under Apache 2.0. Loading from this path uses the
+     * platform's own brand mark — the same SVG that renders next to a Tomcat
+     * run configuration in the run-config dropdown of paid editions — and
+     * automatically picks up the platform's light/dark variants and
+     * 16x16-native rendering hints. Falls back to {@link #ICON_PATH_SVG}
+     * (our bundled copy) if a future platform version moves or removes it.
+     */
+    private static final String PLATFORM_TOMCAT_ICON_PATH = "/runConfigurations/tomcat.svg";
     private static final Icon DEFAULT_ICON = AllIcons.RunConfigurations.Application;
 
     private volatile ConfigurationFactory[] factories;
@@ -51,34 +60,50 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         return DESCRIPTION;
     }
 
-        @Override
+    @Override
     @Nullable
     public Icon getIcon() {
-        Icon icon = loadIcon(ICON_PATH_SVG);
-        if (icon != null) {
-            return icon;
-        }
-
-        icon = loadIcon(ICON_PATH_PNG);
-        if (icon != null) {
-            return icon;
-        }
-
-        LOG.debug("All icon sources failed, using default icon");
-        return DEFAULT_ICON;
+        return tomcatIcon();
     }
 
-        @Nullable
-    private Icon loadIcon(@NotNull String path) {
-        Objects.requireNonNull(path, "Icon path cannot be null");
-
+    /**
+     * Single source of truth for the DevTomcat run-config icon. Used by the
+     * configuration type itself and by both Local and Remote factories so the
+     * Run-config dropdown, Edit Run Configurations dialog, and Services tree
+     * always show the same Tomcat brand mark regardless of deployment target.
+     *
+     * <p>Resolution order:
+     * <ol>
+     *   <li>{@link #PLATFORM_TOMCAT_ICON_PATH} — the platform's own
+     *       Apache-2.0-licensed Tomcat brand mark, designed for 16x16 toolbar
+     *       rendering with proper light/dark variants. Resolved via
+     *       {@code AllIcons.class.getResource} so we only use it when the
+     *       platform actually exposes the resource on the classpath; a missing
+     *       URL means a future platform version moved the file.</li>
+     *   <li>{@link #ICON_PATH_SVG} — our bundled fallback copy.</li>
+     *   <li>{@link #DEFAULT_ICON} — a generic Java application icon. Never
+     *       returns {@code null} so callers can use the result directly
+     *       without a null-check.</li>
+     * </ol>
+     */
+    @NotNull
+    static Icon tomcatIcon() {
         try {
-            Icon icon = IconLoader.getIcon(path, getClass());
-            LOG.debug("Loaded icon: " + path);
-            return icon;
+            if (AllIcons.class.getResource(PLATFORM_TOMCAT_ICON_PATH) != null) {
+                Icon platformIcon = IconLoader.getIcon(PLATFORM_TOMCAT_ICON_PATH, AllIcons.class);
+                if (platformIcon != null) {
+                    return platformIcon;
+                }
+            }
         } catch (Exception e) {
-            LOG.debug("Failed to load icon: " + path + " - " + e.getMessage());
-            return null;
+            LOG.debug("Platform Tomcat icon unreachable, falling back to bundled SVG: " + e.getMessage());
+        }
+        try {
+            Icon icon = IconLoader.getIcon(ICON_PATH_SVG, TomcatRunConfigurationType.class);
+            return icon != null ? icon : DEFAULT_ICON;
+        } catch (Exception e) {
+            LOG.debug("Failed to load Tomcat icon, using default: " + e.getMessage());
+            return DEFAULT_ICON;
         }
     }
 
@@ -384,12 +409,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
         @Override
         public Icon getIcon() {
-            try {
-                Icon icon = IconLoader.getIcon(ICON_PATH_SVG, TomcatRunConfigurationType.class);
-                return icon != null ? icon : DEFAULT_ICON;
-            } catch (Exception e) {
-                return DEFAULT_ICON;
-            }
+            return tomcatIcon();
         }
 
         @Override
@@ -424,7 +444,12 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
         @Override
         public Icon getIcon() {
-            return AllIcons.Nodes.Deploy;
+            // Same Tomcat brand mark as the Local factory — Remote and Local
+            // are both Tomcat run configurations; only the deployment target
+            // differs. Showing AllIcons.Nodes.Deploy here previously made
+            // Remote configs look like an unrelated configuration type in the
+            // Run-config dropdown and Services tree.
+            return tomcatIcon();
         }
 
         @Override

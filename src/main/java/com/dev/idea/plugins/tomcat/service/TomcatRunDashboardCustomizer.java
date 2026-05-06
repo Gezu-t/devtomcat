@@ -19,9 +19,12 @@ import org.jetbrains.annotations.Nullable;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.openapi.project.Project;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+
+import static com.dev.idea.plugins.tomcat.TomcatConstants.DEFAULT_HOST;
 
 /**
  * Customizes how DevTomcat run configurations appear in the Services tool window.
@@ -144,7 +147,9 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
             if (artifacts != null) {
                 // Use the resolved endpoint from the live process handler when available,
                 // so auto-resolved ports appear correctly in child node URLs and the
-                // scheme matches the configured (or live) HTTPS state.
+                // scheme matches the configured (or live) HTTPS state. For remote mode
+                // the host is parsed from the manager URL so "Open in Browser" lands on
+                // the actual remote server, not the user's machine.
                 Endpoint endpoint = resolveLiveEndpoint(node, tomcatConfig);
                 int port = endpoint.port() > 0 ? endpoint.port() : 8080;
                 String configName = tomcatConfig.getName();
@@ -152,7 +157,8 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                 for (DeploymentArtifact artifact : artifacts) {
                     if (artifact != null) {
                         children.add(new TomcatDeploymentNode(
-                                project, artifact, endpoint.https(), port, configName));
+                                project, artifact, endpoint.host(), endpoint.https(),
+                                port, configName));
                     }
                 }
             }
@@ -165,49 +171,107 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
     }
 
     /**
-     * (https, port) pair — what the URL displayed in the Services tree should
-     * point at. {@code https=true} means render the URL with the {@code https://}
-     * scheme and the port the HTTPS connector listens on; {@code false} means
-     * the plain HTTP connector and port. Port {@code 0} signals "no port info"
-     * — callers fall back to a default or hide the URL.
+     * (host, https, port) triple — what the URL displayed in the Services tree
+     * should point at. {@code https=true} means render the URL with the
+     * {@code https://} scheme; {@code host} is the connection host
+     * ({@code localhost} for local mode, the remote server's host for remote
+     * mode); {@code port} is the connector port. Port {@code 0} signals
+     * "no port info" — callers fall back to a default or hide the URL.
      */
-    private record Endpoint(boolean https, int port) {}
+    record Endpoint(@NotNull String host, boolean https, int port) {}
 
     /**
-     * Resolves the endpoint (scheme + port) to display for a run configuration node.
+     * Resolves the endpoint (scheme + host + port) to display for a run
+     * configuration node.
      *
      * <p>Order of preference:
      * <ol>
-     *   <li>The live {@link com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler}'s
-     *       resolved {@link com.dev.idea.plugins.tomcat.model.PortConfig} — picks up
-     *       auto-resolved ports (8080 → 8082) and the actual HTTPS state the JVM
-     *       was launched with, even if the user has since edited the config.</li>
-     *   <li>The configured value when stopped — HTTPS port when HTTPS is enabled,
-     *       HTTP port otherwise — so an apply-while-stopped is reflected immediately.</li>
+     *   <li><b>Remote mode:</b> parse scheme/host/port from the configured
+     *       Tomcat Manager URL via {@link #endpointFromManagerUrl}. The user's
+     *       local config has no live process to consult, and the deployed app
+     *       lives at the manager URL's host:port (different scheme/port
+     *       directories under {@code /manager} aren't supported by Tomcat).</li>
+     *   <li><b>Local mode, running:</b> the live
+     *       {@link com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler}'s
+     *       resolved {@link com.dev.idea.plugins.tomcat.model.PortConfig} —
+     *       picks up auto-resolved ports (8080 → 8082) and the actual HTTPS
+     *       state the JVM was launched with, even if the user has since edited
+     *       the config.</li>
+     *   <li><b>Local mode, stopped:</b> the configured value — HTTPS port when
+     *       HTTPS is enabled, HTTP port otherwise — so an apply-while-stopped
+     *       is reflected immediately.</li>
      * </ol>
      */
     @NotNull
     private static Endpoint resolveLiveEndpoint(@NotNull RunDashboardRunConfigurationNode node,
                                                  @NotNull TomcatRunConfiguration tomcatConfig) {
+        if (tomcatConfig.isRemoteMode()) {
+            String managerUrl = tomcatConfig.getConfigData().getRemoteConfig().getManagerUrl();
+            return endpointFromManagerUrl(managerUrl);
+        }
         RunContentDescriptor descriptor = node.getDescriptor();
         if (descriptor != null && descriptor.getProcessHandler()
                 instanceof com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler th
                 && !th.isProcessTerminated()) {
             com.dev.idea.plugins.tomcat.model.PortConfig live = th.getResolvedPorts();
             if (live != null && live.isHttpsEnabled() && live.getHttps() > 0) {
-                return new Endpoint(true, live.getHttps());
+                return new Endpoint(DEFAULT_HOST, true, live.getHttps());
             }
             int httpPort = th.getHttpPort();
-            if (httpPort > 0) return new Endpoint(false, httpPort);
+            if (httpPort > 0) return new Endpoint(DEFAULT_HOST, false, httpPort);
         }
         if (tomcatConfig.isHttpsEnabled()) {
             Integer httpsPort = tomcatConfig.getHttpsPort();
             if (httpsPort != null && httpsPort > 0) {
-                return new Endpoint(true, httpsPort);
+                return new Endpoint(DEFAULT_HOST, true, httpsPort);
             }
         }
         Integer httpPort = tomcatConfig.getHttpPort();
-        return new Endpoint(false, httpPort != null ? httpPort : 0);
+        return new Endpoint(DEFAULT_HOST, false, httpPort != null ? httpPort : 0);
+    }
+
+    /**
+     * Parses (scheme, host, port) from a Tomcat Manager URL for display in the
+     * Services tree.
+     *
+     * <p>Examples:
+     * <pre>
+     *   http://prod.example.com:8080/manager  → (host=prod.example.com,    https=false, port=8080)
+     *   https://staging:8443/manager          → (host=staging,             https=true,  port=8443)
+     *   http://[2001:db8::1]:8080/manager     → (host=[2001:db8::1],       https=false, port=8080)  // URI.getHost preserves brackets
+     *   http://prod.example.com/manager       → (host=prod.example.com,    https=false, port=80)   // default port for scheme
+     *   https://prod.example.com/manager      → (host=prod.example.com,    https=true,  port=443)
+     * </pre>
+     *
+     * <p>Falls back to {@code (localhost, false, 0)} on any parse failure or
+     * malformed input so the tree never renders {@code "http://null:0/foo"}.
+     * A returned port of {@code 0} causes callers to hide the URL entirely
+     * via {@link TomcatDeploymentNode#formatTooltip} / {@code canNavigate}.
+     */
+    @NotNull
+    static Endpoint endpointFromManagerUrl(@Nullable String managerUrl) {
+        if (managerUrl == null || managerUrl.isBlank()) {
+            return new Endpoint(DEFAULT_HOST, false, 0);
+        }
+        try {
+            URI uri = URI.create(managerUrl.trim());
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || host == null || host.isEmpty()) {
+                return new Endpoint(DEFAULT_HOST, false, 0);
+            }
+            boolean https = "https".equalsIgnoreCase(scheme);
+            int port = uri.getPort();
+            if (port < 0) {
+                // No explicit port in the URL — apply the scheme's default so
+                // the displayed URL reaches the same place a browser would.
+                port = https ? 443 : 80;
+            }
+            return new Endpoint(host, https, port);
+        } catch (IllegalArgumentException e) {
+            LOG.debug("Could not parse manager URL for Services tree: " + managerUrl, e);
+            return new Endpoint(DEFAULT_HOST, false, 0);
+        }
     }
 
     /**

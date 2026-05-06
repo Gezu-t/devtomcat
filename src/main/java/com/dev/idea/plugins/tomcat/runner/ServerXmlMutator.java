@@ -97,6 +97,15 @@ public final class ServerXmlMutator {
             // 5. Handle AJP connector
             if (ajpEnabled) {
                 setOrInjectAjpConnector(doc, ajpPort, httpsPort, httpsEnabled, warnings);
+            } else {
+                // Tomcat's stock server.xml ships an AJP connector at port 8009.
+                // When the user has AJP disabled in the run configuration, the
+                // launcher must strip that connector — otherwise Tomcat still
+                // tries to bind 8009 at startup and fails with BindException
+                // when another process (often a stale Tomcat from a previous
+                // sandbox run) holds it. Auto-port resolution skips AJP when
+                // disabled, so the cleanup has to happen here in the XML stage.
+                removeAjpConnectors(doc);
             }
 
             // 6. Disable autoDeploy — DevTomcat manages deployments via context descriptors.
@@ -295,11 +304,49 @@ public final class ServerXmlMutator {
         NodeList connectors = doc.getElementsByTagName("Connector");
         for (int i = 0; i < connectors.getLength(); i++) {
             Element el = (Element) connectors.item(i);
-            if (TomcatConstants.PROTOCOL_AJP.equals(el.getAttribute("protocol"))) {
+            if (isAjpConnector(el)) {
                 return el;
             }
         }
         return null;
+    }
+
+    /**
+     * Removes every AJP connector from the document. Used when the run
+     * configuration has AJP disabled so the JVM does not try to bind the
+     * AJP port that ships with stock Tomcat server.xml.
+     */
+    private static void removeAjpConnectors(@NotNull Document doc) {
+        NodeList connectors = doc.getElementsByTagName("Connector");
+        // Snapshot first because removeChild mutates the live NodeList.
+        java.util.List<Element> toRemove = new java.util.ArrayList<>();
+        for (int i = 0; i < connectors.getLength(); i++) {
+            Element el = (Element) connectors.item(i);
+            if (isAjpConnector(el)) {
+                toRemove.add(el);
+            }
+        }
+        for (Element el : toRemove) {
+            Node parent = el.getParentNode();
+            if (parent != null) {
+                parent.removeChild(el);
+            }
+        }
+    }
+
+    /**
+     * True if the given Connector element is an AJP connector. Matches the
+     * canonical {@code AJP/1.3} value plus the variant Coyote class names
+     * ({@code org.apache.coyote.ajp.AjpNioProtocol},
+     * {@code org.apache.coyote.ajp.AjpNio2Protocol},
+     * {@code org.apache.coyote.ajp.AjpAprProtocol}, etc.) that some Tomcat
+     * versions ship by default. Case-insensitive substring match on "ajp"
+     * covers every shape.
+     */
+    private static boolean isAjpConnector(@NotNull Element connector) {
+        String protocol = connector.getAttribute("protocol");
+        return protocol != null
+                && protocol.toLowerCase(java.util.Locale.ROOT).contains("ajp");
     }
 
     // --- XML parse/serialize ---

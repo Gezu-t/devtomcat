@@ -21,21 +21,31 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  * Mirrors IntelliJ Ultimate's behavior of showing artifacts under the server node.
  *
  * <p>Double-clicking the node opens the artifact in the browser using its
- * context path and the resolved scheme/port — HTTPS when the configuration
- * (or live process) has HTTPS enabled, HTTP otherwise.
+ * context path and the resolved (scheme, host, port) — HTTPS when the
+ * configuration (or live process) has HTTPS enabled, HTTP otherwise. The
+ * host is {@code localhost} for local-mode configurations and the manager
+ * URL's host (extracted by {@link TomcatRunDashboardCustomizer}) for remote
+ * mode, so a remote deploy's "Open in Browser" action lands on the actual
+ * remote server rather than the user's machine.
  */
 public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
+    private final String host;
     private final boolean https;
     private final int port;
     private final String configurationName;
 
     public TomcatDeploymentNode(@NotNull Project project,
                                  @NotNull DeploymentArtifact artifact,
+                                 @NotNull String host,
                                  boolean https,
                                  int port,
                                  @Nullable String configurationName) {
         super(project, artifact);
+        // Empty host falls back to localhost so a malformed manager URL never
+        // produces "http://:8080/foo". Defensive — the customizer should
+        // already substitute localhost when parsing fails.
+        this.host = host.isEmpty() ? DEFAULT_HOST : host;
         this.https = https;
         this.port = port > 0 ? port : Integer.parseInt(DEFAULT_PORT);
         this.configurationName = configurationName;
@@ -119,36 +129,58 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
 
     @NotNull
     private String buildTooltip(@NotNull DeploymentArtifact artifact) {
-        return formatTooltip(artifact, https, port);
+        return formatTooltip(artifact, host, https, port);
     }
 
     @NotNull
     private String buildUrl(@NotNull DeploymentArtifact artifact) {
-        return formatUrl(artifact, https, port);
+        return formatUrl(artifact, host, https, port);
     }
 
     /** Builds the tooltip text for a deployment node. Package-visible for testing. */
     @NotNull
-    static String formatTooltip(@NotNull DeploymentArtifact artifact, boolean https, int port) {
+    static String formatTooltip(@NotNull DeploymentArtifact artifact,
+                                 @NotNull String host,
+                                 boolean https,
+                                 int port) {
         StringBuilder sb = new StringBuilder();
         sb.append(artifact.getDisplayName());
         String typeBadge = DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
                 ? " (Exploded)" : " (WAR)";
         sb.append(typeBadge);
         if (port > 0) {
-            sb.append("\n").append(formatUrl(artifact, https, port));
+            sb.append("\n").append(formatUrl(artifact, host, https, port));
         }
         return sb.toString();
     }
 
-    /** Builds the browser URL for a deployment artifact. Package-visible for testing. */
+    /**
+     * Builds the browser URL for a deployment artifact. Package-visible for testing.
+     *
+     * <p>An IPv6 host returned by {@link java.net.URI#getHost()} comes back
+     * unbracketed (e.g. {@code ::1}), but URL syntax requires brackets around
+     * IPv6 literals. Re-bracket here so {@code formatUrl} produces a valid URL
+     * regardless of whether the caller passed an IPv4, hostname, or raw IPv6.
+     */
     @NotNull
-    static String formatUrl(@NotNull DeploymentArtifact artifact, boolean https, int port) {
+    static String formatUrl(@NotNull DeploymentArtifact artifact,
+                             @NotNull String host,
+                             boolean https,
+                             int port) {
         String context = artifact.getContextPath();
         if (context == null || context.isEmpty()) {
             context = DEFAULT_CONTEXT_PATH;
         }
-        return (https ? "https" : "http") + "://" + DEFAULT_HOST + ":" + port + context;
+        return (https ? "https" : "http") + "://" + bracketIpv6(host) + ":" + port + context;
+    }
+
+    /** Wraps a raw IPv6 literal in brackets if not already bracketed. */
+    @NotNull
+    private static String bracketIpv6(@NotNull String host) {
+        // ":" without brackets is the unambiguous signature of a raw IPv6 host
+        // returned by URI.getHost() (e.g. "::1", "2001:db8::1"). IPv4 and
+        // hostnames never contain ":", so this is safe.
+        return (host.contains(":") && !host.startsWith("[")) ? "[" + host + "]" : host;
     }
 
     /** Returns the type badge string for display. Package-visible for testing. */
@@ -193,6 +225,11 @@ public class TomcatDeploymentNode extends AbstractTreeNode<DeploymentArtifact> {
     @Nullable
     public String getConfigurationName() {
         return configurationName;
+    }
+
+    @NotNull
+    public String getHost() {
+        return host;
     }
 
     public int getPort() {

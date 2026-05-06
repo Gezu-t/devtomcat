@@ -23,8 +23,13 @@ import org.jetbrains.annotations.NotNull;
 public class UpdateApplicationAction extends AnAction {
 
     public UpdateApplicationAction() {
+        // BuildAutoReloadChanges literally means "build + reload changes",
+        // which is exactly what this action does: compile changed classes
+        // and resources and push them to the running Tomcat without a restart.
+        // ForceRefresh worked but conveyed a heavier "reload everything"
+        // connotation than the action actually performs.
         super("Update Application", "Update the running Tomcat application",
-                AllIcons.Actions.ForceRefresh);
+                AllIcons.Actions.BuildAutoReloadChanges);
     }
 
     @Override

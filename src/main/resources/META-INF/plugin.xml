@@ -14,7 +14,7 @@
         <li>Deploy WAR files and exploded directories with auto-detected artifacts</li>
         <li>Multi-artifact deployment with independent context paths</li>
         <li>Debug with full breakpoint and hot-swap support</li>
-        <li>Code coverage with JaCoCo integration</li>
+        <li>Code coverage via IntelliJ's coverage engine (uses your IDE-configured runner — JaCoCo or IntelliJ's own agent)</li>
         <li>Hot deployment and Update Running Application (Ctrl+F10)</li>
         <li>CATALINA_BASE isolation — each configuration gets its own instance directory</li>
         <li>server.xml auto-generation with HTTP, HTTPS, AJP, and shutdown connectors</li>
@@ -24,14 +24,25 @@
 
     <h3>Smart Diagnostics</h3>
     <ul>
-        <li><b>Error Diagnostics Engine</b> — Detects 16+ common Tomcat errors (ClassNotFound, BindException, OOM, SSL, JDBC, etc.) with categorized severity, actionable suggestions, and quick-fix IDs</li>
+        <li><b>Error Diagnostics Engine</b> — Detects 20+ common Tomcat errors (ClassNotFound, BindException, OOM, SSL, JDBC, etc.) with categorized severity, actionable suggestions, and quick-fix IDs</li>
         <li><b>Version Compatibility Checker</b> — Validates Tomcat/JDK compatibility before launch (Tomcat 7–11 matrix) and warns about Jakarta EE namespace changes</li>
+        <li><b>JDK / Tomcat mismatch quick-fix</b> — When the configured JDK doesn't satisfy the Tomcat version's Java requirement, surfaces a balloon with two one-click actions: open the Run Configuration editor (to switch the JRE) or open Project Structure (to register a missing JDK)</li>
+        <li><b>End-of-life Tomcat warning</b> — Detects EOL branches (7.x, 8.0.x, 8.5.x, 10.0.x) and recommends a tailored upgrade path (Tomcat 9 for javax.servlet, Tomcat 10.1 / 11 for jakarta.servlet)</li>
+        <li><b>ECJ JAR auto-swap</b> — When Tomcat's bundled Eclipse JDT compiler is too old to read your webapp's class files (e.g. ECJ 3.7.x on Tomcat 7 vs Java 17 classes), one-click downloads a modern ECJ from Maven Central, verifies the SHA-1, and atomic-moves it into <code>tomcat/lib/</code> with a reversible backup</li>
+        <li><b>Legacy-Tomcat compatibility shims</b> — Suppresses the BCEL <code>Invalid byte tag in constant pool: 19</code> flood on Tomcat 7.x, 8.0.x, 8.5.x &lt; 51, and 9.0.x &lt; 31 (where the bundled BCEL parser doesn't recognise <code>module-info.class</code>), and routes container-provided JAR scan-skips through <code>catalina.properties</code> on Tomcat 7 / 8.0 (where the Digester ruleset has no rule for <code>&lt;JarScanFilter&gt;</code>)</li>
         <li><b>Auto-Port Resolution</b> — Detects port conflicts at startup and auto-resolves to available ports with console warnings</li>
+    </ul>
+
+    <h3>Security &amp; Safety</h3>
+    <ul>
+        <li><b>AJP bound to localhost by default</b> — Closes CVE-2020-1938 (Ghostcat) for IDE-managed installs by setting <code>address="127.0.0.1"</code> on the AJP connector unless you explicitly bind elsewhere</li>
+        <li><b>JMX and RMI registry bound to localhost by default</b> — JMX monitoring is enabled-on-demand and always binds <code>127.0.0.1</code> (override via VM options if remote monitoring is intentional)</li>
+        <li><b>CATALINA_BASE wipe protection</b> — Refuses configuration copy operations that would overwrite a user's <code>conf/</code> directory; stale-deployment cleanup gated to the IDE-managed run-base; parallel-run cleanup uses <code>NOFOLLOW_LINKS</code> so a symlink at the run-base root cannot be followed off-tree</li>
     </ul>
 
     <h3>Live Deployment Dashboard</h3>
     <ul>
-        <li><b>Live Status Tracking</b> — Real-time server and per-artifact status (Starting, Deploying, Running, Failed) in the Services tool window</li>
+        <li><b>Live Status Tracking</b> — Real-time server and per-artifact status (Starting, Deploying, Reloading, Running, Failed) in the Services tool window</li>
         <li><b>Run History</b> — Persistent history of Tomcat run sessions with duration, startup time, artifact activity, and consecutive failure tracking</li>
         <li><b>Startup Time Trends</b> — Tracks startup performance across runs and shows trend comparisons</li>
     </ul>
@@ -46,8 +57,8 @@
 
     <h3>Requirements</h3>
     <ul>
-        <li>IntelliJ IDEA 2024.1+</li>
-        <li>Apache Tomcat 7+</li>
+        <li>IntelliJ IDEA 2025.1+ (Community or Ultimate)</li>
+        <li>Apache Tomcat 7+ (legacy installs supported via auto-applied compatibility shims)</li>
         <li>Java 17+</li>
     </ul>
     ]]></description>
@@ -205,7 +216,7 @@
                     class="com.dev.idea.plugins.tomcat.action.UpdateApplicationAction"
                     text="Update Application"
                     description="Update the running application (choose update strategy)"
-                    icon="AllIcons.Actions.ForceRefresh"/>
+                    icon="AllIcons.Actions.BuildAutoReloadChanges"/>
             <action id="DevTomcat.Service.Restart"
                     class="com.dev.idea.plugins.tomcat.action.RestartTomcatAction"
                     text="Restart Tomcat"

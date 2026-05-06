@@ -21,7 +21,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/myapp");
 
             assertEquals("http://localhost:8080/myapp",
-                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", false, 8080));
         }
 
         @Test
@@ -31,7 +31,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/");
 
             assertEquals("http://localhost:8080/",
-                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", false, 8080));
         }
 
         @Test
@@ -41,7 +41,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/app");
 
             assertEquals("http://localhost:9090/app",
-                    TomcatDeploymentNode.formatUrl(artifact, false, 9090));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", false, 9090));
         }
 
         @Test
@@ -51,7 +51,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("");
 
             assertEquals("http://localhost:8080/",
-                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", false, 8080));
         }
 
         @Test
@@ -61,7 +61,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/api/v2");
 
             assertEquals("http://localhost:8080/api/v2",
-                    TomcatDeploymentNode.formatUrl(artifact, false, 8080));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", false, 8080));
         }
 
         @Test
@@ -71,7 +71,7 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/app");
 
             assertEquals("https://localhost:8443/app",
-                    TomcatDeploymentNode.formatUrl(artifact, true, 8443));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", true, 8443));
         }
 
         @Test
@@ -81,7 +81,59 @@ class TomcatDeploymentNodeTest {
             artifact.setContextPath("/");
 
             assertEquals("https://localhost:8443/",
-                    TomcatDeploymentNode.formatUrl(artifact, true, 8443));
+                    TomcatDeploymentNode.formatUrl(artifact, "localhost", true, 8443));
+        }
+
+        @Test
+        @DisplayName("remote-mode hostname (FQDN) is used verbatim — no localhost substitution")
+        void remoteHostFqdn() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            assertEquals("http://prod.example.com:8080/app",
+                    TomcatDeploymentNode.formatUrl(artifact, "prod.example.com", false, 8080));
+        }
+
+        @Test
+        @DisplayName("remote-mode HTTPS hostname builds correct https URL")
+        void remoteHostHttps() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            assertEquals("https://staging.example.com:8443/app",
+                    TomcatDeploymentNode.formatUrl(artifact, "staging.example.com", true, 8443));
+        }
+
+        @Test
+        @DisplayName("IPv4 literal host is used verbatim")
+        void ipv4Host() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            assertEquals("http://10.0.0.5:8080/app",
+                    TomcatDeploymentNode.formatUrl(artifact, "10.0.0.5", false, 8080));
+        }
+
+        @Test
+        @DisplayName("unbracketed IPv6 host is re-bracketed in the URL")
+        void ipv6HostRebracket() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            // URI.getHost() strips the brackets from "[::1]"; formatUrl must put
+            // them back so the resulting URL is syntactically valid.
+            assertEquals("http://[::1]:8080/app",
+                    TomcatDeploymentNode.formatUrl(artifact, "::1", false, 8080));
+        }
+
+        @Test
+        @DisplayName("already-bracketed IPv6 host is not double-bracketed")
+        void ipv6HostAlreadyBracketed() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            assertEquals("http://[2001:db8::1]:8080/app",
+                    TomcatDeploymentNode.formatUrl(artifact, "[2001:db8::1]", false, 8080));
         }
     }
 
@@ -95,7 +147,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("myapp", "/tmp/myapp", "exploded");
             artifact.setContextPath("/myapp");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, 8080);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, "localhost", false, 8080);
 
             assertTrue(tooltip.contains("myapp"));
             assertTrue(tooltip.contains("(Exploded)"));
@@ -108,7 +160,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("myapp", "/tmp/myapp.war", "war");
             artifact.setContextPath("/myapp");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, 8080);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, "localhost", false, 8080);
 
             assertTrue(tooltip.contains("myapp"));
             assertTrue(tooltip.contains("(WAR)"));
@@ -121,7 +173,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
             artifact.setContextPath("/app");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, 0);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, "localhost", false, 0);
 
             assertTrue(tooltip.contains("app"));
             assertTrue(tooltip.contains("(WAR)"));
@@ -134,7 +186,7 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "exploded");
             artifact.setContextPath("/app");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, false, -1);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, "localhost", false, -1);
 
             assertFalse(tooltip.contains("http://"));
         }
@@ -145,11 +197,24 @@ class TomcatDeploymentNodeTest {
             DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
             artifact.setContextPath("/app");
 
-            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, true, 8443);
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, "localhost", true, 8443);
 
             assertTrue(tooltip.contains("https://localhost:8443/app"));
             assertFalse(tooltip.contains("http://localhost"),
                     "Should not contain http:// when HTTPS is enabled");
+        }
+
+        @Test
+        @DisplayName("remote-mode tooltip carries the remote host")
+        void remoteHostTooltip() {
+            DeploymentArtifact artifact = new DeploymentArtifact("app", "/tmp/app", "war");
+            artifact.setContextPath("/app");
+
+            String tooltip = TomcatDeploymentNode.formatTooltip(artifact, "prod.example.com", false, 8080);
+
+            assertTrue(tooltip.contains("http://prod.example.com:8080/app"));
+            assertFalse(tooltip.contains("localhost"),
+                    "Tooltip must not show 'localhost' for a remote-mode deployment");
         }
     }
 
