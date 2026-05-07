@@ -137,6 +137,133 @@ class LocalDeploymentStrategyTest {
             assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar"));
             assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("my-company-shared.jar"));
         }
+
+        @Test
+        @DisplayName("JSTL Jakarta API and impl are app-provided, not filtered")
+        void allowsJakartaJstl() {
+            // The literal strings "jakarta.servlet" and "jakarta.jsp" used to be
+            // listed here as container-provided prefixes. Both swallow JSTL
+            // artifacts as a side effect: jakarta.servlet.jsp.jstl-* starts with
+            // "jakarta.servlet". Verifying these flow through to WEB-INF/lib
+            // injection prevents the regression that caused
+            // ClassNotFoundException: jakarta.servlet.jsp.jstl.core.Config
+            // for users who added JSTL to their pom.xml after a clean install.
+            assertAll(
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                            "jakarta.servlet.jsp.jstl-api-3.0.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                            "jakarta.servlet.jsp.jstl-3.0.1.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                            "jakarta.servlet.jsp.jstl-api-2.0.0.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("legacy javax JSTL is also app-provided")
+        void allowsJavaxJstl() {
+            assertAll(
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                            "javax.servlet.jsp.jstl-api-1.2.6.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                            "jstl-1.2.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("EL implementation JAR (jakarta.el-3.x.x.jar) is container-provided")
+        void detectsElImplementation() {
+            // Tomcat ships both jakarta.el-api-*.jar (the API spec) and
+            // jakarta.el-*.jar (the Glassfish-derived implementation) in lib/.
+            // The "jakarta.el-" prefix covers both, but must not trip on
+            // "jakarta.elasticsearch-*.jar" or other app libs starting with
+            // a similar token followed by something other than a digit/api.
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.el-api-5.0.1.jar"));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.el-4.0.0.jar"));
+        }
+
+        @Test
+        @DisplayName("annotation API is container-provided across Tomcat versions")
+        void detectsAnnotationApi() {
+            assertAll(
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.annotation-api-2.1.1.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("javax.annotation-api-1.3.2.jar")),
+                    // Legacy Tomcat 8/9 ships the bare "annotations-api-*.jar" naming.
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("annotations-api-9.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("WebSocket API is container-provided")
+        void detectsWebSocketApi() {
+            assertAll(
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.websocket-api-2.1.0.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.websocket-client-api-2.1.0.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("javax.websocket-api-1.1.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("websocket-api-9.0.0.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("websocket-client-api-9.0.0.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("alternative WebSocket implementations stay app-provided")
+        void allowsAlternativeWebSocketImpls() {
+            // Apps that need server-push features sometimes use Tyrus or
+            // Atmosphere as their websocket implementation, shipping those
+            // JARs in WEB-INF/lib alongside their app classes. They must not
+            // collide with the container's API JAR filter.
+            assertAll(
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("tyrus-server-2.1.5.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("atmosphere-runtime-3.0.10.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("JASPIC (auth SPI) JARs are container-provided")
+        void detectsJaspicApi() {
+            assertAll(
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jaspic-api.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                            "jakarta.security.auth.message-api-3.0.0.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("Tomcat catalina-* and jasper-* internals are container-provided")
+        void detectsTomcatCatalinaJasperInternals() {
+            assertAll(
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-ant-10.1.34.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-ha-10.1.34.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-tribes-10.1.34.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-ssi-10.1.34.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-storeconfig-10.1.34.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jasper.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jasper-el.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("bootstrap.jar")),
+                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("commons-daemon-1.3.4.jar"))
+            );
+        }
+
+        @Test
+        @DisplayName("common app libraries with overlapping name heads stay app-provided")
+        void allowsCommonAppLibraries() {
+            // Bias: prefer false negatives (a container JAR slipping through
+            // and causing a duplicate-class warning) over false positives (an
+            // app-provided JAR mistakenly filtered, causing ClassNotFoundException).
+            // This sweep covers libraries that frequently appear in WEB-INF/lib
+            // and could collide with a too-broad container prefix.
+            assertAll(
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-webmvc-6.2.3.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("hibernate-core-6.5.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("jackson-databind-2.17.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("lombok-1.18.32.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("log4j-core-2.23.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("mysql-connector-j-8.4.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("commons-fileupload-1.5.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("commons-lang3-3.14.0.jar"))
+            );
+        }
     }
 
     // -------------------------------------------------------------------------

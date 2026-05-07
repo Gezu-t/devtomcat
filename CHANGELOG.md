@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.0.11]
+
+Single-issue release: a wider-scope fix for an IDE-side classpath shim that was silently dropping app-provided JARs that share a name prefix with Tomcat-bundled JARs. Surfaced first as a JSTL `ClassNotFoundException` after `mvn clean install`; the root cause affects every JAR family that shares a head with a container library.
+
+### Fixed
+- **Container-provided JAR filter dropped any app-provided JAR whose name shared a prefix with a Tomcat-bundled JAR.** `LocalDeploymentStrategy.isContainerProvidedJar` matched file names with `String#startsWith` against bare prefixes such as `"jakarta.servlet"` and `"jakarta.jsp"`. JSTL is the most painful collision: `jakarta.servlet.jsp.jstl-api-*.jar` and `jakarta.servlet.jsp.jstl-*.jar` both start with `"jakarta.servlet"`, so they were excluded from `WEB-INF/lib` resource injection alongside the actual servlet API. Result: a deploy that looked successful but had no JSTL classes in the classloader, throwing `ClassNotFoundException: jakarta.servlet.jsp.jstl.core.Config` on the first `<c:*>` or `<fmt:*>` tag — `mvn clean install` could not fix it because the bug was in the IDE-side classpath shim, not the build. The same shape would have hit any future app library starting with `jakarta.el`, `jakarta.jsp`, `javax.servlet`, etc. Tightened every prefix to require a trailing `-api`, `-` (followed by a version), or full `.jar` filename so prefix matching cannot reach into a longer Maven coordinate. Expanded the list to also cover `catalina-*`, `catalina.jar`, `jasper`, `jasper-el`, `jakarta.websocket-*`, `javax.websocket-*`, `websocket-api`, `websocket-client-api`, `jakarta.annotation-api`, `javax.annotation-api`, `annotations-api`, `jaspic-api`, `jakarta.security.auth.message-api`, `bootstrap.jar`, and `commons-daemon-*` — every JAR Tomcat 7 through 11 ships in `lib/`. 9 regression tests now cover Jakarta JSTL API + impl, legacy `javax` JSTL, the EL implementation JAR, annotation API, WebSocket API, JASPIC, Tomcat catalina/jasper internals, and a list of common app libraries (Spring, Hibernate, Jackson, Lombok, Tyrus, Atmosphere, Commons FileUpload, Commons Lang3) that must always pass through the filter.
+
 ## [1.0.10]
 
 Three new diagnostic surfaces (Tomcat EOL warning, JDK mismatch quick-fix, ECJ JAR auto-swap), plus residual gap fixes from the 1.0.9 audit and release-engineering hygiene.

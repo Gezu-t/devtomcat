@@ -73,19 +73,90 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * Container-provided libraries must not be injected into a webapp deployed to
      * an external Tomcat. Doing so causes duplicate classes/web fragments when the
      * artifact already contains app-managed variants.
+     *
+     * <p>Every prefix in this list is a {@code String#startsWith} match against
+     * the lower-cased JAR file name. Prefixes intentionally end with a hyphen,
+     * {@code -api}, or a full {@code .jar} filename so they cannot swallow an
+     * application library whose Maven coordinate happens to share the head of
+     * a Tomcat name. The regression that motivated this list is JSTL: the
+     * artifacts {@code jakarta.servlet.jsp.jstl-api-*.jar} and
+     * {@code jakarta.servlet.jsp.jstl-*.jar} both start with the bare literals
+     * {@code "jakarta.servlet"} and {@code "jakarta.jsp"}. If those bare
+     * prefixes were listed here, JSTL would be silently excluded from
+     * {@code WEB-INF/lib} resource injection and the webapp would throw
+     * {@code ClassNotFoundException: jakarta.servlet.jsp.jstl.core.Config}
+     * on the first {@code <c:*>} tag.
+     *
+     * <p>Coverage targets every JAR Tomcat 7 through 11 ships in {@code lib/}:
+     * <ul>
+     *   <li>Tomcat internals: {@code tomcat-*}, {@code catalina-*},
+     *       {@code catalina.jar}, {@code jasper*}, {@code ecj-*},
+     *       {@code bootstrap.jar}, {@code commons-daemon-*}.</li>
+     *   <li>Servlet/JSP/EL API: {@code jakarta.*-api} and the legacy
+     *       {@code javax.*-api} forms, plus the bare {@code servlet-api-*},
+     *       {@code jsp-api-*}, {@code el-api-*} naming used by older Tomcats.</li>
+     *   <li>EL implementation: {@code jakarta.el-} (matches both API and the
+     *       Glassfish-derived impl JAR).</li>
+     *   <li>Annotation API: {@code jakarta.annotation-api},
+     *       {@code javax.annotation-api}, legacy {@code annotations-api}.</li>
+     *   <li>WebSocket API: {@code jakarta.websocket-},
+     *       {@code javax.websocket-}, plus legacy {@code websocket-api},
+     *       {@code websocket-client-api}.</li>
+     *   <li>JASPIC (auth): {@code jaspic-api},
+     *       {@code jakarta.security.auth.message-api}.</li>
+     * </ul>
+     *
+     * <p>Bias: prefer false negatives (an app-provided JAR slipping through and
+     * causing a duplicate-class warning at startup) over false positives (a
+     * container JAR mistakenly identified as app-provided, which would cause
+     * a hard {@code ClassNotFoundException} at runtime). Bare prefixes that
+     * could collide with longer Maven coordinates are not on this list.
      */
     private static final String[] CONTAINER_PROVIDED_JAR_PREFIXES = {
-            "tomcat-",
-            "tomcat-embed-",
-            "jakarta.servlet",
+            // Tomcat internals
+            "tomcat-",                          // tomcat-api, tomcat-coyote, tomcat-juli, tomcat-util,
+                                                // tomcat-websocket, tomcat-jdbc, tomcat-dbcp, tomcat-jni,
+                                                // tomcat-i18n-*, tomcat-jasper, tomcat-servlet-api, etc.
+            "catalina-",                        // catalina-ant, catalina-ha, catalina-ssi,
+                                                // catalina-storeconfig, catalina-tribes
+            "catalina.jar",                     // bare catalina core
+            "jasper-", "jasper.jar",            // JSP engine (jasper.jar, jasper-el.jar)
+            "ecj-",                             // Eclipse JDT compiler
+            "bootstrap.jar",                    // catalina.sh / catalina.bat bootstrap
+            "commons-daemon-",                  // jsvc/procrun launcher
+
+            // Servlet API. Hyphen on "-api" disambiguates from
+            // jakarta.servlet.jsp.jstl-*.jar.
             "jakarta.servlet-api",
-            "javax.servlet",
+            "javax.servlet-api",
             "servlet-api",
+
+            // JSP API. Hyphen on "-api" disambiguates from any future
+            // jakarta.jsp.jstl-*.jar variant.
+            "jakarta.jsp-api",
+            "javax.jsp-api",
             "jsp-api",
-            "jakarta.jsp",
-            "jakarta.el",
+
+            // Expression Language. The "-" on "jakarta.el-" matches both
+            // jakarta.el-api-*.jar (API) and jakarta.el-*.jar (Glassfish impl).
+            "jakarta.el-",
+            "javax.el-api",
             "el-api",
-            "ecj-"
+
+            // Annotation API
+            "jakarta.annotation-api",
+            "javax.annotation-api",
+            "annotations-api",                  // legacy Tomcat 8/9 naming
+
+            // WebSocket API
+            "jakarta.websocket-",                // jakarta.websocket-api, jakarta.websocket-client-api
+            "javax.websocket-",
+            "websocket-api",
+            "websocket-client-api",
+
+            // JASPIC (Java Authentication SPI for Containers)
+            "jakarta.security.auth.message-api",
+            "jaspic-api"
     };
 
     @Override
