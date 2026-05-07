@@ -820,6 +820,192 @@ class EcjJarSwapperTest {
     }
 
     @Nested
+    @DisplayName("multi-class introspection — picks the first probe class that exists")
+    class MultiClassIntrospection {
+
+        // The introspection list now probes four canonical ECJ entry
+        // points. Tests verify that detection still works when the most
+        // canonical one is missing — defending against future Eclipse
+        // refactors that move INameEnvironment.
+
+        @Test
+        @DisplayName("falls back to batch.Main when INameEnvironment is missing")
+        void fallsBackToMainWhenInameEnvAbsent(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("ecj-future.jar");
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                // Skip INameEnvironment, include Main with class-file 61.
+                out.putNextEntry(new java.util.zip.ZipEntry(
+                        "org/eclipse/jdt/internal/compiler/batch/Main.class"));
+                out.write(buildClassFileHeader(61 /* Java 17 */));
+                out.closeEntry();
+            }
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertEquals(JavaSdkVersion.JDK_17, required,
+                    "Detector must fall back through the probe list when the canonical class is gone");
+        }
+
+        @Test
+        @DisplayName("falls back to compiler.Compiler when both INameEnvironment and Main are missing")
+        void fallsBackToCompilerClass(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("ecj-future.jar");
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                out.putNextEntry(new java.util.zip.ZipEntry(
+                        "org/eclipse/jdt/internal/compiler/Compiler.class"));
+                out.write(buildClassFileHeader(55 /* Java 11 */));
+                out.closeEntry();
+            }
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertEquals(JavaSdkVersion.JDK_11, required);
+        }
+
+        @Test
+        @DisplayName("falls back to CompilationProgress as last resort")
+        void fallsBackToCompilationProgressClass(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("ecj-future.jar");
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                out.putNextEntry(new java.util.zip.ZipEntry(
+                        "org/eclipse/jdt/core/compiler/CompilationProgress.class"));
+                out.write(buildClassFileHeader(52 /* Java 8 */));
+                out.closeEntry();
+            }
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertEquals(JavaSdkVersion.JDK_1_8, required);
+        }
+
+        @Test
+        @DisplayName("returns null when none of the probe classes exist")
+        void noneOfTheProbeClassesPresent(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("not-an-ecj.jar");
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                out.putNextEntry(new java.util.zip.ZipEntry("com/example/Foo.class"));
+                out.write(buildClassFileHeader(61));
+                out.closeEntry();
+            }
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertNull(required, "No probe class match → fall back path (null) for caller's choice");
+        }
+
+        @NotNull
+        private static byte[] buildClassFileHeader(int major) {
+            byte[] hdr = new byte[8];
+            hdr[0] = (byte) 0xCA; hdr[1] = (byte) 0xFE;
+            hdr[2] = (byte) 0xBA; hdr[3] = (byte) 0xBE;
+            hdr[4] = 0; hdr[5] = 0;
+            hdr[6] = (byte) ((major >> 8) & 0xFF);
+            hdr[7] = (byte) (major & 0xFF);
+            return hdr;
+        }
+    }
+
+    @Nested
+    @DisplayName("selectEcj — registry-key version override")
+    class SelectEcjOverride {
+
+        // Note: these tests do not register the registry key (test classloader
+        // does not load plugin.xml). The defensive try/catch in
+        // readVersionOverride catches Registry.stringValue's exception when
+        // the key is unregistered and treats it as "no override", so the
+        // tier-table path runs. We assert that the override path activates
+        // when the key resolves to a non-empty value, but fall through to
+        // the picker when it doesn't — neither test case requires us to
+        // pre-load the key.
+
+        @Test
+        @DisplayName("unset registry key falls through to the JVM-aware picker")
+        void unsetKeyFallsThroughToPicker() {
+            // Registry key is not registered in the test classloader, so
+            // Registry.stringValue throws → readVersionOverride returns "".
+            // Picker should run normally.
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_1_8);
+            assertEquals("3.24.0", pick.version(),
+                    "No override → tier-table picker chooses Java-8-compatible ecj-3.24.0");
+        }
+
+        @Test
+        @DisplayName("set registry key uses the user-pinned version verbatim")
+        void overrideUsesPinnedVersion() throws Exception {
+            // Use the runtime Registry registration so we don't need plugin.xml
+            // loaded. Restore the prior value in a finally block so siblings
+            // see the original state.
+            String key = "devtomcat.ecj.target.version";
+            String prior;
+            try {
+                prior = com.intellij.openapi.util.registry.Registry.stringValue(key);
+            } catch (Exception unregistered) {
+                prior = null;
+            }
+            try {
+                com.intellij.openapi.util.registry.Registry.get(key).setValue("3.30.0");
+                EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_17);
+                assertEquals("3.30.0", pick.version(),
+                        "Override must beat the picker — ecj-3.30 chosen even though the picker would prefer 3.36");
+                // 3.30 falls in the Java 11 tier; metadata should reflect that.
+                assertEquals(JavaSdkVersion.JDK_11, pick.minRuntimeJvm());
+                assertEquals(65, pick.maxReadableClassFileMajor());
+            } finally {
+                if (prior != null) {
+                    com.intellij.openapi.util.registry.Registry.get(key).setValue(prior);
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("override version older than all tiers gets permissive metadata so it isn't blocked")
+        void overrideOlderThanTiersGetsPermissiveMetadata() {
+            String key = "devtomcat.ecj.target.version";
+            String prior;
+            try {
+                prior = com.intellij.openapi.util.registry.Registry.stringValue(key);
+            } catch (Exception unregistered) {
+                prior = null;
+            }
+            try {
+                com.intellij.openapi.util.registry.Registry.get(key).setValue("3.7.2");
+                EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_17);
+                assertEquals("3.7.2", pick.version());
+                // Pre-tier version → permissive metadata so the override is honoured.
+                assertEquals(JavaSdkVersion.JDK_1_8, pick.minRuntimeJvm());
+                assertEquals(Integer.MAX_VALUE, pick.maxReadableClassFileMajor(),
+                        "Permissive class-file ceiling so canCompileClassFileMajor never blocks the override");
+            } finally {
+                if (prior != null) {
+                    com.intellij.openapi.util.registry.Registry.get(key).setValue(prior);
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("blank / whitespace override is treated as unset")
+        void whitespaceOverrideIsIgnored() {
+            String key = "devtomcat.ecj.target.version";
+            String prior;
+            try {
+                prior = com.intellij.openapi.util.registry.Registry.stringValue(key);
+            } catch (Exception unregistered) {
+                prior = null;
+            }
+            try {
+                com.intellij.openapi.util.registry.Registry.get(key).setValue("   ");
+                EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_1_8);
+                assertEquals("3.24.0", pick.version(),
+                        "Blank override must fall through to the picker, not be passed through verbatim");
+            } finally {
+                if (prior != null) {
+                    com.intellij.openapi.util.registry.Registry.get(key).setValue(prior);
+                }
+            }
+        }
+    }
+
+    @Nested
     @DisplayName("computePlan(currentEcjJar, runtimeJvm) — version selection")
     class ComputePlanWithJvm {
 

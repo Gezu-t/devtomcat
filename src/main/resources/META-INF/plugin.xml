@@ -187,6 +187,10 @@
                      defaultValue="1099"
                      description="Default JMX port"
                      restartRequired="false"/>
+        <registryKey key="devtomcat.ecj.target.version"
+                     defaultValue=""
+                     description="Pin a specific ECJ Maven version for the swap action (e.g. 3.30.0). Empty = JVM-aware picker chooses automatically."
+                     restartRequired="false"/>
     </extensions>
 
     <actions>

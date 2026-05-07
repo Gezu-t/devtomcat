@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.io.HttpRequests;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -170,13 +171,39 @@ final class EcjJarSwapper {
     }
 
     /**
+     * Registry key allowing the swap target ECJ version to be pinned by an
+     * advanced user (typically a corporate environment with a compliance
+     * requirement on a specific Eclipse JDT release). When set, the picker
+     * returns the pinned version verbatim rather than walking the tier
+     * table — the user accepts responsibility for the runtime constraints.
+     *
+     * <p>Empty string disables the override and the JVM-aware picker runs
+     * normally. Default is empty so existing setups behave identically to
+     * the version that did not have the override.
+     */
+    private static final String REGISTRY_KEY_VERSION_OVERRIDE = "devtomcat.ecj.target.version";
+
+    /**
      * Selects the ECJ tier compatible with the given runtime JVM. Returns the
      * default (modern) tier when {@code runtimeJvm} is null. Never returns
      * null: every supported JVM down to Java 8 has a tier; older JVMs fall
      * through to the lowest tier with a defensive note in the log.
+     *
+     * <p>Honours the {@value #REGISTRY_KEY_VERSION_OVERRIDE} registry key:
+     * when set to a non-empty version string, the picker returns that
+     * version verbatim. The metadata fields ({@code minRuntimeJvm},
+     * {@code maxReadableClassFileMajor}) come from the closest matching
+     * tier so downstream prompts can still render an informative message;
+     * when no tier matches (override version older than all known tiers),
+     * the metadata defaults to permissive ({@code JDK_1_8} /
+     * {@code Integer.MAX_VALUE}) so the user's pin is not second-guessed.
      */
     @NotNull
     static EcjPick selectEcj(@Nullable JavaSdkVersion runtimeJvm) {
+        String override = readVersionOverride();
+        if (!override.isEmpty()) {
+            return overridePick(override);
+        }
         if (runtimeJvm == null) {
             EcjTier highest = ECJ_TIERS[0];
             return new EcjPick(highest.version(), highest.minRuntimeJvm(),
@@ -201,37 +228,103 @@ final class EcjJarSwapper {
     }
 
     /**
-     * Class file inside ECJ that we read to determine the JVM the JAR was
-     * compiled for. Tomcat's Jasper loads this exact entry first; reading
-     * its class-file major is the most direct evidence of the JAR's
-     * runtime requirement and survives any future Eclipse release without
-     * a code change.
+     * Reads the version-override registry key, returning the trimmed value
+     * or an empty string if the key is unset / blank / unavailable. Never
+     * throws — registry access in test classloaders or detached IDE
+     * lifecycles can fail; we treat any error as "no override".
      */
-    private static final String ECJ_INTROSPECT_CLASS =
-            "org/eclipse/jdt/internal/compiler/env/INameEnvironment.class";
+    @NotNull
+    private static String readVersionOverride() {
+        try {
+            String raw = Registry.stringValue(REGISTRY_KEY_VERSION_OVERRIDE);
+            return raw == null ? "" : raw.trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /**
+     * Builds an {@link EcjPick} for a user-pinned override version. Best-
+     * effort metadata: when the override matches a known tier, the tier's
+     * JVM floor and class-file ceiling carry through; otherwise we default
+     * to permissive values so the override is not blocked by checks built
+     * around the tier table.
+     */
+    @NotNull
+    private static EcjPick overridePick(@NotNull String version) {
+        EcjTier match = lookupTierForVersion(version);
+        if (match != null) {
+            return new EcjPick(version, match.minRuntimeJvm(), match.maxReadableClassFileMajor());
+        }
+        // Unknown / pre-tier version — trust the user, do not gate.
+        return new EcjPick(version, JavaSdkVersion.JDK_1_8, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Returns the {@link EcjTier} whose {@code tierStartVersion} is &le; the
+     * given version, walking highest-floor first. Used by both
+     * {@link #requiredJvmFor(String)} and {@link #overridePick} so the two
+     * version-string lookups share one source of truth. Returns null when
+     * no tier matches (input is older than every tier's start).
+     */
+    @Nullable
+    private static EcjTier lookupTierForVersion(@NotNull String ecjVersion) {
+        for (EcjTier tier : ECJ_TIERS) {
+            if (compareEcjVersions(ecjVersion, tier.tierStartVersion()) >= 0) {
+                return tier;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Class entries inside ECJ that we probe in order to determine the JVM
+     * the JAR was compiled for. The first entry is what Tomcat's Jasper
+     * loads first ({@code INameEnvironment} — the class that triggers the
+     * user-reported {@code UnsupportedClassVersionError}); the rest are
+     * stable ECJ entry points kept around as fallbacks so detection still
+     * works if Eclipse ever refactors internal packages and removes
+     * {@code INameEnvironment} from this exact path.
+     *
+     * <p>Order: most-canonical first, descending in stability. Each entry
+     * has been in ECJ for many releases; finding any one is enough to
+     * read a class-file major.
+     */
+    private static final String[] ECJ_INTROSPECT_CLASSES = {
+            "org/eclipse/jdt/internal/compiler/env/INameEnvironment.class",
+            "org/eclipse/jdt/internal/compiler/batch/Main.class",
+            "org/eclipse/jdt/internal/compiler/Compiler.class",
+            "org/eclipse/jdt/core/compiler/CompilationProgress.class"
+    };
 
     /**
      * Reads the bundled ECJ JAR and returns the minimum JVM it requires
-     * based on the class-file major version of {@link #ECJ_INTROSPECT_CLASS}.
-     * Class-file majors map to JVM features as: 52 → 8, 53 → 9, 55 → 11,
-     * 61 → 17, etc. ({@code feature = major - 44} for Java 5 and later).
+     * based on the class-file major version of one of
+     * {@link #ECJ_INTROSPECT_CLASSES}. Probes the list in order and uses
+     * the first entry that exists in the JAR. Class-file majors map to JVM
+     * features as: 52 → 8, 53 → 9, 55 → 11, 61 → 17, etc.
+     * ({@code feature = major - 44} for Java 5 and later).
      *
      * <p>Returns {@code null} when the JAR is missing, unreadable, or does
-     * not contain the introspection class — callers should then fall back
-     * to {@link #requiredJvmFor(String)} or treat the swap as ambiguous.
+     * not contain any probe class — callers should then fall back to
+     * {@link #requiredJvmFor(String)} or treat the swap as ambiguous.
      *
      * <p>This is the version-proof path: even if Eclipse releases a new ECJ
      * with a higher JVM floor than anything in {@link #ECJ_TIERS}, the
      * detection logic reads the actual bytecode and gets the answer right
-     * without needing the table updated. The tier table is now only an
-     * input to the forward-path picker (selecting which version to
-     * download), where some staleness tolerance is acceptable — picking
-     * yesterday's "latest" is never a regression.
+     * without needing the table updated. The multi-class probe insulates
+     * against the additional risk that any single canonical class is
+     * renamed or moved upstream.
      */
     @Nullable
     static JavaSdkVersion requiredJvmFor(@NotNull Path ecjJar) {
-        Integer major = readClassFileMajor(ecjJar, ECJ_INTROSPECT_CLASS);
-        return major == null ? null : classFileMajorToJvm(major);
+        for (String classEntry : ECJ_INTROSPECT_CLASSES) {
+            Integer major = readClassFileMajor(ecjJar, classEntry);
+            if (major != null) {
+                return classFileMajorToJvm(major);
+            }
+        }
+        return null;
     }
 
     /**
