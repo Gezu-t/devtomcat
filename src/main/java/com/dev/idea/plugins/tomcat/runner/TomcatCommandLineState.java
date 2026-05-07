@@ -423,7 +423,13 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 DebugConfig dc = configuration.getConfigData().getDebugConfig();
                 int debugPort = resolvedDebugPort > 0 ? resolvedDebugPort
                         : (dc != null ? dc.getPort() : DebugConfig.DEFAULT_DEBUG_PORT);
-                CatalinaScriptSupport.applyCustomScriptDebugSupport(commandLine, tokens, debugPort);
+                // Pass the resolved JDK so the JDWP agent address syntax matches
+                // what that JVM accepts: Java 9+ takes "address=*:port"; Java 8
+                // takes the no-host form "address=port" (the wildcard is
+                // rejected with TRANSPORT_INIT(510) and the JVM refuses to start).
+                Sdk debugJdk = resolveJdk();
+                CatalinaScriptSupport.applyCustomScriptDebugSupport(
+                        commandLine, tokens, debugPort, debugJdk);
                 deploymentLogger.logServerInfo(
                         "Debug mode with custom startup: JDWP injected via environment variables"
                                 + (CatalinaScriptSupport.isCatalinaCommand(tokens) ? " and catalina jpda mode" : ""));

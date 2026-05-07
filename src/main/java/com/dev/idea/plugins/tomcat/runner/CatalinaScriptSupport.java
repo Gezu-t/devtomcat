@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -140,12 +141,35 @@ final class CatalinaScriptSupport {
      * {@code TOMCAT_DEBUG_PORT} and {@code TOMCAT_JDWP_OPTS} unconditionally,
      * the {@code JPDA_*} family only for catalina commands, and appends
      * (without duplicating) JDWP to {@code CATALINA_OPTS} and {@code JAVA_OPTS}.
+     *
+     * <p>The agent address syntax is JDK-version-aware: Java 9+ accepts
+     * {@code address=*:port}; Java 8 and earlier reject the wildcard with
+     * {@code TRANSPORT_INIT(510)} and require the no-host {@code address=port}
+     * form. {@code jdk} may be {@code null} when the user's custom script
+     * picks its own JVM (we cannot introspect that path); in that case we
+     * default to the modern Java 9+ form for compatibility with current setups.
+     */
+    /**
+     * Convenience overload that emits the modern (Java 9+) wildcard form. Used
+     * by tests that don't need to exercise the JDK-version-aware branching;
+     * production code should always call the four-argument form so a Java 8
+     * launch picks the legacy address syntax.
      */
     static void applyCustomScriptDebugSupport(@NotNull GeneralCommandLine commandLine,
                                               @NotNull List<String> startupTokens,
                                               int debugPort) {
+        applyCustomScriptDebugSupport(commandLine, startupTokens, debugPort, null);
+    }
+
+    static void applyCustomScriptDebugSupport(@NotNull GeneralCommandLine commandLine,
+                                              @NotNull List<String> startupTokens,
+                                              int debugPort,
+                                              @Nullable Sdk jdk) {
+        String format = TomcatJavaParametersBuilder.supportsWildcardAddress(jdk)
+                ? TomcatConstants.JDWP_CONNECTION_FORMAT
+                : TomcatConstants.JDWP_CONNECTION_FORMAT_JAVA_8;
         String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                + String.format(TomcatConstants.JDWP_CONNECTION_FORMAT,
+                + String.format(format,
                 TomcatConstants.JDWP_TRANSPORT_SOCKET, debugPort);
 
         commandLine.withEnvironment(TomcatConstants.ENV_DEBUG_PORT, String.valueOf(debugPort));

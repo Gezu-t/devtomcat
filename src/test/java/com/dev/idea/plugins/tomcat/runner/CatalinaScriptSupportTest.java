@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.intellij.execution.configurations.GeneralCommandLine;
+import com.intellij.openapi.projectRoots.Sdk;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link CatalinaScriptSupport} — the catalina-script
@@ -449,6 +452,65 @@ class CatalinaScriptSupportTest {
             assertTrue(catalinaOpts.contains("-Xmx1g"), "must preserve heap size");
             assertTrue(catalinaOpts.contains("-Dfoo=bar"), "must preserve user property");
             assertTrue(catalinaOpts.contains("-agentlib:jdwp="), "must add JDWP");
+        }
+
+        @Test
+        @DisplayName("Java 8 JDK uses no-host JDWP address across every env var (TRANSPORT_INIT(510) repro)")
+        void java8UsesNoHostAddressAcrossEnvVars() {
+            // Bug repro for the Java 8 + custom-script path: every channel that
+            // carries JDWP (TOMCAT_JDWP_OPTS, JPDA_OPTS, CATALINA_OPTS, JAVA_OPTS)
+            // must use the no-host form on Java 8 so the JVM does not bail out
+            // with TRANSPORT_INIT(510) before Tomcat boots.
+            GeneralCommandLine commandLine = new GeneralCommandLine("catalina.sh", "jpda", "run");
+            Sdk java8 = mockSdk("1.8.0_392");
+
+            CatalinaScriptSupport.applyCustomScriptDebugSupport(
+                    commandLine, List.of("catalina.sh", "jpda", "run"), 5005, java8);
+
+            String expected = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005";
+            assertAll(
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JDWP_OPTS)),
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JPDA_OPTS)),
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_CATALINA_OPTS)),
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JAVA_OPTS)),
+                    // Negative — none of the channels should leak the wildcard form.
+                    () -> assertFalse(
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JDWP_OPTS).contains("address=*:")),
+                    () -> assertFalse(
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_CATALINA_OPTS).contains("address=*:"))
+            );
+        }
+
+        @Test
+        @DisplayName("Java 9+ JDK keeps wildcard JDWP address in every env var")
+        void java9KeepsWildcardAcrossEnvVars() {
+            GeneralCommandLine commandLine = new GeneralCommandLine("catalina.sh", "jpda", "run");
+            Sdk java17 = mockSdk("17.0.10");
+
+            CatalinaScriptSupport.applyCustomScriptDebugSupport(
+                    commandLine, List.of("catalina.sh", "jpda", "run"), 5005, java17);
+
+            String expected = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005";
+            assertAll(
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JDWP_OPTS)),
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JPDA_OPTS)),
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_CATALINA_OPTS)),
+                    () -> assertEquals(expected,
+                            commandLine.getEnvironment().get(TomcatConstants.ENV_JAVA_OPTS))
+            );
+        }
+
+        private static Sdk mockSdk(String versionString) {
+            Sdk sdk = mock(Sdk.class);
+            when(sdk.getVersionString()).thenReturn(versionString);
+            return sdk;
         }
     }
 }

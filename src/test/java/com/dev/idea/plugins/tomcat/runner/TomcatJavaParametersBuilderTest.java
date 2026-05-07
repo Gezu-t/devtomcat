@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.intellij.execution.configurations.ParametersList;
+import com.intellij.openapi.projectRoots.Sdk;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for the static helpers in {@link TomcatJavaParametersBuilder}.
@@ -168,6 +171,128 @@ class TomcatJavaParametersBuilderTest {
                         throw new AssertionError("expected exactly one JDWP agent, got two: " + a + " | " + b);
                     })
                     .orElseThrow(() -> new AssertionError("no JDWP agent in: " + params.getParameters()));
+        }
+    }
+
+    @Nested
+    @DisplayName("injectJdwpAgent — JDK-version-aware address syntax")
+    class InjectJdwpAgentVersionAware {
+
+        @Test
+        @DisplayName("Java 8 JDK uses the no-host address form (Java 8 rejects address=*:port with TRANSPORT_INIT(510))")
+        void java8UsesNoHostAddress() {
+            // Reproduces the upstream bug report: a debug launch on Java 8 with
+            // the wildcard form fails with
+            //   ERROR: JDWP Transport dt_socket failed to initialize, TRANSPORT_INIT(510)
+            //   JDWP exit error AGENT_ERROR_TRANSPORT_INIT(197)
+            // because the *:port syntax was added in Java 9 (JDK-8041435).
+            // The agent must use address=port (no host) on Java 8 instead.
+            ParametersList params = new ParametersList();
+            Sdk java8 = mockSdk("1.8.0_392");
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, java8);
+
+            String agent = params.getParameters().get(0);
+            assertEquals(
+                    "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005",
+                    agent,
+                    "Java 8 must NOT receive the *:port wildcard form");
+            assertFalse(agent.contains("address=*:"),
+                    "Java 8 must not see the wildcard host (would crash with TRANSPORT_INIT(510))");
+        }
+
+        @Test
+        @DisplayName("Java 9 uses *:port wildcard")
+        void java9UsesWildcard() {
+            ParametersList params = new ParametersList();
+            Sdk java9 = mockSdk("9.0.4");
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, java9);
+
+            assertEquals(
+                    "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005",
+                    params.getParameters().get(0));
+        }
+
+        @Test
+        @DisplayName("Java 17 uses *:port wildcard")
+        void java17UsesWildcard() {
+            ParametersList params = new ParametersList();
+            Sdk java17 = mockSdk("17.0.10");
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, java17);
+
+            assertTrue(params.getParameters().get(0).contains("address=*:5005"));
+        }
+
+        @Test
+        @DisplayName("Java 21 uses *:port wildcard")
+        void java21UsesWildcard() {
+            ParametersList params = new ParametersList();
+            Sdk java21 = mockSdk("21.0.2");
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, java21);
+
+            assertTrue(params.getParameters().get(0).contains("address=*:5005"));
+        }
+
+        @Test
+        @DisplayName("Java 7 (legacy) also uses the no-host form")
+        void java7UsesNoHostAddress() {
+            // Tomcat 7 with Java 7 is still encountered on legacy installs.
+            // The wildcard syntax fails there for the same reason as Java 8.
+            ParametersList params = new ParametersList();
+            Sdk java7 = mockSdk("1.7.0_80");
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, java7);
+
+            assertEquals(
+                    "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005",
+                    params.getParameters().get(0));
+        }
+
+        @Test
+        @DisplayName("null JDK falls back to the wildcard form (preserves modern default)")
+        void nullJdkFallsBackToWildcard() {
+            ParametersList params = new ParametersList();
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, (Sdk) null);
+
+            assertTrue(params.getParameters().get(0).contains("address=*:5005"),
+                    "null JDK must default to the modern wildcard form for Java 9+ users");
+        }
+
+        @Test
+        @DisplayName("unparseable JDK version string falls back to the wildcard form")
+        void unparseableVersionFallsBackToWildcard() {
+            ParametersList params = new ParametersList();
+            Sdk weird = mockSdk("not-a-real-version");
+
+            TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005, weird);
+
+            assertTrue(params.getParameters().get(0).contains("address=*:5005"),
+                    "Unparseable version must default to the modern wildcard form");
+        }
+
+        @Test
+        @DisplayName("supportsWildcardAddress predicate matches per JDK version")
+        void supportsWildcardPredicate() {
+            assertAll(
+                    () -> assertFalse(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("1.7.0_80"))),
+                    () -> assertFalse(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("1.8.0_392"))),
+                    () -> assertTrue(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("9.0.4"))),
+                    () -> assertTrue(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("11.0.21"))),
+                    () -> assertTrue(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("17.0.10"))),
+                    () -> assertTrue(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("21.0.2"))),
+                    () -> assertTrue(TomcatJavaParametersBuilder.supportsWildcardAddress(null)),
+                    () -> assertTrue(TomcatJavaParametersBuilder.supportsWildcardAddress(mockSdk("not-a-real-version")))
+            );
+        }
+
+        private static Sdk mockSdk(String versionString) {
+            Sdk sdk = mock(Sdk.class);
+            when(sdk.getVersionString()).thenReturn(versionString);
+            return sdk;
         }
     }
 }

@@ -25,9 +25,20 @@ public final class TomcatConstants {
 
     // --- JDWP Transport Names (JVM spec identifiers for -agentlib:jdwp) ---
     public static final String JDWP_TRANSPORT_SOCKET = "dt_socket";
-    /** JDWP connection format: transport, server mode, suspend policy, address. Args: transport name, port. */
-    /** JDK 9+ requires {@code *:port} to listen on all interfaces (not just localhost). */
+    /**
+     * JDWP connection format for Java 9 and later. Args: transport name, port.
+     * The {@code *:port} address syntax was added in Java 9 (JDK-8041435) so the
+     * agent listens on all interfaces explicitly. Earlier JVMs reject this form
+     * with {@code TRANSPORT_INIT(510)} and refuse to start.
+     */
     public static final String JDWP_CONNECTION_FORMAT = "%s,server=y,suspend=n,address=*:%d";
+    /**
+     * JDWP connection format for Java 8 and earlier. Args: transport name, port.
+     * Omits the {@code *:} wildcard host because Java 8 does not understand it.
+     * The no-host form binds to all interfaces on Java 8 (same effective coverage
+     * as the wildcard on later JVMs).
+     */
+    public static final String JDWP_CONNECTION_FORMAT_JAVA_8 = "%s,server=y,suspend=n,address=%d";
     public static final String JDWP_AGENT_PREFIX = "-agentlib:jdwp=transport=";
 
     // --- Browser Defaults ---

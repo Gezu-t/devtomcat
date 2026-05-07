@@ -18,6 +18,7 @@ import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
@@ -85,20 +86,54 @@ public class TomcatJavaParametersBuilder {
     }
 
     /**
-     * Appends the JDWP agent argument to a VM parameter list in a canonical
-     * {@code -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:port}
-     * form. Extracted to a package-private static helper so unit tests can
-     * verify the injection without standing up the full {@code build()} pipeline
+     * Appends the JDWP agent argument to a VM parameter list. The JDK version
+     * decides the address-syntax form:
+     * <ul>
+     *   <li><b>Java 9+</b>: {@code address=*:port} (explicit wildcard). The
+     *       {@code *:} prefix was introduced in JDK-8041435 to require an
+     *       explicit interface specification on the agent.</li>
+     *   <li><b>Java 8 and earlier</b>: {@code address=port} (no host). Java 8
+     *       rejects the {@code *:} form with
+     *       {@code JDWP Transport dt_socket failed to initialize, TRANSPORT_INIT(510)}
+     *       and the JVM refuses to start. The no-host form has the same
+     *       effective binding coverage on Java 8 (all interfaces).</li>
+     *   <li><b>Unknown</b> (jdk null or unparseable version): assume Java 9+ to
+     *       preserve existing behaviour for users on modern JVMs.</li>
+     * </ul>
+     *
+     * <p>Extracted to a package-private static helper so unit tests can verify
+     * the injection without standing up the full {@code build()} pipeline
      * (which needs a real Tomcat install, artifacts, etc.). Callers are
      * responsible for gating the call on {@link #debugMode}.
      */
-    static void injectJdwpAgent(@NotNull ParametersList vmParams, int port) {
+    static void injectJdwpAgent(@NotNull ParametersList vmParams, int port, @Nullable Sdk jdk) {
+        String format = supportsWildcardAddress(jdk)
+                ? TomcatConstants.JDWP_CONNECTION_FORMAT
+                : TomcatConstants.JDWP_CONNECTION_FORMAT_JAVA_8;
         String jdwpArg = TomcatConstants.JDWP_AGENT_PREFIX
-                + String.format(
-                        TomcatConstants.JDWP_CONNECTION_FORMAT,
-                        TomcatConstants.JDWP_TRANSPORT_SOCKET,
-                        port);
+                + String.format(format, TomcatConstants.JDWP_TRANSPORT_SOCKET, port);
         vmParams.add(jdwpArg);
+    }
+
+    /**
+     * Convenience overload that emits the modern (Java 9+) wildcard form. Used
+     * by tests that don't need to exercise the JDK-version-aware branching;
+     * production code should always call the three-argument form so a Java 8
+     * launch picks the legacy address syntax.
+     */
+    static void injectJdwpAgent(@NotNull ParametersList vmParams, int port) {
+        injectJdwpAgent(vmParams, port, null);
+    }
+
+    /**
+     * True when the given JDK supports the {@code address=*:port} wildcard host
+     * syntax in the {@code -agentlib:jdwp} argument. Returns true for null /
+     * unparseable JDK versions to preserve historical behaviour on modern JVMs.
+     */
+    static boolean supportsWildcardAddress(@Nullable Sdk jdk) {
+        if (jdk == null) return true;
+        JavaSdkVersion version = JavaSdkVersion.fromVersionString(jdk.getVersionString());
+        return version == null || version.isAtLeast(JavaSdkVersion.JDK_1_9);
     }
 
     public TomcatJavaParametersBuilder setResolvedPorts(@Nullable PortConfig resolvedPorts) {
@@ -402,7 +437,7 @@ public class TomcatJavaParametersBuilder {
             int port = resolvedDebugPort > 0
                     ? resolvedDebugPort
                     : effectiveDebugPort();
-            injectJdwpAgent(vmParams, port);
+            injectJdwpAgent(vmParams, port, jdk);
             LOG.info("Debug mode: injected JDWP agent on port " + port
                     + " (resolvedDebugPort=" + resolvedDebugPort + ")");
         }
