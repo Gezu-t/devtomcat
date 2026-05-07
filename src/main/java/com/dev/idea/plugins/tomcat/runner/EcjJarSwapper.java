@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.util.io.HttpRequests;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -59,8 +60,46 @@ final class EcjJarSwapper {
 
     private static final Logger LOG = Logger.getInstance(EcjJarSwapper.class);
 
-    /** Default ECJ release the swap targets. Supports up to Java 22. */
+    /**
+     * Default ECJ release for modern (Java 17+) JVMs. Reads class files up
+     * to Java 22 (major 66). Older JVMs fall back to a legacy ECJ via
+     * {@link #selectEcjVersion} so the swapped JAR can actually load on the
+     * runtime JVM — the regression that motivated the picker is a webapp
+     * launched with Java 8 throwing
+     * {@code UnsupportedClassVersionError: org/eclipse/jdt/internal/compiler/env/INameEnvironment
+     * has been compiled by a more recent version of the Java Runtime
+     * (class file version 61.0)} on the first JSP request because the swap
+     * had unconditionally installed a Java 17-built ECJ.
+     */
     static final String DEFAULT_ECJ_VERSION = "3.36.0";
+
+    /**
+     * Tiered ECJ release picks per JVM minimum. Each entry pairs a JVM floor
+     * with the highest ECJ release that still runs on that floor and the
+     * highest webapp class-file major that release can read. Sorted highest
+     * JVM first so {@link #selectEcjVersion} can return the first match.
+     *
+     * <ul>
+     *   <li><b>3.36.0</b> on Java 17+: reads up to Java 22 (major 66).</li>
+     *   <li><b>3.35.0</b> on Java 11+: last release before the Java 17 minimum;
+     *       reads up to Java 21 (major 65).</li>
+     *   <li><b>3.24.0</b> on Java 8+: last release before the Java 11 minimum;
+     *       reads up to Java 15 (major 59).</li>
+     * </ul>
+     *
+     * <p>If the runtime JVM cannot read the webapp's class-file major even
+     * with the highest tier we can install, that is a JVM-upgrade decision
+     * the user has to make — no ECJ exists that bridges Java 8 to a Java 17
+     * webapp. {@link #selectEcj} returns the chosen tier alongside its
+     * {@link EcjPick#maxReadableClassFileMajor} so callers can detect that
+     * deeper incompatibility and surface a clear message instead of
+     * silently picking an ECJ that will fail at JSP-compile time anyway.
+     */
+    private static final EcjTier[] ECJ_TIERS = {
+            new EcjTier("3.36.0", JavaSdkVersion.JDK_17,  66 /* Java 22 */),
+            new EcjTier("3.35.0", JavaSdkVersion.JDK_11,  65 /* Java 21 */),
+            new EcjTier("3.24.0", JavaSdkVersion.JDK_1_8, 59 /* Java 15 */)
+    };
 
     /** Maven Central root for ECJ artifacts. */
     static final String MAVEN_CENTRAL_BASE =
@@ -79,10 +118,59 @@ final class EcjJarSwapper {
      * Computes the swap plan for an existing ECJ JAR. Does not access the
      * network; pure path calculation that callers can present to the user
      * for confirmation before triggering {@link #execute}.
+     *
+     * <p>Picks {@link #DEFAULT_ECJ_VERSION} unconditionally. Prefer
+     * {@link #computePlan(Path, JavaSdkVersion)} so the picked ECJ matches
+     * the JVM that will host Tomcat — installing ecj-3.36 on a Java 8 host
+     * appears to succeed but throws {@code UnsupportedClassVersionError} on
+     * the first JSP request.
      */
     @NotNull
     static SwapPlan computePlan(@NotNull Path currentEcjJar) {
         return computePlan(currentEcjJar, DEFAULT_ECJ_VERSION);
+    }
+
+    /**
+     * Computes the swap plan, picking the highest ECJ tier whose runtime-JVM
+     * floor is satisfied by {@code runtimeJvm}. Falls back to
+     * {@link #DEFAULT_ECJ_VERSION} when the JVM is unknown so existing setups
+     * on modern hosts behave identically to the legacy single-version
+     * {@link #computePlan(Path)} path.
+     */
+    @NotNull
+    static SwapPlan computePlan(@NotNull Path currentEcjJar, @Nullable JavaSdkVersion runtimeJvm) {
+        return computePlan(currentEcjJar, selectEcj(runtimeJvm).version());
+    }
+
+    /**
+     * Selects the ECJ tier compatible with the given runtime JVM. Returns the
+     * default (modern) tier when {@code runtimeJvm} is null. Never returns
+     * null: every supported JVM down to Java 8 has a tier; older JVMs fall
+     * through to the lowest tier with a defensive note in the log.
+     */
+    @NotNull
+    static EcjPick selectEcj(@Nullable JavaSdkVersion runtimeJvm) {
+        if (runtimeJvm == null) {
+            EcjTier highest = ECJ_TIERS[0];
+            return new EcjPick(highest.version(), highest.minRuntimeJvm(),
+                    highest.maxReadableClassFileMajor());
+        }
+        for (EcjTier tier : ECJ_TIERS) {
+            if (runtimeJvm.isAtLeast(tier.minRuntimeJvm())) {
+                return new EcjPick(tier.version(), tier.minRuntimeJvm(),
+                        tier.maxReadableClassFileMajor());
+            }
+        }
+        // Java 7 or older — every tier wants Java 8+. Pick the lowest tier
+        // and log; the user will hit a runtime error but the log gives them
+        // a precise diagnostic instead of a silent failure.
+        EcjTier lowest = ECJ_TIERS[ECJ_TIERS.length - 1];
+        LOG.warn("Runtime JVM " + runtimeJvm + " is below every ECJ tier's floor;"
+                + " falling back to ECJ " + lowest.version()
+                + " which still requires Java " + lowest.minRuntimeJvm()
+                + ". The webapp's JRE must be upgraded for the swap to load.");
+        return new EcjPick(lowest.version(), lowest.minRuntimeJvm(),
+                lowest.maxReadableClassFileMajor());
     }
 
     /** Same as {@link #computePlan(Path)} but lets the caller pin a specific ECJ version. */
@@ -395,6 +483,40 @@ final class EcjJarSwapper {
                     .connectTimeout(15_000)
                     .readTimeout(60_000)
                     .readString(null);
+        }
+    }
+
+    // ------------------------------------------------------------------ //
+    // ECJ tier model
+    // ------------------------------------------------------------------ //
+
+    /**
+     * One row in {@link #ECJ_TIERS}: an ECJ Maven version, the Java version
+     * required to run that JAR, and the highest webapp class-file major
+     * version that ECJ release can read.
+     */
+    private record EcjTier(@NotNull String version,
+                           @NotNull JavaSdkVersion minRuntimeJvm,
+                           int maxReadableClassFileMajor) {}
+
+    /**
+     * Picker output. Carries the chosen ECJ version alongside the JVM and
+     * class-file constraints that drove the pick so callers can render an
+     * informative message ("the highest ECJ that runs on Java 8 reads class
+     * files up to Java 15; your webapp needs Java 17 — upgrade the JRE").
+     */
+    record EcjPick(@NotNull String version,
+                   @NotNull JavaSdkVersion minRuntimeJvm,
+                   int maxReadableClassFileMajor) {
+
+        /**
+         * True when the selected ECJ can read class files at the given
+         * webapp class-file major. False means the JVM-and-ECJ pairing the
+         * user has chosen physically cannot compile their webapp; the only
+         * fix is upgrading the JVM (or downgrading the webapp's bytecode).
+         */
+        boolean canCompileClassFileMajor(int classFileMajor) {
+            return classFileMajor <= maxReadableClassFileMajor;
         }
     }
 }

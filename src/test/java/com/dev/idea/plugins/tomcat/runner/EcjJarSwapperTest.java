@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -396,6 +397,148 @@ class EcjJarSwapperTest {
                 return shaBody;
             }
             throw new IOException("Unexpected fetchString URL in test: " + url);
+        }
+    }
+
+    @Nested
+    @DisplayName("selectEcj — JVM-aware ECJ tier picker")
+    class SelectEcj {
+
+        @Test
+        @DisplayName("Java 17+ JVM picks the modern ECJ that reads up to Java 22")
+        void java17PicksModernEcj() {
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_17);
+            assertEquals("3.36.0", pick.version());
+            assertEquals(JavaSdkVersion.JDK_17, pick.minRuntimeJvm());
+            assertEquals(66, pick.maxReadableClassFileMajor(),
+                    "ECJ 3.36 should read up to Java 22 class files (major 66)");
+        }
+
+        @Test
+        @DisplayName("Java 21 JVM picks the modern ECJ (highest tier)")
+        void java21PicksModernEcj() {
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_21);
+            assertEquals("3.36.0", pick.version());
+        }
+
+        @Test
+        @DisplayName("Java 11 JVM picks ECJ 3.35 (last release before the Java 17 minimum)")
+        void java11PicksLastJava11Ecj() {
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_11);
+            assertEquals("3.35.0", pick.version());
+            assertEquals(JavaSdkVersion.JDK_11, pick.minRuntimeJvm());
+            assertEquals(65, pick.maxReadableClassFileMajor(),
+                    "ECJ 3.35 should read up to Java 21 class files (major 65)");
+        }
+
+        @Test
+        @DisplayName("Java 16 JVM picks ECJ 3.35 (Java 17 floor not satisfied)")
+        void java16PicksLastJava11Ecj() {
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_16);
+            assertEquals("3.35.0", pick.version());
+        }
+
+        @Test
+        @DisplayName("Java 8 JVM picks ECJ 3.24 (last release before the Java 11 minimum) — bug repro")
+        void java8PicksLastJava8Ecj() {
+            // The motivating regression: a Java 8 host throws
+            // UnsupportedClassVersionError if the swap unconditionally installs
+            // ecj-3.36 (which is compiled for Java 17). The picker must
+            // downgrade to ecj-3.24 here.
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_1_8);
+            assertEquals("3.24.0", pick.version(),
+                    "Java 8 must NOT receive ecj-3.36 (which requires Java 17 to load)");
+            assertEquals(JavaSdkVersion.JDK_1_8, pick.minRuntimeJvm());
+            assertEquals(59, pick.maxReadableClassFileMajor(),
+                    "ECJ 3.24 should read up to Java 15 class files (major 59)");
+        }
+
+        @Test
+        @DisplayName("null JVM defaults to the modern ECJ (preserves legacy single-version behaviour)")
+        void nullJvmDefaultsToModernEcj() {
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(null);
+            assertEquals("3.36.0", pick.version());
+        }
+
+        @Test
+        @DisplayName("Java 7 JVM falls back to the lowest tier with a defensive log warning")
+        void java7FallsBackToLowestTier() {
+            // Every tier requires Java 8+. A Java 7 JVM cannot run any of
+            // them, but rather than refuse the swap we pick the lowest tier
+            // and let the runtime error point at the JVM as the upgrade
+            // target. The picker logs a warning so the diagnostic is in the
+            // log even if the user dismisses the prompt.
+            EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_1_7);
+            assertEquals("3.24.0", pick.version());
+        }
+
+        @Test
+        @DisplayName("canCompileClassFileMajor — Java 8 ECJ cannot read a Java 17 webapp")
+        void java8EcjCannotReadJava17Classes() {
+            EcjJarSwapper.EcjPick java8Pick = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_1_8);
+            assertFalse(java8Pick.canCompileClassFileMajor(61),
+                    "ECJ 3.24 (max class file 59 / Java 15) cannot read a Java 17 webapp (major 61)");
+            assertTrue(java8Pick.canCompileClassFileMajor(59),
+                    "ECJ 3.24 must still read Java 15 class files");
+            assertTrue(java8Pick.canCompileClassFileMajor(52),
+                    "ECJ 3.24 must read Java 8 class files");
+        }
+
+        @Test
+        @DisplayName("canCompileClassFileMajor — Java 17 ECJ reads everything up to Java 22")
+        void java17EcjReadsThroughJava22() {
+            EcjJarSwapper.EcjPick modern = EcjJarSwapper.selectEcj(JavaSdkVersion.JDK_17);
+            assertTrue(modern.canCompileClassFileMajor(61), "Java 17 webapp");
+            assertTrue(modern.canCompileClassFileMajor(65), "Java 21 webapp");
+            assertTrue(modern.canCompileClassFileMajor(66), "Java 22 webapp");
+            assertFalse(modern.canCompileClassFileMajor(67),
+                    "ECJ 3.36 should not pretend to read Java 23 class files");
+        }
+    }
+
+    @Nested
+    @DisplayName("computePlan(currentEcjJar, runtimeJvm) — version selection")
+    class ComputePlanWithJvm {
+
+        @Test
+        @DisplayName("Java 17 JVM produces a plan targeting ecj-3.36.0")
+        void java17PlanTargetsModern(@TempDir Path tomcatLib) throws IOException {
+            Path ecj = tomcatLib.resolve("ecj-3.7.2.jar");
+            Files.writeString(ecj, "stub");
+
+            EcjJarSwapper.SwapPlan plan = EcjJarSwapper.computePlan(ecj, JavaSdkVersion.JDK_17);
+
+            assertEquals("3.36.0", plan.targetVersion());
+            assertEquals("ecj-3.36.0.jar", plan.targetEcjJar().getFileName().toString());
+        }
+
+        @Test
+        @DisplayName("Java 8 JVM produces a plan targeting ecj-3.24.0 — bug repro")
+        void java8PlanTargetsLegacyEcj(@TempDir Path tomcatLib) throws IOException {
+            // Reproduces the user-reported failure mode: launching with
+            // Java 8 (Corretto-1.8) on a webapp whose ECJ swap installed
+            // ecj-3.36.0 unconditionally. The plan must now target ecj-3.24.0
+            // so the JAR actually loads on Java 8.
+            Path ecj = tomcatLib.resolve("ecj-3.7.2.jar");
+            Files.writeString(ecj, "stub");
+
+            EcjJarSwapper.SwapPlan plan = EcjJarSwapper.computePlan(ecj, JavaSdkVersion.JDK_1_8);
+
+            assertEquals("3.24.0", plan.targetVersion());
+            assertEquals("ecj-3.24.0.jar", plan.targetEcjJar().getFileName().toString());
+            assertTrue(plan.downloadUrl().toString().contains("/ecj/3.24.0/"));
+            assertTrue(plan.sha1Url().toString().endsWith(".jar.sha1"));
+        }
+
+        @Test
+        @DisplayName("null JVM produces a plan targeting the default modern ECJ")
+        void nullJvmPlanTargetsDefault(@TempDir Path tomcatLib) throws IOException {
+            Path ecj = tomcatLib.resolve("ecj-3.7.2.jar");
+            Files.writeString(ecj, "stub");
+
+            EcjJarSwapper.SwapPlan plan = EcjJarSwapper.computePlan(ecj, (JavaSdkVersion) null);
+
+            assertEquals(EcjJarSwapper.DEFAULT_ECJ_VERSION, plan.targetVersion());
         }
     }
 }

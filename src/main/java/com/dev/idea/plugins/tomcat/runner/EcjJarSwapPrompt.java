@@ -12,6 +12,9 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JavaSdk;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.Messages;
 import org.jetbrains.annotations.NotNull;
 
@@ -75,6 +78,22 @@ final class EcjJarSwapPrompt {
      */
     static void show(@org.jetbrains.annotations.Nullable Project project,
                      @NotNull EcjVersionCompat.Mismatch mismatch) {
+        show(project, mismatch, null);
+    }
+
+    /**
+     * As {@link #show(Project, EcjVersionCompat.Mismatch)} but lets the caller
+     * pass the Tomcat run configuration's JRE so the swap picks an ECJ
+     * version that can actually load on that JVM. Without this, swapping in
+     * the latest ECJ on a Java 8 host produces
+     * {@code UnsupportedClassVersionError: org.eclipse.jdt.internal.compiler.env.INameEnvironment
+     * has been compiled by a more recent version of the Java Runtime
+     * (class file version 61.0)} the first time a JSP is requested. Pass
+     * {@code null} to fall back to the default-modern ECJ.
+     */
+    static void show(@org.jetbrains.annotations.Nullable Project project,
+                     @NotNull EcjVersionCompat.Mismatch mismatch,
+                     @org.jetbrains.annotations.Nullable Sdk runtimeJdk) {
         if (project == null || project.isDisposed()) return;
         if (mismatch.ecj() == null) return;
 
@@ -87,11 +106,14 @@ final class EcjJarSwapPrompt {
         if (!PROMPTED_THIS_SESSION.add(key)) {
             return;
         }
-        EcjJarSwapper.SwapPlan plan = EcjJarSwapper.computePlan(ecj.jarPath());
 
-        String title = "DevTomcat: ECJ JAR is too old for this webapp";
+        JavaSdkVersion runtimeJvm = jvmVersionOf(runtimeJdk);
+        EcjJarSwapper.EcjPick pick = EcjJarSwapper.selectEcj(runtimeJvm);
+        EcjJarSwapper.SwapPlan plan = EcjJarSwapper.computePlan(ecj.jarPath(), runtimeJvm);
+
         int actualJava = EcjVersionCompat.javaVersionFor(mismatch.actualClassFileMajor());
         int ecjMaxJava = EcjVersionCompat.javaVersionFor(ecj.maxClassFileMajor());
+        String title = "DevTomcat: ECJ JAR is too old for this webapp";
         String content = "Tomcat's bundled <code>" + ecj.jarPath().getFileName()
                 + "</code> (ECJ " + ecj.version() + ") supports up to Java " + ecjMaxJava
                 + ", but the webapp contains Java " + actualJava + " classes. "
@@ -99,14 +121,57 @@ final class EcjJarSwapPrompt {
                 + "DevTomcat can swap in <code>ecj-" + plan.targetVersion()
                 + ".jar</code> from Maven Central.";
 
+        // If the highest ECJ tier compatible with the runtime JVM still cannot
+        // read the webapp's class files, the only fix is upgrading the JVM —
+        // no ECJ exists that bridges, e.g., Java 8 to a Java 17 webapp. Surface
+        // that explicitly and downgrade the prompt to ERROR so the user sees
+        // it as a hard incompatibility rather than a one-click fix.
+        boolean swapWillStillFail = !pick.canCompileClassFileMajor(mismatch.actualClassFileMajor());
+        if (swapWillStillFail) {
+            int pickMaxJava = EcjVersionCompat.javaVersionFor(pick.maxReadableClassFileMajor());
+            content = "Tomcat's bundled <code>" + ecj.jarPath().getFileName()
+                    + "</code> (ECJ " + ecj.version() + ") supports up to Java " + ecjMaxJava
+                    + ", but the webapp contains Java " + actualJava + " classes. "
+                    + "The configured JRE is Java " + pick.minRuntimeJvm()
+                    + ", which can only run ECJ &le; " + pick.version()
+                    + " (reads up to Java " + pickMaxJava + "). "
+                    + "Upgrade the run configuration's JRE to Java "
+                    + EcjVersionCompat.javaVersionFor(actualJava) + "+ "
+                    + "or compile the webapp for Java " + pickMaxJava + " or earlier.";
+        }
+
+        NotificationType level = swapWillStillFail
+                ? NotificationType.ERROR
+                : NotificationType.WARNING;
         Notification notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
-                .createNotification(title, content, NotificationType.WARNING);
+                .createNotification(title, content, level);
 
-        notification.addAction(new SwapAction(plan));
+        if (!swapWillStillFail) {
+            notification.addAction(new SwapAction(plan));
+        }
         notification.addAction(new OpenLibFolderAction(ecj.jarPath().getParent()));
 
         notification.notify(project);
+    }
+
+    /**
+     * Resolves a JDK Sdk to its {@link JavaSdkVersion}. Returns null when the
+     * Sdk is null or its version string cannot be parsed; the picker treats
+     * null as "modern JVM" and uses the default tier.
+     */
+    @org.jetbrains.annotations.Nullable
+    private static JavaSdkVersion jvmVersionOf(@org.jetbrains.annotations.Nullable Sdk jdk) {
+        if (jdk == null) return null;
+        try {
+            return JavaSdk.getInstance().getVersion(jdk);
+        } catch (Throwable t) {
+            // Defensive: the platform's getVersion can throw on a misconfigured
+            // SDK. A null return causes the picker to fall back to the modern
+            // default, which keeps existing user setups behaving identically.
+            LOG.debug("Could not resolve JDK version for ECJ picker: " + t.getMessage());
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------ //

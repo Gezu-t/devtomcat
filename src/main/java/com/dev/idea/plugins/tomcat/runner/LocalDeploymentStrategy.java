@@ -242,7 +242,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     collectWebInfDirsAcrossDeployments(configuration),
                     logger);
             if (mismatch.isMismatch()) {
-                EcjJarSwapPrompt.show(project, mismatch);
+                // Pass the configured JRE so the picker selects an ECJ tier
+                // that actually loads on it. Without this, swapping in
+                // ecj-3.36.0 (compiled for Java 17) on a Java 8 host throws
+                // UnsupportedClassVersionError on the first JSP request.
+                EcjJarSwapPrompt.show(project, mismatch, params.getJdk());
             }
         }
 
