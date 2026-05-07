@@ -96,9 +96,10 @@ final class EcjJarSwapper {
      * silently picking an ECJ that will fail at JSP-compile time anyway.
      */
     private static final EcjTier[] ECJ_TIERS = {
-            new EcjTier("3.36.0", JavaSdkVersion.JDK_17,  66 /* Java 22 */),
-            new EcjTier("3.35.0", JavaSdkVersion.JDK_11,  65 /* Java 21 */),
-            new EcjTier("3.24.0", JavaSdkVersion.JDK_1_8, 59 /* Java 15 */)
+            // tier name        latest    starts at  min JVM                max class-file
+            new EcjTier("3.36.0", "3.36.0", JavaSdkVersion.JDK_17,  66 /* Java 22 */),
+            new EcjTier("3.35.0", "3.25.0", JavaSdkVersion.JDK_11,  65 /* Java 21 */),
+            new EcjTier("3.24.0", "3.21.0", JavaSdkVersion.JDK_1_8, 59 /* Java 15 */)
     };
 
     /** Maven Central root for ECJ artifacts. */
@@ -171,6 +172,127 @@ final class EcjJarSwapper {
                 + ". The webapp's JRE must be upgraded for the swap to load.");
         return new EcjPick(lowest.version(), lowest.minRuntimeJvm(),
                 lowest.maxReadableClassFileMajor());
+    }
+
+    /**
+     * Returns the minimum JVM required to load an ECJ JAR of the given
+     * Maven version. Used by stale-swap detection so a previous-release
+     * install of a Java-17-only ECJ on a Java 8 host can be flagged for
+     * rollback.
+     *
+     * <p>Resolution: walks {@link #ECJ_TIERS} highest-floor-first and
+     * returns the floor of the first tier whose version is &le; the input.
+     * For versions older than every tier (e.g. the original Tomcat 7
+     * {@code ecj-3.7.2.jar}), falls back to {@link JavaSdkVersion#JDK_1_8}
+     * — the lowest JVM any tier supports — because we can't make stronger
+     * claims about pre-tier releases without hardcoding more of the JDT
+     * release history than is necessary.
+     */
+    @NotNull
+    static JavaSdkVersion requiredJvmFor(@NotNull String ecjVersion) {
+        for (EcjTier tier : ECJ_TIERS) {
+            if (compareEcjVersions(ecjVersion, tier.tierStartVersion()) >= 0) {
+                return tier.minRuntimeJvm();
+            }
+        }
+        return JavaSdkVersion.JDK_1_8;
+    }
+
+    /**
+     * Lexicographic-by-numeric-segment compare of two ECJ Maven versions
+     * ("3.36.0" vs "3.7.2"). Returns negative / zero / positive in the
+     * usual {@link Comparable} contract. Non-numeric segments fall back to
+     * string compare so a future release tag like "4.0.0-RC1" still gets
+     * an ordering even if it's not pretty.
+     */
+    private static int compareEcjVersions(@NotNull String a, @NotNull String b) {
+        String[] as = a.split("\\.");
+        String[] bs = b.split("\\.");
+        int len = Math.min(as.length, bs.length);
+        for (int i = 0; i < len; i++) {
+            int aNum = parseSegmentOrMinusOne(as[i]);
+            int bNum = parseSegmentOrMinusOne(bs[i]);
+            if (aNum >= 0 && bNum >= 0) {
+                int cmp = Integer.compare(aNum, bNum);
+                if (cmp != 0) return cmp;
+            } else {
+                int cmp = as[i].compareTo(bs[i]);
+                if (cmp != 0) return cmp;
+            }
+        }
+        return Integer.compare(as.length, bs.length);
+    }
+
+    private static int parseSegmentOrMinusOne(@NotNull String segment) {
+        try {
+            return Integer.parseInt(segment);
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    /**
+     * Looks for an already-installed ECJ JAR in {@code libDir} whose
+     * runtime-JVM requirement is higher than {@code runtimeJvm}, paired
+     * with a {@code .devtomcat-bak} backup written by a previous swap.
+     * Returns the descriptor of that stale state, or {@code null} when no
+     * actionable rollback is available (no JVM info, no backup, or current
+     * ECJ is compatible with the JVM).
+     *
+     * <p>Detection strategy:
+     * <ul>
+     *   <li>Find the lone {@code ecj-*.jar} file in the lib directory
+     *       (multiple matches → null; we cannot tell which was the swap
+     *       target).</li>
+     *   <li>Find the lone {@code *.devtomcat-bak} sibling. Resolve its
+     *       restore-target name by stripping {@link #BACKUP_SUFFIX}.</li>
+     *   <li>Parse the current JAR's ECJ version from its filename.</li>
+     *   <li>Compare {@link #requiredJvmFor} against {@code runtimeJvm};
+     *       only flag when the JAR cannot load on the configured JVM.</li>
+     * </ul>
+     */
+    @Nullable
+    static StaleSwap detectStaleSwap(@NotNull Path libDir, @Nullable JavaSdkVersion runtimeJvm) {
+        if (runtimeJvm == null) return null;
+        if (!Files.isDirectory(libDir)) return null;
+        try (java.util.stream.Stream<Path> entries = Files.list(libDir)) {
+            java.util.List<Path> all = entries.toList();
+            Path currentEcj = null;
+            int currentEcjCount = 0;
+            Path backup = null;
+            int backupCount = 0;
+            for (Path p : all) {
+                String name = p.getFileName().toString();
+                if (name.endsWith(BACKUP_SUFFIX)) {
+                    backup = p;
+                    backupCount++;
+                } else if (name.startsWith("ecj-") && name.endsWith(".jar")) {
+                    currentEcj = p;
+                    currentEcjCount++;
+                }
+            }
+            if (currentEcjCount != 1 || backupCount != 1) {
+                // Ambiguous (multiple ecj-*.jar files, or no backup) — bail
+                // rather than guess. The user can recover manually.
+                return null;
+            }
+            String currentName = currentEcj.getFileName().toString();
+            String currentVersion = currentName.substring("ecj-".length(),
+                    currentName.length() - ".jar".length());
+            JavaSdkVersion requires = requiredJvmFor(currentVersion);
+            if (runtimeJvm.isAtLeast(requires)) {
+                // Installed ECJ loads fine on this JVM — no rollback needed.
+                return null;
+            }
+            String backupName = backup.getFileName().toString();
+            String restoreName = backupName.substring(0, backupName.length() - BACKUP_SUFFIX.length());
+            Path restoreTarget = backup.resolveSibling(restoreName);
+            return new StaleSwap(currentEcj, backup, restoreTarget,
+                    currentVersion, requires);
+        } catch (IOException e) {
+            LOG.debug("Could not scan Tomcat lib directory for stale ECJ swap: " + e.getMessage());
+            return null;
+        }
     }
 
     /** Same as {@link #computePlan(Path)} but lets the caller pin a specific ECJ version. */
@@ -491,11 +613,24 @@ final class EcjJarSwapper {
     // ------------------------------------------------------------------ //
 
     /**
-     * One row in {@link #ECJ_TIERS}: an ECJ Maven version, the Java version
-     * required to run that JAR, and the highest webapp class-file major
-     * version that ECJ release can read.
+     * One row in {@link #ECJ_TIERS}.
+     *
+     * @param version              the highest ECJ release in this tier — what
+     *                             {@link #selectEcj} returns for a JVM that
+     *                             matches this tier.
+     * @param tierStartVersion     the lowest ECJ release that already requires
+     *                             this tier's {@code minRuntimeJvm}.
+     *                             {@link #requiredJvmFor} walks tiers
+     *                             highest-floor-first and returns
+     *                             {@code minRuntimeJvm} for the first tier
+     *                             whose start is &le; the queried version.
+     * @param minRuntimeJvm        Java version required to load any ECJ JAR
+     *                             in this tier ({@code [tierStartVersion .. version]}).
+     * @param maxReadableClassFileMajor highest webapp class-file major the
+     *                                  tier's {@code version} can read.
      */
     private record EcjTier(@NotNull String version,
+                           @NotNull String tierStartVersion,
                            @NotNull JavaSdkVersion minRuntimeJvm,
                            int maxReadableClassFileMajor) {}
 
@@ -518,5 +653,36 @@ final class EcjJarSwapper {
         boolean canCompileClassFileMajor(int classFileMajor) {
             return classFileMajor <= maxReadableClassFileMajor;
         }
+    }
+
+    /**
+     * Description of a previous swap that no longer matches the runtime JVM.
+     * Returned by {@link #detectStaleSwap}; consumed by the
+     * "Restore previous ECJ" notification action.
+     *
+     * @param currentEcjJar the active {@code ecj-X.Y.Z.jar} the swap installed
+     * @param backupPath    the {@code .devtomcat-bak} written by the original swap
+     * @param restoreTarget the path the backup will move to on restore
+     *                      (i.e. the backup name with {@link #BACKUP_SUFFIX} stripped)
+     * @param currentVersion the Maven version parsed from {@code currentEcjJar}'s filename
+     * @param installedRequiresJvm minimum JVM the {@code currentEcjJar} requires to load
+     */
+    record StaleSwap(@NotNull Path currentEcjJar,
+                     @NotNull Path backupPath,
+                     @NotNull Path restoreTarget,
+                     @NotNull String currentVersion,
+                     @NotNull JavaSdkVersion installedRequiresJvm) {}
+
+    /**
+     * Performs the rollback described by a {@link StaleSwap}: removes the
+     * active (incompatible) ECJ JAR, restores the backup to its original
+     * filename, leaves a {@code .devtomcat-replaced} sidecar so the user
+     * can inspect or delete the displaced JAR. Delegates to the existing
+     * {@link #restoreBackup} primitive so the atomic-move-and-cleanup
+     * contract is shared with the manual undo path.
+     */
+    @NotNull
+    static SwapResult restoreFromBackup(@NotNull StaleSwap stale) {
+        return restoreBackup(stale.backupPath(), stale.currentEcjJar());
     }
 }

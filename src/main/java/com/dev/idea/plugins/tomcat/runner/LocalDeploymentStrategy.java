@@ -248,6 +248,27 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 // UnsupportedClassVersionError on the first JSP request.
                 EcjJarSwapPrompt.show(project, mismatch, params.getJdk());
             }
+
+            // Stale-swap rollback: if a previous swap installed an ECJ JAR
+            // that requires a higher JVM than the one this run config is
+            // launching with, surface a "Restore Previous ECJ" balloon. This
+            // is the recovery path for users who ran the 1.0.10 swap on
+            // Tomcat 7 + Java 8 and are now hitting
+            // UnsupportedClassVersionError. Detection only fires when both
+            // a current ecj-*.jar and a sibling .devtomcat-bak are present;
+            // a clean install with no prior swap is a no-op here.
+            Path libDir = Paths.get(tomcatInfo.getPath()).resolve("lib");
+            com.intellij.openapi.projectRoots.JavaSdkVersion runtimeJvm = null;
+            if (params.getJdk() != null) {
+                try {
+                    runtimeJvm = com.intellij.openapi.projectRoots.JavaSdk.getInstance()
+                            .getVersion(params.getJdk());
+                } catch (Throwable ignored) {
+                    // Defensive — a misconfigured Sdk should not block the launch.
+                }
+            }
+            EcjJarSwapper.StaleSwap stale = EcjJarSwapper.detectStaleSwap(libDir, runtimeJvm);
+            EcjJarSwapPrompt.showRestorePromptIfStale(project, stale, runtimeJvm);
         }
 
         // Tomcat EOL warning. Fired once per IDE session per install so

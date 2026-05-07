@@ -64,6 +64,14 @@ final class EcjJarSwapPrompt {
      */
     private static final Set<String> PROMPTED_THIS_SESSION = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Per-session dedup for the stale-swap rollback prompt, keyed by the
+     * absolute path of the active ECJ JAR. One balloon per affected install
+     * per IDE session — once the user has dismissed (or acted on) it, we
+     * stay quiet until the next launch.
+     */
+    private static final Set<String> RESTORE_PROMPTED_THIS_SESSION = ConcurrentHashMap.newKeySet();
+
     private EcjJarSwapPrompt() {}
 
     /**
@@ -302,12 +310,154 @@ final class EcjJarSwapPrompt {
         }
     }
 
+    // ------------------------------------------------------------------ //
+    // Stale-swap rollback prompt
+    // ------------------------------------------------------------------ //
+
     /**
-     * Test-only: clears the per-session dedup cache. Call from a test
+     * Posts a "Restore Previous ECJ" notification when the active ECJ JAR
+     * cannot load on the configured runtime JVM (because an earlier swap
+     * picked a JAR for a newer JVM than the user is now launching with).
+     * Acts on a {@link EcjJarSwapper.StaleSwap} discovered by
+     * {@link EcjJarSwapper#detectStaleSwap}; safe to call when the
+     * detector returned null (this method is a no-op in that case so the
+     * caller can pipe the result through unconditionally).
+     *
+     * <p>Per-session dedup keyed by the active ECJ JAR path so the balloon
+     * only fires once per IDE session per affected install. Restarts of
+     * the same launch see the same key and stay silent.
+     */
+    static void showRestorePromptIfStale(@org.jetbrains.annotations.Nullable Project project,
+                                          @org.jetbrains.annotations.Nullable EcjJarSwapper.StaleSwap stale,
+                                          @org.jetbrains.annotations.Nullable JavaSdkVersion runtimeJvm) {
+        if (project == null || project.isDisposed() || stale == null) return;
+
+        if (!RESTORE_PROMPTED_THIS_SESSION.add(stale.currentEcjJar().toString())) {
+            return;
+        }
+
+        String title = "DevTomcat: Installed ECJ does not match this JVM";
+        String content = "<code>" + stale.currentEcjJar().getFileName() + "</code>"
+                + " requires Java " + stale.installedRequiresJvm()
+                + " but the run configuration's JRE is "
+                + (runtimeJvm != null ? "Java " + runtimeJvm : "older")
+                + ". Tomcat will throw <code>UnsupportedClassVersionError</code>"
+                + " on the first JSP request. DevTomcat can restore the original"
+                + " <code>" + stale.restoreTarget().getFileName() + "</code>"
+                + " from the <code>.devtomcat-bak</code> backup it saved during the previous swap.";
+
+        Notification notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                .createNotification(title, content, NotificationType.ERROR);
+
+        notification.addAction(new RestoreAction(stale));
+        notification.addAction(new OpenLibFolderAction(stale.currentEcjJar().getParent()));
+
+        notification.notify(project);
+    }
+
+    /**
+     * "Restore Previous ECJ" notification action. Confirms with the user
+     * naming the exact file moves, then runs the restore on a background
+     * task with a progress indicator. Mirrors the {@link SwapAction} flow
+     * so the user experience is consistent across forward and backward
+     * paths.
+     */
+    private static final class RestoreAction extends NotificationAction {
+        private final EcjJarSwapper.StaleSwap stale;
+
+        RestoreAction(@NotNull EcjJarSwapper.StaleSwap stale) {
+            super("Restore Previous ECJ");
+            this.stale = stale;
+        }
+
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent event,
+                                    @NotNull Notification notification) {
+            Project project = event.getProject();
+            if (project == null || project.isDisposed()) return;
+
+            String confirmation = "DevTomcat will:\n\n"
+                    + " 1. Rename " + stale.currentEcjJar().getFileName()
+                    + " to " + stale.currentEcjJar().getFileName() + ".devtomcat-replaced\n"
+                    + " 2. Restore " + stale.backupPath().getFileName()
+                    + " back to " + stale.restoreTarget().getFileName() + "\n\n"
+                    + "Both moves are atomic and reversible. The displaced\n"
+                    + "JAR is left as a sidecar so you can inspect or delete\n"
+                    + "it later. Restart Tomcat for the restore to take effect.\n\n"
+                    + "Proceed?";
+            int answer = Messages.showOkCancelDialog(project,
+                    confirmation,
+                    "Restore previous ECJ in Tomcat install?",
+                    "Restore", "Cancel",
+                    Messages.getQuestionIcon());
+            if (answer != Messages.OK) return;
+
+            notification.expire();
+
+            ProgressManager.getInstance().run(new RestoreTask(project, stale));
+        }
+    }
+
+    /**
+     * Background task wrapping {@link EcjJarSwapper#restoreFromBackup} with
+     * a progress indicator and a follow-up balloon describing the outcome.
+     */
+    private static final class RestoreTask extends Task.Backgroundable {
+        private final EcjJarSwapper.StaleSwap stale;
+        private volatile EcjJarSwapper.SwapResult result;
+
+        RestoreTask(@NotNull Project project, @NotNull EcjJarSwapper.StaleSwap stale) {
+            super(project, "Restoring previous ECJ JAR", false);
+            this.stale = stale;
+        }
+
+        @Override
+        public void run(@NotNull ProgressIndicator indicator) {
+            result = EcjJarSwapper.restoreFromBackup(stale);
+        }
+
+        @Override
+        public void onFinished() {
+            Project project = getProject();
+            if (project == null || project.isDisposed() || result == null) return;
+            EcjJarSwapper.SwapResult r = result;
+
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (project.isDisposed()) return;
+                Notification n;
+                if (r.isSuccess()) {
+                    n = NotificationGroupManager.getInstance()
+                            .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                            .createNotification(
+                                    "DevTomcat: ECJ JAR restored",
+                                    "Restored to <code>" + r.newJarPath() + "</code>. "
+                                            + "Displaced JAR left as a "
+                                            + "<code>.devtomcat-replaced</code> sidecar. "
+                                            + "Restart Tomcat for the restore to take effect.",
+                                    NotificationType.INFORMATION);
+                } else {
+                    n = NotificationGroupManager.getInstance()
+                            .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                            .createNotification(
+                                    "DevTomcat: ECJ restore failed",
+                                    r.errorMessage() != null
+                                            ? r.errorMessage()
+                                            : "Unknown error during ECJ restore.",
+                                    NotificationType.ERROR);
+                }
+                n.notify(project);
+            });
+        }
+    }
+
+    /**
+     * Test-only: clears the per-session dedup caches. Call from a test
      * tear-down so a sibling test does not get a stale "already prompted"
      * hit.
      */
     static void clearDedupForTesting() {
         PROMPTED_THIS_SESSION.clear();
+        RESTORE_PROMPTED_THIS_SESSION.clear();
     }
 }

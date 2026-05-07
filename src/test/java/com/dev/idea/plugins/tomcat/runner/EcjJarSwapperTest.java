@@ -497,6 +497,181 @@ class EcjJarSwapperTest {
     }
 
     @Nested
+    @DisplayName("detectStaleSwap — recovery for previous-version bad swaps")
+    class DetectStaleSwap {
+
+        @Test
+        @DisplayName("Java 8 JVM with ecj-3.36 installed flags the swap as stale")
+        void java8WithModernEcjIsStale(@TempDir Path lib) throws IOException {
+            // Reproduces the user-reported state: Tomcat 7's lib/ contains
+            // the modern ecj-3.36.0.jar (from a 1.0.10 swap) plus the
+            // ecj-3.7.2.jar.devtomcat-bak preserved by that swap. Launch on
+            // Java 8 → JSP request → UnsupportedClassVersionError. The
+            // detector must flag this so the rollback prompt can fire.
+            Files.writeString(lib.resolve("ecj-3.36.0.jar"), "fake-modern-ecj");
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original-ecj");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_1_8);
+
+            assertNotNull(stale, "Stale swap must be detected on Java 8 + ecj-3.36 install");
+            assertEquals("3.36.0", stale.currentVersion());
+            assertEquals(JavaSdkVersion.JDK_17, stale.installedRequiresJvm());
+            assertEquals("ecj-3.36.0.jar", stale.currentEcjJar().getFileName().toString());
+            assertEquals("ecj-3.7.2.jar.devtomcat-bak",
+                    stale.backupPath().getFileName().toString());
+            assertEquals("ecj-3.7.2.jar",
+                    stale.restoreTarget().getFileName().toString());
+        }
+
+        @Test
+        @DisplayName("Java 17 JVM with ecj-3.36 installed is not stale")
+        void java17WithModernEcjIsNotStale(@TempDir Path lib) throws IOException {
+            Files.writeString(lib.resolve("ecj-3.36.0.jar"), "fake-modern-ecj");
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original-ecj");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_17);
+
+            assertNull(stale, "ecj-3.36 loads fine on Java 17 — no rollback offered");
+        }
+
+        @Test
+        @DisplayName("Java 11 JVM with ecj-3.35 installed is not stale (boundary)")
+        void java11WithJava11EcjIsNotStale(@TempDir Path lib) throws IOException {
+            Files.writeString(lib.resolve("ecj-3.35.0.jar"), "fake-3.35-ecj");
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original-ecj");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_11);
+
+            assertNull(stale, "ecj-3.35 requires Java 11 — fine on Java 11");
+        }
+
+        @Test
+        @DisplayName("No backup file means we cannot offer a rollback")
+        void noBackupReturnsNull(@TempDir Path lib) throws IOException {
+            // A clean install or one swapped before the backup feature
+            // existed. Without a backup we have nothing to restore to;
+            // the detector must return null rather than guess.
+            Files.writeString(lib.resolve("ecj-3.36.0.jar"), "fake-modern-ecj");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_1_8);
+
+            assertNull(stale);
+        }
+
+        @Test
+        @DisplayName("Multiple ecj-*.jar files is ambiguous; detector bails")
+        void multipleEcjJarsBail(@TempDir Path lib) throws IOException {
+            // A user might have manually placed an additional ECJ alongside
+            // the swapped one. We can't tell which is "active" so the
+            // detector defers to the user rather than guess wrong.
+            Files.writeString(lib.resolve("ecj-3.36.0.jar"), "first");
+            Files.writeString(lib.resolve("ecj-3.24.0.jar"), "second");
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_1_8);
+
+            assertNull(stale);
+        }
+
+        @Test
+        @DisplayName("null JVM means we can't decide — no prompt")
+        void nullJvmReturnsNull(@TempDir Path lib) throws IOException {
+            Files.writeString(lib.resolve("ecj-3.36.0.jar"), "fake-modern-ecj");
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original");
+
+            EcjJarSwapper.StaleSwap stale = EcjJarSwapper.detectStaleSwap(lib, null);
+
+            assertNull(stale);
+        }
+
+        @Test
+        @DisplayName("Non-existent lib directory returns null without throwing")
+        void missingLibDir(@TempDir Path tmp) {
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(tmp.resolve("does-not-exist"),
+                            JavaSdkVersion.JDK_1_8);
+            assertNull(stale);
+        }
+
+        @Test
+        @DisplayName("Java 8 with ecj-3.35 installed flags as stale (reaches Java 11 floor)")
+        void java8WithJava11EcjIsStale(@TempDir Path lib) throws IOException {
+            Files.writeString(lib.resolve("ecj-3.35.0.jar"), "fake-3.35-ecj");
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original-ecj");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_1_8);
+
+            assertNotNull(stale);
+            assertEquals(JavaSdkVersion.JDK_11, stale.installedRequiresJvm());
+        }
+    }
+
+    @Nested
+    @DisplayName("requiredJvmFor — ECJ version → minimum JVM mapping")
+    class RequiredJvmFor {
+
+        @Test
+        @DisplayName("ECJ 3.36+ requires Java 17")
+        void modern() {
+            assertEquals(JavaSdkVersion.JDK_17, EcjJarSwapper.requiredJvmFor("3.36.0"));
+            assertEquals(JavaSdkVersion.JDK_17, EcjJarSwapper.requiredJvmFor("3.40.0"));
+        }
+
+        @Test
+        @DisplayName("ECJ 3.25–3.35 requires Java 11")
+        void java11Era() {
+            assertEquals(JavaSdkVersion.JDK_11, EcjJarSwapper.requiredJvmFor("3.35.0"));
+            assertEquals(JavaSdkVersion.JDK_11, EcjJarSwapper.requiredJvmFor("3.30.0"));
+            assertEquals(JavaSdkVersion.JDK_11, EcjJarSwapper.requiredJvmFor("3.25.0"));
+        }
+
+        @Test
+        @DisplayName("ECJ ≤ 3.24 requires Java 8")
+        void java8Era() {
+            assertEquals(JavaSdkVersion.JDK_1_8, EcjJarSwapper.requiredJvmFor("3.24.0"));
+            assertEquals(JavaSdkVersion.JDK_1_8, EcjJarSwapper.requiredJvmFor("3.21.0"));
+            assertEquals(JavaSdkVersion.JDK_1_8, EcjJarSwapper.requiredJvmFor("3.7.2"));
+        }
+    }
+
+    @Nested
+    @DisplayName("restoreFromBackup — recovery primitive")
+    class RestoreFromBackup {
+
+        @Test
+        @DisplayName("Atomically restores backup and moves displaced JAR to .devtomcat-replaced sidecar")
+        void atomicRestore(@TempDir Path lib) throws IOException {
+            Path active = lib.resolve("ecj-3.36.0.jar");
+            Path backup = lib.resolve("ecj-3.7.2.jar.devtomcat-bak");
+            Path restoreTarget = lib.resolve("ecj-3.7.2.jar");
+            Files.writeString(active, "modern-content");
+            Files.writeString(backup, "original-content");
+
+            EcjJarSwapper.StaleSwap stale = new EcjJarSwapper.StaleSwap(
+                    active, backup, restoreTarget,
+                    "3.36.0", JavaSdkVersion.JDK_17);
+
+            EcjJarSwapper.SwapResult result = EcjJarSwapper.restoreFromBackup(stale);
+
+            assertTrue(result.isSuccess(), "restore should succeed: " + result.errorMessage());
+            assertTrue(Files.exists(restoreTarget), "ecj-3.7.2.jar must be back in place");
+            assertEquals("original-content", Files.readString(restoreTarget),
+                    "Restored content must match the backup, not the displaced JAR");
+            assertFalse(Files.exists(backup), "Backup must be consumed by the restore");
+            assertFalse(Files.exists(active),
+                    "Displaced JAR must move out of its original location");
+            assertTrue(Files.exists(lib.resolve("ecj-3.36.0.jar.devtomcat-replaced")),
+                    "Displaced JAR must land at .devtomcat-replaced for inspection");
+        }
+    }
+
+    @Nested
     @DisplayName("computePlan(currentEcjJar, runtimeJvm) — version selection")
     class ComputePlanWithJvm {
 
