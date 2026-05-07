@@ -88,9 +88,24 @@ final class TomcatCompatibilityPrompt {
         }
 
         String eolDate = TomcatCompatibilityChecker.endOfLifeDateOrNull(tomcatInfo);
-        String displayName = !tomcatInfo.getName().isEmpty()
-                ? tomcatInfo.getName() + " (" + tomcatInfo.getVersion() + ")"
-                : "Tomcat " + tomcatInfo.getVersion();
+        // Use the inline "<name> <version>" form when the install carries the
+        // default "Tomcat" / "Apache Tomcat" label (or has no label at all).
+        // The parenthesised form only reads naturally when the user has
+        // assigned a custom install name like "Production Tomcat", where
+        // the version is genuinely an aside. With a generic label the
+        // parens make the version look auxiliary instead of the subject —
+        // "Tomcat (7.0.30.0) reached end-of-life" reads worse than
+        // "Tomcat 7.0.30.0 reached end-of-life".
+        String name = tomcatInfo.getName();
+        String version = tomcatInfo.getVersion();
+        String displayName;
+        if (name.isEmpty()
+                || name.equalsIgnoreCase("Tomcat")
+                || name.equalsIgnoreCase("Apache Tomcat")) {
+            displayName = "Tomcat " + version;
+        } else {
+            displayName = name + " (" + version + ")";
+        }
 
         String content = displayName + " reached end-of-life "
                 + (eolDate != null ? "in " + eolDate : "")

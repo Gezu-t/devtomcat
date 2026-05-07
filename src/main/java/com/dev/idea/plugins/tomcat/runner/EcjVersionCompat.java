@@ -458,6 +458,23 @@ final class EcjVersionCompat {
      */
     record EcjVersion(int major, int minor, int micro) implements Comparable<EcjVersion> {
 
+        /**
+         * Maven coordinate {@code org.eclipse.jdt:ecj} uses the package-version
+         * form {@code 3.X.Y} (e.g. {@code 3.36.0}). Tomcat 9 / 10 / 11 ship
+         * the JAR under the Eclipse Platform release form instead
+         * ({@code ecj-4.20.jar}, {@code ecj-4.30.jar}, etc.). The two forms
+         * are related by a fixed offset visible in {@code ECJ_MINOR_TO_JAVA}:
+         * Eclipse 4.7 = ECJ 3.13, Eclipse 4.20 = ECJ 3.26, Eclipse 4.30 = ECJ 3.36.
+         * The offset is {@code +6} for every release since Eclipse 4.4 / ECJ 3.10.
+         *
+         * <p>Without the normalisation the lookup against
+         * {@code ECJ_MINOR_TO_JAVA} keys treats {@code ecj-4.20.jar} as if
+         * its minor were 20 — which actually maps to ECJ 3.20 / Eclipse 4.14
+         * / Java 14 — and surfaces a false ECJ-too-old warning even though
+         * {@code ecj-4.20.jar} (= ECJ 3.26) really reads up to Java 17.
+         */
+        private static final int ECLIPSE_RELEASE_TO_ECJ_MINOR_OFFSET = 6;
+
         @Nullable
         static EcjVersion parse(@Nullable String version) {
             if (version == null) return null;
@@ -475,6 +492,13 @@ final class EcjVersionCompat {
                 int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
                 int micro = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
                 if (major < 0 || minor < 0 || micro < 0) return null;
+                // Normalise Eclipse Platform release form (4.X) to ECJ
+                // package version form (3.Y) so the same lookup table works
+                // for both naming conventions. See the offset constant for
+                // the relationship.
+                if (major == 4) {
+                    return new EcjVersion(3, minor + ECLIPSE_RELEASE_TO_ECJ_MINOR_OFFSET, micro);
+                }
                 return new EcjVersion(major, minor, micro);
             } catch (NumberFormatException e) {
                 return null;

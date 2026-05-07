@@ -87,6 +87,70 @@ class EcjVersionCompatTest {
             assertTrue(a.compareTo(c) < 0);
             assertEquals(0, a.compareTo(EcjVersionCompat.EcjVersion.parse("3.7.0")));
         }
+
+        @Test
+        @DisplayName("Eclipse Platform release 4.20 normalises to ECJ 3.26 (Tomcat 9 ships ecj-4.20.jar)")
+        void eclipseRelease420NormalisesTo326() {
+            // Tomcat 9 ships the ECJ JAR under its Eclipse Platform release
+            // form (ecj-4.20.jar) rather than the Maven coordinate form
+            // (ecj-3.26.0.jar). Without normalisation, ECJ_MINOR_TO_JAVA.get(20)
+            // would return the entry for ECJ 3.20 / Eclipse 4.14 / Java 14 —
+            // wildly wrong, since ecj-4.20.jar (= ECJ 3.26) actually reads
+            // up to Java 17. The +6 offset fixes this.
+            EcjVersionCompat.EcjVersion v = EcjVersionCompat.EcjVersion.parse("4.20");
+            assertNotNull(v);
+            assertEquals(3, v.major(), "Eclipse 4.X form must normalise to ECJ 3.Y");
+            assertEquals(26, v.minor(), "Eclipse 4.20 corresponds to ECJ 3.26");
+        }
+
+        @Test
+        @DisplayName("Eclipse Platform release 4.30 normalises to ECJ 3.36 (most modern Tomcat 9 / 10)")
+        void eclipseRelease430NormalisesTo336() {
+            EcjVersionCompat.EcjVersion v = EcjVersionCompat.EcjVersion.parse("4.30");
+            assertNotNull(v);
+            assertEquals(3, v.major());
+            assertEquals(36, v.minor());
+        }
+
+        @Test
+        @DisplayName("Eclipse 4.7 normalises to ECJ 3.13 (the lowest +6 offset case worth pinning)")
+        void eclipseRelease47NormalisesTo313() {
+            EcjVersionCompat.EcjVersion v = EcjVersionCompat.EcjVersion.parse("4.7");
+            assertNotNull(v);
+            assertEquals(3, v.major());
+            assertEquals(13, v.minor());
+        }
+
+        @Test
+        @DisplayName("Maven coordinate form 3.X.Y is unchanged (no false normalisation)")
+        void mavenCoordinateFormUnchanged() {
+            EcjVersionCompat.EcjVersion v1 = EcjVersionCompat.EcjVersion.parse("3.36.0");
+            assertEquals(3, v1.major());
+            assertEquals(36, v1.minor());
+            assertEquals(0, v1.micro());
+
+            EcjVersionCompat.EcjVersion v2 = EcjVersionCompat.EcjVersion.parse("3.7.2");
+            assertEquals(3, v2.major());
+            assertEquals(7, v2.minor());
+            assertEquals(2, v2.micro());
+        }
+
+        @Test
+        @DisplayName("ecj-4.20.jar is correctly mapped to Java 17 max class file (the user-facing fix)")
+        void ecj420ReadsJava17() {
+            // End-to-end of the bug fix: a Tomcat 9-shipped ecj-4.20.jar
+            // landing under any tomcat install must report it reads up to
+            // Java 17, not Java 14.
+            assertEquals(17, EcjVersionCompat.maxSupportedJavaFor(
+                    EcjVersionCompat.EcjVersion.parse("4.20")));
+        }
+
+        @Test
+        @DisplayName("ecj-4.30.jar maps to Java 22 max class file")
+        void ecj430ReadsJava22() {
+            assertEquals(22, EcjVersionCompat.maxSupportedJavaFor(
+                    EcjVersionCompat.EcjVersion.parse("4.30")));
+        }
     }
 
     @Nested
@@ -141,15 +205,40 @@ class EcjVersionCompatTest {
                     EcjVersionCompat.EcjVersion.parse("3.3.0")));
         }
 
-        @Test @DisplayName("Non-3.x major is not falsely flagged: assumes latest known support")
-        void nonThreeMajor() {
-            // ECJ has never left the 3.x major track. An entry like "4.0.0" or
-            // "1.0.0" is exotic; treat as supporting whatever the latest table
-            // entry claims so we do not falsely warn against an unfamiliar shape.
+        @Test @DisplayName("Eclipse Platform release form (4.X) is normalised to the matching ECJ 3.(X+6)")
+        void eclipsePlatformReleaseForm() {
+            // Tomcat 9 / 10 / 11 ship the ECJ JAR as ecj-4.X.jar — the
+            // Eclipse Platform release form. The +6 offset (Eclipse 4.7
+            // = ECJ 3.13, Eclipse 4.20 = ECJ 3.26, Eclipse 4.30 = ECJ 3.36)
+            // is applied in EcjVersion.parse so the lookup table works for
+            // both naming conventions. Earlier exotic-major case
+            // ("4.0.0 should fall through to latest known") was based on
+            // an incorrect assumption that 4.X is unrecognised; in fact
+            // every Eclipse 4.X release pairs with a real ECJ 3.X+6 release.
+            assertEquals(6, EcjVersionCompat.maxSupportedJavaFor(
+                    EcjVersionCompat.EcjVersion.parse("4.0.0")),
+                    "Eclipse 4.0 = ECJ 3.6 = Java 6 max");
+            assertEquals(17, EcjVersionCompat.maxSupportedJavaFor(
+                    EcjVersionCompat.EcjVersion.parse("4.20.0")),
+                    "Eclipse 4.20 = ECJ 3.26 = Java 17 max (the user-facing fix)");
+            assertEquals(22, EcjVersionCompat.maxSupportedJavaFor(
+                    EcjVersionCompat.EcjVersion.parse("4.30.0")),
+                    "Eclipse 4.30 = ECJ 3.36 = Java 22 max");
+        }
+
+        @Test @DisplayName("Other major-version shapes (1.X, 2.X) still treated as exotic / latest")
+        void exoticMajor() {
+            // ECJ 1.X and 2.X are pre-modern, very early Eclipse history.
+            // Anything in those ranges (basically only theoretical now)
+            // falls through to the latest-known fallback in
+            // maxSupportedJavaFor so we do not warn falsely on an
+            // unrecognisable shape.
             int latestKnown = EcjVersionCompat.maxSupportedJavaFor(
                     EcjVersionCompat.EcjVersion.parse("3.40.0"));
             assertEquals(latestKnown, EcjVersionCompat.maxSupportedJavaFor(
-                    EcjVersionCompat.EcjVersion.parse("4.0.0")));
+                    EcjVersionCompat.EcjVersion.parse("1.0.0")));
+            assertEquals(latestKnown, EcjVersionCompat.maxSupportedJavaFor(
+                    EcjVersionCompat.EcjVersion.parse("2.0.0")));
         }
     }
 
