@@ -613,6 +613,154 @@ class EcjJarSwapperTest {
     }
 
     @Nested
+    @DisplayName("requiredJvmFor(Path) — JAR-introspection path (version-proof)")
+    class RequiredJvmForJar {
+
+        // Class-file majors:
+        //   52 = Java 8, 55 = Java 11, 61 = Java 17, 65 = Java 21
+        // Build minimal JAR fixtures that contain just enough header bytes
+        // for the class-file-major reader to work.
+
+        @Test
+        @DisplayName("ECJ JAR with class-file major 61 reports JDK_17 (the bug repro)")
+        void jarWithJava17ClassesReportsJdk17(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("ecj-3.36.0.jar");
+            writeFakeEcjJar(jar, 61 /* Java 17 */);
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertEquals(JavaSdkVersion.JDK_17, required);
+        }
+
+        @Test
+        @DisplayName("ECJ JAR with class-file major 55 reports JDK_11")
+        void jarWithJava11ClassesReportsJdk11(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("ecj-3.35.0.jar");
+            writeFakeEcjJar(jar, 55 /* Java 11 */);
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertEquals(JavaSdkVersion.JDK_11, required);
+        }
+
+        @Test
+        @DisplayName("ECJ JAR with class-file major 52 reports JDK_1_8")
+        void jarWithJava8ClassesReportsJdk18(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("ecj-3.24.0.jar");
+            writeFakeEcjJar(jar, 52 /* Java 8 */);
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertEquals(JavaSdkVersion.JDK_1_8, required);
+        }
+
+        @Test
+        @DisplayName("Future class-file major (e.g. 70 → Java 26) parses through JavaSdkVersion.fromVersionString")
+        void jarWithFutureClassFileMajor(@TempDir Path tmp) throws IOException {
+            // Version-proof contract: a hypothetical future ECJ release with
+            // a class-file major beyond the current switch cases should
+            // still resolve via fromVersionString — the mapping
+            // (major - 44 = feature) is part of the JVM spec, not Eclipse's
+            // release schedule. We don't assert a specific enum (the IDE
+            // may not know about Java 26 yet) but the call must not throw.
+            Path jar = tmp.resolve("ecj-future.jar");
+            writeFakeEcjJar(jar, 70 /* hypothetical Java 26 */);
+
+            // Must not throw. May return null if the platform doesn't know
+            // about that JVM yet — caller falls back to version-string path.
+            assertDoesNotThrow(() -> EcjJarSwapper.requiredJvmFor(jar));
+        }
+
+        @Test
+        @DisplayName("Missing JAR returns null (not throws)")
+        void missingJarReturnsNull(@TempDir Path tmp) {
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(tmp.resolve("does-not-exist.jar"));
+            assertNull(required);
+        }
+
+        @Test
+        @DisplayName("JAR without the introspection class returns null")
+        void jarWithoutIntrospectionClassReturnsNull(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("not-an-ecj.jar");
+            // Write a JAR with a different class entry — INameEnvironment
+            // is missing.
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                out.putNextEntry(new java.util.zip.ZipEntry("com/example/Other.class"));
+                out.write(buildClassFileHeader(52));
+                out.closeEntry();
+            }
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertNull(required, "Missing introspection class must yield null, not a default");
+        }
+
+        @Test
+        @DisplayName("JAR with garbage in place of the magic number returns null")
+        void garbageMagicReturnsNull(@TempDir Path tmp) throws IOException {
+            Path jar = tmp.resolve("not-a-class.jar");
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                out.putNextEntry(new java.util.zip.ZipEntry(
+                        "org/eclipse/jdt/internal/compiler/env/INameEnvironment.class"));
+                out.write(new byte[]{0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0});
+                out.closeEntry();
+            }
+
+            JavaSdkVersion required = EcjJarSwapper.requiredJvmFor(jar);
+            assertNull(required, "Bad magic must yield null");
+        }
+
+        @Test
+        @DisplayName("classFileMajorToJvm spec mapping holds for the common range")
+        void classFileMajorMapping() {
+            assertEquals(JavaSdkVersion.JDK_1_8, EcjJarSwapper.classFileMajorToJvm(52));
+            assertEquals(JavaSdkVersion.JDK_1_9, EcjJarSwapper.classFileMajorToJvm(53));
+            assertEquals(JavaSdkVersion.JDK_11,  EcjJarSwapper.classFileMajorToJvm(55));
+            assertEquals(JavaSdkVersion.JDK_17,  EcjJarSwapper.classFileMajorToJvm(61));
+        }
+
+        @Test
+        @DisplayName("detectStaleSwap reads the JAR and ignores a misleading filename")
+        void detectStaleSwapPrefersJarOverFilename(@TempDir Path lib) throws IOException {
+            // The active JAR's FILENAME says ecj-3.24.0 (which would map to
+            // Java 8 via the version-string path), but the JAR ACTUALLY
+            // contains class-file major 61 (Java 17). Detection must trust
+            // the bytecode over the filename — otherwise an ECJ rebuilt
+            // for a newer JVM but kept under an old filename would slip
+            // past the check.
+            Path active = lib.resolve("ecj-3.24.0.jar");
+            writeFakeEcjJar(active, 61 /* Java 17 — JAR is mislabelled */);
+            Files.writeString(lib.resolve("ecj-3.7.2.jar.devtomcat-bak"), "fake-original");
+
+            EcjJarSwapper.StaleSwap stale =
+                    EcjJarSwapper.detectStaleSwap(lib, JavaSdkVersion.JDK_1_8);
+
+            assertNotNull(stale, "Detector must read JAR bytes, not just the filename");
+            assertEquals(JavaSdkVersion.JDK_17, stale.installedRequiresJvm());
+        }
+
+        @NotNull
+        private static byte[] buildClassFileHeader(int major) {
+            // 4 bytes magic + 2 bytes minor + 2 bytes major
+            byte[] hdr = new byte[8];
+            hdr[0] = (byte) 0xCA; hdr[1] = (byte) 0xFE;
+            hdr[2] = (byte) 0xBA; hdr[3] = (byte) 0xBE;
+            hdr[4] = 0; hdr[5] = 0;            // minor = 0
+            hdr[6] = (byte) ((major >> 8) & 0xFF);
+            hdr[7] = (byte) (major & 0xFF);
+            return hdr;
+        }
+
+        private static void writeFakeEcjJar(@NotNull Path jar, int classFileMajor) throws IOException {
+            try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(
+                    Files.newOutputStream(jar))) {
+                out.putNextEntry(new java.util.zip.ZipEntry(
+                        "org/eclipse/jdt/internal/compiler/env/INameEnvironment.class"));
+                out.write(buildClassFileHeader(classFileMajor));
+                out.closeEntry();
+            }
+        }
+    }
+
+    @Nested
     @DisplayName("requiredJvmFor — ECJ version → minimum JVM mapping")
     class RequiredJvmFor {
 

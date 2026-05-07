@@ -18,6 +18,8 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Replaces an outdated {@code ecj-X.Y.Z.jar} inside a Tomcat install with a
@@ -77,7 +79,7 @@ final class EcjJarSwapper {
      * Tiered ECJ release picks per JVM minimum. Each entry pairs a JVM floor
      * with the highest ECJ release that still runs on that floor and the
      * highest webapp class-file major that release can read. Sorted highest
-     * JVM first so {@link #selectEcjVersion} can return the first match.
+     * JVM first so {@link #selectEcj} can return the first match.
      *
      * <ul>
      *   <li><b>3.36.0</b> on Java 17+: reads up to Java 22 (major 66).</li>
@@ -94,6 +96,30 @@ final class EcjJarSwapper {
      * {@link EcjPick#maxReadableClassFileMajor} so callers can detect that
      * deeper incompatibility and surface a clear message instead of
      * silently picking an ECJ that will fail at JSP-compile time anyway.
+     *
+     * <h3>Maintenance contract</h3>
+     * This table is hardcoded by deliberate choice — querying Maven Central
+     * for the latest ECJ at swap time would require network at swap-time
+     * and add a dependency surface for marginal benefit. The table is only
+     * consumed by:
+     * <ol>
+     *   <li>{@link #selectEcj} — the forward-path picker. If a newer ECJ
+     *       release appears upstream, the picker keeps recommending the
+     *       last version it knows about. That is a soft degradation
+     *       (suboptimal but functional swap), not a regression — the
+     *       recommended JAR still loads on its tier's JVM floor.</li>
+     *   <li>{@link #requiredJvmFor(String)} — version-string fallback for
+     *       stale-swap detection. The JAR-introspection path
+     *       ({@link #requiredJvmFor(Path)}) is preferred and reads the
+     *       actual class-file major; this version-string mapping is only
+     *       used when the JAR cannot be read.</li>
+     * </ol>
+     * When Eclipse releases a new ECJ that bumps the JVM floor, add a row
+     * at the top with the new floor's first version as
+     * {@code tierStartVersion}, the latest of THIS tier as the previous
+     * row's {@code version}, and update the tier-end version of the
+     * adjacent row. Do not edit blindly — verify the bump in the Eclipse
+     * release notes before changing.
      */
     private static final EcjTier[] ECJ_TIERS = {
             // tier name        latest    starts at  min JVM                max class-file
@@ -172,6 +198,109 @@ final class EcjJarSwapper {
                 + ". The webapp's JRE must be upgraded for the swap to load.");
         return new EcjPick(lowest.version(), lowest.minRuntimeJvm(),
                 lowest.maxReadableClassFileMajor());
+    }
+
+    /**
+     * Class file inside ECJ that we read to determine the JVM the JAR was
+     * compiled for. Tomcat's Jasper loads this exact entry first; reading
+     * its class-file major is the most direct evidence of the JAR's
+     * runtime requirement and survives any future Eclipse release without
+     * a code change.
+     */
+    private static final String ECJ_INTROSPECT_CLASS =
+            "org/eclipse/jdt/internal/compiler/env/INameEnvironment.class";
+
+    /**
+     * Reads the bundled ECJ JAR and returns the minimum JVM it requires
+     * based on the class-file major version of {@link #ECJ_INTROSPECT_CLASS}.
+     * Class-file majors map to JVM features as: 52 → 8, 53 → 9, 55 → 11,
+     * 61 → 17, etc. ({@code feature = major - 44} for Java 5 and later).
+     *
+     * <p>Returns {@code null} when the JAR is missing, unreadable, or does
+     * not contain the introspection class — callers should then fall back
+     * to {@link #requiredJvmFor(String)} or treat the swap as ambiguous.
+     *
+     * <p>This is the version-proof path: even if Eclipse releases a new ECJ
+     * with a higher JVM floor than anything in {@link #ECJ_TIERS}, the
+     * detection logic reads the actual bytecode and gets the answer right
+     * without needing the table updated. The tier table is now only an
+     * input to the forward-path picker (selecting which version to
+     * download), where some staleness tolerance is acceptable — picking
+     * yesterday's "latest" is never a regression.
+     */
+    @Nullable
+    static JavaSdkVersion requiredJvmFor(@NotNull Path ecjJar) {
+        Integer major = readClassFileMajor(ecjJar, ECJ_INTROSPECT_CLASS);
+        return major == null ? null : classFileMajorToJvm(major);
+    }
+
+    /**
+     * Reads the class-file major version from a single class entry inside a
+     * JAR. Returns {@code null} when the JAR is missing, the entry is not
+     * present, or the entry is too short to contain a class-file header.
+     * Defensive: never throws — the caller's fallback path stays usable.
+     */
+    @Nullable
+    static Integer readClassFileMajor(@NotNull Path jarPath, @NotNull String classEntryName) {
+        if (!Files.isRegularFile(jarPath)) return null;
+        try (ZipFile zip = new ZipFile(jarPath.toFile())) {
+            ZipEntry entry = zip.getEntry(classEntryName);
+            if (entry == null) return null;
+            try (InputStream in = zip.getInputStream(entry)) {
+                byte[] header = in.readNBytes(8);
+                if (header.length < 8) return null;
+                // Class-file format (JVMS §4.1):
+                //   u4 magic     = 0xCAFEBABE   (bytes 0..3)
+                //   u2 minor     =              (bytes 4..5)
+                //   u2 major     =              (bytes 6..7)
+                int magic = ((header[0] & 0xff) << 24) | ((header[1] & 0xff) << 16)
+                          | ((header[2] & 0xff) << 8)  |  (header[3] & 0xff);
+                if (magic != 0xCAFEBABE) return null;
+                return ((header[6] & 0xff) << 8) | (header[7] & 0xff);
+            }
+        } catch (IOException e) {
+            LOG.debug("Could not read class-file major from " + jarPath
+                    + " entry " + classEntryName + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Maps a class-file major version to the JVM feature version that
+     * introduced it. Class-file format is stable across the JVM spec
+     * (JVMS §4.1, table 4.1-A): {@code feature = major - 44} for Java 5+.
+     *
+     * <p>Class-file majors are part of the JVM specification, not Eclipse's
+     * release schedule, so this mapping does not depend on any third-party
+     * version table. Translation is correct for every JVM, including ones
+     * the IDE doesn't have an enum value for (the fallback uses
+     * {@link JavaSdkVersion#fromVersionString} on the computed feature).
+     */
+    @Nullable
+    static JavaSdkVersion classFileMajorToJvm(int classFileMajor) {
+        if (classFileMajor < 52) return JavaSdkVersion.JDK_1_8;  // pre-Java 8 floor we still support
+        // Common values get an enum directly so the picker / detector logs
+        // are stable string-printed across IntelliJ versions where the enum
+        // names have shifted.
+        switch (classFileMajor) {
+            case 52: return JavaSdkVersion.JDK_1_8;
+            case 53: return JavaSdkVersion.JDK_1_9;
+            case 54: return JavaSdkVersion.JDK_10;
+            case 55: return JavaSdkVersion.JDK_11;
+            case 56: return JavaSdkVersion.JDK_12;
+            case 57: return JavaSdkVersion.JDK_13;
+            case 58: return JavaSdkVersion.JDK_14;
+            case 59: return JavaSdkVersion.JDK_15;
+            case 60: return JavaSdkVersion.JDK_16;
+            case 61: return JavaSdkVersion.JDK_17;
+            default:
+                // Java 18+ — let the platform parser handle it. If a future
+                // class-file major lands in a JAR before IntelliJ knows
+                // about it, fromVersionString returns null and we fall back
+                // to "modern default" upstream.
+                int feature = classFileMajor - 44;
+                return JavaSdkVersion.fromVersionString(String.valueOf(feature));
+        }
     }
 
     /**
@@ -279,7 +408,17 @@ final class EcjJarSwapper {
             String currentName = currentEcj.getFileName().toString();
             String currentVersion = currentName.substring("ecj-".length(),
                     currentName.length() - ".jar".length());
-            JavaSdkVersion requires = requiredJvmFor(currentVersion);
+            // Primary path: read the actual class-file major from a key
+            // ECJ class. This is version-proof — even an ECJ release we've
+            // never heard of gets the right verdict because the JVM spec
+            // pins class-file major → JVM feature mapping.
+            JavaSdkVersion requires = requiredJvmFor(currentEcj);
+            if (requires == null) {
+                // Fallback: we couldn't read the JAR (corrupted, missing
+                // entry, IO error). Use the tier-table mapping by version
+                // string so detection still works on a known release.
+                requires = requiredJvmFor(currentVersion);
+            }
             if (runtimeJvm.isAtLeast(requires)) {
                 // Installed ECJ loads fine on this JVM — no rollback needed.
                 return null;
