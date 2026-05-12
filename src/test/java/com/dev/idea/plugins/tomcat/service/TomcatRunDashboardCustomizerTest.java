@@ -1,8 +1,13 @@
 package com.dev.idea.plugins.tomcat.service;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,6 +60,124 @@ class TomcatRunDashboardCustomizerTest {
         @DisplayName("formats empty string when there are no issues")
         void emptyWhenNoIssues() {
             assertTrue(TomcatRunDashboardCustomizer.formatIssueSummary(0, 0).isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("formatArtifactContextSummary — parent-line summary that replaces the dropped child tree on 2025.3+")
+    class FormatArtifactContextSummaryTests {
+
+        @Test
+        @DisplayName("null artifact list returns empty")
+        void nullList() {
+            assertEquals("", TomcatRunDashboardCustomizer.formatArtifactContextSummary(null));
+        }
+
+        @Test
+        @DisplayName("empty artifact list returns empty")
+        void emptyList() {
+            assertEquals("", TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                    Collections.emptyList()));
+        }
+
+        @Test
+        @DisplayName("single artifact with /myapp context")
+        void singleNonRoot() {
+            assertEquals("/myapp",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/myapp"))));
+        }
+
+        @Test
+        @DisplayName("single artifact at root context renders as /")
+        void singleRoot() {
+            // Root context still surfaces — when there is no child tree, the
+            // root marker is the user's signal that the app is deployed at all.
+            assertEquals("/",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/"))));
+        }
+
+        @Test
+        @DisplayName("two artifacts render as comma-separated context paths")
+        void twoArtifacts() {
+            assertEquals("/app1, /app2",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/app1"), artifact("/app2"))));
+        }
+
+        @Test
+        @DisplayName("three artifacts render in full (boundary at the visible cap)")
+        void threeArtifacts() {
+            assertEquals("/a, /b, /c",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/a"), artifact("/b"), artifact("/c"))));
+        }
+
+        @Test
+        @DisplayName("four artifacts collapse the tail into (+1)")
+        void fourArtifacts() {
+            assertEquals("/a, /b, /c (+1)",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/a"), artifact("/b"), artifact("/c"), artifact("/d"))));
+        }
+
+        @Test
+        @DisplayName("many artifacts collapse the tail into (+N) with correct count")
+        void manyArtifacts() {
+            assertEquals("/a, /b, /c (+4)",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/a"), artifact("/b"), artifact("/c"),
+                                    artifact("/d"), artifact("/e"), artifact("/f"), artifact("/g"))));
+        }
+
+        @Test
+        @DisplayName("null entries in the list are skipped")
+        void nullEntryIsSkipped() {
+            List<DeploymentArtifact> list = new ArrayList<>();
+            list.add(artifact("/keep"));
+            list.add(null);
+            list.add(artifact("/also"));
+            assertEquals("/keep, /also",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(list));
+        }
+
+        @Test
+        @DisplayName("artifacts with empty context are skipped (would render as stray commas)")
+        void emptyContextIsSkipped() {
+            DeploymentArtifact emptyCtx = new DeploymentArtifact("name", "/path", "war");
+            // setContextPath("") through the model normalizes to "/" — bypass
+            // by constructing the artifact and then forcing the field via
+            // setContextPath(null) which the normalizer also maps to "/", so
+            // this branch only fires if a non-normalized artifact slips through
+            // (e.g. deserialized from a malformed XML). Simulate that path by
+            // mocking via subclass.
+            DeploymentArtifact pretendEmpty = new DeploymentArtifact("name", "/path", "war") {
+                @Override
+                @org.jetbrains.annotations.NotNull
+                public String getContextPath() {
+                    return "";
+                }
+            };
+            assertEquals("/keep",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(pretendEmpty, artifact("/keep"))));
+        }
+
+        @Test
+        @DisplayName("five-deep artifact list shows first three plus (+2) — verifies the cap is not off-by-one")
+        void capIsExactlyThree() {
+            assertEquals("/a, /b, /c (+2)",
+                    TomcatRunDashboardCustomizer.formatArtifactContextSummary(
+                            List.of(artifact("/a"), artifact("/b"), artifact("/c"),
+                                    artifact("/d"), artifact("/e"))));
+        }
+
+        private DeploymentArtifact artifact(String contextPath) {
+            DeploymentArtifact a = new DeploymentArtifact(
+                    "name-for-" + contextPath, "/tmp/path.war", DeploymentArtifact.TYPE_WAR);
+            a.setContextPath(contextPath);
+            return a;
         }
     }
 

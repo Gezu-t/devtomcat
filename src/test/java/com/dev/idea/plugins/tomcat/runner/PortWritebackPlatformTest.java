@@ -226,6 +226,104 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
                 "http://localhost:8087/app", launched);
     }
 
+    public void testCustomLoopbackUrlPortIsRewrittenOnWriteback() {
+        // Regression for the dialog-desync bug: the user typed a deeper path
+        // into the "After launch" URL (e.g. http://localhost:8082/connect/
+        // common/login), so the stored URL is not auto-managed. Port resolution
+        // bumps 8082 → 8083. Writeback must rewrite the stored URL's PORT
+        // (preserving the user's custom path) — otherwise the run-config
+        // dialog re-opens showing :8082 even though Tomcat now binds :8083,
+        // and the HTTP-port field shows :8083. The path component is the
+        // user's intent and stays put.
+        TomcatRunConfiguration cfg = createConfig("CustomPathLoopbackUrl");
+        cfg.setHttpPort(8082);
+        cfg.getConfigData().setContextPath("/connect");
+        cfg.setBrowserUrl("http://localhost:8082/connect/common/login"); // custom path, stored verbatim
+
+        PortConfig resolved = resolvedPorts(8083, 8009, 8443, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("HTTP port must reflect the resolved value",
+                Integer.valueOf(8083), cfg.getHttpPort());
+        assertEquals("stored browser URL must have its port rewritten while keeping the custom path",
+                "http://localhost:8083/connect/common/login", cfg.getBrowserUrl());
+    }
+
+    public void testCustomLoopbackUrlIsNormalisedBackToAutoWhenPortRewriteMakesItMatch() {
+        // Boundary: a stored URL that's "auto-shaped except for the stale port"
+        // becomes auto after the rewrite. setBrowserUrl(...) normalises a
+        // value that matches autoBrowserUrl() back to the empty stored form
+        // so the single-source-of-truth invariant holds — every later read
+        // of getBrowserUrl() recomputes from the live port.
+        TomcatRunConfiguration cfg = createConfig("AutoShapedAfterRewrite");
+        cfg.setHttpPort(8082);
+        cfg.getConfigData().setContextPath("/app");
+        // Custom-stored URL that becomes the auto form once port is rewritten to 8083.
+        cfg.getConfigData().getBrowserConfig().setBrowserUrl("http://localhost:8082/app");
+
+        PortConfig resolved = resolvedPorts(8083, 8009, 8443, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("getBrowserUrl must reflect the resolved port",
+                "http://localhost:8083/app", cfg.getBrowserUrl());
+        assertEquals("rewritten value matching auto-form must be normalised to empty stored",
+                "", cfg.getConfigData().getBrowserConfig().getUrl());
+    }
+
+    public void testCustomProxyUrlPreservedAtWriteback() {
+        // User pointed at a reverse proxy / port-forward — deliberate. The
+        // writeback-time rewrite must not touch non-loopback URLs even when
+        // the HTTP port changes. (The runtime safety net in the launch path
+        // also leaves these alone — pinned in testCustomProxyUrlNotRewritten
+        // AtRuntime below.)
+        TomcatRunConfiguration cfg = createConfig("ProxyPreservedOnWriteback");
+        cfg.setHttpPort(8082);
+        cfg.setBrowserUrl("http://proxy.example.com:9090/route");
+
+        PortConfig resolved = resolvedPorts(8083, 8009, 8443, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("HTTP port writeback still applies",
+                Integer.valueOf(8083), cfg.getHttpPort());
+        assertEquals("non-loopback URL must survive writeback untouched",
+                "http://proxy.example.com:9090/route", cfg.getBrowserUrl());
+    }
+
+    public void testWritebackWithUnchangedHttpPortLeavesUrlAlone() {
+        // Idempotency for URL rewrite: when the resolved HTTP port matches
+        // the configured value, the stored URL stays exactly as stored, even
+        // if it happens to be loopback. The rewrite is gated on port change,
+        // not on URL shape.
+        TomcatRunConfiguration cfg = createConfig("UrlIdempotent");
+        cfg.setHttpPort(8083);
+        cfg.getConfigData().setContextPath("/app");
+        cfg.setBrowserUrl("http://localhost:8083/app/deep/page");
+
+        PortConfig resolved = resolvedPorts(8083, 8009, 8443, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("stored URL must be untouched when the resolved port matches",
+                "http://localhost:8083/app/deep/page", cfg.getBrowserUrl());
+    }
+
+    public void testWritebackSkippedInParallelLeavesStoredUrlAlone() {
+        // Parallel-run mode skips port writeback (seed-preservation), so the
+        // stored URL also stays at the seed value. The launch-time rewrite
+        // path handles per-instance port bridging — already pinned in
+        // testParallelRunAutoUrlRewrittenAtRuntime.
+        TomcatRunConfiguration cfg = createConfig("ParallelUrlSkip");
+        cfg.setHttpPort(8082);
+        cfg.getConfigData().setContextPath("/connect");
+        cfg.setAllowMultipleInstances(true);
+        cfg.setBrowserUrl("http://localhost:8082/connect/common/login");
+
+        PortConfig resolved = resolvedPorts(8083, 8009, 8443, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("parallel-run skip applies to URL rewrite as well",
+                "http://localhost:8082/connect/common/login", cfg.getBrowserUrl());
+    }
+
     public void testCustomProxyUrlNotRewrittenAtRuntime() {
         // A user pointing their browser URL at a reverse proxy, CDN, or port-forward
         // chose that port deliberately. Even at launch time the rewrite must NOT

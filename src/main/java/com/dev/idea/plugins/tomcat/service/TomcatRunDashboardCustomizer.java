@@ -68,6 +68,21 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                 statusText.append(":").append(endpoint.port());
             }
 
+            // Artifact context summary — what's deployed at this port. Surfaced on
+            // the parent node's status line because the platform's child-population
+            // hook (RunDashboardCustomizer#getChildren) was removed in IntelliJ
+            // platform 253 (2025.3) and there is no replacement extension point.
+            // On 2025.1 / 2025.2 the expandable artifact tree still renders via
+            // getChildren below; this line is the only way the same information
+            // surfaces on 2025.3+. Keeping it in both modes is harmless redundancy.
+            List<DeploymentArtifact> artifacts =
+                    tomcatConfig.getConfigData().getDeploymentConfig().getArtifacts();
+            String contextSummary = formatArtifactContextSummary(artifacts);
+            if (!contextSummary.isEmpty()) {
+                if (!statusText.isEmpty()) statusText.append(" · ");
+                statusText.append(contextSummary);
+            }
+
             // Live deployment status from the status service
             Project project = config.getProject();
             if (project == null || project.isDisposed()) return false;
@@ -107,13 +122,12 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
                         statusText.append(" · ").append(issueSummary);
                     }
                 }
-            } else {
-                // No live status — show static artifact count
-                List<DeploymentArtifact> artifacts = tomcatConfig.getConfigData().getDeploymentConfig().getArtifacts();
-                if (artifacts != null && !artifacts.isEmpty()) {
-                    if (!statusText.isEmpty()) statusText.append(" · ");
-                    statusText.append(artifacts.size()).append(artifacts.size() == 1 ? " artifact" : " artifacts");
-                }
+            } else if (contextSummary.isEmpty() && artifacts != null && !artifacts.isEmpty()) {
+                // No live status, no context paths to show, but artifacts are
+                // configured — fall back to a count placeholder so the user
+                // still sees the config has something deployed.
+                if (!statusText.isEmpty()) statusText.append(" · ");
+                statusText.append(artifacts.size()).append(artifacts.size() == 1 ? " artifact" : " artifacts");
             }
 
             if (!statusText.isEmpty()) {
@@ -290,6 +304,59 @@ public class TomcatRunDashboardCustomizer extends RunDashboardCustomizer {
         long minutes = ms / 60_000;
         long seconds = (ms % 60_000) / 1_000;
         return minutes + "m " + seconds + "s";
+    }
+
+    /**
+     * Maximum number of artifact context paths rendered inline on the parent
+     * status line before the rest collapse into a "(+N)" suffix. Three keeps
+     * the line readable even when artifacts have moderately long context paths
+     * and matches what the Services panel can fit without horizontal scroll on
+     * a typical IDE layout.
+     */
+    private static final int MAX_VISIBLE_CONTEXTS = 3;
+
+    /**
+     * Builds a compact summary of artifact context paths for the Services tree
+     * presentation line.
+     *
+     * <p>Reason this lives on the parent node: IntelliJ platform 253 (2025.3)
+     * removed {@code RunDashboardCustomizer#getChildren} with no replacement
+     * extension point, so the per-artifact child rows that previously appeared
+     * under the running configuration no longer render on 2025.3+. Surfacing
+     * the context paths here is the only way a user can tell which webapp is
+     * deployed on the displayed port without opening the config dialog.
+     *
+     * <p>Formats:
+     * <pre>
+     *   []                       → ""
+     *   [/myapp]                 → "/myapp"
+     *   [/]                      → "/"
+     *   [/app1, /app2]           → "/app1, /app2"
+     *   [/a, /b, /c, /d]         → "/a, /b, /c (+1)"
+     *   [/a, /b, /c, /d, /e]     → "/a, /b, /c (+2)"
+     * </pre>
+     *
+     * <p>Artifacts with empty context are skipped — they contribute nothing
+     * the user can act on and would render as a stray comma.
+     */
+    @NotNull
+    static String formatArtifactContextSummary(@Nullable List<DeploymentArtifact> artifacts) {
+        if (artifacts == null || artifacts.isEmpty()) return "";
+
+        List<String> contexts = new ArrayList<>(artifacts.size());
+        for (DeploymentArtifact artifact : artifacts) {
+            if (artifact == null) continue;
+            String ctx = artifact.getContextPath();
+            if (ctx != null && !ctx.isEmpty()) {
+                contexts.add(ctx);
+            }
+        }
+        if (contexts.isEmpty()) return "";
+
+        int visible = Math.min(contexts.size(), MAX_VISIBLE_CONTEXTS);
+        String head = String.join(", ", contexts.subList(0, visible));
+        int hidden = contexts.size() - visible;
+        return hidden > 0 ? head + " (+" + hidden + ")" : head;
     }
 
     @NotNull

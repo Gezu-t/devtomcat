@@ -25,6 +25,7 @@ bin
 gradle.properties
 release-notes.txt
 .claude
+LOCAL_NOTES.md
 /com/
 
 # Extracted IntelliJ platform dependency artifacts (class files, native libs)
