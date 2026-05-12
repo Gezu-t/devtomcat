@@ -1,7 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.components.JBLabel;
@@ -13,7 +12,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * VM Options Section
@@ -21,8 +19,6 @@ import java.util.Objects;
  * command-line text (built-in expand button, no horizontal overflow).
  */
 public class VmOptionsSection implements ConfigurationSection {
-
-    private static final Logger LOG = Logger.getInstance(VmOptionsSection.class);
 
     private ExpandableTextField vmOptionsEditor;
     private JPanel panel;

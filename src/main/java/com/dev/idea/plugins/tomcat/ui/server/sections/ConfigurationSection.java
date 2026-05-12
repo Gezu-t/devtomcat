@@ -11,6 +11,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Base interface for configuration sections
@@ -18,13 +19,25 @@ import java.util.List;
  */
 public interface ConfigurationSection {
 
+    /** Reference text used to size the label column. Widest label across all sections. */
+    String LABEL_COLUMN_REFERENCE = "On frame deactivation:";
+
+    /**
+     * Lazy single-cell cache for the label-column width. Interface fields must be final,
+     * so the mutable cell goes here. {@code -1} means "not yet computed".
+     */
+    AtomicInteger LABEL_COLUMN_WIDTH = new AtomicInteger(-1);
+
     /**
      * Returns the minimum width for the label column so that all sections align consistently.
-     * Computed from the widest label ("On frame deactivation:") plus padding.
+     * Computed once from the reference label's preferred size; subsequent calls hit the cache.
      */
     static int getLabelColumnWidth() {
-        JLabel measure = new JLabel("On frame deactivation:");
-        return measure.getPreferredSize().width + JBUI.scale(12);
+        int cached = LABEL_COLUMN_WIDTH.get();
+        if (cached >= 0) return cached;
+        int width = new JLabel(LABEL_COLUMN_REFERENCE).getPreferredSize().width + JBUI.scale(12);
+        LABEL_COLUMN_WIDTH.set(width);
+        return width;
     }
 
     /**
@@ -61,23 +74,30 @@ public interface ConfigurationSection {
     }
 
     /**
-     * Adds a trailing "Configure..." button in column 2 of the current row (use after
-     * {@link #addLabelAndField}). The button sizes naturally from the LAF — callers
+     * Adds a trailing button in column 2 of the current row (use after
+     * {@link #addLabelAndField}). The button sizes naturally from the LAF, callers
      * must not apply {@code setPreferredSize}.
      *
      * @param panel    the target panel (must use {@link #createAlignedGridBagLayout()})
-     * @param gbc      shared constraint object — mutated in place
+     * @param gbc      shared constraint object, mutated in place
+     * @param label    button text
      * @param onClick  action listener invoked when the button is pressed
      * @return the created button so callers can store or further configure it
      */
-    static JButton addConfigureButton(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
-                                       @NotNull ActionListener onClick) {
+    static JButton addTrailingButton(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
+                                      @NotNull String label, @NotNull ActionListener onClick) {
         gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE;
         gbc.insets = JBUI.insets(2, 0, 2, 0);
-        JButton button = new JButton("Configure...");
+        JButton button = new JButton(label);
         button.addActionListener(onClick);
         panel.add(button, gbc);
         return button;
+    }
+
+    /** Backwards-compatible shorthand for the common "Configure..." button. */
+    static JButton addConfigureButton(@NotNull JPanel panel, @NotNull GridBagConstraints gbc,
+                                       @NotNull ActionListener onClick) {
+        return addTrailingButton(panel, gbc, "Configure...", onClick);
     }
 
     boolean isModified(@NotNull TomcatRunConfiguration config);

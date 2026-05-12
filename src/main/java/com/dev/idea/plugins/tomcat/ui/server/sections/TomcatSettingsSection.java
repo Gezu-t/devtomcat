@@ -101,6 +101,11 @@ public class TomcatSettingsSection implements ConfigurationSection {
             httpsPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()), 8);
             addPortRow(formPanel, gbc, row, new JBLabel("HTTPs port:"), httpsPortField);
             preserveSessionsCheckBox = new JBCheckBox("Preserve sessions across restarts and redeploys");
+            preserveSessionsCheckBox.setToolTipText("<html>When enabled, Tomcat serializes active HTTP sessions to " +
+                    "<code>work/</code> on shutdown and reloads them on next start, so users stay logged in across an " +
+                    "IDE-triggered restart or redeploy.<br>" +
+                    "Session attributes must implement <code>Serializable</code>. Leave disabled when redeploying " +
+                    "with schema or class changes that would break deserialization.</html>");
             preserveSessionsCheckBox.setSelected(false);
             addCheckBoxColumn(formPanel, gbc, preserveSessionsCheckBox);
 

@@ -99,13 +99,24 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         jreConfigurationSection = new JreConfigurationSection(project);
         tomcatSettingsSection = new TomcatSettingsSection(project);
 
-        // Wire HTTP port changes to auto-update the browser URL (only for auto-generated URLs)
+        // Wire HTTP port changes to auto-update the browser URL. The listener fires only
+        // on user edits — the section's isSettingPort guard suppresses it during
+        // programmatic resetFrom, which is what we want: during reset, the URL is loaded
+        // independently from BrowserConfig (already in sync with the stored port thanks
+        // to the writeback in LaunchPortClaimer), so reacting to the port-field change
+        // would just re-do work that's already correct.
         tomcatSettingsSection.setPortChangeListener(port -> {
             if (browserLaunchSection != null) {
                 browserLaunchSection.updateUrlPort(port);
             }
         });
 
+        // Section order matters for the reset cascade: ServerConfigurationTab.resetFrom
+        // calls section.loadConfiguration() then section.resetFrom() in this exact order.
+        // browserLaunchSection runs before tomcatSettingsSection so the URL is restored
+        // from the (already-port-synced) stored value before the port field changes
+        // would otherwise trigger a redundant URL update. If a future section adds a
+        // cross-section dependency, declare it here.
         sharedSections.clear();
         sharedSections.add(applicationServerSection);
         sharedSections.add(browserLaunchSection);
@@ -194,7 +205,11 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
             for (ConfigurationSection section : sharedSections) {
                 List<ValidationInfo> errors = section.validateSettings();
                 if (!errors.isEmpty()) {
-                    throw new ConfigurationException(errors.get(0).message);
+                    String joined = errors.stream()
+                            .map(e -> e.message)
+                            .reduce((a, b) -> a + "\n" + b)
+                            .orElse("");
+                    throw new ConfigurationException(joined);
                 }
             }
 

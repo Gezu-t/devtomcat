@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.ui.server.dialogs.JREConfigurationDialog;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
@@ -12,7 +13,10 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.Disposable;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -30,6 +34,8 @@ public class JreConfigurationSection implements ConfigurationSection {
     private final Project project;
     private ComboBox<JreEntry> jreComboBox;
     private JPanel panel;
+    private MessageBusConnection jdkTableConnection;
+    private Disposable connectionDisposable;
 
     public JreConfigurationSection(Project project) {
         this.project = project;
@@ -48,8 +54,58 @@ public class JreConfigurationSection implements ConfigurationSection {
                     new JBLabel("JRE:"), jreComboBox);
 
             ConfigurationSection.addConfigureButton(panel, gbc, e -> configureJRE());
+
+            subscribeToJdkTableChanges();
         }
         return panel;
+    }
+
+    /**
+     * Listens for project-SDK table changes so the combo refreshes if the user adds,
+     * removes, or renames a JDK in another tab (Project Structure) while this editor
+     * is open. Without the subscription the combo shows a stale list until the dialog
+     * is reopened. Preserves the current selection across rebuilds when possible.
+     */
+    private void subscribeToJdkTableChanges() {
+        try {
+            connectionDisposable = Disposer.newDisposable("DevTomcat.JreConfigurationSection");
+            jdkTableConnection = ApplicationManager.getApplication().getMessageBus()
+                    .connect(connectionDisposable);
+            jdkTableConnection.subscribe(ProjectJdkTable.JDK_TABLE_TOPIC,
+                    new ProjectJdkTable.Listener() {
+                        @Override public void jdkAdded(@NotNull Sdk jdk) { rebuildPreservingSelection(); }
+                        @Override public void jdkRemoved(@NotNull Sdk jdk) { rebuildPreservingSelection(); }
+                        @Override public void jdkNameChanged(@NotNull Sdk jdk, @NotNull String previousName) {
+                            rebuildPreservingSelection();
+                        }
+                    });
+        } catch (Exception e) {
+            LOG.debug("Could not subscribe to JDK table changes", e);
+        }
+    }
+
+    private void rebuildPreservingSelection() {
+        if (jreComboBox == null) return;
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (jreComboBox == null) return;
+            JreEntry previous = (JreEntry) jreComboBox.getSelectedItem();
+            String previousSdkName = previous != null ? previous.sdkName : null;
+            boolean previousDefault = previous == null || previous.isDefault;
+            loadConfiguration();
+            if (previousDefault) {
+                if (jreComboBox.getItemCount() > 0) jreComboBox.setSelectedIndex(0);
+                return;
+            }
+            for (int i = 0; i < jreComboBox.getItemCount(); i++) {
+                JreEntry entry = jreComboBox.getItemAt(i);
+                if (Objects.equals(previousSdkName, entry.sdkName)) {
+                    jreComboBox.setSelectedIndex(i);
+                    return;
+                }
+            }
+            // Previously-selected SDK was removed. Fall back to the project default.
+            if (jreComboBox.getItemCount() > 0) jreComboBox.setSelectedIndex(0);
+        });
     }
 
     @Override
@@ -87,22 +143,65 @@ public class JreConfigurationSection implements ConfigurationSection {
         return "Default (project SDK)";
     }
 
-    private String extractMajorVersion(String versionString) {
+    /**
+     * Extracts the user-facing Java major version from a version string. Handles
+     * "17.0.2", "21.0.1+12-LTS", "1.8.0_351", and free-form prefixes like
+     * "java version \"21.0.1\"".
+     *
+     * <p>Tries {@link Runtime.Version#parse} first for canonical Java 9+ strings.
+     * Falls back to a digit-and-dot extraction so legacy "1.8.x" and quoted
+     * vendor strings still resolve to a sensible number.
+     */
+    static String extractMajorVersion(String versionString) {
         if (versionString == null) return null;
-        // Version strings are like "17.0.2", "java version \"21.0.1\"", "1.8.0_351"
-        String cleaned = versionString.replaceAll("[^0-9.]", "").trim();
-        if (cleaned.isEmpty()) return null;
 
-        String[] parts = cleaned.split("\\.");
-        if (parts.length > 0) {
-            String major = parts[0];
-            // For old-style "1.8.x" versions, use the minor version
-            if ("1".equals(major) && parts.length > 1) {
-                return parts[1];
-            }
-            return major;
+        // Strip any non-version prefix (e.g. "java version "21.0.1+12"")
+        // before handing to Runtime.Version.
+        String trimmed = versionString.trim().replaceAll("^[^0-9]*", "");
+        if (trimmed.isEmpty()) return null;
+
+        // Cut at the first character that Runtime.Version.parse can't accept.
+        // Permitted: digits, '.', '+', '-' (build/pre-release).
+        int end = 0;
+        while (end < trimmed.length() && isVersionChar(trimmed.charAt(end))) {
+            end++;
         }
-        return null;
+        String candidate = trimmed.substring(0, end);
+        // Strip trailing punctuation that would trip the parser ("17." or "21+").
+        while (!candidate.isEmpty()) {
+            char last = candidate.charAt(candidate.length() - 1);
+            if (last == '.' || last == '+' || last == '-') {
+                candidate = candidate.substring(0, candidate.length() - 1);
+            } else break;
+        }
+        if (candidate.isEmpty()) return null;
+
+        try {
+            Runtime.Version v = Runtime.Version.parse(candidate);
+            int feature = v.feature();
+            // feature() returns 1 for the legacy "1.x" scheme. The user-facing
+            // major in that case is x (e.g. 1.8 -> 8).
+            if (feature == 1 && v.version().size() > 1) {
+                return String.valueOf(v.version().get(1));
+            }
+            return String.valueOf(feature);
+        } catch (IllegalArgumentException ignored) {
+            // Fall through to digit-only fallback for non-canonical strings.
+        }
+
+        // Fallback: pull the first dotted-numeric run and reuse the 1.x rule.
+        String cleaned = candidate.replaceAll("[^0-9.]", "");
+        if (cleaned.isEmpty()) return null;
+        String[] parts = cleaned.split("\\.");
+        if (parts.length == 0 || parts[0].isEmpty()) return null;
+        if ("1".equals(parts[0]) && parts.length > 1 && !parts[1].isEmpty()) {
+            return parts[1];
+        }
+        return parts[0];
+    }
+
+    private static boolean isVersionChar(char c) {
+        return Character.isDigit(c) || c == '.' || c == '+' || c == '-';
     }
 
     @Override
@@ -190,9 +289,16 @@ public class JreConfigurationSection implements ConfigurationSection {
         }
     }
 
-    public String getSelectedJRE() {
-        JreEntry entry = (JreEntry) jreComboBox.getSelectedItem();
-        return entry != null ? entry.label : null;
+    @Override
+    public void dispose() {
+        if (jdkTableConnection != null) {
+            try { jdkTableConnection.disconnect(); } catch (Exception ignored) {}
+            jdkTableConnection = null;
+        }
+        if (connectionDisposable != null) {
+            try { Disposer.dispose(connectionDisposable); } catch (Exception ignored) {}
+            connectionDisposable = null;
+        }
     }
 
     // =========================================================================
