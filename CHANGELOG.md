@@ -5,8 +5,16 @@
 ## [1.0.12]
 
 ### Fixed
-- **"After launch" URL kept the old port after auto-resolution bumped Tomcat (e.g. 8082 → 8083).** Port writeback now rewrites the port in loopback browser URLs; custom paths and non-loopback hosts are left intact.
-- **Services tree showed no children under a running Tomcat config on IntelliJ 2025.3+.** The platform's `RunDashboardCustomizer.getChildren` hook was removed in branch 253 with no replacement extension point. The artifact context paths are now surfaced on the parent node's status line (`Tomcat 9.0 · :8080 · /myapp · Running`), so users can still tell which webapp is running on which port. Older IDEA (2025.1 / 2025.2) keeps the expandable child tree as before.
+- **After-launch URL kept the old port after auto-resolution bumped Tomcat (8082 to 8083).** Writeback now rewrites loopback URLs; custom paths and non-loopback hosts unchanged.
+- **Services tree showed no artifact rows on IntelliJ 2025.3+** after the platform dropped `RunDashboardCustomizer.getChildren`. Artifact context now appears on the parent status line.
+- **Browser-launch isModified silently dropped pending edits on exception.** Now fails open so Apply stays enabled.
+
+### Changed
+- JRE combo live-refreshes when SDKs change in Project Structure.
+- JRE version parser uses `Runtime.Version.parse`; build tags like `21.0.1+12-LTS` display correctly.
+- Run-config validation surfaces all errors at once, not just the first.
+- Preserve-sessions checkbox now has a tooltip.
+- Internal polish in the run-config editor sections.
 
 ## [1.0.11]
 
