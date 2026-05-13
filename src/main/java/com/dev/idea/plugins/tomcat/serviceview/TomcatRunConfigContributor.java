@@ -15,11 +15,13 @@ import com.intellij.execution.services.ServiceViewDescriptor;
 import com.intellij.execution.services.ServiceViewProvidingContributor;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.projectView.PresentationData;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.pom.Navigatable;
 import com.intellij.ui.SimpleTextAttributes;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -233,7 +235,31 @@ public final class TomcatRunConfigContributor
             if (!statusLine.isEmpty()) {
                 data.addText("  " + statusLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             }
+            data.setTooltip(buildTooltip());
             return data;
+        }
+
+        @NotNull
+        private String buildTooltip() {
+            StringBuilder sb = new StringBuilder();
+            sb.append(tomcatConfig.getName());
+            TomcatInfo info = tomcatConfig.getTomcatInfo();
+            if (info != null) {
+                if (!info.getName().isEmpty()) sb.append("\n").append(info.getName());
+                if (!info.getVersion().isEmpty()) {
+                    sb.append("\nVersion: ").append(info.getVersion());
+                }
+                if (info.getPath() != null && !info.getPath().isEmpty()) {
+                    sb.append("\nHome: ").append(info.getPath());
+                }
+            }
+            Endpoint endpoint = resolveEndpoint(project);
+            if (endpoint.port() > 0) {
+                sb.append("\n")
+                  .append(endpoint.https() ? "https" : "http")
+                  .append("://").append(endpoint.host()).append(":").append(endpoint.port());
+            }
+            return sb.toString();
         }
 
         @Override
@@ -338,7 +364,76 @@ public final class TomcatRunConfigContributor
                 data.addText("  " + state.getLabel(),
                         SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
             }
+            data.setTooltip(buildTooltip());
             return data;
+        }
+
+        @Override
+        @Nullable
+        public Navigatable getNavigatable() {
+            if (!canOpenInBrowser()) return null;
+            String url = buildUrl();
+            return new Navigatable() {
+                @Override public void navigate(boolean requestFocus) { BrowserUtil.browse(url); }
+                @Override public boolean canNavigate() { return true; }
+                @Override public boolean canNavigateToSource() { return false; }
+            };
+        }
+
+        /**
+         * True when the artifact has a valid port and is confirmed deployed.
+         * Mirrors the {@code TomcatDeploymentNode.canNavigate} predicate so the
+         * new contributor path renders the same "browser-launchable" gate as
+         * the old tree node — undeployed or pre-deploy artifacts are not
+         * navigated to.
+         */
+        private boolean canOpenInBrowser() {
+            return item.getPort() > 0
+                    && item.getState() == TomcatDeploymentStatusService.ArtifactState.DEPLOYED;
+        }
+
+        @NotNull
+        private String buildUrl() {
+            DeploymentArtifact artifact = item.getArtifact();
+            String context = artifact.getContextPath();
+            if (context == null || context.isEmpty()) {
+                context = TomcatConstants.DEFAULT_CONTEXT_PATH;
+            }
+            return (item.isHttps() ? "https" : "http")
+                    + "://" + bracketIpv6(item.getHost())
+                    + ":" + item.getPort()
+                    + context;
+        }
+
+        /**
+         * Wraps a raw IPv6 literal in brackets if not already bracketed. A
+         * {@link java.net.URI#getHost()} call returns IPv6 hosts unbracketed
+         * (e.g. {@code ::1}), but URL syntax requires brackets — re-bracket
+         * here so the assembled URL is well-formed regardless of input shape.
+         */
+        @NotNull
+        private static String bracketIpv6(@NotNull String host) {
+            return (host.contains(":") && !host.startsWith("[")) ? "[" + host + "]" : host;
+        }
+
+        @NotNull
+        private String buildTooltip() {
+            DeploymentArtifact artifact = item.getArtifact();
+            StringBuilder sb = new StringBuilder();
+            sb.append(artifact.getDisplayName());
+            sb.append(DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
+                    ? " (Exploded)" : " (WAR)");
+            if (item.getPort() > 0) {
+                sb.append("\n").append(buildUrl());
+            }
+            TomcatDeploymentStatusService.ArtifactState state = item.getState();
+            if (state != null) {
+                sb.append("\nState: ").append(state.getLabel());
+            }
+            if (canOpenInBrowser()) {
+                sb.append("\nDouble-click to open in browser");
+            }
+            return sb.toString();
         }
     }
 }

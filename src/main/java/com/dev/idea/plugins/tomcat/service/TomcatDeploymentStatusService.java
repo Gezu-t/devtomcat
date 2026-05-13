@@ -1,6 +1,8 @@
 package com.dev.idea.plugins.tomcat.service;
 
+import com.dev.idea.plugins.tomcat.serviceview.TomcatServiceViewContributor;
 import com.intellij.execution.dashboard.RunDashboardManager;
+import com.intellij.execution.services.ServiceEventListener;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.Alarm;
@@ -292,8 +294,20 @@ public final class TomcatDeploymentStatusService {
 
     /** Real dashboard refresh — called via {@link #refreshAction} in production. */
     private void doRefreshDashboard() {
-        if (project != null && !project.isDisposed()) {
-            RunDashboardManager.getInstance(project).updateDashboard(true);
+        if (project == null || project.isDisposed()) return;
+        // Refresh the legacy Run Dashboard tree (251 / 252 path).
+        RunDashboardManager.getInstance(project).updateDashboard(true);
+        // Push a reset event for the custom Services group too. Without this
+        // the new ServiceViewContributor-based tree (251+ path that becomes
+        // mandatory on 253+) would stay stale across deployment lifecycle
+        // changes — port shifts, state transitions, artifact additions.
+        try {
+            project.getMessageBus()
+                    .syncPublisher(ServiceEventListener.TOPIC)
+                    .handle(ServiceEventListener.ServiceEvent
+                            .createResetEvent(TomcatServiceViewContributor.class));
+        } catch (Throwable ignored) {
+            // Defensive — the message bus can throw during late shutdown.
         }
     }
 
