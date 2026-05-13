@@ -136,7 +136,14 @@
                 displayName="DevTomcat"
                 groupId="build"/>
 
-        <!-- Services Tool Window Integration -->
+        <!-- Services Tool Window Integration.
+             The serviceViewContributor is the supported path on every platform
+             branch the plugin targets. The runDashboardCustomizer registration
+             is left in place because the platform invokes it on 251 / 252;
+             on 253+ the platform dropped the dispatch but the override is
+             harmless dead code. -->
+        <serviceViewContributor
+                implementation="com.dev.idea.plugins.tomcat.serviceview.TomcatServiceViewContributor"/>
         <runDashboardDefaultTypesProvider
                 implementation="com.dev.idea.plugins.tomcat.service.TomcatRunDashboardDefaultTypesProvider"/>
         <runDashboardCustomizer
