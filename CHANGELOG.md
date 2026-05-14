@@ -6,7 +6,7 @@
 
 ### Fixed
 - **After-launch URL kept the old port after auto-resolution bumped Tomcat (8082 to 8083).** Writeback now rewrites loopback URLs; custom paths and non-loopback hosts unchanged.
-- **Services tree showed no artifact rows on IntelliJ 2025.3+** after the platform dropped `RunDashboardCustomizer.getChildren`. Artifact context now appears on the parent status line.
+- **Services tree restored for Tomcat configs and their deployment artifacts** via a new ServiceViewContributor. The platform dropped `RunDashboardCustomizer.getChildren` on 2025.3+, taking the per-artifact rows with it. Double-click a deployed artifact to open it in the browser; rows refresh live on lifecycle events.
 - **Browser-launch isModified silently dropped pending edits on exception.** Now fails open so Apply stays enabled.
 
 ### Changed
