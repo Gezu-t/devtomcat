@@ -352,30 +352,28 @@ final class LaunchPortClaimer {
     }
 
     /**
-     * Publish {@link RunManagerListener#runConfigurationChanged} on the
-     * project's message bus so every interested listener re-reads the
-     * now-resolved port values: the editor, the Run Dashboard, the
-     * Services panel, and anything else subscribed to the standard IntelliJ
-     * change channel. Also forces a dashboard rebuild as a belt-and-braces
-     * — some listeners rely on it rather than subscribing to the topic.
-     * All UI work runs on the EDT.
+     * Refresh the Services / Run Dashboard tree so it picks up the new resolved
+     * ports.
+     *
+     * <p>Earlier versions of this method ALSO published
+     * {@code RunManagerListener.runConfigurationChanged} on the project message
+     * bus. That broadcast turned out to be a poor fit during a launch in
+     * progress: at least one platform-side subscriber treated it as "the
+     * configuration model changed, re-resolve" and replaced the
+     * {@link com.intellij.execution.RunnerAndConfigurationSettings} reference
+     * held by {@link com.intellij.execution.RunManager#getSelectedConfiguration}.
+     * The freshly-replaced reference no longer matched the one captured in the
+     * platform's {@code runningConfigurations} entry, so
+     * {@code ExecutionManagerImpl.isOfSameType} stopped recognising the live
+     * run for the selected config and the toolbar Run icon never swapped to
+     * Rerun. The dashboard refresh below is enough to keep every UI consumer
+     * in sync without touching the RunManager identity contract.
      */
     private static void notifyConfigurationChanged(@NotNull TomcatRunConfiguration configuration) {
         Project project = configuration.getProject();
         if (project == null || project.isDisposed()) return;
         ApplicationManager.getApplication().invokeLater(() -> {
             if (project.isDisposed()) return;
-            try {
-                RunnerAndConfigurationSettings settings =
-                        RunManager.getInstance(project).findSettings(configuration);
-                if (settings != null) {
-                    project.getMessageBus()
-                            .syncPublisher(RunManagerListener.TOPIC)
-                            .runConfigurationChanged(settings);
-                }
-            } catch (Exception e) {
-                LOG.debug("RunManager change notification after port writeback failed", e);
-            }
             try {
                 RunDashboardManager.getInstance(project).updateDashboard(true);
             } catch (Exception e) {
