@@ -9,6 +9,7 @@ import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.services.ServiceViewContributor;
 import com.intellij.execution.services.ServiceViewDescriptor;
@@ -280,12 +281,32 @@ public final class TomcatRunConfigContributor
             Icon configIcon = tomcatConfig.getIcon();
             if (configIcon == null) configIcon = AllIcons.RunConfigurations.Application;
             if (liveStatus == null) return configIcon;
+            boolean debugging = isDebuggingNow();
             return switch (liveStatus.getServerState()) {
-                case STARTING, DEPLOYING -> AllIcons.Actions.Execute;
-                case RUNNING -> AllIcons.RunConfigurations.TestState.Run;
+                // Pre-running and running states get a debug-themed icon when
+                // the live executor is the debugger, so users can tell at a
+                // glance whether the row is a Run or a Debug session. Same
+                // convention IntelliJ Ultimate's Tomcat plugin uses.
+                case STARTING, DEPLOYING ->
+                        debugging ? AllIcons.Actions.StartDebugger : AllIcons.Actions.Execute;
+                case RUNNING ->
+                        debugging ? AllIcons.Actions.StartDebugger
+                                  : AllIcons.RunConfigurations.TestState.Run;
                 case FAILED -> AllIcons.General.Error;
                 case STOPPED -> configIcon;
             };
+        }
+
+        /**
+         * True when the live process handler for this configuration was
+         * launched under the Debug executor. Returns false when the config
+         * isn't running, when the executor is Run / Coverage / etc., or when
+         * the lookup fails defensively.
+         */
+        private boolean isDebuggingNow() {
+            TomcatProcessHandler handler = findLiveHandler(project);
+            return handler != null
+                    && DefaultDebugExecutor.EXECUTOR_ID.equals(handler.getExecutorId());
         }
 
         @NotNull

@@ -6,6 +6,7 @@
 
 ### Added
 - Right-click on a deployed artifact in the Services tree for **Open in Browser** and **Copy URL**.
+- Services tree row shows a **debugger icon** when the configuration is running under the Debug executor, so Run and Debug sessions are visually distinct.
 
 ### Fixed
 - **HTTPS-port writeback also rewrites the stored browser URL** when an `https://localhost:<port>/...` URL was saved. Pairs with the HTTP-port fix from 1.0.12.
