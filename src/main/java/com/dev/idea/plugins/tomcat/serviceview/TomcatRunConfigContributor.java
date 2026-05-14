@@ -20,6 +20,11 @@ import com.intellij.ide.projectView.PresentationData;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.Navigatable;
 import com.intellij.ui.SimpleTextAttributes;
@@ -378,6 +383,39 @@ public final class TomcatRunConfigContributor
                 @Override public boolean canNavigate() { return true; }
                 @Override public boolean canNavigateToSource() { return false; }
             };
+        }
+
+        @Override
+        @Nullable
+        public ActionGroup getPopupActions() {
+            // Only offer actions when the artifact is actually reachable — both
+            // entries operate on the deployed URL. Returning null suppresses
+            // the popup entirely when there is nothing useful to show.
+            if (!canOpenInBrowser()) return null;
+            String url = buildUrl();
+            DefaultActionGroup group = new DefaultActionGroup();
+            group.add(new AnAction("Open in Browser",
+                    "Open this deployed artifact in your default browser",
+                    AllIcons.Nodes.PpWeb) {
+                @Override public void actionPerformed(@NotNull AnActionEvent e) {
+                    BrowserUtil.browse(url);
+                }
+                @Override public @NotNull ActionUpdateThread getActionUpdateThread() {
+                    return ActionUpdateThread.BGT;
+                }
+            });
+            group.add(new AnAction("Copy URL",
+                    "Copy the deployed artifact's URL to the clipboard",
+                    AllIcons.Actions.Copy) {
+                @Override public void actionPerformed(@NotNull AnActionEvent e) {
+                    CopyPasteManager.getInstance()
+                            .setContents(new java.awt.datatransfer.StringSelection(url));
+                }
+                @Override public @NotNull ActionUpdateThread getActionUpdateThread() {
+                    return ActionUpdateThread.BGT;
+                }
+            });
+            return group;
         }
 
         /**

@@ -784,7 +784,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
      * returns IPv6 literals with their surrounding brackets in Java 17+, so we
      * strip those before comparing.
      */
-    private static boolean isLoopbackHost(@Nullable String host) {
+    static boolean isLoopbackHost(@Nullable String host) {
         if (host == null || host.isEmpty()) return false;
         String normalized = host;
         if (normalized.startsWith("[") && normalized.endsWith("]")) {

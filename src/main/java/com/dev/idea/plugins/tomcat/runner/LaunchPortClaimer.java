@@ -255,32 +255,30 @@ final class LaunchPortClaimer {
         if (configuration.isParallelRunEffective()) return;
 
         PortConfig target = configuration.getConfigData().getPortConfig();
+        // Capture previous values BEFORE assigning the new ones so the browser
+        // URL rewrite can match the URL's stored port against the old value and
+        // only mutate URLs that were genuinely pointing at this Tomcat. Without
+        // the previous-port match, a https://localhost:8443/foo URL would be
+        // rewritten the moment the HTTP port changed — wrong scheme, wrong
+        // port. Mismatched scheme + previous-port check makes the rewrite safe
+        // regardless of which connectors auto-resolved.
+        int previousHttp = target.getHttp();
+        int previousHttps = target.getHttps();
         boolean changed = false;
-        if (target.getHttp() != resolved.getHttp()) {
+        if (previousHttp != resolved.getHttp()) {
             target.setHttp(resolved.getHttp());
-            // The stored browser URL may carry the previous HTTP port baked
-            // into its authority component (e.g. the user typed
-            // http://localhost:8082/connect/common/login). Without rewriting,
-            // every downstream consumer sees the new port (HTTP field, Services
-            // panel, launch-time browser open via {@link
-            // TomcatProcessHandler#rewritePortIfNeeded}) — but the run-config
-            // dialog's "URL" field continues to render the stale stored value
-            // because BrowserLaunchSection.resetFrom shows the raw stored URL
-            // verbatim when the path doesn't match the artifact context. Keep
-            // the model itself consistent here so the dialog reads correctly
-            // without a separate display-layer band-aid. Only loopback URLs
-            // get rewritten; user-deliberate hosts (proxy, CDN, port-forward)
-            // are left intact. The launch-time rewrite remains useful for
-            // parallel-run mode where writeback is intentionally skipped.
-            rewriteStoredBrowserUrlIfLoopback(configuration, resolved.getHttp());
+            rewriteStoredBrowserUrlForPortChange(configuration, "http",
+                    previousHttp, resolved.getHttp());
             changed = true;
         }
         if (target.getShutdown() != resolved.getShutdown()) {
             target.setShutdown(resolved.getShutdown());
             changed = true;
         }
-        if (target.isHttpsEnabled() && target.getHttps() != resolved.getHttps()) {
+        if (target.isHttpsEnabled() && previousHttps != resolved.getHttps()) {
             target.setHttps(resolved.getHttps());
+            rewriteStoredBrowserUrlForPortChange(configuration, "https",
+                    previousHttps, resolved.getHttps());
             changed = true;
         }
         if (target.isJmxEnabled() && target.getJmx() != resolved.getJmx()) {
@@ -297,17 +295,18 @@ final class LaunchPortClaimer {
     }
 
     /**
-     * Replaces the port in the stored browser URL when the URL points at a
-     * loopback host. Called from {@link #writeBackResolvedPorts} so the
-     * run-config dialog's "URL" field stays in sync with the HTTP-port field
-     * after the resolver bumps the port.
+     * Rewrites the port in the stored browser URL when ALL of the following hold:
+     * the URL scheme matches {@code scheme} (case-insensitive), the host is a
+     * loopback name (localhost, 127.0.0.1, ::1), and the URL's current port
+     * equals {@code previousPort}. The match on previousPort is what keeps the
+     * rewrite safe across mixed HTTP / HTTPS configurations — without it, a
+     * stored {@code https://localhost:8443/foo} URL would be silently rewritten
+     * the moment the HTTP port shifted.
      *
-     * <p>Strictness: delegates to {@link TomcatProcessHandler#rewritePortIfNeeded},
-     * which only rewrites URLs whose host is a loopback name (localhost,
-     * 127.0.0.1, ::1). A user-customised URL against a proxy / CDN /
-     * port-forward keeps its deliberately-chosen port. Empty stored URL
-     * (auto-managed) is also a no-op — the recomputation path already
-     * derives the URL from the live port.
+     * <p>A user-customised URL against a proxy / CDN / port-forward keeps its
+     * deliberately-chosen port because either the scheme, host or port will
+     * fail the gate. Empty stored URL (auto-managed) is a no-op — the
+     * recomputation path already derives the URL from the live port.
      *
      * <p>Route through {@link TomcatRunConfiguration#setBrowserUrl} (not
      * {@code BrowserConfig.setBrowserUrl}) so a URL that now matches
@@ -315,13 +314,24 @@ final class LaunchPortClaimer {
      * empty stored form. Preserves the single-source-of-truth invariant —
      * later reads of {@code getBrowserUrl()} recompute from the live port.
      */
-    static void rewriteStoredBrowserUrlIfLoopback(@NotNull TomcatRunConfiguration configuration,
-                                                  int newHttpPort) {
+    static void rewriteStoredBrowserUrlForPortChange(@NotNull TomcatRunConfiguration configuration,
+                                                     @NotNull String scheme,
+                                                     int previousPort,
+                                                     int newPort) {
+        if (previousPort == newPort || previousPort <= 0 || newPort <= 0) return;
         String stored = configuration.getConfigData().getBrowserConfig().getUrl();
         if (stored == null || stored.isEmpty()) return;
-        String rewritten = TomcatProcessHandler.rewritePortIfNeeded(stored, newHttpPort);
-        if (!stored.equals(rewritten)) {
-            configuration.setBrowserUrl(rewritten);
+        try {
+            java.net.URI uri = java.net.URI.create(stored.trim());
+            if (!scheme.equalsIgnoreCase(uri.getScheme())) return;
+            if (!TomcatProcessHandler.isLoopbackHost(uri.getHost())) return;
+            if (uri.getPort() != previousPort) return;
+            java.net.URI rewritten = new java.net.URI(uri.getScheme(), uri.getUserInfo(),
+                    uri.getHost(), newPort,
+                    uri.getPath(), uri.getQuery(), uri.getFragment());
+            configuration.setBrowserUrl(rewritten.toString());
+        } catch (Throwable ignored) {
+            // Malformed URL — leave it alone; the user can fix it manually.
         }
     }
 

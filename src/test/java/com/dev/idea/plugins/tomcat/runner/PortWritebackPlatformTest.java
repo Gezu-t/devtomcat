@@ -249,6 +249,87 @@ public class PortWritebackPlatformTest extends BasePlatformTestCase {
                 "http://localhost:8083/connect/common/login", cfg.getBrowserUrl());
     }
 
+    public void testHttpsPortRewriteUpdatesHttpsUrl() {
+        // Mirror of the HTTP-port writeback path for HTTPS. User stores an
+        // https://localhost:8443/... URL; HTTPS port auto-resolves to 8444.
+        // The stored URL must follow.
+        TomcatRunConfiguration cfg = createConfig("HttpsPortRewrite");
+        cfg.setHttpPort(8080);
+        cfg.setHttpsPort(8443);
+        PortConfig target = cfg.getConfigData().getPortConfig();
+        target.setHttpsEnabled(true);
+        cfg.setBrowserUrl("https://localhost:8443/secure/login");
+
+        PortConfig resolved = resolvedPorts(8080, 8005, 8444, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("HTTPS port must reflect the resolved value",
+                Integer.valueOf(8444), cfg.getHttpsPort());
+        assertEquals("stored HTTPS URL must have its port rewritten",
+                "https://localhost:8444/secure/login", cfg.getBrowserUrl());
+    }
+
+    public void testHttpPortRewriteDoesNotTouchHttpsUrl() {
+        // Regression guard. Before this guard, the writeback rewrote ANY
+        // loopback URL's port to the new HTTP port — even an HTTPS URL,
+        // because the rewrite was scheme-agnostic. With the scheme +
+        // previous-port match, an https://localhost:8443/... URL stays put
+        // when only the HTTP port shifts.
+        TomcatRunConfiguration cfg = createConfig("HttpShiftLeavesHttpsAlone");
+        cfg.setHttpPort(8082);
+        cfg.setHttpsPort(8443);
+        PortConfig target = cfg.getConfigData().getPortConfig();
+        target.setHttpsEnabled(true);
+        cfg.setBrowserUrl("https://localhost:8443/secure/login");
+
+        PortConfig resolved = resolvedPorts(8083, 8005, 8443, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("HTTP port must reflect the resolved value",
+                Integer.valueOf(8083), cfg.getHttpPort());
+        assertEquals("HTTPS URL must not be mutated by an HTTP-only port change",
+                "https://localhost:8443/secure/login", cfg.getBrowserUrl());
+    }
+
+    public void testHttpsPortRewriteDoesNotTouchHttpUrl() {
+        // Symmetric guard: an HTTP URL stays put when only HTTPS port shifts.
+        TomcatRunConfiguration cfg = createConfig("HttpsShiftLeavesHttpAlone");
+        cfg.setHttpPort(8080);
+        cfg.setHttpsPort(8443);
+        PortConfig target = cfg.getConfigData().getPortConfig();
+        target.setHttpsEnabled(true);
+        cfg.setBrowserUrl("http://localhost:8080/myapp");
+
+        PortConfig resolved = resolvedPorts(8080, 8005, 8444, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("HTTPS port must reflect the resolved value",
+                Integer.valueOf(8444), cfg.getHttpsPort());
+        assertEquals("HTTP URL must not be mutated by an HTTPS-only port change",
+                "http://localhost:8080/myapp", cfg.getBrowserUrl());
+    }
+
+    public void testWritebackSkippedWhenHttpsDisabled() {
+        // HTTPS-port writeback only fires when the HTTPS connector is
+        // enabled — mirrors the existing port-value writeback gate. With
+        // HTTPS disabled, both the port mutation and the URL rewrite stay
+        // out. A user with a stored https-shaped URL keeps it as-is.
+        TomcatRunConfiguration cfg = createConfig("HttpsDisabledNoRewrite");
+        cfg.setHttpPort(8080);
+        PortConfig target = cfg.getConfigData().getPortConfig();
+        target.setHttpsEnabled(false);
+        target.setHttps(8443);
+        cfg.setBrowserUrl("https://localhost:8443/secure");
+
+        PortConfig resolved = resolvedPorts(8080, 8005, 8444, 1099, 8009);
+        LaunchPortClaimer.writeBackResolvedPorts(cfg, resolved);
+
+        assertEquals("HTTPS port stays at the user's seed when the connector is disabled",
+                8443, target.getHttps());
+        assertEquals("Stored URL untouched because the HTTPS branch did not run",
+                "https://localhost:8443/secure", cfg.getBrowserUrl());
+    }
+
     public void testCustomLoopbackUrlIsNormalisedBackToAutoWhenPortRewriteMakesItMatch() {
         // Boundary: a stored URL that's "auto-shaped except for the stale port"
         // becomes auto after the rewrite. setBrowserUrl(...) normalises a

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [1.0.13]
+
+### Added
+- Right-click on a deployed artifact in the Services tree for **Open in Browser** and **Copy URL**.
+
+### Fixed
+- **HTTPS-port writeback also rewrites the stored browser URL** when an `https://localhost:<port>/...` URL was saved. Pairs with the HTTP-port fix from 1.0.12.
+- **HTTP-port writeback no longer touches an HTTPS browser URL** (or vice versa). The rewrite now matches scheme and previous-port before mutating.
+
 ## [1.0.12]
 
 ### Fixed
