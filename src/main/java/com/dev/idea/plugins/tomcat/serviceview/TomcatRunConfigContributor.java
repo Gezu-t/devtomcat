@@ -122,7 +122,7 @@ public final class TomcatRunConfigContributor
         return new RunConfigDescriptor(project);
     }
 
-    // -- Endpoint resolution (mirrors TomcatRunDashboardCustomizer behaviour) --
+    // -- Endpoint resolution --
 
     @NotNull
     private Endpoint resolveEndpoint(@NotNull Project project) {
@@ -449,10 +449,8 @@ public final class TomcatRunConfigContributor
 
         /**
          * True when the artifact has a valid port and is confirmed deployed.
-         * Mirrors the {@code TomcatDeploymentNode.canNavigate} predicate so the
-         * new contributor path renders the same "browser-launchable" gate as
-         * the old tree node — undeployed or pre-deploy artifacts are not
-         * navigated to.
+         * Undeployed or pre-deploy artifacts are not navigated to — they have
+         * no meaningful URL yet.
          */
         private boolean canOpenInBrowser() {
             return item.getPort() > 0

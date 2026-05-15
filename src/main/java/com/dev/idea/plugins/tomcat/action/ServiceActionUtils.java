@@ -2,11 +2,8 @@ package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
-import com.dev.idea.plugins.tomcat.utils.DashboardCompat;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
-import com.intellij.execution.configurations.RunConfiguration;
-import com.intellij.execution.dashboard.RunDashboardRunConfigurationNode;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -153,11 +150,6 @@ final class ServiceActionUtils {
     private static TomcatRunConfiguration extractFromObject(@Nullable Object obj) {
         if (obj == null) return null;
 
-        if (obj instanceof RunDashboardRunConfigurationNode node) {
-            RunConfiguration rc = DashboardCompat.getConfiguration(node);
-            if (rc instanceof TomcatRunConfiguration tomcat) return tomcat;
-        }
-
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
             return extractFromObject(mutable.getUserObject());
         }
@@ -194,10 +186,6 @@ final class ServiceActionUtils {
             return desc.getProcessHandler();
         }
 
-        if (obj instanceof RunDashboardRunConfigurationNode node) {
-            RunContentDescriptor desc = node.getDescriptor();
-            if (desc != null) return desc.getProcessHandler();
-        }
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
             return extractProcessHandler(mutable.getUserObject(), depth + 1);
         }
@@ -215,8 +203,7 @@ final class ServiceActionUtils {
         for (String methodName : new String[]{"getConfigurationSettings", "getNode", "getValue", "getData"}) {
             Object result = tryInvokeMethod(wrapper, methodName);
             if (result instanceof RunnerAndConfigurationSettings settings) {
-                RunConfiguration rc = settings.getConfiguration();
-                if (rc instanceof TomcatRunConfiguration tomcat) return tomcat;
+                if (settings.getConfiguration() instanceof TomcatRunConfiguration tomcat) return tomcat;
             }
             TomcatRunConfiguration nested = extractFromObject(result);
             if (nested != null) return nested;

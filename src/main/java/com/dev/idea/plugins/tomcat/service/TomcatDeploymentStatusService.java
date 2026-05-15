@@ -17,8 +17,8 @@ import java.util.function.BiFunction;
 /**
  * Project-level service that tracks live deployment status for each Tomcat run configuration.
  * Updated by {@link com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler} as it detects
- * lifecycle events; read by {@link TomcatRunDashboardCustomizer} and {@link TomcatDeploymentNode}
- * to display real-time status in the Services tool window.
+ * lifecycle events; consumed by the Services tool window contributor (and by the
+ * deployment-history tab via {@link #getStatus}) to surface real-time status to the user.
  */
 @Service(Service.Level.PROJECT)
 public final class TomcatDeploymentStatusService {

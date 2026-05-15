@@ -197,16 +197,10 @@
     </extensions>
 
     <actions>
-        <!-- Open in Browser action for deployment nodes in the Services tree -->
-        <action id="DevTomcat.OpenInBrowser"
-                class="com.dev.idea.plugins.tomcat.action.OpenDeploymentInBrowserAction"
-                text="Open in Browser"
-                description="Open the deployed application in a web browser"
-                icon="AllIcons.Nodes.PpWeb">
-            <add-to-group group-id="ServiceViewItemPopup" anchor="first"/>
-        </action>
-
-        <!-- Services tool window context menu: lifecycle actions -->
+        <!-- Services tool window context menu: lifecycle actions.
+             The artifact-row "Open in Browser" + "Copy URL" entries are
+             provided directly by TomcatRunConfigContributor's per-artifact
+             descriptor; no global ServiceViewItemPopup registration needed. -->
         <group id="DevTomcat.ServiceLifecycleGroup">
             <separator/>
             <action id="DevTomcat.Service.Start"
