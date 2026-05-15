@@ -65,7 +65,6 @@ public class TomcatCoverageRunner extends DefaultJavaProgramRunner {
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
 
-        if (delegate.handleSameExecutorRerun(config, env)) return null;
         if (delegate.handleCrossExecutorConflict(config, env)) return null;
 
         LOG.info("Starting Tomcat with coverage: " + config.getName());

@@ -16,13 +16,15 @@ import org.jetbrains.annotations.NotNull;
  * Tomcat Run executor. Saves documents before launch and delegates
  * to {@link DefaultJavaProgramRunner}.
  *
- * <h3>Re-run interception</h3>
- * <ol>
- *   <li><b>Same executor (Run→Run):</b> shows Update dialog via
- *       {@link TomcatRunnerDelegate#handleSameExecutorRerun}.</li>
- *   <li><b>Cross-executor (Debug/Coverage→Run):</b> stops + relaunches via
- *       {@link TomcatRunnerDelegate#handleCrossExecutorConflict}.</li>
- * </ol>
+ * <p>Same-executor reruns are handled by the platform's standard
+ * stop-and-restart flow because {@link TomcatRunConfiguration} declares
+ * the {@code SINGLE_INSTANCE} singleton policy. Hot reload is reachable
+ * via Ctrl+F10 through {@code TomcatRunningApplicationUpdaterProvider}.
+ *
+ * <p>Cross-executor switches (Run→Debug, Debug→Run, Coverage→Run, etc.)
+ * are intercepted here because the platform does not auto-stop the
+ * previous-executor process when the executor changes — see
+ * {@link TomcatRunnerDelegate#handleCrossExecutorConflict}.
  */
 public class TomcatRunner extends DefaultJavaProgramRunner {
 
@@ -51,7 +53,6 @@ public class TomcatRunner extends DefaultJavaProgramRunner {
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
 
-        if (delegate.handleSameExecutorRerun(config, env)) return null;
         if (delegate.handleCrossExecutorConflict(config, env)) return null;
 
         LOG.info("Starting Tomcat: " + config.getName());

@@ -20,13 +20,13 @@ import org.jetbrains.annotations.Nullable;
  * Tomcat Debug runner. Delegates JDWP agent injection to IntelliJ's debugger runner
  * and attaches to the same resolved port via {@link RemoteConnection}.
  *
- * <h3>Re-run interception</h3>
- * <ol>
- *   <li><b>Same executor (Debug→Debug):</b> shows Update dialog via
- *       {@link TomcatRunnerDelegate#handleSameExecutorRerun}.</li>
- *   <li><b>Cross-executor (Run/Coverage→Debug):</b> stops + relaunches via
- *       {@link TomcatRunnerDelegate#handleCrossExecutorConflict}.</li>
- * </ol>
+ * <p>Same-executor reruns are handled by the platform's standard stop-and-restart
+ * flow because {@link TomcatRunConfiguration} declares the {@code SINGLE_INSTANCE}
+ * singleton policy. Hot reload is reachable via Ctrl+F10.
+ *
+ * <p>Cross-executor switches (Run→Debug, Coverage→Debug, etc.) are intercepted
+ * here because the platform does not auto-stop the previous-executor process when
+ * the executor changes — see {@link TomcatRunnerDelegate#handleCrossExecutorConflict}.
  *
  * <h3>Data flow (local debug)</h3>
  * <pre>
@@ -72,7 +72,6 @@ public class TomcatDebugger extends GenericDebuggerRunner {
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
 
-        if (delegate.handleSameExecutorRerun(config, env)) return null;
         if (delegate.handleCrossExecutorConflict(config, env)) return null;
 
         // Fresh start — resolve debug host/port and attach debugger
