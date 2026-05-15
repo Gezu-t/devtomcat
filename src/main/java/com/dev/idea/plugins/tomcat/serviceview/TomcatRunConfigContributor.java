@@ -409,15 +409,20 @@ public final class TomcatRunConfigContributor
         @Override
         @Nullable
         public ActionGroup getPopupActions() {
-            // Only offer actions when the artifact is actually reachable — both
-            // entries operate on the deployed URL. Returning null suppresses
-            // the popup entirely when there is nothing useful to show.
-            if (!canOpenInBrowser()) return null;
+            // Always return a non-null group so the user can discover the
+            // available actions even before the artifact has reported its
+            // DEPLOYED state. Each action enables/disables itself in update()
+            // based on the current reachability — Open in Browser needs an
+            // actually-deployed artifact, Copy URL just needs a resolved port
+            // (the URL itself is well-formed regardless of deploy state).
             String url = buildUrl();
             DefaultActionGroup group = new DefaultActionGroup();
             group.add(new AnAction("Open in Browser",
                     "Open this deployed artifact in your default browser",
                     AllIcons.Nodes.PpWeb) {
+                @Override public void update(@NotNull AnActionEvent e) {
+                    e.getPresentation().setEnabled(canOpenInBrowser());
+                }
                 @Override public void actionPerformed(@NotNull AnActionEvent e) {
                     BrowserUtil.browse(url);
                 }
@@ -428,6 +433,9 @@ public final class TomcatRunConfigContributor
             group.add(new AnAction("Copy URL",
                     "Copy the deployed artifact's URL to the clipboard",
                     AllIcons.Actions.Copy) {
+                @Override public void update(@NotNull AnActionEvent e) {
+                    e.getPresentation().setEnabled(item.getPort() > 0);
+                }
                 @Override public void actionPerformed(@NotNull AnActionEvent e) {
                     CopyPasteManager.getInstance()
                             .setContents(new java.awt.datatransfer.StringSelection(url));
