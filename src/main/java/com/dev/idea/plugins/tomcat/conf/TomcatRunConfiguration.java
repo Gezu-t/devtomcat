@@ -521,7 +521,14 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     public void setActivateToolWindow(boolean activate)    { configData.getUiConfig().setActivateToolWindow(activate); }
 
     public boolean isAllowMultipleInstances()              { return configData.isAllowMultipleInstances(); }
-    public void setAllowMultipleInstances(boolean allow)   { configData.setAllowMultipleInstances(allow); }
+    public void setAllowMultipleInstances(boolean allow)   {
+        configData.setAllowMultipleInstances(allow);
+        // Keep the platform's allowRunningInParallel flag in lock-step so the
+        // toolbar Run/Rerun presentation updates the moment the user toggles
+        // the UI checkbox — without this, the platform flag would only refresh
+        // on next config reload.
+        syncPlatformFlags();
+    }
 
     /**
      * Returns {@code true} when "Allow parallel run" is checked <em>and</em>
@@ -554,19 +561,28 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // =====================================================================
 
     /**
-     * Always calls {@code setAllowRunningInParallel(true)} so IntelliJ skips the
-     * "Stop and Rerun" dialog and calls {@code doExecute()} while the old process
-     * is still alive. {@link com.dev.idea.plugins.tomcat.runner.TomcatRunner} and
-     * {@link com.dev.idea.plugins.tomcat.runner.TomcatDebugger} intercept that call
-     * and show the Update dialog instead of launching a parallel instance.
+     * Mirrors the user-facing "Allow parallel run" preference onto the platform's
+     * {@code allowRunningInParallel} flag. Called from the constructor,
+     * {@code readExternal()}, and whenever the underlying {@code allowMultipleInstances}
+     * value changes via {@link #setAllowMultipleInstances(boolean)}, so the platform
+     * flag tracks the model regardless of serialization or edit order.
      *
-     * <p>Called from the constructor and {@code readExternal()} to ensure the flag
-     * is always set regardless of serialization or clone order.
-     * {@code isAllowRunningInParallel()} is {@code final} in {@link RunConfigurationBase}
+     * <p>Earlier versions forced this flag to {@code true} unconditionally so the
+     * platform would skip its "Stop and Rerun" dialog and call {@code doExecute()}
+     * while the old process was still alive — letting our runners intercept and
+     * pop the hot-reload Update dialog. The side effect: the toolbar Run icon
+     * never swapped to Rerun while Tomcat was running, because the platform's
+     * {@code ExecutorAction.needRerunPresentation} short-circuits when
+     * {@code isAllowRunningInParallel()} returns {@code true}. Mirroring the
+     * user preference instead gives single-instance configs (the default) the
+     * standard Rerun icon plus the platform's stop-and-restart flow. Hot reload
+     * stays accessible via Ctrl+F10 ({@code TomcatRunningApplicationUpdaterProvider}).
+     *
+     * <p>{@code isAllowRunningInParallel()} is {@code final} in {@link RunConfigurationBase}
      * so it cannot be overridden — this setter approach is the only valid way.
      */
     void syncPlatformFlags() {
-        setAllowRunningInParallel(true);
+        setAllowRunningInParallel(isAllowMultipleInstances());
     }
 
     /**
