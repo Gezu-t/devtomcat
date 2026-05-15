@@ -70,6 +70,17 @@ package com.dev.idea.plugins.tomcat.conf;
                      // Clone fields on TomcatRunConfiguration itself (outside TomcatConfigurationData)
                      clone.setDocBase(original.getDocBase());
 
+                     // Re-sync the platform's allowRunningInParallel flag now that the
+                     // clone's UiConfig has been replaced. The constructor's syncPlatformFlags
+                     // call ran on an empty TomcatConfigurationData and recorded
+                     // allowRunningInParallel=false; the subsequent setUiConfig copies the
+                     // user's "Allow parallel run" preference into UiConfig but does not
+                     // re-trigger the platform-flag sync. Without this call, parallel-run
+                     // clones would silently revert to single-instance from the platform's
+                     // perspective (and single-instance clones would never have the right
+                     // flag either, though it happens to match the default).
+                     clone.syncPlatformFlags();
+
                      LOG.debug("Cloned: " + original.getName() + " -> " + clone.getName());
                      validateClone(clone);
                      return clone;

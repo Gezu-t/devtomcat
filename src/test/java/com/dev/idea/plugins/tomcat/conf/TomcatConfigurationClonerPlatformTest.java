@@ -266,6 +266,44 @@ public class TomcatConfigurationClonerPlatformTest extends BasePlatformTestCase 
         assertEquals("true", restoredCoverageState.getAttributeValue("track_test_folders"));
     }
 
+    public void testClonePreservesAllowRunningInParallelFlag() {
+        // Regression guard for the cloner's platform-flag sync.
+        // syncPlatformFlags fires from the TomcatRunConfiguration constructor
+        // with an empty TomcatConfigurationData, so the freshly-constructed
+        // clone always starts at allowRunningInParallel=false (the platform
+        // default). The cloner then copies the source's UiConfig (which carries
+        // the allowMultipleInstances bit), but UiConfig replacement alone does
+        // NOT re-trigger the platform-flag sync. Without an explicit final
+        // syncPlatformFlags call at the end of the clone, a parallel-run
+        // config's clone would silently revert to single-instance from the
+        // platform's perspective even though the UI checkbox still reads true.
+        TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+        TomcatRunConfiguration parallelOriginal = new TomcatRunConfiguration(
+                getProject(), type.getConfigurationFactories()[0], "Parallel");
+        parallelOriginal.setAllowMultipleInstances(true);
+        assertTrue("guard: original must report parallel",
+                parallelOriginal.isAllowRunningInParallel());
+
+        TomcatRunConfiguration parallelClone = TomcatConfigurationCloner.clone(parallelOriginal);
+        assertTrue("clone of a parallel-run config must keep allowMultipleInstances",
+                parallelClone.isAllowMultipleInstances());
+        assertTrue("clone of a parallel-run config must keep allowRunningInParallel " +
+                        "(platform flag) — without this the toolbar would silently flip " +
+                        "the config back to single-instance after the first edit-and-Apply",
+                parallelClone.isAllowRunningInParallel());
+
+        TomcatRunConfiguration singleOriginal = new TomcatRunConfiguration(
+                getProject(), type.getConfigurationFactories()[0], "Single");
+        // setAllowMultipleInstances(false) is the default but make it explicit
+        singleOriginal.setAllowMultipleInstances(false);
+        assertFalse(singleOriginal.isAllowRunningInParallel());
+
+        TomcatRunConfiguration singleClone = TomcatConfigurationCloner.clone(singleOriginal);
+        assertFalse("clone of a single-instance config must stay single-instance " +
+                        "in the platform flag — needed so the toolbar Run/Rerun icon swap works",
+                singleClone.isAllowRunningInParallel());
+    }
+
     private static LogFileOptions findLogFile(TomcatRunConfiguration configuration, String name) {
         for (LogFileOptions logFile : configuration.getAllLogFiles()) {
             if (name.equals(logFile.getName())) {
