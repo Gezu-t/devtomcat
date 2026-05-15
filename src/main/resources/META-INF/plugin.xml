@@ -136,19 +136,15 @@
                 displayName="DevTomcat"
                 groupId="build"/>
 
-        <!-- Services Tool Window Integration.
-             The serviceViewContributor is the supported path on every platform
-             branch the plugin targets. The runDashboardCustomizer registration
-             is left in place because the platform invokes it on 251 / 252;
-             on 253+ the platform dropped the dispatch but the override is
-             harmless dead code. -->
+        <!-- Services tool window integration. Single source of truth on every
+             supported platform branch (251 through 261). The legacy
+             runDashboardCustomizer + runDashboardDefaultTypesProvider pair
+             was removed because it produced a duplicate artifact tree under
+             the platform's "Run Configurations" group with hard-coded popup
+             actions we couldn't override, and on 253+ the customizer's
+             dispatch was gone anyway. -->
         <serviceViewContributor
                 implementation="com.dev.idea.plugins.tomcat.serviceview.TomcatServiceViewContributor"/>
-        <runDashboardDefaultTypesProvider
-                implementation="com.dev.idea.plugins.tomcat.service.TomcatRunDashboardDefaultTypesProvider"/>
-        <runDashboardCustomizer
-                implementation="com.dev.idea.plugins.tomcat.service.TomcatRunDashboardCustomizer"
-                order="first"/>
 
         <!-- Console filter: clickable URLs and file paths in Tomcat output -->
         <consoleFilterProvider
