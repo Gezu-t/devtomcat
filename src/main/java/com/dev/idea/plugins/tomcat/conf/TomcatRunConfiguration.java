@@ -585,6 +585,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         setAllowRunningInParallel(isAllowMultipleInstances());
     }
 
+
     /**
      * Seeds the default Tomcat log entries into {@code myLogFiles} exactly once
      * per configuration lifetime — when the seeded flag is still {@code false}.

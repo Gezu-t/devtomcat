@@ -165,17 +165,31 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         }
 
         /**
-         * Declare this configuration type as always allowing multiple running instances.
-         * This bypasses IntelliJ's "Stop and Rerun" dialog (which fires when the policy
-         * is {@code SINGLE_INSTANCE}, the platform default) and instead calls
-         * {@code doExecute()} directly on {@link com.dev.idea.plugins.tomcat.runner.TomcatRunner}
-         * / {@link com.dev.idea.plugins.tomcat.runner.TomcatDebugger}, where we detect
-         * the existing process and show our own Update dialog.
+         * Returns {@link RunConfigurationSingletonPolicy#SINGLE_INSTANCE} so the platform
+         * matches the user-facing "Allow parallel run" UI default (unchecked) and so the
+         * main toolbar's Run/Rerun icon swap actually works.
+         *
+         * <p>Earlier versions returned {@code MULTIPLE_INSTANCE_ONLY} as a workaround to
+         * bypass IntelliJ's "Stop and Rerun" dialog and let our own Update dialog fire
+         * via the runner delegate. That workaround had a hidden side-effect surfaced on
+         * 2025.1+: {@code RunnerAndConfigurationSettingsImpl.readExternal} runs after our
+         * {@code TomcatRunConfiguration.readExternal} returns and, when the XML has no
+         * {@code singleton} attribute, calls
+         * {@code setAllowRunningInParallel(factory.singletonPolicy.isAllowRunningInParallel)}.
+         * With the old policy that unconditionally overwrote our value back to {@code true},
+         * which in turn defeated the toolbar's {@code needRerunPresentation} predicate —
+         * the play icon could never swap to rerun no matter what
+         * {@link TomcatRunConfiguration#syncPlatformFlags()} did. Aligning the policy with
+         * the UI default ({@code allowMultipleInstances=false}) lets the platform's
+         * single-instance behaviour take over for the standard case, and the
+         * {@code singleton="false"} attribute persists on disk when the user opts into
+         * parallel mode (factory policy and stored value differ, so the platform writes
+         * the explicit attribute and respects it on load).
          */
         @Override
         @NotNull
         public RunConfigurationSingletonPolicy getSingletonPolicy() {
-            return RunConfigurationSingletonPolicy.MULTIPLE_INSTANCE_ONLY;
+            return RunConfigurationSingletonPolicy.SINGLE_INSTANCE;
         }
 
         @SuppressWarnings("rawtypes")

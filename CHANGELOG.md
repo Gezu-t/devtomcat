@@ -9,7 +9,7 @@
 - Services tree row shows a **debugger icon** when the configuration is running under the Debug executor, so Run and Debug sessions are visually distinct.
 
 ### Fixed
-- **Main toolbar Run button now swaps to the Rerun icon while Tomcat is running.** Earlier versions unconditionally set the platform's `allowRunningInParallel` flag to true (to bypass the "Stop and Rerun" dialog), which had the side effect of disabling the Rerun-icon presentation. The flag now mirrors the user's "Allow parallel run" preference; hot-reload stays accessible via Ctrl+F10.
+- **Main toolbar Run button now swaps to the Rerun icon while Tomcat is running.** The configuration factory's `singletonPolicy` was `MULTIPLE_INSTANCE_ONLY`, which made the platform's post-load logic flip `allowRunningInParallel` back to `true` regardless of the user's "Allow parallel run" checkbox — and the Rerun-icon swap requires the flag to be `false`. Policy is now `SINGLE_INSTANCE`, matching the UI default. Hot-reload stays accessible via Ctrl+F10.
 - **HTTPS-port writeback also rewrites the stored browser URL** when an `https://localhost:<port>/...` URL was saved. Pairs with the HTTP-port fix from 1.0.12.
 - **HTTP-port writeback no longer touches an HTTPS browser URL** (or vice versa). The rewrite now matches scheme and previous-port before mutating.
 
