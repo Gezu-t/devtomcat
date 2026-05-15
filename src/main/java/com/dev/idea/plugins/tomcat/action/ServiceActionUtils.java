@@ -2,6 +2,9 @@ package com.dev.idea.plugins.tomcat.action;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
+import com.dev.idea.plugins.tomcat.serviceview.TomcatArtifactItem;
+import com.dev.idea.plugins.tomcat.serviceview.TomcatRunConfigContributor;
+import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.process.ProcessHandler;
@@ -150,12 +153,37 @@ final class ServiceActionUtils {
     private static TomcatRunConfiguration extractFromObject(@Nullable Object obj) {
         if (obj == null) return null;
 
+        // Direct unwrap for the Services-tool-window contributor items we own.
+        // Without these branches, action update() can't find the config and the
+        // entire DevTomcat lifecycle group hides itself from the right-click popup.
+        if (obj instanceof TomcatRunConfigContributor contributor) {
+            return contributor.getConfiguration();
+        }
+        if (obj instanceof TomcatArtifactItem artifact) {
+            return findConfigByName(artifact.getConfigurationName());
+        }
+
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
             return extractFromObject(mutable.getUserObject());
         }
 
         // Reflection fallback for ServiceView wrappers
         return extractViaReflection(obj);
+    }
+
+    /** Looks up a {@link TomcatRunConfiguration} by name across all open projects. */
+    @Nullable
+    private static TomcatRunConfiguration findConfigByName(@NotNull String name) {
+        for (Project p : com.intellij.openapi.project.ProjectManager.getInstance().getOpenProjects()) {
+            if (p.isDisposed()) continue;
+            for (RunnerAndConfigurationSettings s : RunManager.getInstance(p).getAllSettings()) {
+                if (s.getConfiguration() instanceof TomcatRunConfiguration tc
+                        && name.equals(tc.getName())) {
+                    return tc;
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -186,6 +214,16 @@ final class ServiceActionUtils {
             return desc.getProcessHandler();
         }
 
+        // Services-tool-window contributor items don't carry the handler
+        // directly — look it up via ExecutionManager keyed by config name.
+        if (obj instanceof TomcatRunConfigContributor contributor) {
+            return findLiveHandlerForConfig(contributor.getConfiguration());
+        }
+        if (obj instanceof TomcatArtifactItem artifact) {
+            TomcatRunConfiguration cfg = findConfigByName(artifact.getConfigurationName());
+            return cfg != null ? findLiveHandlerForConfig(cfg) : null;
+        }
+
         if (obj instanceof javax.swing.tree.DefaultMutableTreeNode mutable) {
             return extractProcessHandler(mutable.getUserObject(), depth + 1);
         }
@@ -193,6 +231,30 @@ final class ServiceActionUtils {
             Object result = tryInvokeMethod(obj, methodName);
             ProcessHandler handler = extractProcessHandler(result, depth + 1);
             if (handler != null) return handler;
+        }
+        return null;
+    }
+
+    /**
+     * Finds the live {@link TomcatProcessHandler} for the given configuration by
+     * scanning {@link ExecutionManager#getRunningProcesses()} and matching on
+     * configuration name. Returns {@code null} when the config isn't currently
+     * running.
+     */
+    @Nullable
+    private static ProcessHandler findLiveHandlerForConfig(@NotNull TomcatRunConfiguration config) {
+        try {
+            Project project = config.getProject();
+            if (project == null || project.isDisposed()) return null;
+            for (ProcessHandler h : ExecutionManager.getInstance(project).getRunningProcesses()) {
+                if (h instanceof TomcatProcessHandler th && !th.isProcessTerminated()) {
+                    TomcatRunConfiguration cfg = th.getConfiguration();
+                    if (cfg != null && config.getName().equals(cfg.getName())) {
+                        return th;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
         }
         return null;
     }
