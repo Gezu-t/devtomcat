@@ -33,8 +33,11 @@ import org.jetbrains.annotations.NotNull;
  *       when Tomcat exits.</li>
  * </ol>
  *
- * <p>Same re-run interception strategy as {@link TomcatRunner} and
- * {@link TomcatDebugger}, delegated to {@link TomcatRunnerDelegate}.
+ * <p>Same-executor reruns are handled by the platform under the
+ * {@code SINGLE_INSTANCE} policy declared on {@link TomcatRunConfigurationType}.
+ * Cross-executor switches (Run→Coverage, Debug→Coverage) are intercepted via
+ * {@link TomcatRunnerDelegate#handleCrossExecutorConflict} because the platform
+ * does not auto-stop the previous-executor process when the executor changes.
  */
 public class TomcatCoverageRunner extends DefaultJavaProgramRunner {
 
