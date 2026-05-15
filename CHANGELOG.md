@@ -7,6 +7,7 @@
 ### Added
 - Right-click on a deployed artifact in the Services tree for **Open in Browser** and **Copy URL**.
 - Services tree row shows a **debugger icon** when the configuration is running under the Debug executor.
+- **Clicking Rerun on a running Tomcat now opens the Update dialog** (Update classes / Redeploy / Restart server) via the platform's `RunConfiguration.restartSingleton` hook.
 
 ### Fixed
 - **Main toolbar Run button now swaps to the Rerun icon while Tomcat is running.** Configuration factory's `singletonPolicy` switched from `MULTIPLE_INSTANCE_ONLY` to `SINGLE_INSTANCE`; hot reload stays on Ctrl+F10.

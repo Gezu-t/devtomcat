@@ -3,14 +3,21 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.runner.TomcatCommandLineState;
+import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
+import com.dev.idea.plugins.tomcat.runner.TomcatRunnerDelegate;
+import com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater;
 import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
+import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.configurations.coverage.CoverageEnabledConfiguration;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.*;
+import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
@@ -102,6 +109,107 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         } catch (Exception e) {
             throw new RuntimeConfigurationException("Configuration validation error: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Hooks the platform's Rerun-on-running flow so a running Tomcat gets the
+     * DevTomcat Update dialog (Update classes / Redeploy / Restart server)
+     * instead of an unconditional stop-and-restart.
+     *
+     * <p>Called by {@code ExecutionManagerImpl.restartRunProfile} when the
+     * platform detects a same-config running instance and the config is
+     * not parallel-runnable. Returning {@link RestartSingletonResult#NO_FURTHER_ACTION}
+     * tells the platform to abort its own stop+restart so our handler can
+     * take over. {@link RestartSingletonResult#ASK_AND_RESTART} (the default)
+     * keeps the platform's standard prompt.
+     *
+     * <h3>Branches</h3>
+     * <ol>
+     *   <li><b>Same-executor rerun on a live, restart-ready Tomcat:</b>
+     *       open the {@link TomcatApplicationUpdater} dialog and abort. The
+     *       dialog's three options (Update classes, Redeploy, Restart server)
+     *       cover everything the platform's stop+restart would do plus the
+     *       hot-reload paths.</li>
+     *   <li><b>Cross-executor switch</b> (Run → Debug, etc.) on a live
+     *       Tomcat: hand off to {@link TomcatRunnerDelegate#stopAndRelaunch},
+     *       which sequences the stop and re-launch with the previous run's
+     *       resolved ports carried across so we don't bump into OS
+     *       {@code TIME_WAIT} on the freshly released sockets.</li>
+     *   <li><b>Shutdown overlap</b> (Tomcat already terminating): surface
+     *       the block reason as a notification and abort. Re-entering the
+     *       platform's flow here would race the in-flight shutdown.</li>
+     *   <li><b>Race / no live handler</b>: fall through to the platform's
+     *       default ASK_AND_RESTART. Nothing for us to intercept.</li>
+     * </ol>
+     *
+     * <p>This is the documented platform extension point for exactly this
+     * scenario — no reflection, no policy hacks, no descriptor surgery.
+     */
+    @Override
+    @NotNull
+    public RestartSingletonResult restartSingleton(@NotNull ExecutionEnvironment environment) {
+        Project project = getProject();
+        if (project == null || project.isDisposed()) {
+            return RestartSingletonResult.ASK_AND_RESTART;
+        }
+
+        TomcatProcessHandler runningHandler = findRunningHandlerForThisConfig(project);
+        if (runningHandler == null) {
+            return RestartSingletonResult.ASK_AND_RESTART;
+        }
+
+        // Shutdown overlap: re-entering would race the in-flight termination.
+        String blockReason = runningHandler.getRestartBlockReason();
+        if (blockReason != null) {
+            TomcatNotifier.info(project,
+                    "Restart Unavailable: " + getName(),
+                    blockReason);
+            return RestartSingletonResult.NO_FURTHER_ACTION;
+        }
+
+        String runningExecutorId = runningHandler.getExecutorId();
+        String targetExecutorId = environment.getExecutor().getId();
+        final TomcatProcessHandler handler = runningHandler;
+
+        if (runningExecutorId.equals(targetExecutorId)) {
+            // Same-executor rerun → Update dialog.
+            ApplicationManager.getApplication().invokeLater(
+                    () -> TomcatApplicationUpdater.showDialogAndExecute(project, handler, this));
+            return RestartSingletonResult.NO_FURTHER_ACTION;
+        }
+
+        // Cross-executor switch → stop+relaunch with port carryover.
+        // Delegate's stopAndRelaunch only consults the env's executor, so the
+        // delegate's seed executorId is informational; passing the target id
+        // for log clarity.
+        new TomcatRunnerDelegate(targetExecutorId, LOG)
+                .stopAndRelaunch(handler, this, environment);
+        return RestartSingletonResult.NO_FURTHER_ACTION;
+    }
+
+    /**
+     * Locates the live {@link TomcatProcessHandler} for this run configuration
+     * across all currently running processes. Returns {@code null} when the
+     * config isn't running (race against descriptor disposal) or the running
+     * handler is already terminated.
+     */
+    @Nullable
+    private TomcatProcessHandler findRunningHandlerForThisConfig(@NotNull Project project) {
+        try {
+            ProcessHandler[] handlers =
+                    ExecutionManager.getInstance(project).getRunningProcesses();
+            for (ProcessHandler h : handlers) {
+                if (h instanceof TomcatProcessHandler th && !th.isProcessTerminated()) {
+                    TomcatRunConfiguration cfg = th.getConfiguration();
+                    if (cfg != null && getName().equals(cfg.getName())) {
+                        return th;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // ExecutionManager state can be in flux during project init / disposal.
+        }
+        return null;
     }
 
     @Override
