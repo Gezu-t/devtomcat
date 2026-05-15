@@ -266,6 +266,48 @@ public class TomcatConfigurationClonerPlatformTest extends BasePlatformTestCase 
         assertEquals("true", restoredCoverageState.getAttributeValue("track_test_folders"));
     }
 
+    public void testSetAllowMultipleInstancesSyncsPlatformFlag() {
+        // Pins the contract that toggling the user-facing parallel-run flag
+        // re-syncs the platform's isAllowRunningInParallel() the same EDT tick.
+        // Without this contract, the toolbar Run-vs-Rerun presentation would
+        // lag behind the user's checkbox edit until the next config reload.
+        TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+        TomcatRunConfiguration cfg = new TomcatRunConfiguration(
+                getProject(), type.getConfigurationFactories()[0], "Sync");
+
+        assertFalse("default is single-instance", cfg.isAllowRunningInParallel());
+
+        cfg.setAllowMultipleInstances(true);
+        assertTrue("toggling on must lift the platform flag", cfg.isAllowRunningInParallel());
+
+        cfg.setAllowMultipleInstances(false);
+        assertFalse("toggling off must drop the platform flag", cfg.isAllowRunningInParallel());
+    }
+
+    public void testWriteReadRoundTripPreservesPlatformFlag() throws Exception {
+        // The serializer round-trip must keep allowRunningInParallel in sync
+        // with the persisted allowMultipleInstances bit. readExternal already
+        // calls syncPlatformFlags after deserialisation; this test guards
+        // against a future refactor breaking that link silently.
+        TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+        TomcatRunConfiguration original = new TomcatRunConfiguration(
+                getProject(), type.getConfigurationFactories()[0], "Roundtrip");
+        original.setAllowMultipleInstances(true);
+        assertTrue(original.isAllowRunningInParallel());
+
+        Element element = new Element("configuration");
+        original.writeExternal(element);
+
+        TomcatRunConfiguration restored = new TomcatRunConfiguration(
+                getProject(), type.getConfigurationFactories()[0], "Roundtrip");
+        restored.readExternal(element);
+
+        assertTrue("restored config must keep allowMultipleInstances",
+                restored.isAllowMultipleInstances());
+        assertTrue("restored config must keep allowRunningInParallel (platform flag)",
+                restored.isAllowRunningInParallel());
+    }
+
     public void testClonePreservesAllowRunningInParallelFlag() {
         // Regression guard for the cloner's platform-flag sync.
         // syncPlatformFlags fires from the TomcatRunConfiguration constructor
