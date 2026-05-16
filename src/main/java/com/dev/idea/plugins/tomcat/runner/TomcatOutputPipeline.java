@@ -483,6 +483,19 @@ public final class TomcatOutputPipeline {
      * gets its own {@code create()}-built analyzer list). Buffer is capped at
      * {@link #BUFFER_CAPACITY} headers to avoid pathological growth on log
      * sprays.
+     *
+     * <p><b>Thread safety.</b> {@link com.intellij.execution.process.OSProcessHandler}
+     * runs stdout and stderr on separate reader threads, and the pipeline does
+     * not serialize {@link Analyzer#analyze} dispatch. The other analyzers in
+     * this pipeline keep their mutable state on the shared {@link Context}
+     * with thread-safe primitives ({@code AtomicBoolean}, {@code AtomicInteger},
+     * {@code ConcurrentHashMap.newKeySet()}); this analyzer is the outlier
+     * because its rolling exception-header buffer is genuinely per-launch
+     * state with no shared-Context home. To stay correct under concurrent
+     * stdout / stderr arrival, {@link #analyze} is {@code synchronized}.
+     * The work inside the critical section is bounded ({@value #BUFFER_CAPACITY}
+     * deque entries, one regex match per line) so the lock contention cost
+     * is negligible.
      */
     static final class ContextFailureRootCauseAnalyzer implements Analyzer {
         // Match exception header lines. Accepts both top-level
@@ -516,7 +529,7 @@ public final class TomcatOutputPipeline {
                                        boolean isCausedBy) {}
 
         @Override
-        public void analyze(@NotNull String text, @NotNull Context ctx) {
+        public synchronized void analyze(@NotNull String text, @NotNull Context ctx) {
             if (balloonFired) return;
 
             // Check the failure trigger FIRST. Tomcat's LifecycleException
