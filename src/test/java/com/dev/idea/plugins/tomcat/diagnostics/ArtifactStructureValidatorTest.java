@@ -120,17 +120,18 @@ class ArtifactStructureValidatorTest {
     class WarArtifact {
 
         @Test
-        @DisplayName("valid .war file passes")
+        @DisplayName("valid .war (real ZIP with manifest) passes")
         void validWarFilePasses(@TempDir Path tempDir) throws IOException {
             Path war = tempDir.resolve("myapp.war");
-            Files.writeString(war, "PK fake zip bytes");
+            writeMinimalWar(war);
 
             DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
                     war.toString(), DeploymentArtifact.TYPE_WAR);
             ArtifactStructureValidator.Result result =
                     ArtifactStructureValidator.validate(List.of(artifact));
 
-            assertFalse(result.hasBlockingErrors());
+            assertFalse(result.hasBlockingErrors(),
+                    "minimal real WAR must pass: " + result.blockingErrors());
             assertFalse(result.hasWarnings());
         }
 
@@ -150,6 +151,71 @@ class ArtifactStructureValidatorTest {
             assertTrue(msg.toLowerCase().contains("directory"));
             assertTrue(msg.toLowerCase().contains("exploded") || msg.toLowerCase().contains(".war"),
                     "expected a 'switch type to Exploded' hint: " + msg);
+        }
+
+        @Test
+        @DisplayName("corrupted WAR (non-ZIP bytes) blocks with rebuild hint")
+        void corruptedWarBlocks(@TempDir Path tempDir) throws IOException {
+            Path war = tempDir.resolve("myapp.war");
+            Files.writeString(war, "this is not a zip — was Maven interrupted?");
+
+            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
+                    war.toString(), DeploymentArtifact.TYPE_WAR);
+            ArtifactStructureValidator.Result result =
+                    ArtifactStructureValidator.validate(List.of(artifact));
+
+            assertTrue(result.hasBlockingErrors());
+            String msg = result.blockingErrors().get(0);
+            assertTrue(msg.contains("myapp"));
+            assertTrue(msg.toLowerCase().contains("readable")
+                            || msg.toLowerCase().contains("corrupted")
+                            || msg.toLowerCase().contains("zip"),
+                    "expected a corrupted-WAR explanation: " + msg);
+            assertTrue(msg.toLowerCase().contains("rebuild")
+                            || msg.toLowerCase().contains("mvn")
+                            || msg.toLowerCase().contains("build"),
+                    "expected a rebuild hint: " + msg);
+        }
+
+        @Test
+        @DisplayName("empty file (0 bytes) blocks as corrupted")
+        void emptyWarBlocks(@TempDir Path tempDir) throws IOException {
+            Path war = tempDir.resolve("myapp.war");
+            Files.createFile(war);
+
+            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
+                    war.toString(), DeploymentArtifact.TYPE_WAR);
+            ArtifactStructureValidator.Result result =
+                    ArtifactStructureValidator.validate(List.of(artifact));
+
+            assertTrue(result.hasBlockingErrors(),
+                    "0-byte WAR must be flagged — most often a partial build artifact");
+        }
+
+        @Test
+        @DisplayName("truncated WAR (valid header, truncated body) blocks")
+        void truncatedWarBlocks(@TempDir Path tempDir) throws IOException {
+            Path war = tempDir.resolve("myapp.war");
+            // ZIP files start with the local-file-header magic PK\\x03\\x04. Writing
+            // just the magic plus a few bytes simulates an interrupted-write WAR.
+            Files.write(war, new byte[]{'P', 'K', 0x03, 0x04, 0x14, 0x00});
+
+            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
+                    war.toString(), DeploymentArtifact.TYPE_WAR);
+            ArtifactStructureValidator.Result result =
+                    ArtifactStructureValidator.validate(List.of(artifact));
+
+            assertTrue(result.hasBlockingErrors());
+        }
+
+        /** Minimal but valid ZIP/JAR — empty manifest entry is enough for JarFile to accept it. */
+        private static void writeMinimalWar(Path path) throws IOException {
+            try (java.util.zip.ZipOutputStream zos =
+                         new java.util.zip.ZipOutputStream(Files.newOutputStream(path))) {
+                zos.putNextEntry(new java.util.zip.ZipEntry("META-INF/MANIFEST.MF"));
+                zos.write("Manifest-Version: 1.0\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zos.closeEntry();
+            }
         }
     }
 

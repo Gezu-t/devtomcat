@@ -122,9 +122,14 @@ public final class ArtifactStructureValidator {
     }
 
     /**
-     * WAR artifact must be a regular file. If the user picked TYPE_WAR but the
-     * path resolves to a directory, Tomcat will try to read the directory as
-     * a JAR and fail with a confusing error. Catch that here.
+     * WAR artifact must be a regular file AND a structurally-valid JAR / ZIP.
+     * If the user picked TYPE_WAR but the path resolves to a directory, Tomcat
+     * will try to read the directory as a JAR and fail with a confusing error.
+     * If the file exists but is corrupted (Maven build interrupted, partial
+     * download, manual overwrite while the file was open), Tomcat fails with
+     * {@code java.util.zip.ZipException: error opening zip file} 10 seconds
+     * into startup — the user has no signal that the WAR itself is the
+     * problem. We catch both up front.
      */
     private static void validateWar(@NotNull String displayName, @NotNull Path path,
                                     @NotNull List<String> blocking) {
@@ -133,6 +138,21 @@ public final class ArtifactStructureValidator {
                     + "the path is a directory: " + path
                     + ". Either change the artifact type to 'Exploded', or point the "
                     + "path at the .war file (e.g. target/myapp.war).");
+            return;
+        }
+        // Open the WAR as a JAR. The constructor parses the ZIP central directory
+        // and throws IOException on any structural problem — empty file, truncated
+        // bytes, non-ZIP content, etc. Touching the manifest forces a read past
+        // the constructor's lazy validation. Closing immediately keeps the file
+        // handle scope tight; Tomcat opens its own when it deploys.
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(path.toFile())) {
+            jar.getManifest();
+        } catch (java.io.IOException e) {
+            blocking.add("'" + displayName + "' at " + path + " is not a readable "
+                    + "WAR archive (" + e.getClass().getSimpleName()
+                    + (e.getMessage() != null ? ": " + e.getMessage() : "")
+                    + "). The file may be corrupted, truncated, or your build may have "
+                    + "been interrupted — rebuild the artifact (e.g. mvn package) and retry.");
         }
     }
 
