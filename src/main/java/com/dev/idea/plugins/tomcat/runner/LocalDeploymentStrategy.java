@@ -306,6 +306,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // being spammed every launch. Non-blocking; the launch continues.
         TomcatCompatibilityPrompt.showEolWarningOnce(project, tomcatInfo);
 
+        int deployedCount = 0;
         for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
             if (artifact == null || !artifact.isValid()) continue;
 
@@ -334,8 +335,33 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     TomcatProjectUtils.atomicCopy(artifactPath, targetWar);
                     LOG.info("Deployed WAR artifact: " + targetWar);
                 }
+                deployedCount++;
             } catch (IOException e) {
                 throw new ExecutionException("Failed to deploy artifact: " + artifact.getPath(), e);
+            }
+        }
+
+        // Warn when zero artifacts were actually deployed. Tomcat will still
+        // start successfully — it will just serve whatever ROOT context happens
+        // to live in CATALINA_HOME/webapps/ (if anything). The user almost
+        // certainly intended to deploy something; surfacing the silent
+        // misconfiguration here saves a confused trip back to the run-config
+        // editor after seeing a blank welcome page.
+        if (deployedCount == 0) {
+            String configured = configuration.getDeployedArtifacts() != null
+                    && !configuration.getDeployedArtifacts().isEmpty()
+                    ? "configured artifacts were all skipped as invalid"
+                    : "no artifacts are configured";
+            String warning = "Tomcat will start but " + configured
+                    + " — nothing will be deployed. Add an artifact in the Deployment tab "
+                    + "(or fix the invalid entries) to serve your webapp.";
+            if (logger != null) {
+                logger.logServerWarning(warning);
+            }
+            if (project != null && !project.isDisposed()) {
+                TomcatNotifier.warning(project,
+                        "DevTomcat: no artifacts will be deployed",
+                        warning);
             }
         }
     }
@@ -363,9 +389,31 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         if (preserveSessions) {
             xml.append("\n  <Manager pathname=\"SESSIONS.ser\" />");
         }
-        if (!extraResources.isEmpty()) {
+        // Emit <Resources allowLinking="true"> for an exploded artifact whenever
+        // Tomcat supports the element (8+). Tomcat 8+ disables symlink traversal
+        // by default (CVE-2014-0033 hardening), so a docBase that happens to BE
+        // a symlink — or that contains symlinked subdirectories — fails to
+        // deploy without this attribute. The Maven multi-module shape
+        // (target/<module>/ resolved through a symlinked staging dir) is the
+        // realistic hit. Previously the Resources block was emitted only when
+        // extra PreResources / PostResources were attached, so users with no
+        // extra resources lost symlink support silently. The empty-children
+        // case is well-formed and harmless to Tomcat 8+.
+        //
+        // Tomcat 7 does NOT support <Resources> under <Context> (its Digester
+        // logs 'No rules found matching Context/Resources/PreResources' and
+        // drops the element). On 7, allowLinking defaults to true on the
+        // Context itself so symlinks work without explicit configuration —
+        // omit the block entirely. The major-version=0 (unknown) case is
+        // treated as modern to avoid regressing the realistic 8+ path.
+        boolean tomcatSupportsResources = tomcatInfo == null
+                || tomcatInfo.getMajorVersion() == 0
+                || tomcatInfo.getMajorVersion() >= 8;
+        if (tomcatSupportsResources) {
             xml.append("\n  <Resources allowLinking=\"true\">");
-            xml.append(extraResources);
+            if (!extraResources.isEmpty()) {
+                xml.append(extraResources);
+            }
             xml.append("\n  </Resources>");
         }
         if (!jarScanFilter.isEmpty()) {

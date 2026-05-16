@@ -848,6 +848,81 @@ class LocalDeploymentStrategyTest {
             org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
                     org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
         }
+
+        @Test
+        @DisplayName("Tomcat 8 always emits <Resources allowLinking=\"true\"> even with no extra resources")
+        void tomcat8AlwaysEmitsResourcesForSymlinks(@TempDir Path tempDir) throws IOException {
+            // Pin the symlink-friendly default. Tomcat 8+ disables symlink traversal
+            // by default (CVE-2014-0033 hardening), so a docBase that is a symlink
+            // — common in Maven multi-module projects where target/<module>/ is
+            // linked from a staging dir — silently fails to deploy without an
+            // explicit allowLinking="true". Previously the <Resources> block was
+            // emitted only when extra PreResources/PostResources were attached,
+            // so users with no extras lost symlink support invisibly.
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat8 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 8", "8.5.81", "/opt/tomcat-8.5");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, /* preserveSessions */ false,
+                    project, tomcat8, /* logger */ null);
+
+            assertTrue(contextXml.contains("<Resources allowLinking=\"true\">"),
+                    "Tomcat 8 must emit <Resources allowLinking=\"true\"> so symlinked "
+                            + "docBases deploy. Output:\n" + contextXml);
+            assertTrue(contextXml.contains("</Resources>"),
+                    "the Resources block must be well-formed even when no extra "
+                            + "PreResources / PostResources are attached");
+        }
+
+        @Test
+        @DisplayName("Tomcat 10 emits <Resources allowLinking=\"true\"> (modern release path)")
+        void tomcat10AlwaysEmitsResourcesForSymlinks(@TempDir Path tempDir) throws IOException {
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat10 =
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 10.1", "10.1.18", "/opt/tomcat-10.1");
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, tomcat10, null);
+
+            assertTrue(contextXml.contains("<Resources allowLinking=\"true\">"),
+                    "Tomcat 10 must emit <Resources allowLinking=\"true\">");
+        }
+
+        @Test
+        @DisplayName("Null TomcatInfo emits Resources block — treats unknown as modern (8+)")
+        void nullTomcatInfoEmitsResources(@TempDir Path tempDir) throws IOException {
+            // The null-TomcatInfo path defaults to the modern shape (Resources
+            // block always emitted) so callers / test fixtures without a real
+            // install do not regress symlink support.
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
+                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
+                            "myapp", artifactPath.toString(),
+                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            String contextXml = LocalDeploymentStrategy.buildContextXml(
+                    artifact, artifactPath, false, project, /* tomcatInfo */ null, null);
+
+            assertTrue(contextXml.contains("<Resources allowLinking=\"true\">"),
+                    "null TomcatInfo must default to the modern shape with <Resources>");
+        }
     }
 
     // -------------------------------------------------------------------------
