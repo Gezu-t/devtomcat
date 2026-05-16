@@ -173,6 +173,27 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             public void onActionableDiagnostic(@NotNull TomcatErrorDiagnostics.Diagnostic diagnostic) {
                 if (diagnosticRouter != null) diagnosticRouter.route(diagnostic);
             }
+            @Override
+            public void onStartupRootCause(@NotNull String exceptionClass, @NotNull String message) {
+                // Surface the deepest Caused-by exception from a failed
+                // context-init chain as a balloon so the user sees the actual
+                // root cause without scrolling the catalina log. We do not
+                // assume any particular library or framework — whatever
+                // exception the user's webapp ended up throwing is what
+                // appears in the balloon.
+                com.intellij.openapi.project.Project project = configuration.getProject();
+                if (project == null || project.isDisposed()) return;
+                String suggestion =
+                        "A webapp context failed to start. The exception above is the real cause; "
+                                + "scroll the run console up to the first 'Caused by:' line to see the "
+                                + "full stack trace.";
+                String content = exceptionClass
+                        + (message.isEmpty() ? "" : ": " + message)
+                        + "\n\n" + suggestion;
+                com.dev.idea.plugins.tomcat.utils.TomcatNotifier.error(project,
+                        "Tomcat startup failure",
+                        content);
+            }
         };
         this.lifecycleListener = TomcatLifecycleListener.forConfiguration(configuration, pipelineLogger);
 

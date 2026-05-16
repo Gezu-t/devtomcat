@@ -58,6 +58,21 @@ public final class TomcatOutputPipeline {
          * notification with an "Open Run Configuration" action.
          */
         default void onActionableDiagnostic(@NotNull TomcatErrorDiagnostics.Diagnostic diagnostic) {}
+
+        /**
+         * Called by {@link ContextFailureRootCauseAnalyzer} when a Tomcat context
+         * fails to start AND the analyzer captured the deepest exception class +
+         * message from the preceding stack chain. Whatever the user's webapp
+         * actually threw — any framework, any third-party library, any of their
+         * own classes — is surfaced verbatim. We do not maintain a list of
+         * libraries we "know about"; the contract is purely structural: any
+         * exception chain that propagates up to a Tomcat context-failure line.
+         *
+         * <p>Default no-op. The production listener pops a balloon via
+         * {@link com.dev.idea.plugins.tomcat.utils.TomcatNotifier} so the user
+         * sees the real root cause without scrolling the catalina log.
+         */
+        default void onStartupRootCause(@NotNull String exceptionClass, @NotNull String message) {}
     }
 
     /**
@@ -186,6 +201,7 @@ public final class TomcatOutputPipeline {
             analyzers.add(new JmxAnalyzer());
         }
         analyzers.add(new DiagnosticsAnalyzer());
+        analyzers.add(new ContextFailureRootCauseAnalyzer());
         analyzers.add(new ErrorWarningAnalyzer());
         return new TomcatOutputPipeline(analyzers);
     }
@@ -433,6 +449,121 @@ public final class TomcatOutputPipeline {
                     ctx.logger.onActionableDiagnostic(diag);
                 }
             }
+        }
+    }
+
+    /**
+     * Captures the deepest {@code Caused by:} root cause from any exception
+     * chain that fires during startup, then surfaces it when a context-failure
+     * signature appears. Purely structural — no list of known libraries, no
+     * pattern-matching against specific package names. Whatever exception
+     * propagated up to the failure trigger is what we surface.
+     *
+     * <p>The shape Tomcat emits on a failed context init looks like:
+     * <pre>
+     *   com.example.SomeException: top-level wrapper
+     *           at com.example.Foo.bar(Foo.java:42)
+     *           ... N more frames ...
+     *   Caused by: com.example.AnotherException: middle of the chain
+     *           ... more frames ...
+     *   Caused by: java.io.IOException: the actual root cause
+     *           ... more frames ...
+     *   org.apache.catalina.LifecycleException: Failed to start component [...]
+     *           ... more frames ...
+     *   SEVERE: Context [...] startup failed due to previous errors
+     * </pre>
+     * The user has to scroll back through tens or hundreds of lines to find
+     * the actual cause. This analyzer remembers the deepest {@code Caused by:}
+     * exception header it has seen during the launch and surfaces it the
+     * moment Tomcat reports the context failure — so the balloon shows the
+     * real reason instead of the framework wrapper, regardless of which
+     * framework, ORM, migration tool, JDBC driver, or app class threw.
+     *
+     * <p>State is per-analyzer-instance, which is per-launch (each pipeline
+     * gets its own {@code create()}-built analyzer list). Buffer is capped at
+     * {@link #BUFFER_CAPACITY} headers to avoid pathological growth on log
+     * sprays.
+     */
+    static final class ContextFailureRootCauseAnalyzer implements Analyzer {
+        // Match exception header lines. Accepts both top-level
+        // ("foo.BarException: message") and chain links
+        // ("Caused by: foo.BarException: message" / "Suppressed: foo.BarException").
+        // Anchored to the start of the (trimmed) line so a passing mention
+        // inside a regular message ("the Exception was ignored") never matches.
+        private static final Pattern EXCEPTION_HEADER = Pattern.compile(
+                "^(?:Caused by:\\s+|Suppressed:\\s+)?"
+                        + "([a-zA-Z_$][\\w$]*(?:\\.[a-zA-Z_$][\\w$]*)*"
+                        + "(?:Exception|Error|Throwable))"
+                        + "(?::\\s*(.+))?$");
+
+        // Signatures Tomcat emits when a webapp context has failed to come up.
+        // Matching any of these triggers the balloon — they all mean "the
+        // user's webapp is the problem; look back for the actual cause".
+        private static final Pattern CONTEXT_FAILURE = Pattern.compile(
+                "LifecycleException:.*Failed to start component"
+                        + "|Context\\s*\\[[^\\]]+\\]\\s+startup failed due to previous errors"
+                        + "|One or more (?:Contexts did not start successfully|listeners failed to start"
+                        + "|filters failed to start)");
+
+        private static final int BUFFER_CAPACITY = 8;
+
+        // Per-launch state — each pipeline owns its own analyzer instance.
+        private final java.util.Deque<ExceptionHeader> recent = new java.util.ArrayDeque<>();
+        private boolean balloonFired = false;
+
+        private record ExceptionHeader(@NotNull String exceptionClass,
+                                       @NotNull String message,
+                                       boolean isCausedBy) {}
+
+        @Override
+        public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (balloonFired) return;
+
+            // Check the failure trigger FIRST. Tomcat's LifecycleException
+            // wrapper line also matches the exception-header pattern (because
+            // syntactically it is one), so checking it second would let it
+            // get buffered without firing the balloon — the user would see
+            // nothing despite Tomcat reporting an obvious failure. Order
+            // matters: trigger first, then buffer fallback.
+            if (CONTEXT_FAILURE.matcher(text).find()) {
+                ExceptionHeader rootCause = pickRootCause();
+                if (rootCause != null) {
+                    ctx.logger.onStartupRootCause(rootCause.exceptionClass(), rootCause.message());
+                }
+                balloonFired = true;
+                return;
+            }
+
+            // Otherwise, capture exception headers as they fly by so the
+            // trigger has a stack to look back through.
+            String trimmed = text.trim();
+            Matcher h = EXCEPTION_HEADER.matcher(trimmed);
+            if (h.matches()) {
+                String exClass = h.group(1);
+                String msg = h.group(2) != null ? h.group(2).trim() : "";
+                boolean isCausedBy = trimmed.startsWith("Caused by:");
+                recent.addLast(new ExceptionHeader(exClass, msg, isCausedBy));
+                while (recent.size() > BUFFER_CAPACITY) {
+                    recent.removeFirst();
+                }
+            }
+        }
+
+        /**
+         * Prefer the last {@code Caused by:} we have seen — that is the deepest
+         * link of the chain and almost always the real cause. Fall back to the
+         * first exception header if no {@code Caused by:} appeared (single-level
+         * exception, e.g. an OutOfMemoryError thrown directly from a listener).
+         */
+        @org.jetbrains.annotations.Nullable
+        private ExceptionHeader pickRootCause() {
+            ExceptionHeader lastCausedBy = null;
+            ExceptionHeader firstAny = null;
+            for (ExceptionHeader h : recent) {
+                if (firstAny == null) firstAny = h;
+                if (h.isCausedBy()) lastCausedBy = h;
+            }
+            return lastCausedBy != null ? lastCausedBy : firstAny;
         }
     }
 

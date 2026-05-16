@@ -16,6 +16,7 @@
 - **Stale-deployment cleanup failures are now visible.** When a previous Tomcat process still holds context XML or WAR files open (typical on Windows after an orphan-process scenario), the launch surfaces a balloon naming the locked files instead of crashing later with a cryptic `AccessDeniedException` at write time.
 - **Warns when the deployed artifact is older than recent code edits.** "Make" updates `out/production/classes/` but never refreshes Maven `target/` or external WAR paths; the launch now compares mtimes and pops a balloon naming the offending source file so the user knows to rerun their build (e.g. `mvn package`) or add a build step to Before Launch.
 - **Pre-launch validation catches missing `WEB-INF/` and WAR/exploded type mismatches.** Exploded artifact missing `WEB-INF/` blocks the launch with a clear "build may be incomplete" message; WAR artifact pointing at a directory (or vice versa) is caught with a one-click hint to fix in the Deployment tab. Empty `WEB-INF/classes/` raises a non-blocking warning.
+- **Startup-failure root cause surfaced as a balloon.** When a webapp context fails to start, the deepest `Caused by:` exception in the chain is captured and shown in a notification — no more scrolling the catalina log to find the actual reason. Works for any exception any framework, ORM, migration tool, or app class threw; no library list maintained.
 
 ## [1.0.13]
 

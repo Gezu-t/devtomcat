@@ -748,4 +748,227 @@ class TomcatOutputPipelineTest {
             assertEquals("My Web App", deployedNotifications.get(0));
         }
     }
+
+    @Nested
+    @DisplayName("ContextFailureRootCauseAnalyzer")
+    class ContextFailureRootCauseAnalyzerTests {
+
+        /** Captures the last (exceptionClass, message) pair forwarded to the logger. */
+        private final List<String[]> captured = new ArrayList<>();
+        private TomcatOutputPipeline.Context capturingContext;
+
+        @BeforeEach
+        void wireCapturingContext() {
+            TomcatOutputPipeline.PipelineLogger capturing = new TomcatOutputPipeline.PipelineLogger() {
+                @Override public void logServerStartup(long durationMs) {}
+                @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
+                @Override public void logServerInfo(@NotNull String msg) {}
+                @Override public void logServerError(@NotNull String msg) {}
+                @Override public void logServerWarning(@NotNull String msg) {}
+                @Override
+                public void onStartupRootCause(@NotNull String exceptionClass, @NotNull String message) {
+                    captured.add(new String[]{exceptionClass, message});
+                }
+            };
+            capturingContext = new TomcatOutputPipeline.Context(
+                    capturing, new TomcatLifecycleListener() {}, "testConfig",
+                    contextToArtifact, startupDetected, deployedCount,
+                    errorCount, warningCount, false,
+                    duration -> {}, () -> {}, c -> {});
+        }
+
+        @Test
+        @DisplayName("captures deepest Caused-by on LifecycleException")
+        void causedByChainSurfacesRootCause() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("com.example.app.AppException: top-level wrapper",
+                    capturingContext);
+            analyzer.analyze("\tat com.example.app.Service.run(Service.java:80)",
+                    capturingContext);
+            analyzer.analyze("Caused by: java.io.IOException: connection timed out",
+                    capturingContext);
+            analyzer.analyze("\tat java.base/sun.nio.ch.SocketChannelImpl.connect(SocketChannelImpl.java:129)",
+                    capturingContext);
+            analyzer.analyze("org.apache.catalina.LifecycleException: Failed to start component [StandardEngine[Catalina].StandardHost[localhost].StandardContext[/myapp]]",
+                    capturingContext);
+
+            assertEquals(1, captured.size());
+            assertEquals("java.io.IOException", captured.get(0)[0]);
+            assertEquals("connection timed out", captured.get(0)[1]);
+        }
+
+        @Test
+        @DisplayName("falls back to topmost exception when no Caused-by appeared")
+        void noCausedByUsesTopmost() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("java.lang.NullPointerException: foo is null", capturingContext);
+            analyzer.analyze("\tat com.example.app.Service.lookup(Service.java:42)",
+                    capturingContext);
+            analyzer.analyze("SEVERE: Context [/myapp] startup failed due to previous errors",
+                    capturingContext);
+
+            assertEquals(1, captured.size());
+            assertEquals("java.lang.NullPointerException", captured.get(0)[0]);
+            assertEquals("foo is null", captured.get(0)[1]);
+        }
+
+        @Test
+        @DisplayName("prefers DEEPEST Caused-by when there are multiple")
+        void picksDeepestCausedBy() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("com.example.app.WrapperException: outer failure",
+                    capturingContext);
+            analyzer.analyze("Caused by: com.example.app.MiddleException: middle of chain",
+                    capturingContext);
+            analyzer.analyze("Caused by: java.sql.SQLSyntaxErrorException: schema mismatch",
+                    capturingContext);
+            analyzer.analyze("LifecycleException: Failed to start component", capturingContext);
+
+            assertEquals(1, captured.size());
+            assertEquals("java.sql.SQLSyntaxErrorException", captured.get(0)[0]);
+            assertEquals("schema mismatch", captured.get(0)[1]);
+        }
+
+        @Test
+        @DisplayName("works regardless of which packages appear in the chain")
+        void agnosticOfChainPackages() {
+            // Three distinct chains, each from an unrelated (made-up) package
+            // namespace — all should surface the deepest Caused-by identically.
+            // The analyzer must not contain a list of known libraries.
+            // Class names follow the Java convention of ending with Exception /
+            // Error / Throwable — every real-world Java exception does.
+            for (String[] chain : new String[][]{
+                    {"com.foo.AException: outer",
+                     "Caused by: com.foo.BException: middle",
+                     "Caused by: com.foo.CException: root"},
+                    {"net.bar.XError: outer",
+                     "Caused by: net.bar.YError: root"},
+                    {"io.baz.qux.BoomException: outer",
+                     "Caused by: io.baz.qux.CrashException: deep root"},
+            }) {
+                TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                        new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+                captured.clear();
+                for (String line : chain) {
+                    analyzer.analyze(line, capturingContext);
+                }
+                analyzer.analyze("LifecycleException: Failed to start component",
+                        capturingContext);
+                assertEquals(1, captured.size(),
+                        "chain " + java.util.Arrays.toString(chain) + " must surface a root cause");
+                // Last entry in each chain is the expected deepest cause
+                String lastLine = chain[chain.length - 1];
+                String expectedClass = lastLine
+                        .replaceFirst("^(?:Caused by:\\s+)?", "")
+                        .replaceFirst(":.*$", "");
+                assertEquals(expectedClass, captured.get(0)[0]);
+            }
+        }
+
+        @Test
+        @DisplayName("listener failure also triggers the balloon")
+        void listenerStartFailedTriggers() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("java.lang.IllegalStateException: configuration not loaded",
+                    capturingContext);
+            analyzer.analyze("\tat com.example.app.AppListener.contextInitialized(AppListener.java:10)",
+                    capturingContext);
+            analyzer.analyze("SEVERE: One or more listeners failed to start", capturingContext);
+
+            assertEquals(1, captured.size());
+            assertEquals("java.lang.IllegalStateException", captured.get(0)[0]);
+        }
+
+        @Test
+        @DisplayName("fires only once per launch even if multiple failure lines appear")
+        void firesOnlyOnce() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("foo.BarException: boom", capturingContext);
+            analyzer.analyze("LifecycleException: Failed to start component", capturingContext);
+            analyzer.analyze("Context [/myapp] startup failed due to previous errors", capturingContext);
+            analyzer.analyze("One or more Contexts did not start successfully", capturingContext);
+
+            assertEquals(1, captured.size(), "duplicate cascading failure lines must not multi-fire");
+        }
+
+        @Test
+        @DisplayName("does not fire on clean startup (no exception headers seen)")
+        void cleanStartupDoesNotFire() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("INFO: Starting service [Catalina]", capturingContext);
+            analyzer.analyze("INFO: Starting Servlet engine: [Apache Tomcat/10.1.18]", capturingContext);
+            analyzer.analyze("INFO: Deploying web application archive [/path/myapp.war]",
+                    capturingContext);
+            analyzer.analyze("INFO: Server startup in [456] milliseconds", capturingContext);
+
+            assertTrue(captured.isEmpty());
+        }
+
+        @Test
+        @DisplayName("does not fire when exception header appears but no context-failure signature")
+        void noFailureSignatureMeansNoFire() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            analyzer.analyze("java.lang.NullPointerException: in a log message but not a failure",
+                    capturingContext);
+            analyzer.analyze("\tat com.myapp.Foo.bar(Foo.java:1)", capturingContext);
+            analyzer.analyze("INFO: Server startup in [123] ms", capturingContext);
+
+            assertTrue(captured.isEmpty(),
+                    "exception lines alone are not enough — we need a Tomcat-emitted context-failure signature");
+        }
+
+        @Test
+        @DisplayName("buffer cap protects against pathological exception sprays")
+        void bufferCapBoundedAtCapacity() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            // Spray more headers than the buffer holds. Class names follow the
+            // Java convention (suffix Exception/Error/Throwable) so the analyzer
+            // recognises each one. Only the most-recent N should survive.
+            for (int i = 0; i < 50; i++) {
+                analyzer.analyze("Caused by: com.example.E" + i + "Exception: message " + i,
+                        capturingContext);
+            }
+            analyzer.analyze("LifecycleException: Failed to start component", capturingContext);
+
+            assertEquals(1, captured.size());
+            // The captured class name should be one of the most recent — not E0Exception
+            String capturedClass = captured.get(0)[0];
+            assertNotEquals("com.example.E0Exception", capturedClass,
+                    "stale entries should have been evicted by the buffer cap");
+            assertTrue(capturedClass.startsWith("com.example.E")
+                    && capturedClass.endsWith("Exception"));
+        }
+
+        @Test
+        @DisplayName("lines that mention 'Exception' in prose are not captured")
+        void prosePassiveMentionsAreIgnored() {
+            TomcatOutputPipeline.ContextFailureRootCauseAnalyzer analyzer =
+                    new TomcatOutputPipeline.ContextFailureRootCauseAnalyzer();
+
+            // These lines mention "Exception" but are not exception headers.
+            // The analyzer should not buffer them.
+            analyzer.analyze("DEBUG: An IOException would be unusual here", capturingContext);
+            analyzer.analyze("INFO: the Exception was ignored as expected", capturingContext);
+            analyzer.analyze("LifecycleException: Failed to start component", capturingContext);
+
+            // Because the buffer is empty (no real exception headers), nothing should fire.
+            assertTrue(captured.isEmpty());
+        }
+    }
 }
