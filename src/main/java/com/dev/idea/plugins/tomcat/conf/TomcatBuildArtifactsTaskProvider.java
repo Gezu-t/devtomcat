@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStalenessDetector;
+import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStructureValidator;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.execution.BeforeRunTask;
@@ -134,6 +135,28 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
                     "Cannot start Tomcat. The following artifacts are missing:\n" + missing +
                             "\n\nBuild the project first (Build → Build Artifacts).");
             return false;
+        }
+
+        // Structure validation — the path exists but is it actually a deployable
+        // webapp? Catches the most common missing-JAR/incomplete-build cases:
+        //   • exploded artifact with no WEB-INF/      (build never completed)
+        //   • exploded artifact with empty classes/   (Make step broken)
+        //   • WAR artifact path that is a directory   (type / path mismatch)
+        // Tomcat would fail on any of these but with a confusing log message
+        // 10 seconds into startup. Catching it here gives the user a clear,
+        // actionable balloon and skips the futile launch.
+        ArtifactStructureValidator.Result structure = ArtifactStructureValidator.validate(artifacts);
+        if (structure.hasBlockingErrors()) {
+            TomcatNotifier.error(tomcatConfig.getProject(),
+                    "DevTomcat: Artifact structure invalid",
+                    String.join("\n\n", structure.blockingErrors()));
+            return false;
+        }
+        if (structure.hasWarnings()) {
+            TomcatNotifier.warning(tomcatConfig.getProject(),
+                    "DevTomcat: Artifact may be incomplete",
+                    String.join("\n\n", structure.warnings()));
+            // Soft warning — launch continues
         }
 
         // Staleness check — only runs when the launch is NOT covered by the
