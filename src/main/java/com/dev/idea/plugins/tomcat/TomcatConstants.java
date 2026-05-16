@@ -47,9 +47,6 @@ public final class TomcatConstants {
     // --- JRE ---
     public static final String JRE_PROJECT_DEFAULT = "Project default";
 
-    // --- Before Launch ---
-    public static final String TASK_BUILD = "Build";
-
     // --- Update Actions ---
     public static final String ACTION_UPDATE_RESOURCES = "Update resources";
     public static final String ACTION_UPDATE_CLASSES_AND_RESOURCES = "Update classes and resources";
@@ -80,10 +77,8 @@ public final class TomcatConstants {
     // --- Artifact Naming Suffixes (IntelliJ convention) ---
     public static final String ARTIFACT_SUFFIX_WAR_EXPLODED = ":war exploded";
     public static final String ARTIFACT_SUFFIX_EAR_EXPLODED = ":ear exploded";
-    public static final String ARTIFACT_SUFFIX_WEBAPP_EXPLODED = ":web application exploded";
     public static final String ARTIFACT_SUFFIX_WAR = ":war";
     public static final String ARTIFACT_SUFFIX_EAR = ":ear";
-    public static final String ARTIFACT_SUFFIX_WEBAPP_ARCHIVE = ":web application archive";
 
     // --- Deployment ---
     public static final String DEPLOY_OPTION_ARTIFACT = "Artifact...";
@@ -106,8 +101,6 @@ public final class TomcatConstants {
     // --- Tomcat config file paths (relative to CATALINA_HOME or CATALINA_BASE) ---
     public static final String CONFIG_SERVER_XML = "conf/server.xml";
     public static final String CONFIG_WEB_XML = "conf/web.xml";
-    public static final String CONFIG_CONTEXT_XML = "conf/context.xml";
-    public static final String CONFIG_TOMCAT_USERS_XML = "conf/tomcat-users.xml";
     public static final String CONFIG_LOGGING_PROPERTIES = "conf/logging.properties";
     public static final String CONFIG_CATALINA_PROPERTIES = "conf/catalina.properties";
     public static final String CONTEXT_XML_DIR = "conf/Catalina/localhost";
