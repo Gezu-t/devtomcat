@@ -150,6 +150,15 @@
         <consoleFilterProvider
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatConsoleFilterProvider"/>
 
+        <!-- Console folding: collapse Tomcat boilerplate so user-relevant output
+             stands out. The startup banner (~12 lines of OS / JVM / CATALINA info)
+             folds to one line; Tomcat-internal stack frames fold the same way
+             the platform folds JDK frames, leaving the user's own frames visible. -->
+        <consoleFolding
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatStartupBannerFolding"/>
+        <consoleFolding
+                implementation="com.dev.idea.plugins.tomcat.runner.TomcatStackFrameFolding"/>
+
         <!-- Notification Group for balloon notifications -->
         <notificationGroup id="DevTomcat" displayType="BALLOON"/>
 
