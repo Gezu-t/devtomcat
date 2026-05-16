@@ -23,7 +23,9 @@ import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.project.Project;
 import com.intellij.execution.ui.ConsoleView;
+import com.intellij.execution.filters.ExceptionFilter;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
@@ -495,6 +497,23 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     .getConsole();
         }
         if (console != null) {
+            // Attach the platform's Java exception filter so stack-trace lines
+            // like "at com.foo.Bar.baz(Bar.java:42)" become clickable and jump
+            // to the source. JavaCommandLineState does NOT install this by
+            // default — convention is for each Java run config (ApplicationConfiguration,
+            // JUnitConfiguration, etc.) to attach it explicitly via
+            // getConsoleBuilder() or post-create. We do it here because we
+            // already override createConsole for the deployment logger, and
+            // attaching after the platform's own filter chain keeps the
+            // ordering deterministic.
+            //
+            // Scope is GlobalSearchScope.allScope so users can navigate into
+            // framework code (Spring, Hibernate, Tomcat itself) — these are
+            // the most common destinations in a Tomcat stack trace, not the
+            // user's own classes. Restricting to project source would defeat
+            // the point.
+            Project project = getEnvironment().getProject();
+            console.addMessageFilter(new ExceptionFilter(GlobalSearchScope.allScope(project)));
             deploymentLogger.setConsoleView(console);
         }
         return console;
