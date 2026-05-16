@@ -9,7 +9,9 @@ import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -75,11 +77,20 @@ final class PortResolver {
         httpsPort    = resolvePortWithLogging("HTTPS",    httpsPort,    configuration.isHttpsEnabled());
         ajpPort      = resolvePortWithLogging("AJP",      ajpPort,      configuration.isAjpEnabled());
 
-        if (httpPort <= 0 || shutdownPort <= 0
-                || (configuration.isJmxEnabled()   && jmxPort   <= 0)
-                || (configuration.isHttpsEnabled() && httpsPort <= 0)
-                || (configuration.isAjpEnabled()   && ajpPort   <= 0)) {
-            throw new ExecutionException("Unable to find available ports for Tomcat run configuration");
+        List<String> unresolvedConnectors = new ArrayList<>();
+        if (httpPort <= 0)     unresolvedConnectors.add("HTTP");
+        if (shutdownPort <= 0) unresolvedConnectors.add("Shutdown");
+        if (configuration.isJmxEnabled()   && jmxPort   <= 0) unresolvedConnectors.add("JMX");
+        if (configuration.isHttpsEnabled() && httpsPort <= 0) unresolvedConnectors.add("HTTPS");
+        if (configuration.isAjpEnabled()   && ajpPort   <= 0) unresolvedConnectors.add("AJP");
+        if (!unresolvedConnectors.isEmpty()) {
+            throw new ExecutionException(
+                    "Could not find an available port for " + String.join(", ", unresolvedConnectors)
+                            + ". Every port from the configured starting value up to 65535 is in "
+                            + "use, or scan was blocked by the OS. Stop conflicting processes "
+                            + "(e.g. 'lsof -i :<port>' on macOS/Linux, 'netstat -ano | findstr :<port>' "
+                            + "on Windows), or change the starting port in the Run Configuration's "
+                            + "Server tab.");
         }
 
         PortConfig ports = new PortConfig();

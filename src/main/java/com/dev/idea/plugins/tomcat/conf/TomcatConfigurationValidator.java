@@ -56,7 +56,15 @@ package com.dev.idea.plugins.tomcat.conf;
                     throw e;
                 } catch (Exception e) {
                     LOG.error("Unexpected error during validation: " + config.getName(), e);
-                    throw new RuntimeConfigurationException("Validation error: " + e.getLocalizedMessage(), e);
+                    // Include the configuration name so a user with multiple
+                    // Tomcat configurations can identify which one triggered
+                    // the unexpected exception. Bare "Validation error: ..."
+                    // gives no signal when the IDE has 3+ Tomcat run configs.
+                    String name = config.getName();
+                    String prefix = (name != null && !name.isBlank())
+                            ? "Validation error in '" + name + "': "
+                            : "Validation error: ";
+                    throw new RuntimeConfigurationException(prefix + e.getLocalizedMessage(), e);
                 }
             }
 
