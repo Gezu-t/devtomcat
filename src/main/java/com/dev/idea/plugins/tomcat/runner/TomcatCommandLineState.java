@@ -108,8 +108,31 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             TomcatPortRegistry.getInstance()
                     .releaseAllFor(configuration.getName());
             if (e instanceof ExecutionException) throw (ExecutionException) e;
-            throw new ExecutionException(e.getMessage(), e);
+            // Wrap with phase + exception class so the user sees WHERE the
+            // failure occurred even when the cause's message is null (common
+            // for NullPointerException / IllegalStateException without a
+            // message constructor arg). Without this, the run console shows
+            // a bare "ExecutionException: null" with no signal whatsoever.
+            throw new ExecutionException(
+                    "Could not build Java command line for Tomcat: "
+                            + describeFailure(e),
+                    e);
         }
+    }
+
+    /**
+     * Produces a "{ExceptionClass}: {message}" string that is never empty.
+     * Falls back to the exception's simple class name when {@code getMessage()}
+     * is null — the bare class name is more useful than the literal string
+     * "null" when surfaced to the user via the run console.
+     */
+    @NotNull
+    static String describeFailure(@NotNull Throwable t) {
+        String msg = t.getMessage();
+        if (msg == null || msg.isBlank()) {
+            return t.getClass().getSimpleName();
+        }
+        return t.getClass().getSimpleName() + ": " + msg;
     }
 
     /**
@@ -483,7 +506,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             TomcatPortRegistry.getInstance()
                     .releaseAllFor(configuration.getName());
             if (e instanceof ExecutionException) throw (ExecutionException) e;
-            throw new ExecutionException(e.getMessage(), e);
+            // Same wrap-with-phase rationale as createJavaParameters above.
+            throw new ExecutionException(
+                    "Could not start Tomcat process: " + describeFailure(e), e);
         }
     }
 
