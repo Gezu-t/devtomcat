@@ -112,6 +112,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final TomcatOutputPipeline.Context pipelineContext;
     private final AtomicBoolean browserLaunchTriggered = new AtomicBoolean(false);
     private final Set<String> readyContexts = ConcurrentHashMap.newKeySet();
+    /**
+     * Fires a balloon at each local-midnight crossing so the user is warned
+     * that Tomcat's dated log files have rotated and existing Log tabs will
+     * be tailing the previous day's file. Disposed on processTerminated so
+     * a stopped run never produces a stale balloon. Null until startNotified.
+     */
+    @Nullable private volatile LogRolloverNotifier logRolloverNotifier;
     private volatile @Nullable String browserTargetContextName;
     private final boolean activateToolWindow;
     private final boolean showConsoleOnStdout;
@@ -331,6 +338,14 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         deploymentLogger.logServerInfo("Tomcat process started");
         lifecycleListener.onServerStarting(configurationName);
 
+        // Schedule the midnight-rollover notifier so the user is warned when
+        // Tomcat starts a new dated log file and the existing Log tabs go
+        // idle on yesterday's now-stale file.
+        com.intellij.openapi.project.Project project = configuration.getProject();
+        if (project != null && !project.isDisposed()) {
+            logRolloverNotifier = new LogRolloverNotifier(project);
+        }
+
         List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
         expectedArtifactCount.set(artifacts.size());
         if (artifacts.isEmpty()) {
@@ -365,6 +380,14 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         // to the next launch without waiting for the OS to reclaim them
         TomcatPortRegistry.getInstance()
                 .releaseAllFor(configurationName);
+
+        // Cancel the midnight-rollover alarm: this run is done, no balloon
+        // should fire after the user stopped Tomcat.
+        LogRolloverNotifier notifier = logRolloverNotifier;
+        if (notifier != null) {
+            com.intellij.openapi.util.Disposer.dispose(notifier);
+            logRolloverNotifier = null;
+        }
 
         try {
             lifecycleListener.onServerStopped(configurationName, exitCode, duration,

@@ -17,6 +17,7 @@
 - **Warns when the deployed artifact is older than recent source edits** — common when Maven `target/` or external WAR paths aren't rebuilt before launch.
 - **Pre-launch validation catches missing `WEB-INF/` and WAR-vs-exploded type mismatches** before Tomcat starts.
 - **Startup-failure root cause surfaced as a balloon** — deepest `Caused by:` from any context-init exception chain, library-agnostic.
+- **Midnight log-rotation notice** — when Tomcat runs past midnight, a balloon explains that existing Log tabs are now tailing yesterday's file and how to refresh.
 
 ## [1.0.13]
 
