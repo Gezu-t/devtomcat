@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+        import com.dev.idea.plugins.tomcat.TomcatConstants;
         import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
         import com.dev.idea.plugins.tomcat.model.PortConfig;
         import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
@@ -208,18 +209,51 @@ package com.dev.idea.plugins.tomcat.conf;
                     }
                 }
 
-                // Check for duplicate context paths
-                if (artifacts.size() < 2) return;
-                Set<String> seen = new HashSet<>();
+                // Single pass over artifacts validates each context path AND tracks
+                // for collisions. Keyed by the resolved Tomcat context name (which
+                // matches LocalDeploymentStrategy's on-disk file name and Tomcat's
+                // actual deployment behaviour). Raw-string comparison would miss
+                // equivalent paths that normalise to the same target:
+                //   "/foo" + "/foo/"           — trailing slash variant
+                //   ""     + "/"               — empty vs default both → ROOT
+                //   null   + "/"               — null vs explicit default both → ROOT
+                // Tomcat resolves all of these to the same context.xml file on disk
+                // and serves only the last write. Catching the collision in the
+                // validator surfaces it in the run-config editor with a yellow
+                // border so the user fixes it before the launch silently drops
+                // half their artifacts.
+                //
+                // The traversal-check branch runs for any artifact count (even one),
+                // because LocalDeploymentStrategy would throw at deploy time and we
+                // want the editor's Apply button to refuse it earlier with a clear
+                // attribution to the offending artifact.
+                Map<String, DeploymentArtifact> seenByContextName = new HashMap<>();
                 for (DeploymentArtifact artifact : artifacts) {
                     if (artifact == null) continue;
-                    String ctx = artifact.getContextPath();
-                    if (ctx == null || ctx.isEmpty()) ctx = "/";
-                    if (!seen.add(ctx)) {
+                    String resolvedName;
+                    try {
+                        resolvedName = ContextPathUtils.resolveContextName(artifact.getContextPath());
+                    } catch (IllegalArgumentException e) {
+                        // Invalid characters in the context path (.., \, :) — hard
+                        // error, surface as RuntimeConfigurationException so Apply
+                        // refuses the bad path early instead of letting it through
+                        // to a less informative ExecutionException at deploy time.
+                        throw new RuntimeConfigurationException(
+                                "Invalid context path on artifact '" + artifact.getDisplayName()
+                                        + "': " + e.getMessage());
+                    }
+                    if (artifacts.size() < 2) continue;
+                    DeploymentArtifact previous = seenByContextName.putIfAbsent(resolvedName, artifact);
+                    if (previous != null) {
+                        String displayPath = resolvedName.equals(TomcatConstants.ROOT_CONTEXT_NAME)
+                                ? "/ (ROOT)"
+                                : "/" + resolvedName;
                         throw new RuntimeConfigurationWarning(
-                                "Duplicate context path '" + ctx + "': multiple artifacts " +
-                                "deployed to the same path will conflict. Change the context path " +
-                                "of '" + artifact.getDisplayName() + "' in the Deployment tab.");
+                                "Duplicate context path " + displayPath + ": artifacts '"
+                                        + previous.getDisplayName() + "' and '"
+                                        + artifact.getDisplayName() + "' both deploy here. "
+                                        + "Tomcat will only serve one — change the context path "
+                                        + "of one in the Deployment tab.");
                     }
                 }
 

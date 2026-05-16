@@ -12,6 +12,7 @@
 
 ### Fixed
 - **Plugin now installable on IntelliJ IDEA 2026.2 EAP.** `until-build` raised from `261.*` to `262.*`; the marketplace was hiding the install button on 262.x builds.
+- **Duplicate-context-path detection now catches normalized variants.** Two artifacts using `/foo` and `/foo/`, or `""` and `"/"`, would silently collide on disk — only one was served. The validator now keys by Tomcat's resolved context name and refuses the run with both artifact names in the message. Invalid paths (`..`, `\`, `:`) are rejected at Apply time.
 
 ## [1.0.13]
 

@@ -288,6 +288,102 @@ class TomcatConfigurationValidatorTest {
                     () -> TomcatConfigurationValidator.validate(data));
             assertTrue(ex.getLocalizedMessage().contains("Duplicate deployment for module"));
         }
+
+        @Test
+        @DisplayName("identical raw context paths collide")
+        void identicalContextPathsCollide() throws Exception {
+            Path aPath = Files.createTempDirectory("devtomcat-art-a");
+            Path bPath = Files.createTempDirectory("devtomcat-art-b");
+            DeploymentArtifact a = new DeploymentArtifact("artifact-alpha", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            a.setContextPath("/myapp");
+            DeploymentArtifact b = new DeploymentArtifact("artifact-beta", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            b.setContextPath("/myapp");
+            data.getDeploymentConfig().addArtifact(a);
+            data.getDeploymentConfig().addArtifact(b);
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("Duplicate context path"));
+            assertTrue(ex.getLocalizedMessage().contains("/myapp"));
+            // Error message should name BOTH conflicting artifacts so the user
+            // can locate them in the Deployment tab without guessing.
+            assertTrue(ex.getLocalizedMessage().contains("artifact-alpha"),
+                    "expected first artifact name in message: " + ex.getLocalizedMessage());
+            assertTrue(ex.getLocalizedMessage().contains("artifact-beta"),
+                    "expected second artifact name in message: " + ex.getLocalizedMessage());
+        }
+
+        @Test
+        @DisplayName("trailing slash variant collides via normalization (/foo vs /foo/)")
+        void trailingSlashVariantCollides() throws Exception {
+            Path aPath = Files.createTempDirectory("devtomcat-trail-a");
+            Path bPath = Files.createTempDirectory("devtomcat-trail-b");
+            DeploymentArtifact a = new DeploymentArtifact("trail-app-a", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            a.setContextPath("/foo");
+            DeploymentArtifact b = new DeploymentArtifact("trail-app-b", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            b.setContextPath("/foo/");
+            data.getDeploymentConfig().addArtifact(a);
+            data.getDeploymentConfig().addArtifact(b);
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("Duplicate context path"));
+            assertTrue(ex.getLocalizedMessage().contains("/foo"));
+        }
+
+        @Test
+        @DisplayName("empty vs default both resolve to ROOT and collide")
+        void emptyAndDefaultBothCollideAsRoot() throws Exception {
+            Path aPath = Files.createTempDirectory("devtomcat-root-a");
+            Path bPath = Files.createTempDirectory("devtomcat-root-b");
+            DeploymentArtifact a = new DeploymentArtifact("root-app-a", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            a.setContextPath("");
+            DeploymentArtifact b = new DeploymentArtifact("root-app-b", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            b.setContextPath("/");
+            data.getDeploymentConfig().addArtifact(a);
+            data.getDeploymentConfig().addArtifact(b);
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("Duplicate context path"));
+            // ROOT label should be present so users grasp the canonical form.
+            assertTrue(ex.getLocalizedMessage().contains("ROOT") || ex.getLocalizedMessage().contains("/"),
+                    "expected ROOT label or '/' in message: " + ex.getLocalizedMessage());
+        }
+
+        @Test
+        @DisplayName("distinct context paths pass validation")
+        void distinctContextPathsPass() throws Exception {
+            Path aPath = Files.createTempDirectory("devtomcat-distinct-a");
+            Path bPath = Files.createTempDirectory("devtomcat-distinct-b");
+            DeploymentArtifact a = new DeploymentArtifact("distinct-a", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            a.setContextPath("/alpha");
+            DeploymentArtifact b = new DeploymentArtifact("distinct-b", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            b.setContextPath("/beta");
+            data.getDeploymentConfig().addArtifact(a);
+            data.getDeploymentConfig().addArtifact(b);
+
+            assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
+        }
+
+        @Test
+        @DisplayName("invalid context path with .. throws hard exception")
+        void invalidContextPathThrowsHardException() throws Exception {
+            Path aPath = Files.createTempDirectory("devtomcat-invalid");
+            DeploymentArtifact a = new DeploymentArtifact("invalid-app", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            a.setContextPath("/foo/../bar");
+            data.getDeploymentConfig().addArtifact(a);
+
+            RuntimeConfigurationException ex = assertThrows(
+                    RuntimeConfigurationException.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("Invalid context path"));
+            assertTrue(ex.getLocalizedMessage().contains("invalid-app"),
+                    "expected offending artifact name in message: " + ex.getLocalizedMessage());
+        }
     }
 
     // =========================================================================
