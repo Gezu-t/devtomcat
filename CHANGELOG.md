@@ -5,18 +5,18 @@
 ## [1.0.14]
 
 ### Added
-- **Clickable Java stack traces in the run-config console.** Lines like `at com.foo.Bar.baz(Bar.java:42)` navigate to the source. Scope includes framework code (Spring, Hibernate, Tomcat).
-- **Console folding for Tomcat boilerplate.** Startup system-info banner and runs of `org.apache.{catalina,coyote,tomcat,...}` / `jakarta.servlet` / `javax.servlet` stack frames collapse the way IntelliJ folds JDK frames.
-- **Actionable balloons on Tomcat failures.** Port-in-use, missing-class, OOM, and JRE-mismatch errors pop a notification with an "Open Run Configuration" action. Deduped per launch.
-- **Balloon when custom `server.xml` cannot be parsed.** Previously a console-only warning; users now see a visible alert that Tomcat is launching on the minimal generated config and custom Valves / Realms / Listeners are not active.
+- **Clickable Java stack traces** in the run-config console; navigates to source for project, framework, and container code.
+- **Console folding for Tomcat boilerplate** — startup banner and container-internal stack frames collapse like JDK frames.
+- **Actionable balloons on common failures** — port-in-use, missing-class, OOM, JRE mismatch — with an Open Run Configuration action.
+- **Balloon when custom `server.xml` cannot be parsed**; the launch falls back to a minimal config and the user is alerted instead of silently losing custom Valves / Realms / Listeners.
 
 ### Fixed
-- **Plugin now installable on IntelliJ IDEA 2026.2 EAP.** `until-build` raised from `261.*` to `262.*`; the marketplace was hiding the install button on 262.x builds.
-- **Duplicate-context-path detection now catches normalized variants.** Two artifacts using `/foo` and `/foo/`, or `""` and `"/"`, would silently collide on disk — only one was served. The validator now keys by Tomcat's resolved context name and refuses the run with both artifact names in the message. Invalid paths (`..`, `\`, `:`) are rejected at Apply time.
-- **Stale-deployment cleanup failures are now visible.** When a previous Tomcat process still holds context XML or WAR files open (typical on Windows after an orphan-process scenario), the launch surfaces a balloon naming the locked files instead of crashing later with a cryptic `AccessDeniedException` at write time.
-- **Warns when the deployed artifact is older than recent code edits.** "Make" updates `out/production/classes/` but never refreshes Maven `target/` or external WAR paths; the launch now compares mtimes and pops a balloon naming the offending source file so the user knows to rerun their build (e.g. `mvn package`) or add a build step to Before Launch.
-- **Pre-launch validation catches missing `WEB-INF/` and WAR/exploded type mismatches.** Exploded artifact missing `WEB-INF/` blocks the launch with a clear "build may be incomplete" message; WAR artifact pointing at a directory (or vice versa) is caught with a one-click hint to fix in the Deployment tab. Empty `WEB-INF/classes/` raises a non-blocking warning.
-- **Startup-failure root cause surfaced as a balloon.** When a webapp context fails to start, the deepest `Caused by:` exception in the chain is captured and shown in a notification — no more scrolling the catalina log to find the actual reason. Works for any exception any framework, ORM, migration tool, or app class threw; no library list maintained.
+- **Plugin now installable on IntelliJ IDEA 2026.2 EAP** — `until-build` raised from `261.*` to `262.*`.
+- **Duplicate-context-path detection catches normalized variants** (`/foo` vs `/foo/`, `""` vs `"/"`); invalid paths rejected at Apply.
+- **Stale-deployment cleanup failures surface as a balloon** naming the locked files instead of failing later with `AccessDeniedException`.
+- **Warns when the deployed artifact is older than recent source edits** — common when Maven `target/` or external WAR paths aren't rebuilt before launch.
+- **Pre-launch validation catches missing `WEB-INF/` and WAR-vs-exploded type mismatches** before Tomcat starts.
+- **Startup-failure root cause surfaced as a balloon** — deepest `Caused by:` from any context-init exception chain, library-agnostic.
 
 ## [1.0.13]
 
