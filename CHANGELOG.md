@@ -4,6 +4,11 @@
 
 ## [1.0.14]
 
+### Added
+- **Clickable Java stack traces in the run-config console.** Lines like `at com.foo.Bar.baz(Bar.java:42)` navigate to the source. Scope includes framework code (Spring, Hibernate, Tomcat).
+- **Console folding for Tomcat boilerplate.** Startup system-info banner and runs of `org.apache.{catalina,coyote,tomcat,...}` / `jakarta.servlet` / `javax.servlet` stack frames collapse the way IntelliJ folds JDK frames.
+- **Actionable balloons on Tomcat failures.** Port-in-use, missing-class, OOM, and JRE-mismatch errors pop a notification with an "Open Run Configuration" action. Deduped per launch.
+
 ### Fixed
 - **Plugin now installable on IntelliJ IDEA 2026.2 EAP.** `until-build` raised from `261.*` to `262.*`; the marketplace was hiding the install button on 262.x builds.
 

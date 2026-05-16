@@ -44,6 +44,20 @@ public final class TomcatOutputPipeline {
         void logServerInfo(@NotNull String message);
         void logServerError(@NotNull String message);
         void logServerWarning(@NotNull String message);
+
+        /**
+         * Called by {@link DiagnosticsAnalyzer} when a Tomcat error pattern matches
+         * and the diagnostic carries a non-null {@code quickFixId} — i.e. one of
+         * the four classes of failure with a known navigation target
+         * (Port Conflict, Missing Class, Out of Memory, Java Version Mismatch).
+         *
+         * <p>Default no-op so headless test fixtures and any callers that do not
+         * want the IDE balloon UX can opt out by omitting the override. The
+         * production {@link TomcatProcessHandler} routes this to a
+         * {@code DiagnosticBalloonRouter} which dedupes and pops a balloon
+         * notification with an "Open Run Configuration" action.
+         */
+        default void onActionableDiagnostic(@NotNull TomcatErrorDiagnostics.Diagnostic diagnostic) {}
     }
 
     /**
@@ -409,6 +423,15 @@ public final class TomcatOutputPipeline {
             List<TomcatErrorDiagnostics.Diagnostic> diagnostics = TomcatErrorDiagnostics.analyze(text);
             for (TomcatErrorDiagnostics.Diagnostic diag : diagnostics) {
                 ctx.logger.logServerInfo(TomcatErrorDiagnostics.formatForConsole(diag));
+                // Diagnostics carrying a quickFixId are the ones where we can
+                // direct the user to a specific place to fix the problem (port,
+                // classpath, memory, JRE). Promote those to a balloon so the
+                // user does not have to spot the [CRITICAL] line in a flood of
+                // console output. The PipelineLogger default is a no-op so
+                // headless test fixtures stay quiet.
+                if (diag.getQuickFixId() != null) {
+                    ctx.logger.onActionableDiagnostic(diag);
+                }
             }
         }
     }

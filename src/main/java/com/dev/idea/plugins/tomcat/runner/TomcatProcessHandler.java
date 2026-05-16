@@ -1,6 +1,8 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.diagnostics.DiagnosticBalloonRouter;
+import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
@@ -157,12 +159,20 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         this.shutdownPort = ports.getShutdown();
         this.httpPort = ports.getHttp();
         // Build lifecycle listener from event consumers
+        DiagnosticBalloonRouter diagnosticRouter =
+                configuration.getProject() != null
+                        ? new DiagnosticBalloonRouter(configuration.getProject(), configuration)
+                        : null;
         TomcatOutputPipeline.PipelineLogger pipelineLogger = new TomcatOutputPipeline.PipelineLogger() {
             @Override public void logServerStartup(long durationMs) { deploymentLogger.logServerStartup(durationMs); }
             @Override public void logDeploymentSuccess(@NotNull String name, long ms) { deploymentLogger.logDeploymentSuccess(name, ms); }
             @Override public void logServerInfo(@NotNull String msg) { deploymentLogger.logServerInfo(msg); }
             @Override public void logServerError(@NotNull String msg) { deploymentLogger.logServerError(msg); }
             @Override public void logServerWarning(@NotNull String msg) { deploymentLogger.logServerWarning(msg); }
+            @Override
+            public void onActionableDiagnostic(@NotNull TomcatErrorDiagnostics.Diagnostic diagnostic) {
+                if (diagnosticRouter != null) diagnosticRouter.route(diagnostic);
+            }
         };
         this.lifecycleListener = TomcatLifecycleListener.forConfiguration(configuration, pipelineLogger);
 

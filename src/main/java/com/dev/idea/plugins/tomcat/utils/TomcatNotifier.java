@@ -1,8 +1,11 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
@@ -55,6 +58,55 @@ public final class TomcatNotifier {
             throw pce;
         } catch (Exception e) {
             LOG.debug("Could not show notification '" + title + "': " + e.getMessage());
+        }
+    }
+
+    /**
+     * Convenience wrapper around {@link #notifyWithAction} for ERROR-level
+     * balloons that direct the user to a specific fix-up action.
+     */
+    public static void errorWithAction(@NotNull Project project,
+                                       @NotNull String title,
+                                       @NotNull String content,
+                                       @NotNull String actionLabel,
+                                       @NotNull Runnable action) {
+        notifyWithAction(project, title, content, NotificationType.ERROR, actionLabel, action);
+    }
+
+    /**
+     * Pops a balloon with a single clickable action button.
+     *
+     * <p>Used by the diagnostic balloon router to surface actionable Tomcat
+     * failures (port-in-use, missing class, OOM, JRE mismatch) with a one-click
+     * path back to the Run Configuration editor. The notification auto-expires
+     * after the action runs so it does not linger as a stale "Open …" prompt.
+     */
+    public static void notifyWithAction(@NotNull Project project,
+                                        @NotNull String title,
+                                        @NotNull String content,
+                                        @NotNull NotificationType type,
+                                        @NotNull String actionLabel,
+                                        @NotNull Runnable action) {
+        if (project.isDisposed()) return;
+        try {
+            Notification notification = NotificationGroupManager.getInstance()
+                    .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                    .createNotification(title, content, type);
+            notification.addAction(new NotificationAction(actionLabel) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
+                    try {
+                        action.run();
+                    } finally {
+                        n.expire();
+                    }
+                }
+            });
+            notification.notify(project);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            throw pce;
+        } catch (Exception e) {
+            LOG.debug("Could not show notification with action '" + title + "': " + e.getMessage());
         }
     }
 }
