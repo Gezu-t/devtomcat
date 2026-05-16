@@ -1,8 +1,11 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStalenessDetector;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
+import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.BeforeRunTaskProvider;
+import com.intellij.execution.RunManagerEx;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.icons.AllIcons;
@@ -130,8 +133,76 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
                     "DevTomcat: Artifacts Not Ready",
                     "Cannot start Tomcat. The following artifacts are missing:\n" + missing +
                             "\n\nBuild the project first (Build → Build Artifacts).");
+            return false;
         }
-        return allValid;
+
+        // Staleness check — only runs when the launch is NOT covered by the
+        // platform's own BuildArtifactsBeforeRunTask. That task rebuilds
+        // matching IntelliJ Artifacts itself, so on the Ultimate path the
+        // deployed file is guaranteed fresh by the time we get here. For
+        // external paths (Maven target/, Gradle build/, hand-rolled WARs)
+        // nothing rebuilds them — the "Make" task only updates
+        // out/production/classes/, and Tomcat happily serves the stale file.
+        // Surface a balloon naming the offending source so the user can fix
+        // the build setup (add `mvn package` to Before Launch, point the
+        // artifact at the right output, etc.). Non-blocking: returns true so
+        // the launch proceeds.
+        if (!hasPlatformArtifactBuildTask(tomcatConfig)) {
+            List<ArtifactStalenessDetector.StaleReport> stale =
+                    ArtifactStalenessDetector.findStaleArtifacts(
+                            tomcatConfig.getProject(), artifacts);
+            if (!stale.isEmpty()) {
+                warnStaleArtifacts(tomcatConfig, stale);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns {@code true} when the platform's own
+     * {@code BuildArtifactsBeforeRunTask} is enabled on the configuration.
+     * In that case the platform rebuilds the matching IntelliJ Artifact and
+     * the deployed file is fresh — skip the staleness check to avoid
+     * surfacing a false positive on Ultimate / configured-artifact setups.
+     */
+    private static boolean hasPlatformArtifactBuildTask(@NotNull TomcatRunConfiguration config) {
+        try {
+            for (BeforeRunTask<?> task : RunManagerEx.getInstanceEx(config.getProject())
+                    .getBeforeRunTasks(config)) {
+                if (task == null || !task.isEnabled()) continue;
+                if (task instanceof com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            // If we cannot read BeforeRun tasks for any reason, fall back to
+            // running the staleness check — a false positive (extra warning)
+            // is preferable to a false negative (silent stale code).
+            return false;
+        }
+    }
+
+    private static void warnStaleArtifacts(@NotNull TomcatRunConfiguration config,
+                                           @NotNull List<ArtifactStalenessDetector.StaleReport> stale) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Source files have been edited since the deployed artifact was last built. ")
+                .append("The change may not be visible after launch.\n\n");
+        int shown = Math.min(stale.size(), 3);
+        for (int i = 0; i < shown; i++) {
+            ArtifactStalenessDetector.StaleReport r = stale.get(i);
+            sb.append("• '").append(r.artifactDisplayName()).append("' — ")
+                    .append(r.exampleSourceFile()).append(" is newer than ")
+                    .append(r.artifactPath()).append('\n');
+        }
+        if (stale.size() > shown) {
+            sb.append("• … and ").append(stale.size() - shown).append(" more\n");
+        }
+        sb.append("\nRebuild the artifact, or add a build step to Before Launch ")
+                .append("(e.g., 'Run Maven Goal: package' for Maven projects).");
+        TomcatNotifier.warning(config.getProject(),
+                "DevTomcat: Deployed artifact may be stale",
+                sb.toString());
     }
 
     @Override
