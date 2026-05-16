@@ -17,10 +17,14 @@ Run, debug, and deploy web applications with smart diagnostics, live status trac
 - **CATALINA_BASE isolation** — Each run configuration gets its own instance directory, or you can point to a custom one
 - **Startup performance tracking** — Records startup times and shows trend comparisons across runs
 - **Intelligent console monitoring** — Detects Tomcat log levels (SEVERE/ERROR/FATAL/WARNING) and exception stack traces without false positives on normal application output
+- **Clickable Java stack traces** — Lines like `at com.foo.Bar.baz(Bar.java:42)` navigate to the source for project, framework, and Tomcat code
+- **Console folding** — Tomcat's startup banner and container-internal stack frames (`org.apache.{catalina,coyote,tomcat,...}`, `jakarta.servlet`) collapse like JDK frames so user code stands out
+- **Actionable balloon notifications** — Common failures (port-in-use, missing class, OOM, JRE mismatch) pop a balloon with an "Open Run Configuration" action; the deepest `Caused by:` from any context-init failure is surfaced as a notification so you don't have to scroll the catalina log
+- **Pre-launch validation** — Missing `WEB-INF/`, type/path mismatches, corrupted WARs, duplicate context paths (including `/foo` vs `/foo/` normalised variants), and stale-source-vs-artifact mtime are all caught before Tomcat starts
 - **Graceful non-blocking shutdown** — Sends the SHUTDOWN command (or runs a custom script) on a background thread so the IDE stays responsive
 - **Custom script support** — Startup and shutdown scripts are properly tokenized, so `catalina.sh run` is correctly split into executable + arguments
 - **Before Launch consolidation** — All deployment artifacts are combined into a single "Build N artifacts" task
-- **Log file monitoring** — Standard Tomcat logs appear as console tabs with automatic merge of new log types on plugin updates
+- **Log file monitoring** — Standard Tomcat logs appear as console tabs; a balloon at midnight warns when Tomcat rotates dated log files so you don't keep tailing yesterday's file
 - **Remote deployment** — Deploy to a remote Tomcat instance via the Manager API
 
 ## Installation
@@ -236,7 +240,7 @@ DevTomcat monitors standard Tomcat log files and displays them as tabs in the Ru
 
 | Log File | Pattern | Default |
 |----------|---------|---------|
-| **Catalina Out** | `catalina.out` | Active |
+| **Catalina Out** | `catalina.out` | Inactive — stdout/stderr already route to the main Console tab |
 | **Catalina Log** | `catalina.*.log` | Active |
 | **Localhost Log** | `localhost.*.log` | Active |
 | **Access Log** | `localhost_access_log.*.txt` | Inactive |
@@ -254,7 +258,11 @@ DevTomcat parses Tomcat console output in real time to provide:
 
 - **Error detection** — Matches `SEVERE`, `ERROR`, and `FATAL` log levels plus Java exception stack traces (`Caused by:`, exception class names). Avoids false positives on normal application output that happens to contain words like "error" or "unable".
 - **Warning detection** — Matches `WARNING` and `WARN` log levels.
-- **Error suggestions** — When known errors are detected (e.g., `BindException`, `OutOfMemoryError`, `ClassNotFoundException`), DevTomcat logs actionable suggestions in the console.
+- **Clickable stack traces** — Lines like `at com.foo.Bar.baz(Bar.java:42)` open the source in the editor. Scope includes framework and Tomcat code, not just project source.
+- **Stack-frame folding** — Runs of `org.apache.{catalina,coyote,tomcat,jasper,el,naming,juli}` and `jakarta.servlet` / `javax.servlet` frames collapse like JDK frames so user-code frames stand out. The startup boilerplate banner (OS / JVM / CATALINA paths, etc.) folds the same way.
+- **Actionable balloons** — Known recoverable failures (`BindException`, `ClassNotFoundException`, `OutOfMemoryError`, `UnsupportedClassVersionError`) pop a balloon with an "Open Run Configuration" action, deduped per launch.
+- **Root-cause balloon** — When a webapp context fails to start, the deepest `Caused by:` exception from the chain is surfaced in a notification with the actual class and message — works for any framework / ORM / migration tool / app class, no library-specific patterns maintained.
+- **Error suggestions** — When known errors are detected, DevTomcat logs an actionable suggestion in the console alongside the original line.
 - **Startup tracking** — Records server startup time and compares against previous runs.
 - **Session summary** — On shutdown, logs a summary including duration, exit code, error/warning counts, and deployment status.
 
