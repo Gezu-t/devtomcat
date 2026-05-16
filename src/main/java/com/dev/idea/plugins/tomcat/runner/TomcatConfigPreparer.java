@@ -555,13 +555,15 @@ public final class TomcatConfigPreparer {
         sb.append("  <Listener className=\"org.apache.catalina.core.ThreadLocalLeakPreventionListener\" />\n");
         sb.append("  <Service name=\"Catalina\">\n");
         sb.append("    <Connector port=\"").append(httpPort).append("\" protocol=\"").append(PROTOCOL_HTTP).append("\"\n");
-        sb.append("               connectionTimeout=\"20000\" redirectPort=\"")
+        sb.append("               connectionTimeout=\"").append(CONNECTOR_CONNECTION_TIMEOUT_MS)
+                .append("\" redirectPort=\"")
                 .append(httpsEnabled ? httpsPort : PortConfig.DEFAULT_HTTPS_PORT)
                 .append("\" />\n");
 
         if (httpsEnabled) {
             sb.append("    <Connector port=\"").append(httpsPort).append("\" protocol=\"").append(PROTOCOL_HTTPS).append("\"\n");
-            sb.append("               maxThreads=\"150\" SSLEnabled=\"true\">\n");
+            sb.append("               maxThreads=\"").append(CONNECTOR_HTTPS_MAX_THREADS)
+                    .append("\" SSLEnabled=\"true\">\n");
             sb.append("      <!-- Configure SSL certificate in server.xml or use JVM keystore -->\n");
             sb.append("    </Connector>\n");
         }

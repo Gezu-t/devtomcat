@@ -59,6 +59,12 @@ public final class TomcatConstants {
     public static final String DEFAULT_PORT = "8080";
     public static final int DEFAULT_PORT_NUMBER = 8080;
 
+    // --- Connector defaults (mirrors Apache Tomcat's stock server.xml) ---
+    /** Default {@code maxThreads} for the HTTPS connector when DevTomcat injects one. */
+    public static final int CONNECTOR_HTTPS_MAX_THREADS = 150;
+    /** Default HTTP connector {@code connectionTimeout} in milliseconds. */
+    public static final int CONNECTOR_CONNECTION_TIMEOUT_MS = 20_000;
+
     // --- Environment Variable Names (passed to Tomcat process) ---
     public static final String ENV_HTTP_PORT = "TOMCAT_HTTP_PORT";
     public static final String ENV_SHUTDOWN_PORT = "TOMCAT_SHUTDOWN_PORT";

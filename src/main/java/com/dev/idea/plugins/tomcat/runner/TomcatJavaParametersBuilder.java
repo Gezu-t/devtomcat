@@ -17,6 +17,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.openapi.diagnostic.Logger;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
@@ -291,6 +292,25 @@ public class TomcatJavaParametersBuilder {
             }
             for (String warning : warnings) {
                 deploymentLogger.logServerWarning(warning);
+            }
+        }
+
+        // Promote the server.xml DOM-parse-failure case to a balloon. The
+        // console warning is easy to lose in the scrollback, and the user
+        // needs to know their custom server.xml was bypassed — otherwise they
+        // see Tomcat starting "fine" on the minimal generated config and have
+        // no signal that custom Valves / Realms / Listeners are silently
+        // absent. The warning string is produced by ServerXmlMutator when
+        // DocumentBuilder.parse() throws on malformed XML.
+        if (warnings.stream().anyMatch(w -> w.contains("XML parsing failed"))) {
+            Project project = configuration.getProject();
+            if (project != null) {
+                TomcatNotifier.warning(project,
+                        "Custom server.xml could not be parsed",
+                        "Tomcat is launching on a minimal generated server.xml. Custom Valves, " +
+                                "Realms, or Listeners in your server.xml are not active until the " +
+                                "parse error is fixed — see the run-config console for the XML " +
+                                "parse details.");
             }
         }
     }

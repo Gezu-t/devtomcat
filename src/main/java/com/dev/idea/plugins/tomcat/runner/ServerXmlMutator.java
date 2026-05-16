@@ -214,7 +214,7 @@ public final class ServerXmlMutator {
         Element httpsConnector = doc.createElement("Connector");
         httpsConnector.setAttribute("port", String.valueOf(port));
         httpsConnector.setAttribute("protocol", TomcatConstants.PROTOCOL_HTTPS);
-        httpsConnector.setAttribute("maxThreads", "150");
+        httpsConnector.setAttribute("maxThreads", String.valueOf(TomcatConstants.CONNECTOR_HTTPS_MAX_THREADS));
         httpsConnector.setAttribute("SSLEnabled", "true");
 
         Node parent = httpConnector.getParentNode();
