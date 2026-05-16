@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.0.14]
+
+### Fixed
+- **Plugin now installable on IntelliJ IDEA 2026.2 EAP.** `until-build` raised from `261.*` to `262.*`; the marketplace was hiding the install button on 262.x builds.
+
 ## [1.0.13]
 
 ### Added

@@ -103,13 +103,24 @@ intellijPlatform {
             // recommended() pulls seven IDE builds (~35GB of DMG downloads) which
             // exceeds available disk on developer laptops. Verify against a
             // tighter, meaningful set: our exact build target (pinned in
-            // gradle.properties as platformVersion) and the upper bound of our
-            // pluginUntilBuild claim so we catch API drift before the
-            // Marketplace does. If you're running in CI with plenty of disk,
-            // swap this for `recommended()`.
+            // gradle.properties as platformVersion) and the most-recent stable
+            // upper bound so we catch API drift before the Marketplace does.
+            // If you're running in CI with plenty of disk, swap this for
+            // `recommended()`.
             create(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
-            // IntelliJ IDEA Community was merged into the unified IDEA product at
-            // 2025.3 (build 253), so the upper-bound target uses the unified type.
+            // Upper bound stays on the latest 2026.1 release rather than an
+            // EAP snapshot, even though pluginUntilBuild claims 262.*.
+            // Reason: the IntelliJ Platform Gradle Plugin 2.11.0 cannot resolve
+            // 2026.2 EAP snapshot artifacts against the cache-redirector — it
+            // computes a wrong-group-ID path (idea:idea or idea:ideaIC instead
+            // of com.jetbrains.intellij.idea:ideaIU) and the resolution 404s
+            // even with snapshots() added to the repositories block. We rely
+            // on the platform's binary-compat promise within a single yearly
+            // major (251–262 share the same API surface modulo deprecations)
+            // plus manual smoke-testing in the user's 2026.x install.
+            // Re-evaluate when bumping past 262.* — by then the Gradle plugin
+            // should support snapshot resolution and we can pin a concrete
+            // EAP build here again.
             create(IntelliJPlatformType.IntellijIdea, "2026.1")
         }
     }
