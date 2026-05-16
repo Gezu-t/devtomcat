@@ -1,0 +1,147 @@
+package com.dev.idea.plugins.tomcat.runner;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Tests for the static cleanup helpers in {@link LocalDeploymentStrategy} —
+ * the {@code .xml} / {@code .war} purge that runs before every IDE-managed
+ * launch. The happy path is what most users hit; tests pin the boundary
+ * behaviours (filtering by suffix, leaving unrelated files alone, returning
+ * a non-null empty list when the directory does not exist).
+ *
+ * <p>The "stale Tomcat holds file open" failure case is not exercised here
+ * because portably forcing {@code Files.deleteIfExists} to throw IOException
+ * is awkward on POSIX (open-then-unlink succeeds). The contract is verified
+ * structurally: failures are collected into the supplied list and the method
+ * does not throw, no matter what the filesystem does. Manual verification on
+ * Windows confirms the locked-file path appends to the list.
+ */
+class LocalDeploymentStrategyCleanupTest {
+
+    @Nested
+    @DisplayName("cleanStaleDeployments")
+    class CleanStaleDeployments {
+
+        @Test
+        @DisplayName("removes every .xml in confDir and every .war in webappsDir")
+        void removesXmlAndWar(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            Files.writeString(conf.resolve("ROOT.xml"), "<Context/>");
+            Files.writeString(conf.resolve("myapp.xml"), "<Context/>");
+            Files.writeString(webapps.resolve("myapp.war"), "PK"); // fake WAR magic
+
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(webapps, conf);
+
+            assertTrue(failures.isEmpty(), "happy path should not report failures");
+            assertFalse(Files.exists(conf.resolve("ROOT.xml")));
+            assertFalse(Files.exists(conf.resolve("myapp.xml")));
+            assertFalse(Files.exists(webapps.resolve("myapp.war")));
+        }
+
+        @Test
+        @DisplayName("preserves files with non-matching suffixes (.properties, .txt, directories)")
+        void preservesUnrelatedFiles(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            // Cruft that must survive the sweep
+            Files.writeString(conf.resolve("catalina.properties"), "key=value");
+            Files.writeString(conf.resolve("logging.properties"), "");
+            Files.createDirectory(webapps.resolve("ROOT")); // an exploded webapp directory
+
+            LocalDeploymentStrategy.cleanStaleDeployments(webapps, conf);
+
+            assertTrue(Files.exists(conf.resolve("catalina.properties")));
+            assertTrue(Files.exists(conf.resolve("logging.properties")));
+            assertTrue(Files.isDirectory(webapps.resolve("ROOT")),
+                    "exploded webapp directories must not be deleted by the .war-only sweep");
+        }
+
+        @Test
+        @DisplayName("missing webapps or conf directory yields an empty failures list (no throw)")
+        void missingDirectoriesAreSilent(@TempDir Path tempDir) {
+            Path notExistConf = tempDir.resolve("conf-missing");
+            Path notExistWebapps = tempDir.resolve("webapps-missing");
+
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(notExistWebapps, notExistConf);
+
+            assertTrue(failures.isEmpty());
+        }
+
+        @Test
+        @DisplayName("empty directories yield an empty failures list")
+        void emptyDirectoriesAreSilent(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(webapps, conf);
+
+            assertTrue(failures.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("deleteEndingWith")
+    class DeleteEndingWith {
+
+        @Test
+        @DisplayName("filters by suffix and only deletes matches")
+        void filtersBySuffix(@TempDir Path tempDir) throws IOException {
+            Files.writeString(tempDir.resolve("a.xml"), "");
+            Files.writeString(tempDir.resolve("b.xml"), "");
+            Files.writeString(tempDir.resolve("a.war"), "");
+            Files.writeString(tempDir.resolve("readme.txt"), "");
+            List<Path> failures = new ArrayList<>();
+
+            LocalDeploymentStrategy.deleteEndingWith(tempDir, ".xml", failures);
+
+            assertTrue(failures.isEmpty());
+            assertFalse(Files.exists(tempDir.resolve("a.xml")));
+            assertFalse(Files.exists(tempDir.resolve("b.xml")));
+            assertTrue(Files.exists(tempDir.resolve("a.war")), ".war must survive .xml sweep");
+            assertTrue(Files.exists(tempDir.resolve("readme.txt")));
+        }
+
+        @Test
+        @DisplayName("suffix match is literal (no glob, no partial)")
+        void literalSuffixOnly(@TempDir Path tempDir) throws IOException {
+            // Tricky names that should NOT be matched by '.xml'
+            Files.writeString(tempDir.resolve("not-xml.txt"), "");
+            Files.writeString(tempDir.resolve("contains.xml.bak"), ""); // ends with .bak, not .xml
+            Files.writeString(tempDir.resolve("real.xml"), "");
+            List<Path> failures = new ArrayList<>();
+
+            LocalDeploymentStrategy.deleteEndingWith(tempDir, ".xml", failures);
+
+            assertTrue(failures.isEmpty());
+            assertFalse(Files.exists(tempDir.resolve("real.xml")));
+            assertTrue(Files.exists(tempDir.resolve("not-xml.txt")));
+            assertTrue(Files.exists(tempDir.resolve("contains.xml.bak")),
+                    "'contains.xml.bak' ends in '.bak', not '.xml' — must be preserved");
+        }
+
+        @Test
+        @DisplayName("non-existent directory does not throw, failures list stays empty")
+        void nonExistentDirectoryIsSilent(@TempDir Path tempDir) {
+            List<Path> failures = new ArrayList<>();
+
+            LocalDeploymentStrategy.deleteEndingWith(
+                    tempDir.resolve("does-not-exist"), ".xml", failures);
+
+            assertEquals(0, failures.size());
+        }
+    }
+}

@@ -6,6 +6,7 @@ import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
@@ -177,7 +178,36 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             // Tomcat install at /opt/tomcat), those files are theirs to manage —
             // wiping them on launch would erase hand-deployed apps.
             if (isIdeManagedCatalinaBase(catalinaBase, configuration)) {
-                cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
+                List<Path> staleFailures = cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
+                if (!staleFailures.isEmpty()) {
+                    // Surface to the user before the imminent atomicWriteString fails with
+                    // AccessDeniedException. Naming the files lets them grep for a stale
+                    // Tomcat process holding them open — on Windows this is the realistic
+                    // root cause of every cleanup-failed path here.
+                    String filesList = staleFailures.stream()
+                            .limit(5)
+                            .map(p -> p.getFileName().toString())
+                            .collect(java.util.stream.Collectors.joining(", "));
+                    String suffix = staleFailures.size() > 5
+                            ? filesList + ", and " + (staleFailures.size() - 5) + " more"
+                            : filesList;
+                    String warning = "Stale-deployment cleanup could not delete "
+                            + staleFailures.size() + " file(s) in CATALINA_BASE ("
+                            + suffix + "). A previous Tomcat process may still be holding "
+                            + "them open — stop any orphan Tomcat JVM, then retry. The next "
+                            + "write may fail until the lock is released.";
+                    if (logger != null) {
+                        logger.logServerWarning(warning);
+                    }
+                    if (!project.isDisposed()) {
+                        TomcatNotifier.warning(project,
+                                "Stale Tomcat files could not be cleaned",
+                                "A previous Tomcat process may still be holding " +
+                                        staleFailures.size() + " file(s) open. Stop the " +
+                                        "orphan process, then retry the launch. See the run " +
+                                        "console for the file list.");
+                    }
+                }
             } else if (logger != null) {
                 logger.logServerInfo(
                         "Skipping stale-deployment cleanup: CATALINA_BASE is user-pinned ("
@@ -492,21 +522,49 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         return pinned == null || pinned.isBlank();
     }
 
-    private void cleanStaleDeployments(@NotNull Path webappsDir, @NotNull Path confDir) {
-        // Remove previous context XML descriptors to prevent conflicts with new deployments
-        try (var stream = Files.list(confDir)) {
-            stream.filter(p -> p.getFileName().toString().endsWith(".xml"))
-                  .forEach(p -> TomcatProjectUtils.safeDelete(p, LOG));
-        } catch (IOException e) {
-            LOG.debug("Could not clean conf directory: " + confDir, e);
-        }
+    /**
+     * Removes every stale {@code .xml} descriptor from {@code conf/Catalina/localhost}
+     * and every stale {@code .war} from {@code webapps/} so the new launch starts
+     * from a clean slate. Returns the list of paths that could NOT be deleted —
+     * empty on the happy path.
+     *
+     * <p>The realistic failure case is Windows: a previous Tomcat JVM (orphaned
+     * by an IDE force-quit or a hung shutdown) still holds the file open, and
+     * Windows refuses to unlink open files. The caller surfaces this list to the
+     * user as a balloon so they can stop the stale process before the next
+     * launch crashes with a cryptic {@code AccessDeniedException} when
+     * {@link com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils#atomicWriteString}
+     * tries to overwrite the locked file. On Linux / macOS this list will be
+     * empty: {@code unlink()} succeeds even when the file is open; the stale
+     * process keeps reading from the now-anonymous inode.
+     *
+     * <p>Per-file delete failures are logged at WARN (was DEBUG) because they
+     * are now actionable — the user has a balloon prompting them to act.
+     * Directory-listing failures stay at WARN as well; previously DEBUG was
+     * silent enough that a corrupt or unreadable conf dir went unnoticed.
+     */
+    @NotNull
+    static List<Path> cleanStaleDeployments(@NotNull Path webappsDir, @NotNull Path confDir) {
+        List<Path> failures = new ArrayList<>();
+        deleteEndingWith(confDir, ".xml", failures);
+        deleteEndingWith(webappsDir, ".war", failures);
+        return failures;
+    }
 
-        // Remove previous WAR files to prevent WAR/context XML conflicts
-        try (var stream = Files.list(webappsDir)) {
-            stream.filter(p -> p.getFileName().toString().endsWith(".war"))
-                  .forEach(p -> TomcatProjectUtils.safeDelete(p, LOG));
+    static void deleteEndingWith(@NotNull Path dir, @NotNull String suffix,
+                                 @NotNull List<Path> failures) {
+        try (var stream = Files.list(dir)) {
+            stream.filter(p -> p.getFileName().toString().endsWith(suffix))
+                  .forEach(p -> {
+                      try {
+                          Files.deleteIfExists(p);
+                      } catch (IOException e) {
+                          LOG.warn("Stale-deployment cleanup could not delete " + p + ": " + e.getMessage());
+                          failures.add(p);
+                      }
+                  });
         } catch (IOException e) {
-            LOG.debug("Could not clean webapps directory: " + webappsDir, e);
+            LOG.warn("Could not list directory for stale-deployment cleanup: " + dir, e);
         }
     }
 
