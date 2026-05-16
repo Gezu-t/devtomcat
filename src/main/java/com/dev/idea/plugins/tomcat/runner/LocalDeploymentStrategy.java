@@ -178,7 +178,23 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             // Tomcat install at /opt/tomcat), those files are theirs to manage —
             // wiping them on launch would erase hand-deployed apps.
             if (isIdeManagedCatalinaBase(catalinaBase, configuration)) {
-                List<Path> staleFailures = cleanStaleDeployments(webappsDir, confCatalinaLocalhost);
+                // Collect context stems for every artifact we are about to
+                // deploy so the cleanup pass can also remove any leftover
+                // webapps/<stem>/ directory at that location (e.g. a previous
+                // run's WAR extract that would now conflict with a new WAR
+                // copy or a switched-to-exploded descriptor).
+                java.util.Set<String> activeContextNames = new java.util.HashSet<>();
+                for (DeploymentArtifact a : configuration.getDeployedArtifacts()) {
+                    if (a == null || !a.isValid()) continue;
+                    try {
+                        activeContextNames.add(ContextPathUtils.resolveContextName(a.getContextPath()));
+                    } catch (IllegalArgumentException ignored) {
+                        // Invalid path is rejected by the duplicate-context
+                        // validator at Apply time; skipping here is safe.
+                    }
+                }
+                List<Path> staleFailures = cleanStaleDeployments(
+                        webappsDir, confCatalinaLocalhost, activeContextNames);
                 if (!staleFailures.isEmpty()) {
                     // Surface to the user before the imminent atomicWriteString fails with
                     // AccessDeniedException. Naming the files lets them grep for a stale
@@ -593,10 +609,85 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      */
     @NotNull
     static List<Path> cleanStaleDeployments(@NotNull Path webappsDir, @NotNull Path confDir) {
+        return cleanStaleDeployments(webappsDir, confDir, java.util.Set.of());
+    }
+
+    /**
+     * Same as {@link #cleanStaleDeployments(Path, Path)}, plus an extra pass
+     * that removes leftover {@code webapps/<contextName>/} directories for
+     * every context name about to be deployed in this launch.
+     *
+     * <p><b>Why.</b> The plain {@code .war}-suffix cleanup pass leaves
+     * extracted webapp directories behind. Two scenarios produce them:
+     * <ol>
+     *   <li>A previous run deployed {@code myapp.war}; Tomcat extracted it
+     *       to {@code webapps/myapp/}. We then deleted the {@code .war} on
+     *       the next launch but the extracted directory persists.</li>
+     *   <li>The user changed an artifact's type from WAR to exploded — the
+     *       new launch writes a context.xml descriptor pointing at
+     *       {@code out/artifacts/...} but Tomcat also sees the old
+     *       {@code webapps/myapp/} and gets an ambiguous double-deploy.</li>
+     * </ol>
+     * Either way the stale directory at the context name we are about to
+     * deploy conflicts with the new deploy. The fix is targeted: we only
+     * remove directories whose name matches a currently-deploying context.
+     * Bundled apps mirrored by {@link CatalinaHomeMirror} (ROOT, manager,
+     * host-manager, docs, examples) are left alone unless the user has
+     * deliberately reserved that context for one of their own artifacts —
+     * the mirror also skips reserved stems, so the replacement is intended.
+     *
+     * @param activeContextNames context stems (e.g. "ROOT", "myapp",
+     *                           "foo#bar") for every artifact the current
+     *                           launch will deploy. Pass an empty set to
+     *                           preserve the legacy files-only behaviour.
+     */
+    @NotNull
+    static List<Path> cleanStaleDeployments(@NotNull Path webappsDir,
+                                            @NotNull Path confDir,
+                                            @NotNull java.util.Set<String> activeContextNames) {
         List<Path> failures = new ArrayList<>();
         deleteEndingWith(confDir, ".xml", failures);
         deleteEndingWith(webappsDir, ".war", failures);
+        for (String contextName : activeContextNames) {
+            if (contextName == null || contextName.isBlank()) continue;
+            Path leftover = webappsDir.resolve(contextName);
+            if (Files.isDirectory(leftover)) {
+                try {
+                    deleteRecursively(leftover);
+                    LOG.info("Stale-deployment cleanup removed leftover directory: " + leftover);
+                } catch (IOException e) {
+                    LOG.warn("Stale-deployment cleanup could not delete leftover directory "
+                            + leftover + ": " + e.getMessage());
+                    failures.add(leftover);
+                }
+            }
+        }
         return failures;
+    }
+
+    /**
+     * Recursive {@code rm -rf} for a single directory. Uses {@link Files#walkFileTree}
+     * with delete-on-exit semantics so Windows file locks bubble as IOException
+     * (caller adds the path to the cleanup-failures list for the balloon).
+     */
+    private static void deleteRecursively(@NotNull Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
+        Files.walkFileTree(dir, new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult visitFile(
+                    @NotNull Path file,
+                    @NotNull java.nio.file.attribute.BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+            @Override
+            public java.nio.file.FileVisitResult postVisitDirectory(
+                    @NotNull Path d, java.io.IOException exc) throws IOException {
+                if (exc != null) throw exc;
+                Files.delete(d);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
     }
 
     static void deleteEndingWith(@NotNull Path dir, @NotNull String suffix,

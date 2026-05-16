@@ -20,6 +20,7 @@
 - **Midnight log-rotation notice** — when Tomcat runs past midnight, a balloon explains that existing Log tabs are now tailing yesterday's file and how to refresh.
 - **Symlinked docBase deploys on Tomcat 8+** — `<Resources allowLinking="true">` is now always emitted; previously omitted when no extra resources, causing Maven multi-module symlink targets to silently fail.
 - **Warns when no artifacts will be deployed** — empty / all-invalid artifact list now surfaces a balloon instead of silently starting Tomcat with nothing to serve.
+- **Cleans leftover `webapps/<context>/` directories from previous WAR extracts.** A switched-from-WAR or stale extract no longer collides with a new deploy at the same context. Mirrored bundled apps (ROOT, manager, host-manager) untouched.
 
 ## [1.0.13]
 

@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -89,6 +90,96 @@ class LocalDeploymentStrategyCleanupTest {
 
             List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(webapps, conf);
 
+            assertTrue(failures.isEmpty());
+        }
+
+        @Test
+        @DisplayName("active-context overload removes leftover webapps/<context>/ directories")
+        void activeContextsRemovesLeftoverDirs(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            // Simulate a previous WAR extract — exists as a directory under webapps/
+            Path leftoverMyapp = Files.createDirectories(webapps.resolve("myapp").resolve("WEB-INF"));
+            Files.writeString(leftoverMyapp.resolve("web.xml"), "<web-app/>");
+            Path leftoverIndex = webapps.resolve("myapp").resolve("index.html");
+            Files.writeString(leftoverIndex, "stale");
+
+            // Currently deploying an artifact whose resolved context name is 'myapp'
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, Set.of("myapp"));
+
+            assertTrue(failures.isEmpty());
+            assertFalse(Files.exists(webapps.resolve("myapp")),
+                    "leftover webapps/myapp/ must be removed so the new deploy is clean");
+        }
+
+        @Test
+        @DisplayName("active-context overload preserves bundled-app directories not in the set")
+        void preservesBundledDirsOutsideActiveSet(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            // Mirror-managed bundled apps that the launch does NOT target
+            Files.createDirectories(webapps.resolve("ROOT"));
+            Files.createDirectories(webapps.resolve("manager"));
+            Files.createDirectories(webapps.resolve("host-manager"));
+            // User's own artifact about to deploy at context 'myapp'
+            Files.createDirectories(webapps.resolve("myapp").resolve("WEB-INF"));
+
+            LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, Set.of("myapp"));
+
+            assertFalse(Files.exists(webapps.resolve("myapp")),
+                    "active context's leftover dir must be removed");
+            assertTrue(Files.isDirectory(webapps.resolve("ROOT")),
+                    "mirrored ROOT must not be touched");
+            assertTrue(Files.isDirectory(webapps.resolve("manager")),
+                    "mirrored manager must not be touched");
+            assertTrue(Files.isDirectory(webapps.resolve("host-manager")),
+                    "mirrored host-manager must not be touched");
+        }
+
+        @Test
+        @DisplayName("active-context overload tolerates missing dir (no failure entry)")
+        void missingLeftoverDirIsSilent(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+
+            // Set names a context whose directory does NOT exist — should not error.
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, Set.of("never-deployed"));
+
+            assertTrue(failures.isEmpty());
+        }
+
+        @Test
+        @DisplayName("active-context overload handles multi-segment context names like foo#bar")
+        void multiSegmentContext(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            // Tomcat encodes /foo/bar context paths as foo#bar on disk
+            Files.createDirectories(webapps.resolve("foo#bar").resolve("WEB-INF"));
+
+            LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, Set.of("foo#bar"));
+
+            assertFalse(Files.exists(webapps.resolve("foo#bar")));
+        }
+
+        @Test
+        @DisplayName("active-context with null / blank entries does not throw")
+        void tolerantOfBlankEntries(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            Set<String> activeContexts = new java.util.HashSet<>();
+            activeContexts.add(null);
+            activeContexts.add("");
+            activeContexts.add("   ");
+            activeContexts.add("real");
+
+            // Should not throw — blanks are skipped, only 'real' is processed.
+            // 'real' directory does not exist, so the result is an empty failures list.
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, activeContexts);
             assertTrue(failures.isEmpty());
         }
     }
