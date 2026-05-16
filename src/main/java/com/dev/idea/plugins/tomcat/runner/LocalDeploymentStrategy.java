@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
@@ -343,11 +344,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                         || Files.isDirectory(artifactPath)) {
                     String contextXml = buildContextXml(artifact, artifactPath, preserveSessions,
                             project, configuration.getTomcatInfo(), logger);
-                    Path contextFile = confCatalinaLocalhost.resolve(contextName + ".xml");
+                    Path contextFile = TomcatDeploymentPaths.contextDescriptor(
+                            confCatalinaLocalhost, contextName);
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
                 } else {
-                    Path targetWar = webappsDir.resolve(contextName + ".war");
+                    Path targetWar = TomcatDeploymentPaths.warFile(webappsDir, contextName);
                     TomcatProjectUtils.atomicCopy(artifactPath, targetWar);
                     LOG.info("Deployed WAR artifact: " + targetWar);
                 }
@@ -650,7 +652,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         deleteEndingWith(webappsDir, ".war", failures);
         for (String contextName : activeContextNames) {
             if (contextName == null || contextName.isBlank()) continue;
-            Path leftover = webappsDir.resolve(contextName);
+            Path leftover = TomcatDeploymentPaths.extractedDirectory(webappsDir, contextName);
             if (Files.isDirectory(leftover)) {
                 try {
                     deleteRecursively(leftover);

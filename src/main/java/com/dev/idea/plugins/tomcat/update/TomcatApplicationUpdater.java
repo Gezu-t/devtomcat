@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
@@ -291,7 +292,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             try {
                 String contextName = resolveContextName(artifact.getContextPath());
                 Path source = Path.of(artifact.getPath());
-                Path target = webappsDir.resolve(contextName + ".war");
+                Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
                 TomcatProjectUtils.atomicCopy(source, target);
                 logger.logServerInfo("Re-deployed WAR: " + artifact.getDisplayName());
             } catch (IOException e) {
@@ -321,7 +322,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
 
             String contextName = resolveContextName(artifact.getContextPath());
-            Path contextFile = contextXmlDir.resolve(contextName + ".xml");
+            Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
             if (Files.exists(contextFile)) {
                 try {
                     Files.setLastModifiedTime(contextFile,
@@ -369,7 +370,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // Pass the configured TomcatInfo so the generator can omit the
                     // <Resources> block on Tomcat 7 (PreResources is a Tomcat 8 feature).
                     Path artifactPath = Path.of(artifact.getPath());
-                    Path contextFile = contextXmlDir.resolve(contextName + ".xml");
+                    Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
                     String contextXml = DeploymentStrategy.buildContextXml(
                             artifact, artifactPath, preserveSessions, project,
                             configuration.getTomcatInfo(), logger);
@@ -377,7 +378,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     logger.logServerInfo("Redeployed (context rewrite): " + artifact.getDisplayName());
                 } else {
                     Path source = Path.of(artifact.getPath());
-                    Path target = webappsDir.resolve(contextName + ".war");
+                    Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
                     TomcatProjectUtils.atomicCopy(source, target);
                     logger.logServerInfo("Redeployed WAR: " + artifact.getDisplayName());
                 }
