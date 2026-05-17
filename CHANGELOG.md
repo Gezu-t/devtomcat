@@ -11,6 +11,7 @@
 - **Balloon when custom `server.xml` cannot be parsed**; the launch falls back to a minimal config and the user is alerted instead of silently losing custom Valves / Realms / Listeners.
 
 ### Fixed
+- **IDE main-window flicker when balloons fire from background threads** — `TomcatNotifier` now dispatches every balloon onto the EDT via `invokeLater` with `ModalityState.any()`. Single-point fix covering all 15 call sites.
 - **Plugin now installable on IntelliJ IDEA 2026.2 EAP** — `until-build` raised from `261.*` to `262.*`.
 - **Duplicate-context-path detection catches normalized variants** (`/foo` vs `/foo/`, `""` vs `"/"`); invalid paths rejected at Apply.
 - **Stale-deployment cleanup failures surface as a balloon** naming the locked files instead of failing later with `AccessDeniedException`.

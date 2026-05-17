@@ -6,6 +6,8 @@ import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
@@ -17,6 +19,23 @@ import org.jetbrains.annotations.Nullable;
  * <p>All callers that previously embedded a {@code NotificationGroupManager} chain
  * inside a try-catch now delegate here. Failures are swallowed silently because a
  * missing notification must never crash a running operation.
+ *
+ * <p><b>Threading.</b> The IntelliJ Platform's {@code Notification.notify(project)}
+ * is documented as safe to call from any thread, but on Windows we observed the
+ * IDE main window briefly losing focus and re-appearing whenever a notification
+ * was emitted from a background thread (process output reader, BeforeRunTask
+ * executor, launch-initiation thread). The interaction is between the
+ * notification's owner-window placement and Windows focus-stealing prevention.
+ * The platform-side fix is to always dispatch the {@code notify()} call onto
+ * the EDT. Every entry point in this class wraps its body in
+ * {@code ApplicationManager.invokeLater(...)} with {@link ModalityState#any()}
+ * so the balloon is delivered on the EDT regardless of which thread the caller
+ * was on, and is not blocked by a modal dialog that happened to be open at
+ * notify-time. Call sites do not need to dispatch themselves.
+ *
+ * <p>The disposed-project check is performed twice — once before scheduling
+ * and once inside the runnable — because a project can transition to disposed
+ * in the window between {@code invokeLater} and EDT pickup.
  */
 public final class TomcatNotifier {
 
@@ -49,16 +68,19 @@ public final class TomcatNotifier {
         // Posting to a disposed project produces an AssertionError on some 2025.x
         // builds — not actionable, just noise on shutdown paths that race the close.
         if (project.isDisposed()) return;
-        try {
-            NotificationGroupManager.getInstance()
-                    .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
-                    .createNotification(title, content, type)
-                    .notify(project);
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            throw pce;
-        } catch (Exception e) {
-            LOG.debug("Could not show notification '" + title + "': " + e.getMessage());
-        }
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (project.isDisposed()) return;
+            try {
+                NotificationGroupManager.getInstance()
+                        .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                        .createNotification(title, content, type)
+                        .notify(project);
+            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                throw pce;
+            } catch (Exception e) {
+                LOG.debug("Could not show notification '" + title + "': " + e.getMessage());
+            }
+        }, ModalityState.any());
     }
 
     /**
@@ -88,25 +110,28 @@ public final class TomcatNotifier {
                                         @NotNull String actionLabel,
                                         @NotNull Runnable action) {
         if (project.isDisposed()) return;
-        try {
-            Notification notification = NotificationGroupManager.getInstance()
-                    .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
-                    .createNotification(title, content, type);
-            notification.addAction(new NotificationAction(actionLabel) {
-                @Override
-                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
-                    try {
-                        action.run();
-                    } finally {
-                        n.expire();
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (project.isDisposed()) return;
+            try {
+                Notification notification = NotificationGroupManager.getInstance()
+                        .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                        .createNotification(title, content, type);
+                notification.addAction(new NotificationAction(actionLabel) {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
+                        try {
+                            action.run();
+                        } finally {
+                            n.expire();
+                        }
                     }
-                }
-            });
-            notification.notify(project);
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            throw pce;
-        } catch (Exception e) {
-            LOG.debug("Could not show notification with action '" + title + "': " + e.getMessage());
-        }
+                });
+                notification.notify(project);
+            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                throw pce;
+            } catch (Exception e) {
+                LOG.debug("Could not show notification with action '" + title + "': " + e.getMessage());
+            }
+        }, ModalityState.any());
     }
 }
