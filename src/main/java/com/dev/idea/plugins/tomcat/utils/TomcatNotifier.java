@@ -7,7 +7,6 @@ import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
@@ -28,10 +27,13 @@ import org.jetbrains.annotations.Nullable;
  * notification's owner-window placement and Windows focus-stealing prevention.
  * The platform-side fix is to always dispatch the {@code notify()} call onto
  * the EDT. Every entry point in this class wraps its body in
- * {@code ApplicationManager.invokeLater(...)} with {@link ModalityState#any()}
- * so the balloon is delivered on the EDT regardless of which thread the caller
- * was on, and is not blocked by a modal dialog that happened to be open at
- * notify-time. Call sites do not need to dispatch themselves.
+ * {@code ApplicationManager.getApplication().invokeLater(Runnable)} — the
+ * same shape used elsewhere in this plugin (TomcatConfigurationEditor,
+ * ServerConfigurationTab, JreConfigurationSection). No explicit
+ * {@code ModalityState}: the platform's {@code NotificationGroupManager}
+ * already handles modal-dialog interactions for balloons, so we let the
+ * default capture-current-modality apply rather than over-specifying with
+ * {@code ModalityState.any()}, which the platform docs say to use sparingly.
  *
  * <p>The disposed-project check is performed twice — once before scheduling
  * and once inside the runnable — because a project can transition to disposed
@@ -80,7 +82,7 @@ public final class TomcatNotifier {
             } catch (Exception e) {
                 LOG.debug("Could not show notification '" + title + "': " + e.getMessage());
             }
-        }, ModalityState.any());
+        });
     }
 
     /**
@@ -132,6 +134,6 @@ public final class TomcatNotifier {
             } catch (Exception e) {
                 LOG.debug("Could not show notification with action '" + title + "': " + e.getMessage());
             }
-        }, ModalityState.any());
+        });
     }
 }
