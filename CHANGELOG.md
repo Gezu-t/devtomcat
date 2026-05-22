@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.2]
+
+### Fixed
+- **Services panel correctly shows FAILED for artifacts whose Spring context init threw.** Catches the `Failed to start component [...StandardContext[/X]]` and `LifecycleException ... StandardContext[/X]` log forms in addition to `Context [/X] startup failed due to previous errors`, so a webapp whose listener exception was reported only via the LifecycleException form no longer stays green-checked.
+
 ## [1.1.1]
 
 ### Fixed

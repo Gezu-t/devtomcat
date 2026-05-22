@@ -557,6 +557,73 @@ class TomcatOutputPipelineTest {
 
             assertEquals(List.of("My Web App"), failedArtifacts);
         }
+
+        @Test
+        @DisplayName("detects 'Failed to start component [StandardContext[/X]]' form")
+        void detectsComponentFailedForm() {
+            contextToArtifact.put("myapp", "My Web App");
+            List<String> failedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            analyzer.analyze(
+                    "SEVERE [main] org.apache.catalina.core.ContainerBase.addChildInternal "
+                    + "ContainerBase.addChild: start: org.apache.catalina.LifecycleException: "
+                    + "Failed to start component [StandardEngine[Catalina].StandardHost[localhost].StandardContext[/myapp]]",
+                    testContext);
+
+            assertEquals(List.of("My Web App"), failedArtifacts);
+        }
+
+        @Test
+        @DisplayName("detects LifecycleException + StandardContext form when 'Failed to start component' is absent")
+        void detectsLifecycleExceptionForm() {
+            contextToArtifact.put("myapp", "My Web App");
+            List<String> failedArtifacts = new ArrayList<>();
+            TomcatOutputPipeline.Context testContext = new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override
+                        public void onArtifactFailed(@NotNull String configName, @NotNull String artifactName) {
+                            failedArtifacts.add(artifactName);
+                        }
+                    },
+                    "testConfig",
+                    contextToArtifact,
+                    startupDetected,
+                    deployedCount,
+                    errorCount,
+                    warningCount,
+                    true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            analyzer.analyze(
+                    "Caused by: org.apache.catalina.LifecycleException: A child container failed during start "
+                    + "StandardContext[/myapp]",
+                    testContext);
+
+            assertEquals(List.of("My Web App"), failedArtifacts);
+        }
     }
 
     @Nested

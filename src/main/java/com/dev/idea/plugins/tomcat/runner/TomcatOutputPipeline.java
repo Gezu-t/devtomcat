@@ -341,8 +341,17 @@ public final class TomcatOutputPipeline {
     static final class ArtifactFailureAnalyzer implements Analyzer {
         private static final Pattern DEPLOY_FAILURE_PATTERN = Pattern.compile(
                 "(?i)Error deploying (?:deployment descriptor|web application(?: archive| directory)?)\\s*\\[.*?([^/\\\\\\]]+?)(?:\\.(?:xml|war))?\\]");
-        private static final Pattern CONTEXT_FAILURE_PATTERN = Pattern.compile(
-                "(?i)(?:LifecycleException:.*StandardContext\\[|Context \\[)(/[^\\]]+)](?:.*Failed to start component| startup failed due to previous errors)");
+        // "Context [/X] startup failed due to previous errors"
+        private static final Pattern CONTEXT_STARTUP_FAILED_PATTERN = Pattern.compile(
+                "(?i)Context \\[(/[^\\]]+)\\] startup failed due to previous errors");
+        // "Failed to start component [...StandardContext[/X]]" — Tomcat sometimes
+        // only logs this form, with no separate "Context [...] startup failed"
+        // line, so a CONTEXT_STARTUP_FAILED-only pattern would miss the failure.
+        private static final Pattern COMPONENT_FAILED_PATTERN = Pattern.compile(
+                "(?i)Failed to start component \\[.*?StandardContext\\[(/[^\\]]+)\\]");
+        // "LifecycleException ... StandardContext[/X]" — wrapping exception form.
+        private static final Pattern LIFECYCLE_EXCEPTION_PATTERN = Pattern.compile(
+                "(?i)LifecycleException[^\\n]*StandardContext\\[(/[^\\]]+)\\]");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
@@ -362,15 +371,23 @@ public final class TomcatOutputPipeline {
                 String contextName = deployFailure.group(1);
                 return ctx.contextToArtifactName.getOrDefault(contextName, contextName);
             }
-
-            Matcher contextFailure = CONTEXT_FAILURE_PATTERN.matcher(text);
-            if (contextFailure.find()) {
-                String rawContext = contextFailure.group(1);
-                String normalizedContext = rawContext.startsWith("/") ? rawContext.substring(1) : rawContext;
-                return ctx.contextToArtifactName.getOrDefault(normalizedContext, rawContext);
-            }
+            String resolved = matchContextName(CONTEXT_STARTUP_FAILED_PATTERN, text, ctx);
+            if (resolved != null) return resolved;
+            resolved = matchContextName(COMPONENT_FAILED_PATTERN, text, ctx);
+            if (resolved != null) return resolved;
+            resolved = matchContextName(LIFECYCLE_EXCEPTION_PATTERN, text, ctx);
+            if (resolved != null) return resolved;
 
             return null;
+        }
+
+        @Nullable
+        private static String matchContextName(@NotNull Pattern p, @NotNull String text, @NotNull Context ctx) {
+            Matcher m = p.matcher(text);
+            if (!m.find()) return null;
+            String rawContext = m.group(1);
+            String normalized = rawContext.startsWith("/") ? rawContext.substring(1) : rawContext;
+            return ctx.contextToArtifactName.getOrDefault(normalized, rawContext);
         }
     }
 
