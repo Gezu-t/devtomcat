@@ -141,9 +141,9 @@ public final class TomcatRunnerDelegate {
      * rerun click targets, and a regression turns toolbar Restart into
      * "spawn a second instance".
      */
-    static boolean belongsTo(@NotNull TomcatProcessHandler handler,
-                              @NotNull TomcatRunConfiguration config,
-                              @Nullable RunnerAndConfigurationSettings targetSettings) {
+    public static boolean belongsTo(@NotNull TomcatProcessHandler handler,
+                                    @NotNull TomcatRunConfiguration config,
+                                    @Nullable RunnerAndConfigurationSettings targetSettings) {
         RunnerAndConfigurationSettings handlerSettings = handler.getLaunchSettings();
         if (targetSettings != null && handlerSettings != null) {
             return targetSettings == handlerSettings;

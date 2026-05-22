@@ -161,7 +161,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             return RestartSingletonResult.ASK_AND_RESTART;
         }
 
-        TomcatProcessHandler runningHandler = findRunningHandlerForThisConfig(project);
+        TomcatProcessHandler runningHandler = findRunningHandlerForThisConfig(
+                project, environment.getRunnerAndConfigurationSettings());
         if (runningHandler == null) {
             return RestartSingletonResult.ASK_AND_RESTART;
         }
@@ -195,22 +196,28 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     }
 
     /**
-     * Locates the live {@link TomcatProcessHandler} for this run configuration
-     * across all currently running processes. Returns {@code null} when the
-     * config isn't running (race against descriptor disposal) or the running
-     * handler is already terminated.
+     * Locates the live {@link TomcatProcessHandler} for this run configuration.
+     * Identity-matched via {@link TomcatRunnerDelegate#belongsTo} — by
+     * {@link com.intellij.execution.RunnerAndConfigurationSettings} reference
+     * when available, falling back to {@code TomcatRunConfiguration} reference
+     * equality. Name comparison is deliberately avoided: two configs with
+     * matching names but different settings instances would collide, which is
+     * exactly what made the toolbar Rerun icon flicker for users running
+     * multiple Tomcat configs simultaneously.
      */
     @Nullable
-    private TomcatProcessHandler findRunningHandlerForThisConfig(@NotNull Project project) {
+    private TomcatProcessHandler findRunningHandlerForThisConfig(
+            @NotNull Project project,
+            @Nullable com.intellij.execution.RunnerAndConfigurationSettings targetSettings) {
         try {
             ProcessHandler[] handlers =
                     ExecutionManager.getInstance(project).getRunningProcesses();
             for (ProcessHandler h : handlers) {
-                if (h instanceof TomcatProcessHandler th && !th.isProcessTerminated()) {
-                    TomcatRunConfiguration cfg = th.getConfiguration();
-                    if (cfg != null && getName().equals(cfg.getName())) {
-                        return th;
-                    }
+                if (h instanceof TomcatProcessHandler th
+                        && !th.isProcessTerminated()
+                        && com.dev.idea.plugins.tomcat.runner.TomcatRunnerDelegate
+                                .belongsTo(th, this, targetSettings)) {
+                    return th;
                 }
             }
         } catch (Throwable ignored) {

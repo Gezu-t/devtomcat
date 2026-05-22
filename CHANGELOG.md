@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.1]
+
+### Fixed
+- **Main-toolbar Rerun icon stays visible when multiple Tomcat configs are running.** Running-handler lookup now matches by stable `RunnerAndConfigurationSettings` identity instead of by config name, so a delayed `runConfigurationChanged` event from one config can no longer flip the toolbar's "is this running?" answer for another config.
+
 ## [1.1.0]
 
 ### Changed
