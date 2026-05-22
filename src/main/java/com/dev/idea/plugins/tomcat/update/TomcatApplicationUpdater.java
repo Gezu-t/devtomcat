@@ -316,6 +316,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     }
                 } catch (Exception e) {
                     LOG.warn("Failed to restart Tomcat: " + configuration.getName(), e);
+                    com.dev.idea.plugins.tomcat.utils.ProcessStopSupport
+                            .purgeTerminatedDescriptors(project);
                     logger.logServerError("Failed to restart: " + e.getMessage());
                     notifyRestartFailed(project, configuration.getName(), e.getMessage());
                 }

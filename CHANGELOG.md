@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.6]
+
+### Fixed
+- Failed restart no longer accumulates stale "started Tomcat" entries in the toolbar.
+
 ## [1.1.5]
 
 ### Changed

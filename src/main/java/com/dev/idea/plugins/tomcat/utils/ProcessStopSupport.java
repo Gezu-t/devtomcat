@@ -107,4 +107,33 @@ public final class ProcessStopSupport {
             ApplicationManager.getApplication().executeOnPooledThread(handler::destroyProcess);
         }
     }
+
+    /**
+     * Removes any toolbar/services descriptor whose process handler is already
+     * terminated. Used by relaunch failure paths to evict the stranded
+     * descriptor the platform attached to a process that died before reaching
+     * "running" — without this, every failed restart leaves a stale "running"
+     * entry in the toolbar.
+     */
+    public static void purgeTerminatedDescriptors(@NotNull Project project) {
+        if (project.isDisposed()) return;
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (project.isDisposed()) return;
+            try {
+                RunContentManager mgr = RunContentManager.getInstance(project);
+                Executor runExec = com.intellij.execution.executors.DefaultRunExecutor.getRunExecutorInstance();
+                Executor debugExec = com.intellij.execution.executors.DefaultDebugExecutor.getDebugExecutorInstance();
+                for (RunContentDescriptor d : mgr.getAllDescriptors()) {
+                    ProcessHandler h = d.getProcessHandler();
+                    if (h != null && h.isProcessTerminated()) {
+                        if (!mgr.removeRunContent(runExec, d)) {
+                            mgr.removeRunContent(debugExec, d);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debug("Could not purge terminated descriptors: " + e.getMessage());
+            }
+        });
+    }
 }

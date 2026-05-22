@@ -213,6 +213,8 @@ public final class TomcatRunnerDelegate {
                             + (carriedPorts != null ? " (reusing ports)" : ""));
                 } catch (ExecutionException ex) {
                     LOG.warn("Failed to relaunch " + config.getName(), ex);
+                    com.dev.idea.plugins.tomcat.utils.ProcessStopSupport
+                            .purgeTerminatedDescriptors(project);
                     notifyRelaunchFailed(project, config.getName(), ex.getMessage());
                 }
             } else {
