@@ -5,35 +5,37 @@
 ## [1.1.2]
 
 ### Fixed
-- **Services panel correctly shows FAILED when a webapp's context fails to start.** Catches the `Failed to start component [...StandardContext[/X]]` and `LifecycleException ... StandardContext[/X]` Tomcat log forms in addition to `Context [/X] startup failed due to previous errors`, so an artifact whose listener threw — for any reason — no longer stays green-checked.
+- Services panel shows FAILED for context-startup failures via LifecycleException / component-failed log forms.
 
 ## [1.1.1]
 
 ### Fixed
-- **Main-toolbar Rerun icon stays visible when multiple Tomcat configs are running.** Running-handler lookup now matches by stable `RunnerAndConfigurationSettings` identity instead of by config name, so a delayed `runConfigurationChanged` event from one config can no longer flip the toolbar's "is this running?" answer for another config.
+- Toolbar Rerun icon stays visible with multiple Tomcat configs (identity-based handler lookup).
 
 ## [1.1.0]
 
 ### Changed
-- **Remote-mode launches no longer fork a local Tomcat JVM** — pure Manager-API deploy with a single console.
-- **Quieter notifications** — repeat-on-every-launch balloons moved to console-only; remaining balloons trimmed to one short line.
-- **Port resolution now seeds from the user's intended port** — auto-bumps under conflict no longer overwrite the original; next launch re-tries the original first.
-- **Tomcat shutdown waits for the OS to actually release ports** — eliminates Windows TIME_WAIT-driven drift on rapid restart.
-- **Orphan-Tomcat reclaim verifies the configured port is free** after the kill before yielding to the next launch's resolver.
+- Remote-mode launches use pure Manager-API deploy, no local JVM fork.
+- Repeat balloons moved to console-only.
+- Port resolution seeds from user-intended port; preferred-vs-resolved tracking.
+- Tomcat shutdown waits for OS port release.
+- Orphan reclaim verifies port is free post-kill.
 
 ### Fixed
-- **Class-sync refuses to mirror ECJ "compile-with-errors" stubs** — protects working deployed classes from being overwritten with broken bytecode that would throw `java.lang.Error` at Tomcat startup.
-- **Class-sync runs on every launch** — Stop+Run, initial Run, cross-executor switch — not just the Update dialog paths.
-- **Class-sync follows transitive module dependencies** — edits in a dep module take effect without `mvn package`.
-- **Class-sync per-artifact diagnostics in the run console** — every skip names the cause (module, type, structure).
-- **Class-sync size tie-breaker** — equal-mtime but byte-different files still copy.
+- Class-sync refuses ECJ broken-class stubs.
+- Class-sync runs on every launch, not just Update.
+- Class-sync follows transitive module dependencies.
+- Class-sync per-artifact diagnostics in run console.
+- Class-sync size tie-breaker for equal-mtime files.
+- Web-resource sync mirrors `src/main/webapp/` into exploded artifact root.
 
 ### Added
-- **`PortStrategy`** — per-config policy: `AUTO_BUMP` (default), `RECLAIM_THEN_FAIL`, or `STRICT`. STRICT refuses launch whenever a preferred HTTP/shutdown port would be silently bumped — by OS conflict OR by the in-process port registry.
-- **Tools → Set Up DevTomcat from Project** — single-dialog action that scans the project for WAR-packaging Maven modules and creates ONE Tomcat run config with all webapps as deployments (matches IntelliJ Ultimate). Port mode picker: auto-resolve or fixed. Duplicate context paths in the table are flagged live (red-tinted cells, OK button gated with a clear validation message).
-- **Four new error patterns in run-console diagnostics**, library-agnostic: ECJ compilation stubs, localhost backend unreachable, JDK module-access denial, JSch/SFTP connection failures.
-- **Compiler-type preflight warning** — surfaces a one-line caution when IntelliJ's Java compiler is set to Eclipse (ECJ) instead of Javac.
-- **Port-drift warning in the run-config editor** — when the current port differs from the user's intended port, a soft warning explains the drift and points at dependent config files.
+- `PortStrategy` per-config policy: `AUTO_BUMP` / `RECLAIM_THEN_FAIL` / `STRICT`.
+- Tools → Set Up DevTomcat from Project: one config, N exploded deployments, port-mode picker, live duplicate-context validation.
+- Four library-agnostic diagnostic patterns: ECJ stubs, localhost backend unreachable, JDK module-access, SFTP.
+- Compiler-type preflight warning when IDE compiler is Eclipse.
+- Port-drift warning in the run-config editor.
+- WAR-artifact warning naming artifacts that won't hot-sync.
 
 ## [1.0.14]
 
