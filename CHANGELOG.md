@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.1.5]
+
+### Changed
+- Pipeline analyzers (Startup, Deployment, Context, Reload, ArtifactFailure) early-exit on a keyword check before any regex.
+- WebResourcesSync uses a single `readAttributes` (catches NoSuchFile) instead of `exists` + `readAttributes`.
+
 ## [1.1.4]
 
 ### Changed

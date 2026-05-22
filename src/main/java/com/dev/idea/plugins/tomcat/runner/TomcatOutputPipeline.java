@@ -220,6 +220,8 @@ public final class TomcatOutputPipeline {
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (ctx.serverStartupDetected.get()) return;
+            if (!text.contains("startup") && !text.contains("Startup")) return;
             Matcher m = STARTUP_PATTERN.matcher(text);
             if (m.find() && ctx.serverStartupDetected.compareAndSet(false, true)) {
                 try {
@@ -271,6 +273,7 @@ public final class TomcatOutputPipeline {
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (!text.contains("Deployment of")) return;
             Matcher m = DESCRIPTOR_DEPLOYED_PATTERN.matcher(text);
             if (m.find()) {
                 try {
@@ -302,6 +305,7 @@ public final class TomcatOutputPipeline {
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (!text.contains("ontext")) return;
             Matcher m = CONTEXT_PATTERN.matcher(text);
             if (m.find()) {
                 String contextName = m.group(1);
@@ -320,6 +324,7 @@ public final class TomcatOutputPipeline {
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (!text.contains("Reloading")) return;
             Matcher m = RELOAD_PATTERN.matcher(text);
             if (m.find()) {
                 String rawCtx = m.group(1);
@@ -355,6 +360,12 @@ public final class TomcatOutputPipeline {
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (!text.contains("Error deploying")
+                    && !text.contains("startup failed")
+                    && !text.contains("Failed to start component")
+                    && !text.contains("LifecycleException")) {
+                return;
+            }
             String artifactName = resolveFailedArtifactName(text, ctx);
             if (artifactName == null || artifactName.isBlank()) {
                 return;

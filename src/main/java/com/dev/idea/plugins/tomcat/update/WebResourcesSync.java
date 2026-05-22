@@ -409,14 +409,16 @@ public final class WebResourcesSync {
     private static boolean shouldCopy(@NotNull Path src,
                                       @NotNull BasicFileAttributes srcAttrs,
                                       @NotNull Path target) throws IOException {
-        if (!Files.exists(target)) return true;
-        BasicFileAttributes dstAttrs = Files.readAttributes(target, BasicFileAttributes.class);
+        // Single stat: try to read dst attrs; NoSuchFile => copy.
+        BasicFileAttributes dstAttrs;
+        try {
+            dstAttrs = Files.readAttributes(target, BasicFileAttributes.class);
+        } catch (java.nio.file.NoSuchFileException missing) {
+            return true;
+        }
         long srcMillis = srcAttrs.lastModifiedTime().toMillis();
         long dstMillis = dstAttrs.lastModifiedTime().toMillis();
         if (srcMillis > dstMillis) return true;
-        // Equal mtime but different size: copy. Edits within the same
-        // filesystem mtime tick still need to land. Same tie-breaker
-        // DeployedClassesSync uses.
         return srcAttrs.size() != dstAttrs.size();
     }
 }
