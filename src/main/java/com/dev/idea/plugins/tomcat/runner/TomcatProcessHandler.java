@@ -7,7 +7,6 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
-import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.intellij.ide.browsers.BrowserLauncher;
 import com.intellij.ide.browsers.WebBrowser;
 import com.intellij.ide.browsers.WebBrowserManager;
@@ -48,12 +47,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.progress.Task;
 import com.intellij.util.execution.ParametersListUtil;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
@@ -190,15 +185,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 // appears in the balloon.
                 com.intellij.openapi.project.Project project = configuration.getProject();
                 if (project == null || project.isDisposed()) return;
-                String suggestion =
-                        "A webapp context failed to start. The exception above is the real cause; "
-                                + "scroll the run console up to the first 'Caused by:' line to see the "
-                                + "full stack trace.";
-                String content = exceptionClass
-                        + (message.isEmpty() ? "" : ": " + message)
-                        + "\n\n" + suggestion;
+                // Short balloon — full stack already in the run console. Just
+                // name the root-cause exception so the user knows what to
+                // search for, without rehashing the "scroll up to find it"
+                // user-education line that used to bloat this message.
+                String content = exceptionClass + (message.isEmpty() ? "" : ": " + message);
                 com.dev.idea.plugins.tomcat.utils.TomcatNotifier.error(project,
-                        "Tomcat startup failure",
+                        "Startup failed",
                         content);
             }
         };
@@ -210,7 +203,10 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 errorCount, warningCount, jmxEnabled,
                 duration -> { this.serverStartupTimeMs = duration; },
                 () -> {
-                    triggerRemoteDeploymentIfNeeded();
+                    // Remote deployment no longer rides on top of a local Tomcat
+                    // startup. Remote-mode configurations are now routed to
+                    // RemoteDeploymentRunProfileState before any local JVM is
+                    // forked. See that class's javadoc for the new flow.
                     if (shouldWaitForContextBeforeOpeningBrowser()) {
                         tryLaunchBrowserWhenReady();
                     } else {
@@ -330,6 +326,37 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        // Windows TIME_WAIT can outlast process exit. Rationale in LOCAL_NOTES.md.
+        verifyPortsReleased();
+    }
+
+    private static final long PORT_RELEASE_WAIT_MS = 5_000L;
+    private static final long PORT_POLL_INTERVAL_MS = 250L;
+
+    private void verifyPortsReleased() {
+        long deadline = System.currentTimeMillis() + PORT_RELEASE_WAIT_MS;
+        int httpPortLocal = this.httpPort;
+        int shutdownPortLocal = this.shutdownPort;
+        while (System.currentTimeMillis() < deadline) {
+            boolean httpFree = httpPortLocal <= 0
+                    || com.dev.idea.plugins.tomcat.utils.PortUtils.isAvailable(httpPortLocal);
+            boolean shutdownFree = shutdownPortLocal <= 0
+                    || com.dev.idea.plugins.tomcat.utils.PortUtils.isAvailable(shutdownPortLocal);
+            if (httpFree && shutdownFree) {
+                LOG.info("Ports released after stop (http=" + httpPortLocal
+                        + ", shutdown=" + shutdownPortLocal + ")");
+                return;
+            }
+            try {
+                Thread.sleep(PORT_POLL_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        LOG.warn("Ports still held " + PORT_RELEASE_WAIT_MS + "ms after process exit "
+                + "(http=" + httpPortLocal + ", shutdown=" + shutdownPortLocal
+                + "). Likely TIME_WAIT; next launch's port resolver will handle.");
     }
 
     @Override
@@ -512,8 +539,9 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     }
 
     private boolean shouldWaitForContextBeforeOpeningBrowser() {
+        // No remote-mode guard needed: this handler only runs for local-mode
+        // configurations now (remote routes through RemoteDeploymentProcessHandler).
         return configuration.isAfterLaunchEnabled()
-                && !configuration.isRemoteMode()
                 && browserTargetContextName != null;
     }
 
@@ -639,99 +667,6 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                 LOG.debug("Could not activate console: " + e.getMessage());
             }
         });
-    }
-
-    /**
-     * If the configuration uses Remote mode, deploys artifacts to the remote
-     * Tomcat via Manager API after the local server startup is detected.
-     */
-    private void triggerRemoteDeploymentIfNeeded() {
-        if (!configuration.isRemoteMode()) {
-            return;
-        }
-        RemoteConfig remoteConfig = configuration.getConfigData().getRemoteConfig();
-        if (remoteConfig == null || !remoteConfig.isValid()) {
-            deploymentLogger.logServerWarning("Remote mode enabled but configuration is invalid; skipping remote deployment");
-            return;
-        }
-
-        ProgressManager.getInstance().run(
-            new Task.Backgroundable(
-                    configuration.getProject(), "Deploying to Remote Tomcat", true) {
-                @Override
-                public void run(@NotNull ProgressIndicator indicator) {
-                    CredentialResolver.ensureResolved(remoteConfig);
-
-                    TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
-                    List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts().stream()
-                            .filter(artifact -> artifact != null && artifact.isValid())
-                            .toList();
-                    if (artifacts.isEmpty()) {
-                        deploymentLogger.logServerInfo("Remote mode active, but no valid artifacts are configured for deployment");
-                        return;
-                    }
-
-                    indicator.setText("Testing remote connection...");
-                    if (isProcessTerminatingOrTerminated()) {
-                        return;
-                    }
-                    String error = deployer.testConnection();
-                    if (isProcessTerminatingOrTerminated()) {
-                        return;
-                    }
-                    if (error != null) {
-                        deploymentLogger.logServerError("Remote connection failed: " + error);
-                        for (DeploymentArtifact artifact : artifacts) {
-                            lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
-                        }
-                        return;
-                    }
-
-                    int successCount = 0;
-                    int total = artifacts.size();
-                    for (int i = 0; i < total; i++) {
-                        DeploymentArtifact artifact = artifacts.get(i);
-                        if (indicator.isCanceled() || isProcessTerminatingOrTerminated()) {
-                            deploymentLogger.logServerWarning("Remote deployment cancelled");
-                            return;
-                        }
-                        indicator.setText("Deploying " + artifact.getDisplayName() + " (" + (i + 1) + "/" + total + ")");
-                        indicator.setFraction((double) i / total);
-                        lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
-                        // Pass the process-state predicate so the upload chunk
-                        // loop in deployWarViaPut polls termination too. Without
-                        // this, clicking Stop on the local Tomcat mid-upload of a
-                        // large WAR lets the upload run to completion against a
-                        // dead handler (the indicator alone would not cancel).
-                        // Qualified `TomcatProcessHandler.this::` because we're
-                        // inside an anonymous Task.Backgroundable.
-                        TomcatManagerDeployer.DeployResult result =
-                                deployer.deployWithProgress(artifact, deploymentLogger, indicator,
-                                        TomcatProcessHandler.this::isProcessTerminatingOrTerminated);
-                        switch (result) {
-                            case SUCCESS -> {
-                                successCount++;
-                                lifecycleListener.onArtifactDeployed(configurationName, artifact.getDisplayName());
-                            }
-                            case CANCELLED -> {
-                                deploymentLogger.logServerWarning("Deployment cancelled: " + artifact.getDisplayName());
-                                lifecycleListener.onArtifactCancelled(configurationName, artifact.getDisplayName());
-                                return;
-                            }
-                            case FAILED ->
-                                lifecycleListener.onArtifactFailed(configurationName, artifact.getDisplayName());
-                        }
-                    }
-                    indicator.setFraction(1.0);
-                    deploymentLogger.logServerInfo("Remote deployment complete: " +
-                            successCount + "/" + total + " artifact(s) deployed");
-                }
-            });
-    }
-
-    /** True once the local process has begun shutdown — short-circuit for long-running background work. */
-    private boolean isProcessTerminatingOrTerminated() {
-        return isProcessTerminating() || isProcessTerminated();
     }
 
     private void launchBrowserIfEnabled() {

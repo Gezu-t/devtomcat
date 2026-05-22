@@ -305,15 +305,15 @@ class ContextPathUtilsTest {
         @Test
         @DisplayName("strips ##version from .war name")
         void stripsParallelDeployVersion() {
-            assertEquals("wipo-connect-shared-service",
-                    ContextPathUtils.extractBaseModuleName("wipo-connect-shared-service##5.18.0.war"));
+            assertEquals("shared-service",
+                    ContextPathUtils.extractBaseModuleName("shared-service##5.18.0.war"));
         }
 
         @Test
         @DisplayName("strips -version suffix from exploded name")
         void stripsVersionSuffix() {
-            assertEquals("wipo-connect-shared-service",
-                    ContextPathUtils.extractBaseModuleName("wipo-connect-shared-service-5.18.0"));
+            assertEquals("shared-service",
+                    ContextPathUtils.extractBaseModuleName("shared-service-5.18.0"));
         }
 
         @Test

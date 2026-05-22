@@ -211,15 +211,40 @@ final class OrphanTomcatReclaimer {
 
         // Brief pause so the OS releases the sockets before the next port
         // probe runs. The SO_REUSEADDR probe in PortUtils.tryBind makes
-        // TIME_WAIT transparent, so 200ms is enough.
+        // TIME_WAIT transparent in most cases, so 200ms is the baseline.
         try {
             Thread.sleep(POST_KILL_SOCKET_RELEASE_MS);
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
         }
 
+        // Windows TIME_WAIT fallback — rationale in LOCAL_NOTES.md.
+        waitForPreferredPortRelease();
+
         deploymentLogger.logServerWarning("Reclaimed " + orphans.size()
                 + " orphan Tomcat process(es) from prior launches of this configuration"
                 + (forceKilled.isEmpty() ? "" : " (force-killed: " + forceKilled + ")"));
+    }
+
+    private static final long PORT_RELEASE_VERIFY_MS = 5_000L;
+    private static final long PORT_RELEASE_POLL_MS = 250L;
+
+    private void waitForPreferredPortRelease() {
+        int httpPort = configuration.getConfigData().getPortConfig().getHttp();
+        if (httpPort <= 0) return;
+        long deadline = System.currentTimeMillis() + PORT_RELEASE_VERIFY_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (com.dev.idea.plugins.tomcat.utils.PortUtils.isAvailable(httpPort)) {
+                return;
+            }
+            try {
+                Thread.sleep(PORT_RELEASE_POLL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        LOG.warn("Port " + httpPort + " still held after orphan reclaim + "
+                + PORT_RELEASE_VERIFY_MS + "ms wait. Next launch may bump.");
     }
 }

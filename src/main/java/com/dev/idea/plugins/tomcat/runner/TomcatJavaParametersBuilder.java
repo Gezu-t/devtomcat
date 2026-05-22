@@ -305,12 +305,10 @@ public class TomcatJavaParametersBuilder {
         if (warnings.stream().anyMatch(w -> w.contains("XML parsing failed"))) {
             Project project = configuration.getProject();
             if (project != null) {
+                // Short balloon — full parse error already in the run console.
                 TomcatNotifier.warning(project,
-                        "Custom server.xml could not be parsed",
-                        "Tomcat is launching on a minimal generated server.xml. Custom Valves, " +
-                                "Realms, or Listeners in your server.xml are not active until the " +
-                                "parse error is fixed — see the run-config console for the XML " +
-                                "parse details.");
+                        "Custom server.xml not parsed",
+                        "Using minimal config. Fix XML to re-enable custom Valves/Realms.");
             }
         }
     }
@@ -474,8 +472,38 @@ public class TomcatJavaParametersBuilder {
     }
 
     private void setupDeploymentArtifacts(@NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {
-        DeploymentStrategy strategy = DeploymentStrategy.create(configuration);
-        strategy.configureDeployment(params, catalinaBase, configuration, project, deploymentLogger);
+        // Mirror freshly-compiled module output into each exploded deployment's
+        // WEB-INF/classes BEFORE the deployment strategy lays down context.xml.
+        // This runs on EVERY launch (initial Run, Stop+Run, cross-executor switch,
+        // and the relaunch leg of doRestart) — not just the Update-dialog paths in
+        // TomcatApplicationUpdater. Without this hook a plain Stop-then-Run leaves
+        // target/<war>/WEB-INF/classes/ at the previous mvn-package state and the
+        // user's Java edits never reach Tomcat. See DeployedClassesSync javadoc
+        // for the full pain-shape rationale.
+        // One-line headline before per-artifact sync output: when any artifact
+        // is WAR-packaged, hot sync skips it. Users editing source then need to
+        // know they must repackage — without this banner, the per-artifact
+        // "skipped: type is war" lines below are easy to miss.
+        com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater
+                .warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), deploymentLogger);
+
+        com.dev.idea.plugins.tomcat.update.DeployedClassesSync.syncIfNeeded(
+                project, configuration.getDeployedArtifacts(), deploymentLogger);
+
+        // Same rationale for src/main/webapp/ (JSP, JS, CSS, HTML, taglibs).
+        // IntelliJ's Make never copies those into target/<war>/, so without
+        // this hook a Stop+Run after editing index.jsp would still serve the
+        // previous mvn-package'd copy. Runs on EVERY launch like the class
+        // sync above.
+        com.dev.idea.plugins.tomcat.update.WebResourcesSync.syncIfNeeded(
+                project, configuration.getDeployedArtifacts(), deploymentLogger);
+
+        // Only one strategy now — remote-mode launches bypass this whole path
+        // (they go through RemoteDeploymentRunProfileState and never build
+        // JavaParameters). The interface stays as a future-proofing seam; see
+        // DeploymentStrategy javadoc.
+        new LocalDeploymentStrategy()
+                .configureDeployment(params, catalinaBase, configuration, project, deploymentLogger);
     }
 
     public static TomcatJavaParametersBuilder create(@NotNull TomcatRunConfiguration configuration,

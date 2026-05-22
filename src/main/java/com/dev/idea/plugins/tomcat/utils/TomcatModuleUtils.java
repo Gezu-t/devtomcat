@@ -90,25 +90,214 @@ public final class TomcatModuleUtils {
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
         for (VirtualFile contentRoot : contentRoots) {
-            // Check common web root paths
+            // Content root IS the webapp (Eclipse-style / IntelliJ-hand-configured):
+            // the module's root directory directly contains WEB-INF/, no intervening
+            // src/main/webapp/. Detected by a stricter check than isValidWebRoot —
+            // we require WEB-INF presence specifically, because any Maven module's
+            // pom.xml at content root would otherwise satisfy the "has a web-extension
+            // file" branch and produce a false positive.
+            if (isContentRootWebapp(contentRoot)) {
+                webRoots.add(contentRoot);
+            }
+            // Check common web root paths — case-insensitive walk so layouts like
+            // src/main/WEBAPP, src/Main/webapp, or SRC/main/Webapp are detected on
+            // case-sensitive filesystems (Linux, CI runners, deliberately
+            // case-sensitive macOS volumes). findFileByRelativePath would have
+            // missed these even though Tomcat-on-Linux serves them fine.
             for (String webPath : WEB_ROOT_PATHS) {
-                VirtualFile webRoot = contentRoot.findFileByRelativePath(webPath);
+                VirtualFile webRoot = findChildByRelativePathIgnoreCase(contentRoot, webPath);
                 if (isValidWebRoot(webRoot)) {
                     webRoots.add(webRoot);
                 }
             }
 
-            // Check direct children with web root names
+            // Check direct children with web root names (case-insensitive).
             for (VirtualFile child : contentRoot.getChildren()) {
-                if (child.isValid() && child.isDirectory() && WEB_ROOT_NAMES.contains(child.getName())) {
-                    if (isValidWebRoot(child)) {
-                        webRoots.add(child);
-                    }
+                if (child.isValid()
+                        && child.isDirectory()
+                        && containsIgnoreCase(WEB_ROOT_NAMES, child.getName())
+                        && isValidWebRoot(child)) {
+                    webRoots.add(child);
                 }
             }
         }
 
         return new ArrayList<>(webRoots);
+    }
+
+    /**
+     * Stricter variant of {@link #isValidWebRoot}: requires the directory to
+     * contain a {@code WEB-INF/} subdirectory directly. Used for the
+     * content-root-IS-webapp detection where the looser "has a web-extension
+     * file" check from {@code isValidWebRoot} would produce false positives
+     * (a Maven module's content root carries {@code pom.xml}, which would
+     * satisfy that branch).
+     */
+    private static boolean isContentRootWebapp(@Nullable VirtualFile dir) {
+        if (dir == null || !dir.isDirectory()) return false;
+        VirtualFile webInf = dir.findChild(WEB_INF);
+        return webInf != null && webInf.isDirectory();
+    }
+
+    /**
+     * Directory-name fragments that mark a subtree as build output, version
+     * control, IDE metadata, or dependency cache — never a webapp source.
+     * Used by {@link #findUnconventionalWebRoots} to keep the scan bounded.
+     */
+    private static final Set<String> SCAN_EXCLUDE_DIRS = Set.of(
+            "target", "build", "out", "bin", "dist",
+            ".git", ".idea", ".gradle", ".mvn",
+            "node_modules", ".m2", ".vscode", ".settings",
+            "test-output", "logs", "tmp"
+    );
+
+    /**
+     * Maximum directory depth the {@link #findUnconventionalWebRoots} scan
+     * descends. {@code src/main/webapp} is depth 3 from the content root;
+     * 4 leaves headroom for layouts like {@code src/main/web/v2} without
+     * letting the walk wander into deep dependency trees if exclusions
+     * miss something.
+     */
+    private static final int UNCONVENTIONAL_SCAN_MAX_DEPTH = 4;
+
+    /**
+     * Bounded filesystem scan under each of a module's content roots looking
+     * for any directory that directly contains {@code WEB-INF/}. Catches
+     * layouts the convention lists miss — Gradle {@code webAppDirName}
+     * overrides, custom Eclipse exports, arbitrary user-named webapp
+     * directories — without requiring a parallel reflection path through the
+     * Gradle plugin model.
+     *
+     * <p>Performance is the reason for the depth cap and the exclude list:
+     * a recursive walk through {@code node_modules/} or a deep Maven
+     * {@code target/} would dwarf the work this method exists to do, and
+     * those directories never legitimately host a webapp source.
+     *
+     * <p>Returns an empty list (never {@code null}). Intended as a fallback
+     * — callers should consult conventional + facet + Maven sources first and
+     * only invoke this when none of those produced anything, otherwise the
+     * scan would duplicate roots already discovered via cheaper paths.
+     */
+    @NotNull
+    public static List<VirtualFile> findUnconventionalWebRoots(@NotNull Module module) {
+        LinkedHashSet<VirtualFile> found = new LinkedHashSet<>();
+        for (VirtualFile contentRoot : ModuleRootManager.getInstance(module).getContentRoots()) {
+            scanForWebInfHolders(contentRoot, 0, found);
+        }
+        return new ArrayList<>(found);
+    }
+
+    /**
+     * Recursive helper for {@link #findUnconventionalWebRoots}. Skips
+     * {@link #SCAN_EXCLUDE_DIRS} entries by name and gives up at
+     * {@link #UNCONVENTIONAL_SCAN_MAX_DEPTH}. Symlinked directories are
+     * skipped — could point outside the project or form a loop.
+     */
+    private static void scanForWebInfHolders(@NotNull VirtualFile dir,
+                                             int depth,
+                                             @NotNull LinkedHashSet<VirtualFile> out) {
+        if (depth > UNCONVENTIONAL_SCAN_MAX_DEPTH) return;
+        if (!dir.isValid() || !dir.isDirectory() || dir.is(com.intellij.openapi.vfs.VFileProperty.SYMLINK)) {
+            return;
+        }
+        // Does this directory itself host a webapp?
+        if (isContentRootWebapp(dir)) {
+            out.add(dir);
+            // Don't descend below a confirmed webapp root — its own subtree
+            // is content, not a candidate for nested webapps.
+            return;
+        }
+        for (VirtualFile child : dir.getChildren()) {
+            if (!child.isValid() || !child.isDirectory()) continue;
+            // Skip well-known non-webapp subtrees by name. Case-insensitive
+            // because Linux may have variants (.GIT vs .git) and Windows
+            // case-folds anyway.
+            if (containsIgnoreCase(SCAN_EXCLUDE_DIRS, child.getName())) continue;
+            scanForWebInfHolders(child, depth + 1, out);
+        }
+    }
+
+    /**
+     * Reads {@code WebFacet.getWebRoots()} via {@link com.intellij.facet.FacetManager}
+     * for every {@code "web"}-type facet attached to {@code module}. Falls back to an
+     * empty list when the JavaEE plugin (IntelliJ Ultimate) is not present, when
+     * no Web Facets are attached, or when the reflective access fails.
+     *
+     * <p>Authoritative source: a user who has explicitly configured Web Facet roots
+     * in Project Structure → Facets → Web wants those exact paths, not any
+     * convention guess.
+     */
+    @NotNull
+    public static List<VirtualFile> findWebFacetRoots(@NotNull Module module) {
+        try {
+            com.intellij.facet.FacetManager fm = com.intellij.facet.FacetManager.getInstance(module);
+            if (fm == null) return java.util.Collections.emptyList();
+            LinkedHashSet<VirtualFile> out = new LinkedHashSet<>();
+            for (com.intellij.facet.Facet<?> facet : fm.getAllFacets()) {
+                // String-ID match avoids a compile-time dependency on WebFacet
+                // (which lives in IntelliJ's JavaEE plugin, Ultimate-only).
+                if (!"web".equals(facet.getType().getStringId())) continue;
+                try {
+                    Object roots = facet.getClass().getMethod("getWebRoots").invoke(facet);
+                    if (!(roots instanceof Iterable<?>)) continue;
+                    for (Object webRoot : (Iterable<?>) roots) {
+                        Object file = webRoot.getClass().getMethod("getFile").invoke(webRoot);
+                        if (file instanceof VirtualFile vf && vf.isValid() && vf.isDirectory()) {
+                            out.add(vf);
+                        }
+                    }
+                } catch (NoSuchMethodException | IllegalAccessException
+                         | java.lang.reflect.InvocationTargetException ignored) {
+                    // Facet shape unexpected — skip this facet, try the next.
+                }
+            }
+            return new ArrayList<>(out);
+        } catch (NoClassDefFoundError | Exception e) {
+            return java.util.Collections.emptyList();
+        }
+    }
+
+    /**
+     * Case-insensitive equivalent of {@link VirtualFile#findFileByRelativePath}.
+     * Walks each path segment by iterating the directory's children and matching
+     * names with {@link String#equalsIgnoreCase}, so {@code src/main/webapp} also
+     * locates {@code src/main/WEBAPP}, {@code SRC/Main/webapp}, etc.
+     *
+     * <p>Mac/Windows filesystems are case-insensitive by default — the original
+     * {@code findFileByRelativePath} happened to work on those, hiding the bug
+     * during routine development. Linux and case-sensitive macOS volumes (and
+     * therefore CI runners, Docker images, and most production servers) made
+     * the gap visible.
+     */
+    @Nullable
+    private static VirtualFile findChildByRelativePathIgnoreCase(@NotNull VirtualFile root,
+                                                                 @NotNull String relativePath) {
+        VirtualFile current = root;
+        for (String segment : relativePath.split("/")) {
+            if (segment.isEmpty()) continue;
+            VirtualFile next = null;
+            for (VirtualFile child : current.getChildren()) {
+                if (segment.equalsIgnoreCase(child.getName())) {
+                    next = child;
+                    break;
+                }
+            }
+            if (next == null) return null;
+            current = next;
+        }
+        return current;
+    }
+
+    /**
+     * Case-insensitive membership check against a set of canonical names.
+     * Uses {@link Locale#ROOT} so a Turkish-locale machine does not fold
+     * {@code I} → {@code ı} and miss matches like {@code WebContent}.
+     */
+    private static boolean containsIgnoreCase(@NotNull Set<String> set, @NotNull String name) {
+        for (String entry : set) {
+            if (entry.equalsIgnoreCase(name)) return true;
+        }
+        return false;
     }
 
     @NotNull

@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [1.1.0]
+
+### Changed
+- **Remote-mode launches no longer fork a local Tomcat JVM** — pure Manager-API deploy with a single console.
+- **Quieter notifications** — repeat-on-every-launch balloons moved to console-only; remaining balloons trimmed to one short line.
+- **Port resolution now seeds from the user's intended port** — auto-bumps under conflict no longer overwrite the original; next launch re-tries the original first.
+- **Tomcat shutdown waits for the OS to actually release ports** — eliminates Windows TIME_WAIT-driven drift on rapid restart.
+- **Orphan-Tomcat reclaim verifies the configured port is free** after the kill before yielding to the next launch's resolver.
+
+### Fixed
+- **Class-sync refuses to mirror ECJ "compile-with-errors" stubs** — protects working deployed classes from being overwritten with broken bytecode that would throw `java.lang.Error` at Tomcat startup.
+- **Class-sync runs on every launch** — Stop+Run, initial Run, cross-executor switch — not just the Update dialog paths.
+- **Class-sync follows transitive module dependencies** — edits in a dep module take effect without `mvn package`.
+- **Class-sync per-artifact diagnostics in the run console** — every skip names the cause (module, type, structure).
+- **Class-sync size tie-breaker** — equal-mtime but byte-different files still copy.
+
+### Added
+- **`PortStrategy`** — per-config policy: `AUTO_BUMP` (default), `RECLAIM_THEN_FAIL`, or `STRICT`. STRICT refuses launch whenever a preferred HTTP/shutdown port would be silently bumped — by OS conflict OR by the in-process port registry.
+- **Tools → Set Up DevTomcat from Project** — single-dialog action that scans the project for WAR-packaging Maven modules and creates ONE Tomcat run config with all webapps as deployments (matches IntelliJ Ultimate). Port mode picker: auto-resolve or fixed. Duplicate context paths in the table are flagged live (red-tinted cells, OK button gated with a clear validation message).
+- **Four new error patterns in run-console diagnostics**, library-agnostic: ECJ compilation stubs, localhost backend unreachable, JDK module-access denial, JSch/SFTP connection failures.
+- **Compiler-type preflight warning** — surfaces a one-line caution when IntelliJ's Java compiler is set to Eclipse (ECJ) instead of Javac.
+- **Port-drift warning in the run-config editor** — when the current port differs from the user's intended port, a soft warning explains the drift and points at dependent config files.
+
 ## [1.0.14]
 
 ### Added
@@ -11,7 +34,9 @@
 - **Balloon when custom `server.xml` cannot be parsed**; the launch falls back to a minimal config and the user is alerted instead of silently losing custom Valves / Realms / Listeners.
 
 ### Fixed
-- **IDE main-window flicker when balloons fire from background threads** — `TomcatNotifier` now dispatches every balloon onto the EDT via `invokeLater` with `ModalityState.any()`. Single-point fix covering all 15 call sites.
+- **Restart Server / Update Classes / Redeploy now pick up Java edits on Maven exploded deployments** — fresh class output from Make is mirrored into each exploded deployment's `WEB-INF/classes/` before the relaunch. No more `mvn clean install` between edits. Per-artifact diagnostics in the run console name the owning module, the source roots, and exactly why a skip happened (missing module, no production output, name mismatch, multiple web modules) so silent stales are visible. Equal-mtime-different-size files are copied via a size tie-breaker that catches the edge case where fast edits land within filesystem mtime resolution.
+- **Plugin verifier "use of internal API" warning** on `PluginManagerCore.getPlugin` (2024.3+) — switched to the public `PluginManager.isPluginInstalled` for the JavaScript-plugin probe in Browser Launch.
+- **IDE main-window flicker when balloons fire from background threads** — `TomcatNotifier` now dispatches every balloon onto the EDT via `invokeLater`. Single-point fix covering all 15 call sites.
 - **Plugin now installable on IntelliJ IDEA 2026.2 EAP** — `until-build` raised from `261.*` to `262.*`.
 - **Duplicate-context-path detection catches normalized variants** (`/foo` vs `/foo/`, `""` vs `"/"`); invalid paths rejected at Apply.
 - **Stale-deployment cleanup failures surface as a balloon** naming the locked files instead of failing later with `AccessDeniedException`.

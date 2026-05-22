@@ -107,42 +107,20 @@ final class TomcatCompatibilityPrompt {
             displayName = name + " (" + version + ")";
         }
 
-        String content = displayName + " reached end-of-life "
-                + (eolDate != null ? "in " + eolDate : "")
-                + " and no longer receives security updates from Apache. "
-                + recommendationFor(tomcatInfo)
-                + " The current launch continues; this notification will appear once per IDE session.";
+        // Short balloon — the "click here for upgrade options" action covers
+        // the recommendation, so the body just states the fact.
+        String content = displayName + " is end-of-life"
+                + (eolDate != null ? " (" + eolDate + ")" : "")
+                + ". No more security updates.";
 
         Notification notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
                 .createNotification(
-                        "DevTomcat: Tomcat install is end-of-life",
+                        "Tomcat end-of-life",
                         content,
                         NotificationType.WARNING);
         notification.addAction(new OpenWhichVersionPageAction());
         notification.notify(project);
-    }
-
-    /**
-     * Returns a one-line upgrade recommendation tailored to the user's
-     * webapp servlet namespace expectations. Tomcat 9 keeps the
-     * {@code javax.servlet} namespace and is the natural sweet spot for
-     * legacy webapps; Tomcat 10+ moves to {@code jakarta.servlet} and
-     * requires a webapp migration.
-     */
-    @NotNull
-    private static String recommendationFor(@NotNull TomcatInfo tomcatInfo) {
-        int major = tomcatInfo.getMajorVersion();
-        if (major == 7 || major == 8) {
-            return "For a javax.servlet webapp, the natural upgrade is Tomcat 9.0.x"
-                    + " (still maintained, same namespace, modern bundled ECJ). For a"
-                    + " jakarta.servlet webapp, use Tomcat 10.1.x or 11.0.x.";
-        }
-        if (major == 10) {
-            return "Upgrade to Tomcat 10.1.x or 11.0.x. The webapp servlet namespace"
-                    + " (jakarta.servlet) does not change.";
-        }
-        return "Upgrade to a supported branch.";
     }
 
     /**
@@ -161,15 +139,13 @@ final class TomcatCompatibilityPrompt {
                                       @NotNull String issueMessage) {
         if (project == null || project.isDisposed()) return;
 
-        String content = issueMessage
-                + " Click <b>Open Run Configuration</b> to pick a registered JRE on the Server tab,"
-                + " or open <b>File &rarr; Project Structure &rarr; SDKs</b> to register one.";
-
+        // Short balloon — the two actions are the call-to-action, the
+        // <b>click here…</b> prose used to bloat the body for no benefit.
         Notification notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
                 .createNotification(
-                        "DevTomcat: JDK does not match Tomcat requirement",
-                        content,
+                        "JDK does not match Tomcat",
+                        issueMessage,
                         NotificationType.ERROR);
         notification.addAction(new OpenRunConfigurationAction(configuration));
         notification.addAction(new OpenSdksSettingsAction());

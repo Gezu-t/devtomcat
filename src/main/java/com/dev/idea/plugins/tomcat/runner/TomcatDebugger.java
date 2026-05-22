@@ -74,7 +74,13 @@ public class TomcatDebugger extends GenericDebuggerRunner {
 
         if (delegate.handleCrossExecutorConflict(config, env)) return null;
 
-        // Fresh start — resolve debug host/port and attach debugger
+        // Fresh start — resolve debug host/port and attach debugger.
+        //
+        // State type is determined by TomcatRunConfiguration.getState():
+        //   - Local mode  → state is TomcatCommandLineState (resolved port lives there)
+        //   - Remote mode → state is RemoteDeploymentRunProfileState (port comes from RunnerSettings)
+        // The else fallback below is defensive only — it would mean a future
+        // RunProfileState type slipped through without an updated branch here.
         boolean isRemote = config.isRemoteMode();
 
         String debugHost;

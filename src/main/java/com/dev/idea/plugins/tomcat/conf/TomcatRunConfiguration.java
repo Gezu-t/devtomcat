@@ -89,6 +89,14 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     @Nullable
     public RunProfileState getState(@NotNull Executor executor, @NotNull ExecutionEnvironment env) {
         try {
+            // Remote-mode runs do NOT fork a local Tomcat JVM. They route through
+            // RemoteDeploymentRunProfileState which calls the Tomcat Manager API
+            // on the remote server. This is the entry point for the local-JVM
+            // skip that fixes the previous "dual-Tomcat" launch behaviour —
+            // see RemoteDeploymentProcessHandler javadoc for the full story.
+            if (isRemoteMode()) {
+                return new com.dev.idea.plugins.tomcat.runner.RemoteDeploymentRunProfileState(env, this);
+            }
             return new TomcatCommandLineState(env, this);
         } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
             // Honour IntelliJ cancellation: returning null on PCE would silently
@@ -161,9 +169,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         // Shutdown overlap: re-entering would race the in-flight termination.
         String blockReason = runningHandler.getRestartBlockReason();
         if (blockReason != null) {
-            TomcatNotifier.info(project,
-                    "Restart Unavailable: " + getName(),
-                    blockReason);
+            // Short balloon — config name already on the run toolbar.
+            TomcatNotifier.info(project, "Restart unavailable", blockReason);
             return RestartSingletonResult.NO_FURTHER_ACTION;
         }
 
@@ -298,6 +305,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     @Nullable public Integer getHttpPort()     { return positiveOrNull(configData.getPortConfig().getHttp()); }
     @Nullable public Integer getShutdownPort() { return positiveOrNull(configData.getPortConfig().getShutdown()); }
+
+    // Preferred (intent) ports — semantics in LOCAL_NOTES.md (1.1.0).
+    @Nullable public Integer getPreferredHttpPort()     { return positiveOrNull(configData.getPortConfig().getPreferredHttp()); }
+    @Nullable public Integer getPreferredShutdownPort() { return positiveOrNull(configData.getPortConfig().getPreferredShutdown()); }
 
     @Nullable public Integer getHttpsPort() {
         PortConfig pc = configData.getPortConfig();

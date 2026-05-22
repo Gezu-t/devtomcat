@@ -191,6 +191,25 @@ package com.dev.idea.plugins.tomcat.conf;
                 if (result.hasWarnings()) {
                     LOG.debug("Port validation warnings: " + result.getWarningMessage());
                 }
+
+                // Port-drift warning — see LOCAL_NOTES.md (1.1.0).
+                int preferredHttp = ports.getPreferredHttp();
+                if (preferredHttp > 0 && preferredHttp != ports.getHttp()) {
+                    throw new RuntimeConfigurationWarning(
+                            "HTTP port drifted from " + preferredHttp + " to " + ports.getHttp()
+                                    + " (auto-resolved by DevTomcat after a prior conflict). "
+                                    + "External config files that hardcode " + preferredHttp
+                                    + " (e.g. backendUrl in application.properties) may now point at "
+                                    + "the wrong port. Reset to " + preferredHttp + " in the Server tab "
+                                    + "if the original conflict is gone, or update the dependent configs.");
+                }
+                int preferredShutdown = ports.getPreferredShutdown();
+                if (preferredShutdown > 0 && preferredShutdown != ports.getShutdown()) {
+                    throw new RuntimeConfigurationWarning(
+                            "Shutdown port drifted from " + preferredShutdown + " to "
+                                    + ports.getShutdown() + " (auto-resolved). Reset in the Server tab "
+                                    + "if the original conflict is gone.");
+                }
             }
 
             private static void validateDeploymentArtifacts(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {

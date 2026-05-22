@@ -149,4 +149,89 @@ class PortConfigTest {
         assertTrue(pc.isJmxEnabled());
         assertTrue(pc.isAjpEnabled());
     }
+
+    // --- Preferred-vs-resolved port semantics (1.1.0, Section 6.3) ---
+
+    @Test
+    @DisplayName("getPreferredHttp falls back to http when no snapshot exists")
+    void preferredHttpFallbackToHttp() {
+        PortConfig pc = new PortConfig();
+        pc.setHttp(8081);
+        // No setHttpResolved call has happened — preferred returns current.
+        assertEquals(8081, pc.getPreferredHttp());
+    }
+
+    @Test
+    @DisplayName("setHttpResolved snapshots current http into preferred ONCE")
+    void setHttpResolvedSnapshotsPreferred() {
+        PortConfig pc = new PortConfig();
+        pc.setHttp(8081);                  // user's intent
+        pc.setHttpResolved(8082);          // first bump — snapshot 8081
+        assertEquals(8082, pc.getHttp());
+        assertEquals(8081, pc.getPreferredHttp());
+
+        pc.setHttpResolved(8083);          // second bump — DON'T re-snapshot
+        assertEquals(8083, pc.getHttp());
+        assertEquals(8081, pc.getPreferredHttp(),
+                "second bump must NOT overwrite the original preferred snapshot");
+    }
+
+    @Test
+    @DisplayName("setHttp (UI intent) clears the preferred snapshot")
+    void setHttpClearsPreferred() {
+        PortConfig pc = new PortConfig();
+        pc.setHttp(8081);
+        pc.setHttpResolved(8082);
+        assertEquals(8081, pc.getPreferredHttp());
+
+        // User edits in the UI to a different port — new intent.
+        pc.setHttp(9090);
+        assertEquals(9090, pc.getHttp());
+        assertEquals(9090, pc.getPreferredHttp(),
+                "explicit UI edit must reset preferred so it tracks the new value");
+    }
+
+    @Test
+    @DisplayName("setHttp with unchanged value preserves the preferred snapshot")
+    void setHttpUnchangedPreservesPreferred() {
+        // Editor form-binding calls setHttp on every save, even when the value
+        // didn't change. That must NOT wipe the preferred — otherwise opening
+        // and closing the editor would lose drift state silently.
+        PortConfig pc = new PortConfig();
+        pc.setHttp(8081);
+        pc.setHttpResolved(8082);
+        assertEquals(8081, pc.getPreferredHttp());
+
+        // Form save with no change → setHttp(8082) — current value
+        pc.setHttp(8082);
+        assertEquals(8081, pc.getPreferredHttp(),
+                "no-change setHttp must preserve preferred snapshot (form save semantics)");
+    }
+
+    @Test
+    @DisplayName("preferred-shutdown follows the same snapshot semantics as http")
+    void preferredShutdownMirrors() {
+        PortConfig pc = new PortConfig();
+        pc.setShutdown(8005);
+        pc.setShutdownResolved(8006);
+        assertEquals(8006, pc.getShutdown());
+        assertEquals(8005, pc.getPreferredShutdown());
+
+        pc.setShutdown(9999); // user UI edit
+        assertEquals(9999, pc.getPreferredShutdown());
+    }
+
+    @Test
+    @DisplayName("copy constructor preserves preferred snapshots")
+    void copyConstructorCarriesPreferred() {
+        PortConfig original = new PortConfig();
+        original.setHttp(8081);
+        original.setHttpResolved(8082);
+        original.setShutdown(8005);
+        original.setShutdownResolved(8006);
+
+        PortConfig copy = new PortConfig(original);
+        assertEquals(8081, copy.getPreferredHttp());
+        assertEquals(8005, copy.getPreferredShutdown());
+    }
 }

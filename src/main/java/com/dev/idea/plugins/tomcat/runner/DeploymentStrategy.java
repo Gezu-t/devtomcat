@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.runner;
 
-import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
@@ -14,18 +13,19 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.file.Path;
 
 /**
- * Strategy for deploying artifacts to Tomcat, separating local filesystem
- * deployment from remote Manager API deployment.
+ * Strategy for deploying artifacts to a locally-launched Tomcat.
  *
- * <p>Implementations handle mode-specific concerns:
- * <ul>
- *   <li>{@link LocalDeploymentStrategy} — context XML generation, WAR copying,
- *       PostResources for multi-module classpath</li>
- *   <li>{@link RemoteDeploymentStrategy} — VM properties for Manager API,
- *       credential resolution via PasswordSafe</li>
- * </ul>
+ * <p>Originally split into Local and Remote implementations, but remote-mode
+ * launches no longer fork a local Tomcat JVM (they route through
+ * {@link RemoteDeploymentRunProfileState} and call the Tomcat Manager API
+ * directly). This interface now has a single implementation
+ * ({@link LocalDeploymentStrategy}); we keep it as an interface only to
+ * preserve the per-strategy seam for any future deployment mode that
+ * still launches a JVM (e.g. an embedded-Tomcat variant) and to keep the
+ * call sites stable.
  *
  * @see TomcatJavaParametersBuilder#build()
+ * @see LocalDeploymentStrategy
  */
 public interface DeploymentStrategy {
 
@@ -48,29 +48,10 @@ public interface DeploymentStrategy {
 
     /**
      * Synchronously resolves credentials needed for deployment.
-     * Only meaningful for remote mode (PasswordSafe is async);
-     * local mode is a no-op.
+     * Default no-op; {@link LocalDeploymentStrategy} keeps this as a no-op
+     * because the local JVM does not need PasswordSafe lookups.
      */
     default void resolveCredentials(@NotNull TomcatRunConfiguration configuration) {}
-
-    /**
-     * Creates the appropriate strategy based on the configuration's server mode.
-     */
-    @NotNull
-    static DeploymentStrategy create(@NotNull TomcatRunConfiguration configuration) {
-        return forMode(configuration.getServerMode());
-    }
-
-    /**
-     * Creates the appropriate strategy for the given server mode string.
-     * Package-visible for testing.
-     */
-    @NotNull
-    static DeploymentStrategy forMode(@Nullable String mode) {
-        return TomcatConstants.MODE_REMOTE.equals(mode)
-                ? new RemoteDeploymentStrategy()
-                : new LocalDeploymentStrategy();
-    }
 
     /**
      * Generates a context XML descriptor for an exploded artifact, including

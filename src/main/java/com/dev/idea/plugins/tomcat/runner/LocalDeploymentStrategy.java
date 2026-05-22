@@ -217,12 +217,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                         logger.logServerWarning(warning);
                     }
                     if (!project.isDisposed()) {
+                        // Short balloon — file list is in the run console.
                         TomcatNotifier.warning(project,
-                                "Stale Tomcat files could not be cleaned",
-                                "A previous Tomcat process may still be holding " +
-                                        staleFailures.size() + " file(s) open. Stop the " +
-                                        "orphan process, then retry the launch. See the run " +
-                                        "console for the file list.");
+                                "Stale files locked",
+                                staleFailures.size() + " file(s) held by an orphan Tomcat. Stop it and retry.");
                     }
                 }
             } else if (logger != null) {
@@ -377,9 +375,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 logger.logServerWarning(warning);
             }
             if (project != null && !project.isDisposed()) {
+                // Short balloon — full prose explanation already in the console.
                 TomcatNotifier.warning(project,
-                        "DevTomcat: no artifacts will be deployed",
-                        warning);
+                        "No artifacts to deploy",
+                        "Tomcat will start with nothing served. Add an artifact in Deployment.");
             }
         }
     }

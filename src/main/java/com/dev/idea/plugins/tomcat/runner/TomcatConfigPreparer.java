@@ -152,14 +152,16 @@ public final class TomcatConfigPreparer {
     /**
      * Cleans stale persistent cache/lock state from temp/ before launch.
      *
-     * <p>Disk-backed caches (ehcache, liquibase, hazelcast, etc.) persist lock
-     * and state files here across runs. When the old JVM is gone but its lock
-     * file remains, the next startup fails with "Persistence directory already
-     * locked by this process". Removing these entries restores a clean slate.
+     * <p>Disk-backed caches and lock files persist here across runs. When the
+     * old JVM is gone but its lock file remains, the next startup fails with
+     * "Persistence directory already locked by this process". Removing these
+     * entries restores a clean slate.
      *
-     * <p>Only targets entries whose names indicate persistent state
-     * ({@link #looksLikePersistentAppTempState}); other temp files created by
-     * Tomcat during startup are untouched.
+     * <p>Library-agnostic by design: matches only on generic markers
+     * ({@link #looksLikePersistentAppTempState}) — no hardcoded library names —
+     * so any framework that follows the {@code *lock*} / {@code *cache*} /
+     * {@code .lck} / {@code .pid} convention is covered. Other temp files
+     * created by Tomcat during startup are untouched.
      */
     static void cleanStaleTempState(@NotNull Path catalinaBase) throws IOException {
         Path tempDir = catalinaBase.resolve(DIR_TEMP);
@@ -193,17 +195,16 @@ public final class TomcatConfigPreparer {
     }
 
     private static boolean looksLikePersistentAppTempState(@NotNull Path path) {
-        // Locale.ROOT so 'LIQUIBASE' matches 'liquibase' even under tr_TR (capital I → ı folding).
+        // Locale.ROOT so 'LOCK' folds to 'lock' even under tr_TR (capital I → ı folding).
         String name = path.getFileName() != null
                 ? path.getFileName().toString().toLowerCase(java.util.Locale.ROOT)
                 : "";
         // Only flag files/directories with names suggesting persistent state —
         // not ALL directories, since Tomcat normally creates temp subdirectories.
+        // Generic markers only; intentionally no library-specific names so the
+        // heuristic stays framework-agnostic.
         return name.contains("lock")
                 || name.contains("cache")
-                || name.contains("ehcache")
-                || name.contains("liquibase")
-                || name.contains("hazelcast")
                 || name.endsWith(".lck")
                 || name.endsWith(".pid");
     }

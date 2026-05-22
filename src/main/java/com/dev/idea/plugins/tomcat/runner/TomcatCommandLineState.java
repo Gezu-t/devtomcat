@@ -6,7 +6,6 @@ import com.dev.idea.plugins.tomcat.diagnostics.TomcatCompatibilityChecker;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
-import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
@@ -26,8 +25,6 @@ import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.filters.ExceptionFilter;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.util.Key;
@@ -83,13 +80,15 @@ public class TomcatCommandLineState extends JavaCommandLineState {
 
     @Override
     protected JavaParameters createJavaParameters() throws ExecutionException {
-        // Ensure pre-launch setup runs exactly once, even if the framework
-        // calls getJavaParameters()/createJavaParameters() before startProcess()
-        ensurePreLaunchSetup();
-
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
         try {
+            // Ensure pre-launch setup runs exactly once, even if the framework
+            // calls getJavaParameters()/createJavaParameters() before startProcess().
+            // Inside the try so a STRICT/RECLAIM refusal (IllegalStateException from
+            // LaunchPortClaimer) releases ports that claimAndTrack already reserved.
+            ensurePreLaunchSetup();
+
             TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
                     .setDebugMode(isDebug)
                     .setDeploymentLogger(deploymentLogger)
@@ -150,51 +149,34 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // and only afterwards the real error ("not registered"), which makes
         // the registration problem look secondary. This is the same gate as
         // TomcatJavaParametersBuilder.getCatalinaHome() but it runs before
-        // side-effectful setup. Remote mode is exempt because there's no local
-        // Tomcat install to register.
-        if (!configuration.isRemoteMode()) {
-            requireRegisteredTomcatServer();
-            // Kill any orphan Tomcats left over from prior runs of THIS config so
-            // their ports free up before the port-conflict detector sees them.
-            // Without this, a zombie on the seed port pushes us onto the next free
-            // port, and the user sees the dialog's seed permanently disagree with
-            // the Services panel's actually-bound port. Runs after the registration
-            // gate so we don't waste cycles scanning for a launch that's about to
-            // fail anyway.
-            reclaimOrphanTomcats();
-        }
+        // side-effectful setup.
+        //
+        // Note: this state is constructed only for local-mode configurations
+        // (TomcatRunConfiguration.getState branches on isRemoteMode and routes
+        // remote configs to RemoteDeploymentRunProfileState). The previous
+        // isRemoteMode() guards in this method are therefore unreachable and
+        // have been removed.
+        requireRegisteredTomcatServer();
+        // Kill any orphan Tomcats left over from prior runs of THIS config so
+        // their ports free up before the port-conflict detector sees them.
+        // Without this, a zombie on the seed port pushes us onto the next free
+        // port, and the user sees the dialog's seed permanently disagree with
+        // the Services panel's actually-bound port. Runs after the registration
+        // gate so we don't waste cycles scanning for a launch that's about to
+        // fail anyway.
+        reclaimOrphanTomcats();
 
         checkCompatibility();
         runPreflightValidation();
         warnIfManualJdwpInDebugMode();
-        // Port conflict detection is only meaningful for local mode — remote ports
-        // are on the remote machine and not claimable or detectable from here.
-        boolean portsReserved = false;
-        try {
-            if (!configuration.isRemoteMode()) {
-                resolvePortConflicts();
-                portsReserved = true;
-            }
 
-            DeploymentStrategy.create(configuration).resolveCredentials(configuration);
-
-            if (configuration.isRemoteMode()) {
-                RemoteConfig rc = configuration.getConfigData().getRemoteConfig();
-                if (rc != null && rc.isUseCredentials() && rc.getPassword().isEmpty()) {
-                    throw new ExecutionException(
-                            "Remote deployment requires credentials but no password was found. " +
-                            "Configure credentials in the Remote tab or store them in PasswordSafe.");
-                }
-            }
-        } catch (ExecutionException e) {
-            // Release any ports we already claimed — processTerminated() won't fire
-            // because the process was never started.
-            if (portsReserved) {
-                TomcatPortRegistry.getInstance()
-                        .releaseAllFor(configuration.getName());
-            }
-            throw e;
-        }
+        // Both calls below are non-throwing (LaunchPortClaimer.claim() returns a
+        // Resolution, LocalDeploymentStrategy.resolveCredentials is a no-op), so
+        // there is no ExecutionException to catch and no ports to release here.
+        // Failures during port-claim turn into LaunchPortClaimer's own balloon /
+        // unrecoverable-state surfaces.
+        resolvePortConflicts();
+        new LocalDeploymentStrategy().resolveCredentials(configuration);
     }
 
     /**
@@ -202,15 +184,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      * launching in Debug mode. GenericDebuggerRunner injects its own JDWP agent,
      * so a manual one creates a duplicate — the JVM assigns the second agent a
      * different port, causing the debugger to connect to the wrong one.
+     *
+     * <p>Only relevant for local mode: this state is constructed exclusively
+     * for local-mode configurations, so no remote-mode guard is needed.
      */
     private void warnIfManualJdwpInDebugMode() {
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(
                 getEnvironment().getExecutor().getId());
         if (!isDebug) return;
-
-        // Only warn for local debug — in remote mode the user must supply their
-        // own JDWP agent on the remote JVM, so a manual -agentlib:jdwp is expected.
-        if (configuration.isRemoteMode()) return;
 
         String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
         if (CatalinaScriptSupport.hasManualJdwpAgent(vmOptions)) {
@@ -219,10 +200,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     "In Debug mode, the IDE injects its own JDWP agent automatically. " +
                     "Having two agents causes a port mismatch. Remove the manual one " +
                     "from VM options, or switch to Run mode if you want manual JDWP control.");
-            notifyUser("DevTomcat: Duplicate JDWP Agent",
-                    "Remove -agentlib:jdwp from VM options when using Debug mode.\n" +
-                    "The IDE injects its own agent automatically.",
-                    NotificationType.WARNING);
+            // Console-only — the warning above is enough; a balloon used to
+            // fire here every debug launch with manual JDWP, which is too
+            // repetitive for what is fundamentally a config-hygiene reminder.
         }
     }
 
@@ -400,9 +380,6 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         new LogFilePathAligner(configuration).align(runIdAssigner.resolve());
     }
 
-    private void notifyUser(@NotNull String title, @NotNull String content, @NotNull NotificationType type) {
-        TomcatNotifier.notify(configuration.getProject(), title, content, type);
-    }
 
     @NotNull
     @Override

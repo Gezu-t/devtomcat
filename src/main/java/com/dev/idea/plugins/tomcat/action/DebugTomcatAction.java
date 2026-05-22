@@ -58,9 +58,9 @@ public class DebugTomcatAction extends AnAction {
                 ExecutionEnvironmentBuilder.create(debugExecutor, settings).buildAndExecute();
             } catch (Exception ex) {
                 LOG.warn("Failed to restart Tomcat in Debug mode: " + config.getName(), ex);
-                TomcatNotifier.error(project, "Debug Restart Failed",
-                        "Tomcat '" + config.getName() + "' stopped but could not restart in Debug mode. " +
-                        "Start the configuration manually to resume.");
+                // Short balloon — config name already in the run toolbar.
+                TomcatNotifier.error(project, "Debug restart failed",
+                        "Stopped without relaunch. Start manually.");
             }
         });
     }

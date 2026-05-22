@@ -92,6 +92,21 @@ public final class TomcatErrorDiagnostics {
     private static final Pattern FAILED_DUE_TO_PREVIOUS_ERRORS = Pattern.compile(
             "Context \\[([^\\]]+)] startup failed due to previous errors");
 
+    // 1.1.0 additions — rationale in LOCAL_NOTES.md. Patterns kept deliberately
+    // library-agnostic: they describe Tomcat/JVM/network-level conditions, not
+    // application-framework errors.
+    private static final Pattern ECJ_UNRESOLVED_COMPILATION = Pattern.compile(
+            "java\\.lang\\.Error:\\s*Unresolved compilation problems?");
+    private static final Pattern BACKEND_UNREACHABLE = Pattern.compile(
+            "(?:Connection refused|Connection timed out)[^\\n]*localhost[:/]+(\\d{2,5})",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern MODULE_ACCESS_ERROR = Pattern.compile(
+            "InaccessibleObjectException|module [^\\s]+ does not (?:export|open)",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern SFTP_CONNECTION_FAILURE = Pattern.compile(
+            "JSchException[^\\n]*(?:Connection refused|Connection timed out|Auth fail|UnknownHostKey)",
+            Pattern.CASE_INSENSITIVE);
+
     /**
      * Analyzes a Tomcat log line and returns diagnostics if a known error pattern is detected.
      * Can return multiple diagnostics from a single line (e.g., root cause + context).
@@ -327,6 +342,55 @@ public final class TomcatErrorDiagnostics {
                     "The web application may have started threads or registered ThreadLocals that "
                             + "prevent garbage collection on redeploy. Consider adding "
                             + "JreMemoryLeakPreventionListener in server.xml.",
+                    null));
+        }
+
+        // 1.1.0 additions
+        // ECJ broken-class stub at class init
+        if (ECJ_UNRESOLVED_COMPILATION.matcher(text).find()) {
+            results.add(new Diagnostic(Severity.CRITICAL, "ECJ Compilation Stub",
+                    "A class file was compiled with Eclipse JDT despite unresolved errors",
+                    "Settings → Build, Execution, Deployment → Compiler → Java Compiler: switch from "
+                            + "Eclipse to Javac, then Build → Rebuild Project. If you must keep Eclipse, "
+                            + "fix all unresolved imports — ECJ proceeds with errors and writes stubs that throw at runtime.",
+                    "FIX_CLASSPATH"));
+        }
+
+        // Backend unreachable on localhost — generic connectivity diagnostic for
+        // multi-service localhost setups. Stays library-agnostic: no advice mentions
+        // any specific framework, file, or property name.
+        m = BACKEND_UNREACHABLE.matcher(text);
+        if (m.find()) {
+            String port = m.group(1);
+            results.add(new Diagnostic(Severity.ERROR, "Backend Unreachable",
+                    "Cannot connect to localhost service" + (port != null ? " on port " + port : ""),
+                    "Something on this machine expected a service at localhost"
+                            + (port != null ? ":" + port : "") + " but couldn't reach it. "
+                            + "Verify the peer service is running and bound to that port. If you run several "
+                            + "Tomcat configs together, check the run console's port-resolution lines — a "
+                            + "bumped port can leave hardcoded peer URLs pointing at the wrong slot.",
+                    null));
+        }
+
+        // JDK 9+ module-access denial
+        if (MODULE_ACCESS_ERROR.matcher(text).find()) {
+            results.add(new Diagnostic(Severity.ERROR, "Module Access Denied",
+                    "JVM rejected reflective access to internal JDK classes",
+                    "Add --add-opens flags to Server tab → VM options. Common ones: "
+                            + "--add-opens=java.base/java.lang=ALL-UNNAMED "
+                            + "--add-opens=java.base/java.util=ALL-UNNAMED "
+                            + "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED. "
+                            + "The stack trace above names the specific module/package that needs opening.",
+                    null));
+        }
+
+        // JSch / SFTP connectivity
+        if (SFTP_CONNECTION_FAILURE.matcher(text).find()) {
+            results.add(new Diagnostic(Severity.WARNING, "SFTP Connection Failed",
+                    "JSch couldn't reach the configured SFTP host",
+                    "Verify the host is reachable from this machine (corporate VPN often required). "
+                            + "Check credentials / known_hosts. Often non-critical at startup — the app may "
+                            + "retry on first request — but flagged here to make the cause findable later.",
                     null));
         }
 

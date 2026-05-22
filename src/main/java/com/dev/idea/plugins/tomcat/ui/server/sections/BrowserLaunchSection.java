@@ -506,8 +506,12 @@ public class BrowserLaunchSection implements ConfigurationSection {
 
     private static boolean isJavaScriptPluginAvailable() {
         try {
-            return com.intellij.ide.plugins.PluginManagerCore.getPlugin(
-                    com.intellij.openapi.extensions.PluginId.getId("JavaScript")) != null;
+            // PluginManager.isPluginInstalled is the public-API replacement for
+            // PluginManagerCore.getPlugin(...), which is @ApiStatus.Internal in
+            // 2024.3+ and now produces a "use of internal API" warning that
+            // blocks plugin verification on the marketplace.
+            return com.intellij.ide.plugins.PluginManager.isPluginInstalled(
+                    com.intellij.openapi.extensions.PluginId.getId("JavaScript"));
         } catch (Exception e) {
             return false;
         }

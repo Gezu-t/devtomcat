@@ -53,11 +53,12 @@ final class PortResolver {
             return preResolved;
         }
 
-        int httpPort     = getConfigPort(configuration.getHttpPort(),     PortUtils.DEFAULT_HTTP);
-        int shutdownPort = getConfigPort(configuration.getShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
-        int jmxPort      = getConfigPort(configuration.getJmxPort(),      PortUtils.DEFAULT_JMX);
-        int httpsPort    = getConfigPort(configuration.getHttpsPort(),    PortUtils.DEFAULT_HTTPS);
-        int ajpPort      = getConfigPort(configuration.getAjpPort(),      PortUtils.DEFAULT_AJP);
+        // Seed from user's PREFERRED port to unwind prior drift (see LOCAL_NOTES.md).
+        int httpPort     = getConfigPort(configuration.getPreferredHttpPort(),     PortUtils.DEFAULT_HTTP);
+        int shutdownPort = getConfigPort(configuration.getPreferredShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
+        int jmxPort      = getConfigPort(configuration.getJmxPort(),               PortUtils.DEFAULT_JMX);
+        int httpsPort    = getConfigPort(configuration.getHttpsPort(),             PortUtils.DEFAULT_HTTPS);
+        int ajpPort      = getConfigPort(configuration.getAjpPort(),               PortUtils.DEFAULT_AJP);
 
         // Resolve internal conflicts first (same value assigned to multiple connectors)
         Set<Integer> assigned = new HashSet<>();

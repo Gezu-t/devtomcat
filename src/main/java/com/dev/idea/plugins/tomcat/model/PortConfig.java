@@ -34,6 +34,15 @@ public class PortConfig implements Serializable, Cloneable {
     private boolean jmxEnabled;
     private boolean ajpEnabled;
 
+    // Preferred-vs-resolved port snapshot. Semantics in LOCAL_NOTES.md (1.1.0).
+    // 0 = no snapshot, getPreferredHttp() falls through to http.
+    private int preferredHttp = 0;
+    private int preferredShutdown = 0;
+
+    // Port-conflict policy. See PortStrategy javadoc + LOCAL_NOTES.md.
+    @NotNull
+    private PortStrategy strategy = PortStrategy.AUTO_BUMP;
+
     public PortConfig() {}
 
     public PortConfig(int http, int shutdown) {
@@ -58,10 +67,38 @@ public class PortConfig implements Serializable, Cloneable {
         this.httpsEnabled = other.httpsEnabled;
         this.jmxEnabled = other.jmxEnabled;
         this.ajpEnabled = other.ajpEnabled;
+        this.preferredHttp = other.preferredHttp;
+        this.preferredShutdown = other.preferredShutdown;
+        this.strategy = other.strategy;
     }
 
+    @NotNull public PortStrategy getStrategy() { return strategy; }
+    public void setStrategy(@NotNull PortStrategy strategy) { this.strategy = strategy; }
+
     public int getHttp() { return http; }
-    public void setHttp(int port) { this.http = port; }
+
+    // UI/external setter: explicit user intent — clears preferred snapshot.
+    public void setHttp(int port) {
+        if (port == this.http) return;
+        this.http = port;
+        this.preferredHttp = 0;
+    }
+
+    // Launcher-only setter: snapshots current http into preferred BEFORE overwriting.
+    public void setHttpResolved(int port) {
+        if (port == this.http) return;
+        if (this.preferredHttp <= 0 && this.http > 0) {
+            this.preferredHttp = this.http;
+        }
+        this.http = port;
+    }
+
+    public int getPreferredHttp() {
+        return preferredHttp > 0 ? preferredHttp : http;
+    }
+
+    // Serializer-only persistence hook. Use setHttp/setHttpResolved elsewhere.
+    public void setPreferredHttp(int port) { this.preferredHttp = Math.max(0, port); }
 
     public int getHttps() { return https; }
     public void setHttps(int port) { this.https = port; }
@@ -73,7 +110,26 @@ public class PortConfig implements Serializable, Cloneable {
     public void setAjp(int port) { this.ajp = port; }
 
     public int getShutdown() { return shutdown; }
-    public void setShutdown(int port) { this.shutdown = port; }
+
+    public void setShutdown(int port) {
+        if (port == this.shutdown) return;
+        this.shutdown = port;
+        this.preferredShutdown = 0;
+    }
+
+    public void setShutdownResolved(int port) {
+        if (port == this.shutdown) return;
+        if (this.preferredShutdown <= 0 && this.shutdown > 0) {
+            this.preferredShutdown = this.shutdown;
+        }
+        this.shutdown = port;
+    }
+
+    public int getPreferredShutdown() {
+        return preferredShutdown > 0 ? preferredShutdown : shutdown;
+    }
+
+    public void setPreferredShutdown(int port) { this.preferredShutdown = Math.max(0, port); }
 
     public boolean isHttpsEnabled() { return httpsEnabled; }
     public void setHttpsEnabled(boolean enabled) { this.httpsEnabled = enabled; }

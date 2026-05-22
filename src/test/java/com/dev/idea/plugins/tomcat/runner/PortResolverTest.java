@@ -131,6 +131,12 @@ class PortResolverTest {
         when(configuration.getProject()).thenReturn(mock(Project.class));
         when(configuration.getHttpPort()).thenReturn(httpPort);
         when(configuration.getShutdownPort()).thenReturn(shutdownPort);
+        // 1.1.0 added preferred-port accessors. Tests model a config that
+        // hasn't been auto-bumped yet, so preferred == current. The
+        // production accessors fall through to the current value when no
+        // preferred snapshot exists, matching the pre-1.1.0 behavior.
+        when(configuration.getPreferredHttpPort()).thenReturn(httpPort);
+        when(configuration.getPreferredShutdownPort()).thenReturn(shutdownPort);
         when(configuration.getJmxPort()).thenReturn(jmxPort);
         when(configuration.getHttpsPort()).thenReturn(httpsPort);
         when(configuration.getAjpPort()).thenReturn(ajpPort);

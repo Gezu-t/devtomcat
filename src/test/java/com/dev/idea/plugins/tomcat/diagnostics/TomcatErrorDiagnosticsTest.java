@@ -279,10 +279,70 @@ class TomcatErrorDiagnosticsTest {
     @DisplayName("startup failed due to previous errors is explained as secondary symptom")
     void failedDueToPreviousErrors() {
         List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
-                "10-Mar-2026 08:16:54.579 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal Context [/wipo-connect-local-backend] startup failed due to previous errors");
+                "10-Mar-2026 08:16:54.579 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal Context [/some-app] startup failed due to previous errors");
         assertFalse(results.isEmpty());
         TomcatErrorDiagnostics.Diagnostic d = results.get(0);
         assertEquals("Secondary Startup Failure", d.getCategory());
         assertTrue(d.getSuggestion().contains("first Caused by:"));
+    }
+
+    // --- 1.1.0 additions (Section 6.9 of the proposal) ---
+
+    @Test
+    @DisplayName("ECJ 'Unresolved compilation problems' Error is diagnosed with the compiler-switch fix")
+    void ecjUnresolvedCompilation() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "Caused by: java.lang.Error: Unresolved compilation problems:");
+        assertFalse(results.isEmpty());
+        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
+        assertEquals(TomcatErrorDiagnostics.Severity.CRITICAL, d.getSeverity());
+        assertEquals("ECJ Compilation Stub", d.getCategory());
+        assertTrue(d.getSuggestion().contains("Javac"),
+                "fix-suggestion must point at the Javac compiler switch");
+    }
+
+    @Test
+    @DisplayName("ECJ pattern tolerates the singular and plural form")
+    void ecjBothPluralForms() {
+        // ECJ has historically emitted both "problem" and "problems" depending on count.
+        assertFalse(TomcatErrorDiagnostics.analyze(
+                "java.lang.Error: Unresolved compilation problem").isEmpty());
+        assertFalse(TomcatErrorDiagnostics.analyze(
+                "java.lang.Error: Unresolved compilation problems:").isEmpty());
+    }
+
+    @Test
+    @DisplayName("Backend unreachable on localhost is diagnosed with port-mismatch hint")
+    void backendUnreachable() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "Connection refused: localhost:8081");
+        assertFalse(results.isEmpty());
+        // Both BACKEND_UNREACHABLE and CONNECT_REFUSED can match — accept either-or-both.
+        boolean hasBackend = results.stream().anyMatch(d -> "Backend Unreachable".equals(d.getCategory()));
+        assertTrue(hasBackend, "must surface Backend Unreachable diagnostic");
+    }
+
+    @Test
+    @DisplayName("JDK 9+ module-access error is diagnosed with --add-opens hint")
+    void moduleAccessError() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "java.lang.reflect.InaccessibleObjectException: Unable to make field private final java.util.ArrayList$Itr.cursor accessible");
+        assertFalse(results.isEmpty());
+        assertEquals("Module Access Denied", results.get(0).getCategory());
+        assertTrue(results.get(0).getSuggestion().contains("--add-opens"));
+    }
+
+    @Test
+    @DisplayName("JSch SFTP connection failure is diagnosed")
+    void sftpConnectionFailure() {
+        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                "com.jcraft.jsch.JSchException: Connection refused: sftp.example.com");
+        // The CONNECT_REFUSED pattern also matches "Connection refused" lines —
+        // both diagnostics can appear in the result list. We just assert
+        // the SFTP-specific one is present, in any position.
+        boolean hasSftp = results.stream()
+                .anyMatch(d -> "SFTP Connection Failed".equals(d.getCategory()));
+        assertTrue(hasSftp,
+                "JSchException + Connection refused must surface the SFTP-specific diagnostic");
     }
 }

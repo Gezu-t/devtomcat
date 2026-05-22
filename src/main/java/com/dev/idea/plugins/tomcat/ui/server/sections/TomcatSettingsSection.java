@@ -42,6 +42,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
     private JBCheckBox deployAppsCheckBox;
     private JBCheckBox preserveSessionsCheckBox;
     private JBCheckBox allowMultipleInstancesCheckBox;
+    private com.intellij.openapi.ui.ComboBox<com.dev.idea.plugins.tomcat.model.PortStrategy> portStrategyCombo;
     private JPanel panel;
 
     private Consumer<String> portChangeListener;
@@ -71,7 +72,23 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
             int row = 0;
 
-            // Row 0: HTTP port + Deploy checkbox
+            // Row 0: Port strategy (1.1.0). See LOCAL_NOTES.md.
+            portStrategyCombo = new com.intellij.openapi.ui.ComboBox<>(
+                    com.dev.idea.plugins.tomcat.model.PortStrategy.values());
+            portStrategyCombo.setRenderer(com.intellij.ui.SimpleListCellRenderer.create(
+                    "", s -> s == null ? "" : switch (s) {
+                        case AUTO_BUMP          -> "Auto-bump (find next free port if busy)";
+                        case RECLAIM_THEN_FAIL  -> "Reclaim then fail (kill own orphans, else fail)";
+                        case STRICT             -> "Strict (fail if preferred port busy)";
+                    }));
+            portStrategyCombo.setToolTipText("<html>How DevTomcat handles a busy preferred port at launch.<br>"
+                    + "<b>Auto-bump</b>: pick the next available port (existing behavior).<br>"
+                    + "<b>Reclaim then fail</b>: kill our own orphan Tomcats, fail if port is held by something else.<br>"
+                    + "<b>Strict</b>: refuse to launch if the preferred port is busy.</html>");
+            addPortRow(formPanel, gbc, row, new JBLabel("Port strategy:"), portStrategyCombo);
+
+            // Row 1: HTTP port + Deploy checkbox
+            row++;
             httpPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpPort()), 8);
             httpPortDocListener = new DocumentListener() {
                 @Override public void insertUpdate(DocumentEvent e) { onPortChange(); }
@@ -96,7 +113,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
             deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
             addCheckBoxColumn(formPanel, gbc, deployAppsCheckBox);
 
-            // Row 1: HTTPS port + Preserve sessions checkbox
+            // Row 2: HTTPS port + Preserve sessions checkbox
             row++;
             httpsPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()), 8);
             addPortRow(formPanel, gbc, row, new JBLabel("HTTPs port:"), httpsPortField);
@@ -109,7 +126,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
             preserveSessionsCheckBox.setSelected(false);
             addCheckBoxColumn(formPanel, gbc, preserveSessionsCheckBox);
 
-            // Row 2: JMX port + Allow parallel run checkbox
+            // Row 3: JMX port + Allow parallel run checkbox
             row++;
             jmxPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getJmxPort()), 8);
             addPortRow(formPanel, gbc, row, new JBLabel("JMX port:"), jmxPortField);
@@ -117,17 +134,17 @@ public class TomcatSettingsSection implements ConfigurationSection {
             allowMultipleInstancesCheckBox.setToolTipText("Allow multiple instances of this configuration to run simultaneously");
             addCheckBoxColumn(formPanel, gbc, allowMultipleInstancesCheckBox);
 
-            // Row 3: AJP port
+            // Row 4: AJP port
             row++;
             ajpPortField = new JBTextField("", 8);
             addPortRow(formPanel, gbc, row, new JBLabel("AJP port:"), ajpPortField);
 
-            // Row 4: Shutdown port
+            // Row 5: Shutdown port
             row++;
             shutdownPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getShutdownPort()), 8);
             addPortRow(formPanel, gbc, row, new JBLabel("Shutdown port:"), shutdownPortField);
 
-            // Row 5: CATALINA_BASE (spans both field columns for the browse button)
+            // Row 6: CATALINA_BASE (spans both field columns for the browse button)
             // Note: Debug port/transport are configured in the Startup/Connection tab (Debug mode),
             // matching IntelliJ Ultimate's layout. Values persist to DebugConfig.
             row++;
@@ -188,6 +205,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
         deployAppsCheckBox.setSelected(DynamicTomcatEnvironment.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(false);
         allowMultipleInstancesCheckBox.setSelected(false);
+        portStrategyCombo.setSelectedItem(com.dev.idea.plugins.tomcat.model.PortStrategy.AUTO_BUMP);
     }
 
     @Override
@@ -222,6 +240,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
         deployAppsCheckBox.setSelected(configuration.isHotDeploymentEnabled());
         preserveSessionsCheckBox.setSelected(configuration.isPreserveSessions());
         allowMultipleInstancesCheckBox.setSelected(configuration.isAllowMultipleInstances());
+        portStrategyCombo.setSelectedItem(configuration.getConfigData().getPortConfig().getStrategy());
 
         LOG.debug("Reset Tomcat settings: HTTP=" + httpPortField.getText() +
                 ", Shutdown=" + shutdownPortField.getText() +
@@ -270,6 +289,10 @@ public class TomcatSettingsSection implements ConfigurationSection {
         configuration.setHotDeploymentEnabled(deployAppsCheckBox.isSelected());
         configuration.setPreserveSessions(preserveSessionsCheckBox.isSelected());
         configuration.setAllowMultipleInstances(allowMultipleInstancesCheckBox.isSelected());
+        Object selectedStrategy = portStrategyCombo.getSelectedItem();
+        if (selectedStrategy instanceof com.dev.idea.plugins.tomcat.model.PortStrategy s) {
+            configuration.getConfigData().getPortConfig().setStrategy(s);
+        }
 
         LOG.debug("Applied Tomcat settings - HTTP: " + portConfig.httpPort +
                 ", Shutdown: " + portConfig.shutdownPort +
@@ -365,6 +388,14 @@ public class TomcatSettingsSection implements ConfigurationSection {
             String configCatalinaBase = config.getConfigData().getCatalinaBase();
             String currentCatalinaBase = catalinaBaseField.getText().trim();
             if (!Objects.equals(configCatalinaBase != null ? configCatalinaBase : "", currentCatalinaBase)) {
+                return true;
+            }
+
+            com.dev.idea.plugins.tomcat.model.PortStrategy configStrategy =
+                    config.getConfigData().getPortConfig().getStrategy();
+            Object selected = portStrategyCombo.getSelectedItem();
+            if (selected instanceof com.dev.idea.plugins.tomcat.model.PortStrategy current
+                    && current != configStrategy) {
                 return true;
             }
 

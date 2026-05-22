@@ -157,11 +157,31 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * use "Redeploy" for WAR-based deployments.
      */
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
+        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Syncing resources...",
                 "Build aborted; resource sync cancelled",
                 "Build failed",
-                warnings -> logger.logServerInfo("Resources synced" + warningSuffix(warnings)));
+                warnings -> {
+                    logger.logServerInfo("Resources synced" + warningSuffix(warnings));
+                    // Mirror module output (which includes resource roots — Maven
+                    // puts src/main/resources/* into target/classes/, Gradle puts
+                    // them into build/resources/main/) into each exploded
+                    // deployment's WEB-INF/classes/. Without this hook the Make
+                    // task above produces fresh resource files in target/classes/
+                    // but Tomcat keeps serving the previous mvn-package'd copy
+                    // from target/<war>/WEB-INF/classes/ — exactly the
+                    // ".properties files sometimes stale" symptom.
+                    DeployedClassesSync.syncIfNeeded(project,
+                            configuration.getDeployedArtifacts(), logger);
+                    // Mirror webapp source files (JSP, JS, CSS, HTML, images,
+                    // taglibs) into the exploded artifact root. IntelliJ's Make
+                    // task doesn't copy src/main/webapp/ — only Maven's
+                    // prepare-package does, which Make never triggers — so
+                    // without this step JSP edits silently never reach Tomcat.
+                    WebResourcesSync.syncIfNeeded(project,
+                            configuration.getDeployedArtifacts(), logger);
+                });
     }
 
     /**
@@ -175,12 +195,24 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * <p>For WAR artifacts the WAR file is re-copied to webapps after compilation.
      */
     private void doUpdateClassesAndResources(@NotNull TomcatDeploymentLogger logger) {
+        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling project...",
                 "Compilation aborted",
                 "Compilation failed",
                 warnings -> {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings));
+                    // Mirror fresh class output into each exploded deployment's
+                    // WEB-INF/classes/ BEFORE touching context.xml — the deployer's
+                    // reload trigger should see the new bytes already in place.
+                    // See DeployedClassesSync javadoc for the Maven target/ rationale.
+                    DeployedClassesSync.syncIfNeeded(project,
+                            configuration.getDeployedArtifacts(), logger);
+                    // See doUpdateResourcesOnly above for why this is needed
+                    // alongside the class sync — JSP/JS/CSS edits otherwise
+                    // would not reach the exploded artifact.
+                    WebResourcesSync.syncIfNeeded(project,
+                            configuration.getDeployedArtifacts(), logger);
                     redeployWarArtifacts(logger);
                     touchExplodedContextXml(logger);
                 });
@@ -191,12 +223,20 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * rewrites context.xml for exploded dirs, re-copies WAR files.
      */
     private void doRedeploy(@NotNull TomcatDeploymentLogger logger) {
+        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling and redeploying...",
                 "Compilation aborted",
                 "Compilation failed",
                 warnings -> {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", redeploying artifacts...");
+                    // Mirror fresh classes into each exploded deployment so the
+                    // forced redeploy (context.xml rewrite below) lands a fresh
+                    // classloader on top of fresh bytes, not the previous build's.
+                    DeployedClassesSync.syncIfNeeded(project,
+                            configuration.getDeployedArtifacts(), logger);
+                    WebResourcesSync.syncIfNeeded(project,
+                            configuration.getDeployedArtifacts(), logger);
                     redeployAllArtifacts(logger);
                 });
     }
@@ -206,6 +246,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * the restarted Tomcat picks up the latest class files.
      */
     private void doRestart(@NotNull TomcatDeploymentLogger logger) {
+        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
         String originalExecutorId = processHandler.getExecutorId();
 
         CompilerSupport.compileAndThen(project, logger,
@@ -214,6 +255,17 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 "Compilation failed; restart cancelled",
                 warnings -> {
             logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", restarting Tomcat...");
+
+            // Mirror fresh classes into each exploded deployment BEFORE we stop
+            // the current process. The relaunch's Before Launch tasks re-run Make
+            // but never repackage a Maven target/<warname>/ exploded layout, so
+            // without this step the restarted Tomcat would serve the same stale
+            // bytes as before the restart — exactly the "I have to mvn clean
+            // install every time" pain. See DeployedClassesSync javadoc.
+            DeployedClassesSync.syncIfNeeded(project,
+                    configuration.getDeployedArtifacts(), logger);
+            WebResourcesSync.syncIfNeeded(project,
+                    configuration.getDeployedArtifacts(), logger);
 
             // Capture before destroy — see ProcessStopSupport javadoc for race rationale
             Executor resolvedExecutor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
@@ -417,16 +469,55 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     private static void notifyRestartFailed(@NotNull Project project,
                                             @NotNull String configName,
                                             @Nullable String errorMessage) {
-        String content = "Tomcat '" + configName + "' stopped but could not restart" +
-                (errorMessage != null ? ": " + errorMessage : ".") +
-                " Start the configuration manually to resume.";
-        TomcatNotifier.error(project, "Restart Failed", content);
+        // Short balloon — old text repeated the config name verbatim and ended
+        // with a wordy "start the configuration manually to resume" sentence.
+        // The user already knows which config they were on (it's in the run
+        // toolbar), so the balloon just needs to flag the stop-without-restart
+        // state. Console has the full stack.
+        String content = errorMessage != null
+                ? "Stopped without restart: " + errorMessage
+                : "Stopped without restart. Start manually.";
+        TomcatNotifier.error(project, "Restart failed", content);
     }
 
     /** Returns {@code " (N warning(s))"} when warnings &gt; 0, empty string otherwise. */
     @NotNull
     private static String warningSuffix(int warnings) {
         return warnings > 0 ? " (" + warnings + " warning(s))" : "";
+    }
+
+    /**
+     * Logs a single aggregated warning when one or more deployment artifacts in
+     * the config are WAR-packaged (not exploded). Hot class/web sync skips WAR
+     * artifacts because their content lives inside a ZIP that the plugin cannot
+     * safely mutate — so without this warning, users editing JSP/Java would see
+     * "skipped: type is war" lines scroll past per-artifact and wonder why
+     * their change didn't take effect.
+     *
+     * <p>One line per launch / per update action, fires only when at least
+     * one WAR artifact is present, names every offender, and offers the two
+     * concrete ways forward (build-tool repackage, or switch the artifact to
+     * exploded in the Deployment tab). Public + static so the launch path
+     * ({@code TomcatJavaParametersBuilder}) can call it too.
+     */
+    public static void warnAboutWarArtifactsIfPresent(@NotNull List<DeploymentArtifact> artifacts,
+                                                      @NotNull TomcatDeploymentLogger logger) {
+        java.util.List<String> warNames = new java.util.ArrayList<>();
+        for (DeploymentArtifact a : artifacts) {
+            if (a != null && DeploymentArtifact.TYPE_WAR.equals(a.getType())) {
+                warNames.add(a.getDisplayName());
+            }
+        }
+        if (warNames.isEmpty()) return;
+        String plural = warNames.size() == 1 ? "artifact is" : "artifacts are";
+        logger.logServerWarning(
+                warNames.size() + " WAR " + plural + " in this run config: "
+                        + String.join(", ", warNames)
+                        + ". Hot class/resource sync (Ctrl+F10) only applies to exploded deployments,"
+                        + " so changes to these won't take effect until you rebuild the WAR with"
+                        + " 'mvn package' / 'gradle war' — or change the artifact type to 'exploded'"
+                        + " in the Deployment tab (the exploded directory lives at"
+                        + " target/<finalName>/ for Maven, build/libs/exploded/ for Gradle).");
     }
 
     /**

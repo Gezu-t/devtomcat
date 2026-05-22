@@ -67,13 +67,11 @@ public final class LogRolloverNotifier implements Disposable {
     private void onMidnight() {
         if (disposed) return;
         if (!project.isDisposed()) {
+            // Short balloon — full explanation lived here for one user-
+            // education moment, but a one-line cue is enough.
             TomcatNotifier.warning(project,
-                    "Tomcat log files rotated for the new day",
-                    "Tomcat rotates its dated log files (e.g. catalina.YYYY-MM-DD.log) at "
-                            + "midnight. Existing Log tabs continue tailing the previous day's file "
-                            + "and will appear idle. To see today's logs, close and reopen the "
-                            + "affected tabs in the run configuration's Logs section, or restart "
-                            + "the Tomcat run.");
+                    "Log files rotated",
+                    "Reopen Log tabs to tail today's file.");
         }
         scheduleNext();
     }

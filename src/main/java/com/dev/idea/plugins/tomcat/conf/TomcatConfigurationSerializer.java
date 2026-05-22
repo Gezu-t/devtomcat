@@ -37,6 +37,10 @@ public class TomcatConfigurationSerializer {
 
     private static final String ATTR_HTTP_PORT = "httpPort";
     private static final String ATTR_SHUTDOWN_PORT = "shutdownPort";
+    // Preferred-port attrs — only written when they differ from current. 1.1.0.
+    private static final String ATTR_PREFERRED_HTTP_PORT = "preferredHttpPort";
+    private static final String ATTR_PREFERRED_SHUTDOWN_PORT = "preferredShutdownPort";
+    private static final String ATTR_PORT_STRATEGY = "portStrategy";
     private static final String ATTR_HTTPS_PORT = "httpsPort";
     private static final String ATTR_HTTPS_ENABLED = "httpsEnabled";
     private static final String ATTR_JMX_PORT = "jmxPort";
@@ -125,6 +129,17 @@ public class TomcatConfigurationSerializer {
         PortConfig pc = data.getPortConfig();
         writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
         writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
+        // Only emit preferred ports when they differ — keeps pre-1.1.0 configs byte-identical.
+        if (pc.getPreferredHttp() != pc.getHttp() && pc.getPreferredHttp() > 0) {
+            writeInt(element, ATTR_PREFERRED_HTTP_PORT, pc.getPreferredHttp());
+        }
+        if (pc.getPreferredShutdown() != pc.getShutdown() && pc.getPreferredShutdown() > 0) {
+            writeInt(element, ATTR_PREFERRED_SHUTDOWN_PORT, pc.getPreferredShutdown());
+        }
+        // Only emit strategy when non-default — pre-1.1.0 configs stay byte-identical.
+        if (pc.getStrategy() != com.dev.idea.plugins.tomcat.model.PortStrategy.AUTO_BUMP) {
+            element.setAttribute(ATTR_PORT_STRATEGY, pc.getStrategy().name());
+        }
         writeInt(element, ATTR_HTTPS_PORT, pc.getHttps());
         element.setAttribute(ATTR_HTTPS_ENABLED, String.valueOf(pc.isHttpsEnabled()));
         writeInt(element, ATTR_JMX_PORT, pc.getJmx());
@@ -294,6 +309,14 @@ public class TomcatConfigurationSerializer {
         PortConfig pc = data.getPortConfig();
         readInt(element, ATTR_HTTP_PORT, pc::setHttp);
         readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);
+        // Preferred ports read via persistence-only setters (bypass UI-intent reset).
+        readInt(element, ATTR_PREFERRED_HTTP_PORT, pc::setPreferredHttp);
+        readInt(element, ATTR_PREFERRED_SHUTDOWN_PORT, pc::setPreferredShutdown);
+        // Strategy — absence defaults to AUTO_BUMP (pre-1.1.0 behavior preserved).
+        String strategy = element.getAttributeValue(ATTR_PORT_STRATEGY);
+        if (strategy != null && !strategy.isBlank()) {
+            pc.setStrategy(com.dev.idea.plugins.tomcat.model.PortStrategy.fromSerialized(strategy));
+        }
         readInt(element, ATTR_HTTPS_PORT, pc::setHttps);
         readBool(element, ATTR_HTTPS_ENABLED, pc::setHttpsEnabled);
         readInt(element, ATTR_JMX_PORT, pc::setJmx);

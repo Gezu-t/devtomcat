@@ -230,9 +230,10 @@ public final class TomcatRunnerDelegate {
     private static void notifyRelaunchFailed(@NotNull Project project,
                                              @NotNull String configName,
                                              @Nullable String reason) {
-        String content = "Tomcat '" + configName + "' stopped but could not relaunch" +
-                (reason != null ? ": " + reason : ".") +
-                " Start the configuration manually to resume.";
-        TomcatNotifier.error(project, "Relaunch Failed", content);
+        // Short balloon — config name is already visible in the run toolbar.
+        String content = reason != null
+                ? "Stopped without relaunch: " + reason
+                : "Stopped without relaunch. Start manually.";
+        TomcatNotifier.error(project, "Relaunch failed", content);
     }
 }

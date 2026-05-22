@@ -5,7 +5,6 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
-import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunManagerListener;
@@ -13,7 +12,6 @@ import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.runners.ExecutionEnvironment;
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -87,6 +85,7 @@ final class LaunchPortClaimer {
     Resolution claim() {
         String configName = configuration.getName();
         TomcatPortRegistry registry = TomcatPortRegistry.getInstance();
+        PortConfig originalPorts = configuration.getConfigData().getPortConfig();
 
         // Carryover path: a prior process (stopped by stopAndRelaunch) handed
         // its resolved ports down via ExecutionEnvironment user data. Re-use
@@ -95,8 +94,13 @@ final class LaunchPortClaimer {
         // port and bump it up needlessly.
         PortConfig carried = environment.getUserData(TomcatCommandLineState.CARRIED_PORTS_KEY);
         if (carried != null) {
+            logActiveStrategy(originalPorts);
             List<String> changes = new ArrayList<>();
             claimAndTrack(carried, registry, configName, changes);
+            logResolutionChanges(changes);
+            // Strategy gate AFTER claimAndTrack so a registry-mediated bump
+            // (another DevTomcat config holding the carried port) is caught.
+            enforcePortStrategy(originalPorts, carried);
             writeBackResolvedPorts(configuration, carried);
 
             int debugPort = -1;
@@ -116,11 +120,9 @@ final class LaunchPortClaimer {
                 }
                 writeBackResolvedDebugPort(configuration, debugPort);
             }
-            logResolutionChanges(changes);
             return new Resolution(carried, debugPort);
         }
 
-        PortConfig originalPorts = configuration.getConfigData().getPortConfig();
         boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(environment.getExecutor().getId());
 
         if (isDebug) {
@@ -133,6 +135,7 @@ final class LaunchPortClaimer {
     private Resolution claimForDebug(@NotNull TomcatPortRegistry registry,
                                      @NotNull String configName,
                                      @NotNull PortConfig originalPorts) {
+        logActiveStrategy(originalPorts);
         DebugConfig debugConfig = configuration.getConfigData().getDebugConfig();
         int seedDebugPort = debugConfig != null ? debugConfig.getPort() : DebugConfig.DEFAULT_DEBUG_PORT;
 
@@ -153,9 +156,13 @@ final class LaunchPortClaimer {
                     + " claimed by a concurrent instance, resolved to " + resolvedDebugPort);
         }
 
+        logResolutionChanges(resolution.getChanges());
+        // Strategy gate AFTER claimAndTrack and after the JDWP claim so a
+        // registry-mediated bump on HTTP/shutdown is caught. Debug-port bumps
+        // are accepted under STRICT (the user's "preferred" intent is HTTP/shutdown).
+        enforcePortStrategy(originalPorts, rp);
         writeBackResolvedPorts(configuration, rp);
         writeBackResolvedDebugPort(configuration, resolvedDebugPort);
-        logResolutionChanges(resolution.getChanges());
         return new Resolution(rp, resolvedDebugPort);
     }
 
@@ -163,14 +170,70 @@ final class LaunchPortClaimer {
     private Resolution claimForRun(@NotNull TomcatPortRegistry registry,
                                    @NotNull String configName,
                                    @NotNull PortConfig originalPorts) {
+        logActiveStrategy(originalPorts);
         PortConflictDetector.PortResolution resolution =
                 PortConflictDetector.resolveConflicts(originalPorts);
 
         PortConfig rp = resolution.getResolvedConfig();
         claimAndTrack(rp, registry, configName, resolution.getChanges());
-        writeBackResolvedPorts(configuration, rp);
         logResolutionChanges(resolution.getChanges());
+        // Strategy gate AFTER claimAndTrack so a registry-mediated bump
+        // (another DevTomcat config holding the port in-process) is caught.
+        enforcePortStrategy(originalPorts, rp);
+        writeBackResolvedPorts(configuration, rp);
         return new Resolution(rp, -1);
+    }
+
+    private void logActiveStrategy(@NotNull PortConfig seed) {
+        com.dev.idea.plugins.tomcat.model.PortStrategy s = seed.getStrategy();
+        deploymentLogger.logServerInfo("Port strategy: " + s
+                + " (preferred HTTP " + seed.getPreferredHttp()
+                + ", current " + seed.getHttp() + ")");
+    }
+
+    // Strategy enforcement — see LOCAL_NOTES.md (1.1.0 PortStrategy).
+    private void enforcePortStrategy(@NotNull PortConfig seed, @NotNull PortConfig resolved) {
+        String refusal = evaluatePortStrategy(seed, resolved);
+        if (refusal == null) {
+            com.dev.idea.plugins.tomcat.model.PortStrategy s = seed.getStrategy();
+            if (s != com.dev.idea.plugins.tomcat.model.PortStrategy.AUTO_BUMP) {
+                deploymentLogger.logServerInfo("Port strategy " + s + ": preferred ports free, allowing launch.");
+            }
+            return;
+        }
+        // Surface to the run console AND throw — the console line is more
+        // visible than the wrapped ExecutionException dialog alone.
+        // Use the plugin-error channel so idea.log doesn't mislabel this as
+        // "Tomcat error:" — the strategy refusal is a pre-launch decision we
+        // made, not anything Tomcat reported.
+        deploymentLogger.logPluginError(refusal);
+        // Short balloon for STRICT refusal — the run console has the full message.
+        com.dev.idea.plugins.tomcat.utils.TomcatNotifier.error(
+                configuration.getProject(),
+                "Port busy (" + seed.getStrategy() + ")",
+                "See run console for details.");
+        throw new IllegalStateException(refusal);
+    }
+
+    /**
+     * Pure strategy logic — package-private for testability.
+     * Returns {@code null} when launch should proceed, or the refusal message
+     * when a non-AUTO_BUMP strategy detects an HTTP/shutdown bump between
+     * {@code seed} (user's intent) and {@code resolved} (post-detector
+     * post-registry final values).
+     */
+    @org.jetbrains.annotations.Nullable
+    static String evaluatePortStrategy(@NotNull PortConfig seed, @NotNull PortConfig resolved) {
+        com.dev.idea.plugins.tomcat.model.PortStrategy s = seed.getStrategy();
+        if (s == com.dev.idea.plugins.tomcat.model.PortStrategy.AUTO_BUMP) return null;
+        boolean httpBumped = seed.getHttp() != resolved.getHttp();
+        boolean shutdownBumped = seed.getShutdown() != resolved.getShutdown();
+        if (!httpBumped && !shutdownBumped) return null;
+        StringBuilder msg = new StringBuilder("Port conflict refused by ").append(s).append(" strategy: ");
+        if (httpBumped)     msg.append("HTTP ").append(seed.getHttp()).append(" is busy; ");
+        if (shutdownBumped) msg.append("shutdown ").append(seed.getShutdown()).append(" is busy; ");
+        msg.append("change ports in the Server tab, free the occupier, or switch to Auto-bump.");
+        return msg.toString();
     }
 
     /**
@@ -222,14 +285,15 @@ final class LaunchPortClaimer {
 
     private void logResolutionChanges(@NotNull List<String> changes) {
         if (changes.isEmpty()) return;
+        // Console-only — a balloon used to fire here on every launch where a
+        // port had to be bumped (very common during active development with
+        // multiple Tomcats running). The deployment-logger lines stay so the
+        // user can still see the resolution in the run console, but the
+        // popup repetition is gone.
         deploymentLogger.logServerWarning("Port conflicts detected and auto-resolved:");
         for (String change : changes) {
             deploymentLogger.logServerWarning("  " + change);
         }
-        TomcatNotifier.notify(configuration.getProject(),
-                "DevTomcat: Port Auto-Resolved",
-                String.join("\n", changes),
-                NotificationType.WARNING);
     }
 
     // --- Static writeback API (preserved across the extraction) -----------
@@ -266,13 +330,14 @@ final class LaunchPortClaimer {
         int previousHttps = target.getHttps();
         boolean changed = false;
         if (previousHttp != resolved.getHttp()) {
-            target.setHttp(resolved.getHttp());
+            // setHttpResolved snapshots intent before overwriting (see LOCAL_NOTES.md).
+            target.setHttpResolved(resolved.getHttp());
             rewriteStoredBrowserUrlForPortChange(configuration, "http",
                     previousHttp, resolved.getHttp());
             changed = true;
         }
         if (target.getShutdown() != resolved.getShutdown()) {
-            target.setShutdown(resolved.getShutdown());
+            target.setShutdownResolved(resolved.getShutdown());
             changed = true;
         }
         if (target.isHttpsEnabled() && previousHttps != resolved.getHttps()) {

@@ -105,8 +105,41 @@ public final class TomcatPreflightValidator {
         checkDuplicateDeployments(configuration.getConfigData().getDeploymentConfig(), issues);
         checkDuplicateJars(configuration.getConfigData().getDeploymentConfig(), issues);
         checkLockedPaths(configuration, parsedProperties, issues);
+        checkCompilerType(configuration, issues);
 
         return new PreflightResult(issues);
+    }
+
+    // Warn if IntelliJ's Java Compiler is Eclipse (ECJ) — see LOCAL_NOTES.md.
+    // Reflective so we tolerate platform API drift; any reflection failure = skip.
+    private static void checkCompilerType(@NotNull TomcatRunConfiguration configuration,
+                                          @NotNull List<PreflightIssue> issues) {
+        try {
+            Class<?> ccClass = Class.forName(
+                    "com.intellij.compiler.CompilerConfiguration");
+            Object cc = ccClass.getMethod("getInstance",
+                    com.intellij.openapi.project.Project.class)
+                    .invoke(null, configuration.getProject());
+            Object backend = ccClass.getMethod("getDefaultCompiler").invoke(cc);
+            if (backend == null) return;
+            String backendId = String.valueOf(
+                    backend.getClass().getMethod("getId").invoke(backend));
+            if (backendId == null) return;
+            if (backendId.equalsIgnoreCase("Eclipse")
+                    || backendId.equalsIgnoreCase("ECJ")) {
+                issues.add(new PreflightIssue(
+                        PreflightIssue.Severity.WARNING,
+                        "Java Compiler is set to Eclipse (ECJ). ECJ emits .class stubs "
+                                + "with embedded \"Unresolved compilation problems\" Errors when imports "
+                                + "are unresolved, which Tomcat then throws at class init. "
+                                + "Settings > Build, Execution, Deployment > Compiler > Java Compiler: "
+                                + "switch to Javac to make compile failures abort the build instead of "
+                                + "producing poisoned classes. Non-blocking — DevTomcat's class-sync "
+                                + "refuses to mirror detected stubs, but switching upstream is the proper fix."));
+            }
+        } catch (Throwable t) {
+            LOG.debug("Compiler-type preflight check skipped: " + t.getMessage());
+        }
     }
 
     // =========================================================================

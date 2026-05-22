@@ -206,6 +206,14 @@
     </extensions>
 
     <actions>
+        <!-- Project-scan action that creates run configs from detected WAR modules. -->
+        <action id="DevTomcat.Setup.FromProject"
+                class="com.dev.idea.plugins.tomcat.action.SetupDevTomcatProfileAction"
+                text="Set Up DevTomcat from Project..."
+                description="Detect WAR modules and create Tomcat run configurations">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
         <!-- Services tool window context menu: lifecycle actions.
              The artifact-row "Open in Browser" + "Copy URL" entries are
              provided directly by TomcatRunConfigContributor's per-artifact

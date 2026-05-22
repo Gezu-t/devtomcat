@@ -1,12 +1,9 @@
 package com.dev.idea.plugins.tomcat.conf;
 
-import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStalenessDetector;
 import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStructureValidator;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
-import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.BeforeRunTaskProvider;
-import com.intellij.execution.RunManagerEx;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.icons.AllIcons;
@@ -130,10 +127,11 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
             }
         }
         if (!allValid) {
+            // Short balloon — the run-console writes the full path list; the
+            // balloon just needs to say "blocked, build first".
             TomcatNotifier.error(tomcatConfig.getProject(),
-                    "DevTomcat: Artifacts Not Ready",
-                    "Cannot start Tomcat. The following artifacts are missing:\n" + missing +
-                            "\n\nBuild the project first (Build → Build Artifacts).");
+                    "Artifacts not ready",
+                    "Build the project, then launch again.");
             return false;
         }
 
@@ -143,89 +141,38 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         //   • exploded artifact with empty classes/   (Make step broken)
         //   • WAR artifact path that is a directory   (type / path mismatch)
         // Tomcat would fail on any of these but with a confusing log message
-        // 10 seconds into startup. Catching it here gives the user a clear,
-        // actionable balloon and skips the futile launch.
+        // 10 seconds into startup. Blocking errors keep their balloon (one
+        // short line + console for the file list). Soft warnings ("partially
+        // populated dir") used to balloon too but were the worst offenders
+        // for repeat-noise on every launch — those now stay in the console.
         ArtifactStructureValidator.Result structure = ArtifactStructureValidator.validate(artifacts);
         if (structure.hasBlockingErrors()) {
             TomcatNotifier.error(tomcatConfig.getProject(),
-                    "DevTomcat: Artifact structure invalid",
-                    String.join("\n\n", structure.blockingErrors()));
+                    "Artifact structure invalid",
+                    "See run console for details.");
+            // Full per-artifact details in the console so the user has the
+            // signal without the balloon body bloat.
+            for (String err : structure.blockingErrors()) {
+                LOG.warn("DevTomcat artifact structure: " + err);
+            }
             return false;
         }
         if (structure.hasWarnings()) {
-            TomcatNotifier.warning(tomcatConfig.getProject(),
-                    "DevTomcat: Artifact may be incomplete",
-                    String.join("\n\n", structure.warnings()));
-            // Soft warning — launch continues
-        }
-
-        // Staleness check — only runs when the launch is NOT covered by the
-        // platform's own BuildArtifactsBeforeRunTask. That task rebuilds
-        // matching IntelliJ Artifacts itself, so on the Ultimate path the
-        // deployed file is guaranteed fresh by the time we get here. For
-        // external paths (Maven target/, Gradle build/, hand-rolled WARs)
-        // nothing rebuilds them — the "Make" task only updates
-        // out/production/classes/, and Tomcat happily serves the stale file.
-        // Surface a balloon naming the offending source so the user can fix
-        // the build setup (add `mvn package` to Before Launch, point the
-        // artifact at the right output, etc.). Non-blocking: returns true so
-        // the launch proceeds.
-        if (!hasPlatformArtifactBuildTask(tomcatConfig)) {
-            List<ArtifactStalenessDetector.StaleReport> stale =
-                    ArtifactStalenessDetector.findStaleArtifacts(
-                            tomcatConfig.getProject(), artifacts);
-            if (!stale.isEmpty()) {
-                warnStaleArtifacts(tomcatConfig, stale);
+            // Console-only — non-blocking and repeats every launch otherwise.
+            for (String warn : structure.warnings()) {
+                LOG.info("DevTomcat artifact may be incomplete: " + warn);
             }
         }
+
+        // Staleness check removed in 1.1.0 — DeployedClassesSync now mirrors
+        // fresh module output into WEB-INF/classes/ on every launch (initial
+        // Run, Stop+Run, cross-executor switch, Restart relaunch). The "your
+        // artifact is stale, rebuild it" balloon used to fire on every launch
+        // in a development workflow where Maven hadn't repackaged recently —
+        // pure noise once the sync makes the deployed artifact fresh by the
+        // time Tomcat reads it. Keeping the validation gates above (missing
+        // path, broken structure) because those are still real blockers.
         return true;
-    }
-
-    /**
-     * Returns {@code true} when the platform's own
-     * {@code BuildArtifactsBeforeRunTask} is enabled on the configuration.
-     * In that case the platform rebuilds the matching IntelliJ Artifact and
-     * the deployed file is fresh — skip the staleness check to avoid
-     * surfacing a false positive on Ultimate / configured-artifact setups.
-     */
-    private static boolean hasPlatformArtifactBuildTask(@NotNull TomcatRunConfiguration config) {
-        try {
-            for (BeforeRunTask<?> task : RunManagerEx.getInstanceEx(config.getProject())
-                    .getBeforeRunTasks(config)) {
-                if (task == null || !task.isEnabled()) continue;
-                if (task instanceof com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask) {
-                    return true;
-                }
-            }
-            return false;
-        } catch (Throwable t) {
-            // If we cannot read BeforeRun tasks for any reason, fall back to
-            // running the staleness check — a false positive (extra warning)
-            // is preferable to a false negative (silent stale code).
-            return false;
-        }
-    }
-
-    private static void warnStaleArtifacts(@NotNull TomcatRunConfiguration config,
-                                           @NotNull List<ArtifactStalenessDetector.StaleReport> stale) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Source files have been edited since the deployed artifact was last built. ")
-                .append("The change may not be visible after launch.\n\n");
-        int shown = Math.min(stale.size(), 3);
-        for (int i = 0; i < shown; i++) {
-            ArtifactStalenessDetector.StaleReport r = stale.get(i);
-            sb.append("• '").append(r.artifactDisplayName()).append("' — ")
-                    .append(r.exampleSourceFile()).append(" is newer than ")
-                    .append(r.artifactPath()).append('\n');
-        }
-        if (stale.size() > shown) {
-            sb.append("• … and ").append(stale.size() - shown).append(" more\n");
-        }
-        sb.append("\nRebuild the artifact, or add a build step to Before Launch ")
-                .append("(e.g., 'Run Maven Goal: package' for Maven projects).");
-        TomcatNotifier.warning(config.getProject(),
-                "DevTomcat: Deployed artifact may be stale",
-                sb.toString());
     }
 
     @Override

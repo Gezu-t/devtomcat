@@ -366,6 +366,23 @@ package com.dev.idea.plugins.tomcat.logging;
              }
 
              /**
+              * Log an error that originates from the plugin itself (not Tomcat output) —
+              * e.g. a STRICT port-strategy refusal, or any pre-launch check that aborts
+              * the launch before Tomcat is started. The run console line uses the same
+              * {@code [ERROR]} prefix so it reads as a failure, but the idea.log line is
+              * labelled {@code DevTomcat:} instead of {@code Tomcat error:} so post-mortem
+              * readers don't grep Tomcat documentation for a message we wrote.
+              *
+              * @param message the message (cannot be null)
+              * @throws NullPointerException if message is null
+              */
+             public void logPluginError(@NotNull String message) {
+                 Objects.requireNonNull(message, "Message cannot be null");
+                 logPrefixed(message, ERROR_PREFIX, ConsoleViewContentType.ERROR_OUTPUT);
+                 LOG.warn("DevTomcat: " + message);
+             }
+
+             /**
               * Log error message with exception details.
               *
               * <p>In debug mode, includes full stack trace. Otherwise, only exception class and message.
