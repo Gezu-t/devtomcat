@@ -75,12 +75,14 @@ public class TomcatSettingsSection implements ConfigurationSection {
             // Row 0: Port strategy (1.1.0). See LOCAL_NOTES.md.
             portStrategyCombo = new com.intellij.openapi.ui.ComboBox<>(
                     com.dev.idea.plugins.tomcat.model.PortStrategy.values());
-            portStrategyCombo.setRenderer(com.intellij.ui.SimpleListCellRenderer.create(
-                    "", s -> s == null ? "" : switch (s) {
-                        case AUTO_BUMP          -> "Auto-bump (find next free port if busy)";
-                        case RECLAIM_THEN_FAIL  -> "Reclaim then fail (kill own orphans, else fail)";
-                        case STRICT             -> "Strict (fail if preferred port busy)";
-                    }));
+            portStrategyCombo.setRenderer(com.intellij.ui.SimpleListCellRenderer.create((label, s, index) -> {
+                if (s == null) { label.setText(""); return; }
+                label.setText(switch (s) {
+                    case AUTO_BUMP          -> "Auto-bump (find next free port if busy)";
+                    case RECLAIM_THEN_FAIL  -> "Reclaim then fail (kill own orphans, else fail)";
+                    case STRICT             -> "Strict (fail if preferred port busy)";
+                });
+            }));
             portStrategyCombo.setToolTipText("<html>How DevTomcat handles a busy preferred port at launch.<br>"
                     + "<b>Auto-bump</b>: pick the next available port (existing behavior).<br>"
                     + "<b>Reclaim then fail</b>: kill our own orphan Tomcats, fail if port is held by something else.<br>"

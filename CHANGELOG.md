@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.4]
+
+### Changed
+- Migrated 2 `SimpleListCellRenderer.create(String, Function)` call sites to the non-deprecated 3-arg Customizer form.
+
 ## [1.1.3]
 
 ### Changed
