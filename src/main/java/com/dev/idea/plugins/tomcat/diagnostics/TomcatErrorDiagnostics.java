@@ -116,6 +116,8 @@ public final class TomcatErrorDiagnostics {
      */
     @NotNull
     public static List<Diagnostic> analyze(@NotNull String text) {
+        // Fast-reject: bail before any regex if no failure keyword is in the line.
+        if (!mightContainDiagnostic(text)) return java.util.Collections.emptyList();
         List<Diagnostic> results = new ArrayList<>();
 
         // ClassNotFoundException / NoClassDefFoundError
@@ -407,5 +409,26 @@ public final class TomcatErrorDiagnostics {
         return "[" + diagnostic.getSeverity() + "] " + diagnostic.getCategory()
                 + ": " + diagnostic.getMessage()
                 + " — " + diagnostic.getSuggestion();
+    }
+
+    // Substrings that must be present for ANY pattern in this class to match.
+    // Lets analyze() skip the regex sweep for 90%+ of normal log lines.
+    private static final String[] DIAGNOSTIC_KEYWORDS = {
+            "Exception", "Error", "SEVERE", "FATAL", "WARNING",
+            "failed", "Failed", "denied", "refused",
+            "Cannot", "Could not", "no suitable",
+            "InaccessibleObject", "module ", "TLDs",
+            "fragment", "locked", "Unresolved",
+            "JSch", "memory leak", "ThreadLocal",
+            "Address already in use", "already in use",
+            "already exists", "appears to have started",
+            "External configuration file"
+    };
+
+    private static boolean mightContainDiagnostic(@NotNull String text) {
+        for (String kw : DIAGNOSTIC_KEYWORDS) {
+            if (text.contains(kw)) return true;
+        }
+        return false;
     }
 }

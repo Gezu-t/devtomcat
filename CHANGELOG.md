@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.3]
+
+### Changed
+- Diagnostic analyzer skips the ~20-regex sweep for log lines without any failure keyword.
+
 ## [1.1.2]
 
 ### Fixed
