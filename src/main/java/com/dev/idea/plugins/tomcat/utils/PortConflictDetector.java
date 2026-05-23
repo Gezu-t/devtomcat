@@ -99,9 +99,7 @@ public final class PortConflictDetector {
      */
     public static boolean isPortAvailable(int port) {
         if (port < 1 || port > 65535) return false;
-        // Check wildcard address (0.0.0.0)
         if (!tryBind(port, null)) return false;
-        // Check localhost (may resolve to ::1 on macOS/IPv6)
         if (!tryBind(port, "localhost")) return false;
         return true;
     }

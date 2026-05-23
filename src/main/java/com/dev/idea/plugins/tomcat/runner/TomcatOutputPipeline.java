@@ -512,18 +512,12 @@ public final class TomcatOutputPipeline {
      * {@link #BUFFER_CAPACITY} headers to avoid pathological growth on log
      * sprays.
      *
-     * <p><b>Thread safety.</b> {@link com.intellij.execution.process.OSProcessHandler}
-     * runs stdout and stderr on separate reader threads, and the pipeline does
-     * not serialize {@link Analyzer#analyze} dispatch. The other analyzers in
-     * this pipeline keep their mutable state on the shared {@link Context}
-     * with thread-safe primitives ({@code AtomicBoolean}, {@code AtomicInteger},
-     * {@code ConcurrentHashMap.newKeySet()}); this analyzer is the outlier
-     * because its rolling exception-header buffer is genuinely per-launch
-     * state with no shared-Context home. To stay correct under concurrent
-     * stdout / stderr arrival, {@link #analyze} is {@code synchronized}.
-     * The work inside the critical section is bounded ({@value #BUFFER_CAPACITY}
-     * deque entries, one regex match per line) so the lock contention cost
-     * is negligible.
+     * <p><b>Thread safety.</b> stdout / stderr arrive on separate reader threads.
+     * The hot path (line matches neither pattern) takes zero locks. The deque
+     * is guarded only when adding a header or picking the root cause, and the
+     * one-shot fire flag is an {@link AtomicBoolean} CAS — the external logger
+     * callback runs outside the lock so a slow logger cannot stall the next
+     * line of output.
      */
     static final class ContextFailureRootCauseAnalyzer implements Analyzer {
         // Match exception header lines. Accepts both top-level
@@ -549,16 +543,18 @@ public final class TomcatOutputPipeline {
         private static final int BUFFER_CAPACITY = 8;
 
         // Per-launch state — each pipeline owns its own analyzer instance.
+        // Lock is the deque itself; balloonFired is a one-shot CAS so the
+        // common case (line matches neither pattern) takes zero locks.
         private final java.util.Deque<ExceptionHeader> recent = new java.util.ArrayDeque<>();
-        private boolean balloonFired = false;
+        private final AtomicBoolean balloonFired = new AtomicBoolean(false);
 
         private record ExceptionHeader(@NotNull String exceptionClass,
                                        @NotNull String message,
                                        boolean isCausedBy) {}
 
         @Override
-        public synchronized void analyze(@NotNull String text, @NotNull Context ctx) {
-            if (balloonFired) return;
+        public void analyze(@NotNull String text, @NotNull Context ctx) {
+            if (balloonFired.get()) return;
 
             // Check the failure trigger FIRST. Tomcat's LifecycleException
             // wrapper line also matches the exception-header pattern (because
@@ -567,11 +563,16 @@ public final class TomcatOutputPipeline {
             // nothing despite Tomcat reporting an obvious failure. Order
             // matters: trigger first, then buffer fallback.
             if (CONTEXT_FAILURE.matcher(text).find()) {
-                ExceptionHeader rootCause = pickRootCause();
+                if (!balloonFired.compareAndSet(false, true)) return;
+                ExceptionHeader rootCause;
+                synchronized (recent) {
+                    rootCause = pickRootCause();
+                }
                 if (rootCause != null) {
+                    // Callback dispatched outside the lock so a slow logger
+                    // cannot stall the next line of stdout.
                     ctx.logger.onStartupRootCause(rootCause.exceptionClass(), rootCause.message());
                 }
-                balloonFired = true;
                 return;
             }
 
@@ -583,9 +584,11 @@ public final class TomcatOutputPipeline {
                 String exClass = h.group(1);
                 String msg = h.group(2) != null ? h.group(2).trim() : "";
                 boolean isCausedBy = trimmed.startsWith("Caused by:");
-                recent.addLast(new ExceptionHeader(exClass, msg, isCausedBy));
-                while (recent.size() > BUFFER_CAPACITY) {
-                    recent.removeFirst();
+                synchronized (recent) {
+                    recent.addLast(new ExceptionHeader(exClass, msg, isCausedBy));
+                    while (recent.size() > BUFFER_CAPACITY) {
+                        recent.removeFirst();
+                    }
                 }
             }
         }

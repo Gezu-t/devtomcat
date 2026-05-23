@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.7]
+
+### Changed
+- ContextFailureRootCauseAnalyzer: narrowed sync scope to deque mutations + atomic one-shot flag; logger callback runs outside the lock.
+
 ## [1.1.6]
 
 ### Fixed
