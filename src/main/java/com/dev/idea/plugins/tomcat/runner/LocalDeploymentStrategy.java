@@ -1198,15 +1198,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      */
     @Nullable
     private static String getMavenArtifactId(@NotNull Module module, @NotNull Project project) {
+        Object mavenProject = com.dev.idea.plugins.tomcat.utils.MavenReflection
+                .findMavenProject(module, project);
+        if (mavenProject == null) return null;
         try {
-            Class<?> managerClass =
-                    Class.forName("org.jetbrains.idea.maven.project.MavenProjectsManager");
-            Object manager = managerClass.getMethod("getInstance", Project.class)
-                    .invoke(null, project);
-            if (manager == null) return null;
-            Object mavenProject = managerClass.getMethod("findProject", Module.class)
-                    .invoke(manager, module);
-            if (mavenProject == null) return null;
             Object mavenId = mavenProject.getClass().getMethod("getMavenId").invoke(mavenProject);
             if (mavenId == null) return null;
             return (String) mavenId.getClass().getMethod("getArtifactId").invoke(mavenId);

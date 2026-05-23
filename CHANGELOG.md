@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.1.8]
+
+### Changed
+- Shared MavenReflection cache: `MavenProjectsManager` class + `getInstance` / `findProject` resolved once at class init instead of per call (used by WebResourcesSync and LocalDeploymentStrategy).
+- TomcatPreflightValidator caches CompilerConfiguration reflection at class init.
+- Two unconditional `LOG.debug` string concatenations in TomcatOutputPipeline now guarded with `isDebugEnabled`.
+
 ## [1.1.7]
 
 ### Changed

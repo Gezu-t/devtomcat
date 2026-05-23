@@ -261,13 +261,10 @@ public final class WebResourcesSync {
     @NotNull
     private static List<Path> findMavenExtraWebResources(@NotNull Module module,
                                                          @NotNull Project project) {
+        Object mavenProject = com.dev.idea.plugins.tomcat.utils.MavenReflection
+                .findMavenProject(module, project);
+        if (mavenProject == null) return java.util.Collections.emptyList();
         try {
-            Class<?> managerClass = Class.forName("org.jetbrains.idea.maven.project.MavenProjectsManager");
-            Object manager = managerClass.getMethod("getInstance", Project.class).invoke(null, project);
-            if (manager == null) return java.util.Collections.emptyList();
-            Object mavenProject = managerClass.getMethod("findProject", Module.class).invoke(manager, module);
-            if (mavenProject == null) return java.util.Collections.emptyList();
-
             // MavenProject.findPlugin(groupId, artifactId) → MavenPlugin
             Object warPlugin = mavenProject.getClass()
                     .getMethod("findPlugin", String.class, String.class)

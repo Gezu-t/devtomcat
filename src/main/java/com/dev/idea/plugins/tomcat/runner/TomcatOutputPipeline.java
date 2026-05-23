@@ -255,7 +255,9 @@ public final class TomcatOutputPipeline {
                     ctx.onStartupDetected.accept(duration);
                     ctx.onPostStartup.run();
                 } catch (NumberFormatException e) {
-                    LOG.debug("Could not parse startup time from: " + m.group(1));
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Could not parse startup time from: " + m.group(1));
+                    }
                 }
             }
         }
@@ -290,7 +292,9 @@ public final class TomcatOutputPipeline {
                         ctx.onContextReady.accept(contextName);
                     }
                 } catch (NumberFormatException e) {
-                    LOG.debug("Could not parse deployment duration from: " + m.group(2));
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Could not parse deployment duration from: " + m.group(2));
+                    }
                 }
             }
         }

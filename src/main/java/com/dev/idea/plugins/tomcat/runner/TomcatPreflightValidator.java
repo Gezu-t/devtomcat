@@ -41,6 +41,25 @@ public final class TomcatPreflightValidator {
 
     private static final Logger LOG = Logger.getInstance(TomcatPreflightValidator.class);
 
+    // Reflection cache for CompilerConfiguration — resolved once at class init,
+    // null when the IntelliJ Java/Compiler module is unavailable (rare; would
+    // mean the platform itself is unusual). Skips the per-launch class
+    // hierarchy walk.
+    private static final java.lang.reflect.Method COMPILER_GET_INSTANCE;
+    private static final java.lang.reflect.Method COMPILER_GET_DEFAULT;
+    static {
+        java.lang.reflect.Method gi = null, gd = null;
+        try {
+            Class<?> ccClass = Class.forName("com.intellij.compiler.CompilerConfiguration");
+            gi = ccClass.getMethod("getInstance", com.intellij.openapi.project.Project.class);
+            gd = ccClass.getMethod("getDefaultCompiler");
+        } catch (Throwable ignored) {
+            // Compiler API unavailable — checkCompilerType degrades to skip.
+        }
+        COMPILER_GET_INSTANCE = gi;
+        COMPILER_GET_DEFAULT = gd;
+    }
+
     /**
      * System properties that reference filesystem paths and must exist for Tomcat to start.
      * Checked only when explicitly set by the user in VM options.
@@ -111,16 +130,13 @@ public final class TomcatPreflightValidator {
     }
 
     // Warn if IntelliJ's Java Compiler is Eclipse (ECJ) — see LOCAL_NOTES.md.
-    // Reflective so we tolerate platform API drift; any reflection failure = skip.
+    // Reflection cached at class init; any failure here just skips the check.
     private static void checkCompilerType(@NotNull TomcatRunConfiguration configuration,
                                           @NotNull List<PreflightIssue> issues) {
+        if (COMPILER_GET_INSTANCE == null || COMPILER_GET_DEFAULT == null) return;
         try {
-            Class<?> ccClass = Class.forName(
-                    "com.intellij.compiler.CompilerConfiguration");
-            Object cc = ccClass.getMethod("getInstance",
-                    com.intellij.openapi.project.Project.class)
-                    .invoke(null, configuration.getProject());
-            Object backend = ccClass.getMethod("getDefaultCompiler").invoke(cc);
+            Object cc = COMPILER_GET_INSTANCE.invoke(null, configuration.getProject());
+            Object backend = COMPILER_GET_DEFAULT.invoke(cc);
             if (backend == null) return;
             String backendId = String.valueOf(
                     backend.getClass().getMethod("getId").invoke(backend));
