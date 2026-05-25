@@ -39,8 +39,7 @@ public final class DeploymentAdapter {
     }
 
     /** Map a typed deployment back to legacy form for serialization. */
-    public static @NotNull DeploymentArtifact toLegacy(@NotNull Project project,
-                                                       @NotNull Deployment typed) {
+    public static @NotNull DeploymentArtifact toLegacy(@NotNull Deployment typed) {
         DeploymentArtifact out = new DeploymentArtifact();
         out.setContextPath(typed.getContextPath());
         out.setType(typed.isExploded()
@@ -49,7 +48,7 @@ public final class DeploymentAdapter {
 
         if (typed instanceof ArtifactBackedDeployment a) {
             out.setName(a.getArtifactName());
-            Path resolved = a.getResolvedPath(project);
+            Path resolved = a.getResolvedPath();
             out.setPath(resolved == null ? "" : resolved.toString());
             out.setSource(DeploymentArtifact.Source.INTELLIJ_ARTIFACT);
         } else if (typed instanceof ModuleBackedDeployment m) {

@@ -1,6 +1,5 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -34,14 +33,14 @@ public final class ExternalFileDeployment implements Deployment {
     }
 
     @Override
-    public @Nullable Path getResolvedPath(@NotNull Project project) {
+    public @Nullable Path getResolvedPath() {
         return externalPath;
     }
 
     @Override public boolean isExploded() { return exploded; }
 
     @Override
-    public boolean isValid(@NotNull Project project) {
+    public boolean isValid() {
         return Files.exists(externalPath);
     }
 

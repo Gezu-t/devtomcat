@@ -81,7 +81,7 @@ class DeploymentAdapterTest {
 
             ArtifactBackedDeployment typed = new ArtifactBackedDeployment(ptr, "/ctx");
 
-            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(project, typed);
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(typed);
             assertEquals("app", legacy.getName());
             assertEquals("/out/app", legacy.getPath());
             assertEquals(DeploymentArtifact.TYPE_EXPLODED, legacy.getType());
@@ -98,7 +98,7 @@ class DeploymentAdapterTest {
 
             ArtifactBackedDeployment typed = new ArtifactBackedDeployment(ptr, "/c");
 
-            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(project, typed);
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(typed);
             assertEquals("ghost", legacy.getName());
             assertEquals("", legacy.getPath());
             assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, legacy.getSource());
@@ -113,7 +113,7 @@ class DeploymentAdapterTest {
             ModuleBackedDeployment typed = new ModuleBackedDeployment(
                     ptr, Path.of("/target/web-mod"), "/ctx", true);
 
-            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(project, typed);
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(typed);
             assertEquals("web-mod", legacy.getName());
             assertEquals("/target/web-mod", legacy.getPath());
             assertEquals(DeploymentArtifact.TYPE_EXPLODED, legacy.getType());
@@ -127,7 +127,7 @@ class DeploymentAdapterTest {
             ExternalFileDeployment typed = new ExternalFileDeployment(
                     Path.of("/x/y.war"), "/ctx", false);
 
-            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(project, typed);
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(typed);
             assertEquals("y.war", legacy.getName());
             assertEquals("/x/y.war", legacy.getPath());
             assertEquals(DeploymentArtifact.TYPE_WAR, legacy.getType());

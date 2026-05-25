@@ -38,7 +38,7 @@ public final class ArtifactBackedDeployment implements Deployment {
     @Override public @NotNull String getDisplayName() { return artifactPointer.getArtifactName(); }
 
     @Override
-    public @Nullable Path getResolvedPath(@NotNull Project project) {
+    public @Nullable Path getResolvedPath() {
         Artifact artifact = artifactPointer.getArtifact();
         if (artifact == null) return null;
         String filePath = artifact.getOutputFilePath();
@@ -49,13 +49,13 @@ public final class ArtifactBackedDeployment implements Deployment {
     public boolean isExploded() {
         Artifact artifact = artifactPointer.getArtifact();
         if (artifact == null) return false;
-        // Exploded artifact types in IntelliJ all carry "exploded" in
-        // their type id (e.g. "exploded-war", "exploded-jar").
+        // Exploded artifact types in IntelliJ all carry "exploded" in their type id
+        // (e.g. "exploded-war", "exploded-jar").
         return artifact.getArtifactType().getId().contains("exploded");
     }
 
     @Override
-    public boolean isValid(@NotNull Project project) {
+    public boolean isValid() {
         return artifactPointer.getArtifact() != null;
     }
 

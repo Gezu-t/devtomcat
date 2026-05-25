@@ -1,19 +1,14 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
 
 /**
- * One deployment line in a Tomcat run configuration. Three concrete
- * shapes — sealed so dispatch is exhaustive.
+ * One deployment line in a Tomcat run configuration. Three concrete shapes — sealed so dispatch is exhaustive.
  *
- * <p>Built from {@code ArtifactPointer} / {@code ModulePointer}
- * primitives so the artifact↔module link is platform-maintained instead
- * of resolved by string matching. Replaces the legacy stringly-typed
- * {@link DeploymentArtifact}; see LOCAL_NOTES.md for the migration plan.
+ * <p>Built from {@code ArtifactPointer} / {@code ModulePointer} primitives — the artifact↔module link is platform-maintained instead of resolved by string matching.
  */
 public sealed interface Deployment
         permits ArtifactBackedDeployment, ModuleBackedDeployment, ExternalFileDeployment {
@@ -24,9 +19,9 @@ public sealed interface Deployment
 
     @NotNull String getDisplayName();
 
-    @Nullable Path getResolvedPath(@NotNull Project project);
+    @Nullable Path getResolvedPath();
 
     boolean isExploded();
 
-    boolean isValid(@NotNull Project project);
+    boolean isValid();
 }

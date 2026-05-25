@@ -58,7 +58,7 @@ class DeploymentTest {
         void resolvedPath() {
             Path p = Path.of("/x/y/z");
             ExternalFileDeployment d = new ExternalFileDeployment(p, "/foo", true);
-            assertEquals(p, d.getResolvedPath(project));
+            assertEquals(p, d.getResolvedPath());
         }
 
         @Test
@@ -67,8 +67,8 @@ class DeploymentTest {
             Path present = Files.createFile(dir.resolve("real.war"));
             Path absent = dir.resolve("ghost.war");
 
-            assertTrue(new ExternalFileDeployment(present, "/a", false).isValid(project));
-            assertFalse(new ExternalFileDeployment(absent, "/a", false).isValid(project));
+            assertTrue(new ExternalFileDeployment(present, "/a", false).isValid());
+            assertFalse(new ExternalFileDeployment(absent, "/a", false).isValid());
         }
 
         @Test
@@ -136,7 +136,7 @@ class DeploymentTest {
             when(ptr.getArtifact()).thenReturn(artifact);
 
             ArtifactBackedDeployment d = new ArtifactBackedDeployment(ptr, "/c");
-            assertEquals(Path.of("/tmp/out/app"), d.getResolvedPath(project));
+            assertEquals(Path.of("/tmp/out/app"), d.getResolvedPath());
         }
 
         @Test
@@ -147,8 +147,8 @@ class DeploymentTest {
             when(ptr.getArtifact()).thenReturn(null);
 
             ArtifactBackedDeployment d = new ArtifactBackedDeployment(ptr, "/c");
-            assertNull(d.getResolvedPath(project));
-            assertFalse(d.isValid(project));
+            assertNull(d.getResolvedPath());
+            assertFalse(d.isValid());
         }
 
         @Test
@@ -231,7 +231,7 @@ class DeploymentTest {
 
             Path out = Path.of("/some/output");
             ModuleBackedDeployment d = new ModuleBackedDeployment(ptr, out, "/c", true);
-            assertEquals(out, d.getResolvedPath(project));
+            assertEquals(out, d.getResolvedPath());
             assertEquals(out, d.getOutputPath());
         }
 
@@ -250,11 +250,11 @@ class DeploymentTest {
             when(ptrStale.getModuleName()).thenReturn("m");
             when(ptrStale.getModule()).thenReturn(null);
 
-            assertTrue(new ModuleBackedDeployment(ptrLive, present, "/c", true).isValid(project),
+            assertTrue(new ModuleBackedDeployment(ptrLive, present, "/c", true).isValid(),
                     "module present + path exists → valid");
-            assertFalse(new ModuleBackedDeployment(ptrLive, absent, "/c", true).isValid(project),
+            assertFalse(new ModuleBackedDeployment(ptrLive, absent, "/c", true).isValid(),
                     "module present but path missing → invalid");
-            assertFalse(new ModuleBackedDeployment(ptrStale, present, "/c", true).isValid(project),
+            assertFalse(new ModuleBackedDeployment(ptrStale, present, "/c", true).isValid(),
                     "path exists but module deleted → invalid");
         }
 

@@ -48,14 +48,14 @@ public final class ModuleBackedDeployment implements Deployment {
     @Override public @NotNull String getDisplayName() { return modulePointer.getModuleName(); }
 
     @Override
-    public @Nullable Path getResolvedPath(@NotNull Project project) {
+    public @Nullable Path getResolvedPath() {
         return outputPath;
     }
 
     @Override public boolean isExploded() { return exploded; }
 
     @Override
-    public boolean isValid(@NotNull Project project) {
+    public boolean isValid() {
         // Both module and output dir must be present — they go stale independently
         // (module deletion vs. mvn clean).
         return modulePointer.getModule() != null && Files.exists(outputPath);
