@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.model;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -159,6 +160,21 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return artifacts.stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    /**
+     * Typed view of {@link #getDeployedArtifacts()} — each legacy
+     * {@link DeploymentArtifact} is converted to its typed counterpart
+     * via {@link DeploymentAdapter}. Use this from new code; the legacy
+     * list accessor will be removed in Phase 5.
+     */
+    @NotNull
+    public List<Deployment> getDeployments(@NotNull Project project) {
+        List<Deployment> out = new ArrayList<>(artifacts.size());
+        for (DeploymentArtifact a : artifacts) {
+            if (a != null) out.add(DeploymentAdapter.toTyped(project, a));
+        }
+        return out;
     }
 
     @Nullable
