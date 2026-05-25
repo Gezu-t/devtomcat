@@ -16,7 +16,6 @@ import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.elements.CompositePackagingElement;
 import com.intellij.packaging.elements.PackagingElement;
 import com.intellij.packaging.elements.PackagingElementResolvingContext;
-import com.intellij.packaging.impl.elements.ModulePackagingElement;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,6 +27,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -404,17 +404,21 @@ public final class DeployedClassesSync {
 
     /**
      * Depth-first walk over a packaging-element subtree. Returns the first
-     * {@link Module} found via {@link ModulePackagingElement#findModule}.
-     * Package-private and {@code element}-typed so tests can drive it
-     * with mocked trees without needing a real {@link ArtifactManager}.
+     * module reached via the platform's {@code ModulePackagingElement}.
+     * Reflection-based on purpose: {@code ModulePackagingElement} lives in
+     * {@code com.intellij.packaging.impl.elements} — an {@code impl}
+     * package that the plugin verifier may flag and that JetBrains does
+     * not guarantee binary compatibility for. Same trick {@code
+     * MavenReflection} uses for the Maven plugin's APIs.
+     *
+     * <p>Package-private and {@code PackagingElement}-typed so tests can
+     * drive it with mocked trees.
      */
     @Nullable
     static Module walkPackagingTreeForModule(@NotNull PackagingElement<?> element,
                                              @NotNull PackagingElementResolvingContext ctx) {
-        if (element instanceof ModulePackagingElement mpe) {
-            Module m = mpe.findModule(ctx);
-            if (m != null) return m;
-        }
+        Module direct = tryFindModuleOnElement(element, ctx);
+        if (direct != null) return direct;
         if (element instanceof CompositePackagingElement<?> composite) {
             for (PackagingElement<?> child : composite.getChildren()) {
                 Module m = walkPackagingTreeForModule(child, ctx);
@@ -422,6 +426,63 @@ public final class DeployedClassesSync {
             }
         }
         return null;
+    }
+
+    /**
+     * Calls {@code ModulePackagingElement.findModule(ctx)} on {@code element}
+     * via reflection if {@code element} happens to implement that interface.
+     * Returns {@code null} if it doesn't, or if the reflective call fails.
+     */
+    @Nullable
+    private static Module tryFindModuleOnElement(@NotNull PackagingElement<?> element,
+                                                 @NotNull PackagingElementResolvingContext ctx) {
+        Class<?> iface = MODULE_PACKAGING_ELEMENT_CLASS;
+        Method method = MODULE_FIND_MODULE_METHOD;
+        if (iface == null || method == null || !iface.isInstance(element)) return null;
+        try {
+            Object result = method.invoke(element, ctx);
+            return result instanceof Module m ? m : null;
+        } catch (ReflectiveOperationException e) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("ModulePackagingElement.findModule failed reflectively", e);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * {@code com.intellij.packaging.impl.elements.ModulePackagingElement},
+     * loaded once at class init. {@code null} if the class moves or
+     * disappears in a future IntelliJ release — in which case the
+     * structural strategy quietly degrades and the fallback strategies
+     * (name match, content-root, single-web-fallback) take over.
+     */
+    @Nullable
+    private static final Class<?> MODULE_PACKAGING_ELEMENT_CLASS =
+            loadClass("com.intellij.packaging.impl.elements.ModulePackagingElement");
+
+    /**
+     * {@code findModule(PackagingElementResolvingContext)} on the cached
+     * interface above. Cached at class init for the same reason.
+     */
+    @Nullable
+    private static final Method MODULE_FIND_MODULE_METHOD =
+            findMethod(MODULE_PACKAGING_ELEMENT_CLASS, "findModule",
+                       PackagingElementResolvingContext.class);
+
+    @Nullable
+    private static Class<?> loadClass(@NotNull String fqn) {
+        try { return Class.forName(fqn); }
+        catch (ClassNotFoundException e) { return null; }
+    }
+
+    @Nullable
+    private static Method findMethod(@Nullable Class<?> cls,
+                                     @NotNull String name,
+                                     @NotNull Class<?>... params) {
+        if (cls == null) return null;
+        try { return cls.getMethod(name, params); }
+        catch (NoSuchMethodException e) { return null; }
     }
 
     /**
