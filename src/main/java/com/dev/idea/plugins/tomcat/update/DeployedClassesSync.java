@@ -10,6 +10,7 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -26,6 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Mirrors freshly-compiled module output into each exploded deployment's
@@ -281,6 +284,19 @@ public final class DeployedClassesSync {
                         "name-match: '" + baseName + "'",
                         collectProductionRoots(direct), null);
             }
+            // Maven's <finalName> defaults to ${artifactId}-${version}, so the
+            // exploded artifact often carries a trailing version suffix the
+            // module name doesn't (e.g. artifact 'foo-web-6.0.0' for module
+            // 'foo-web'). Retry after stripping a Maven-style version tail.
+            String stripped = stripMavenVersionSuffix(baseName);
+            if (stripped != null && !stripped.isEmpty()) {
+                Module versionStripped = moduleManager.findModuleByName(stripped);
+                if (versionStripped != null) {
+                    return new ResolutionReport(versionStripped.getName(),
+                            "name-match (version-stripped '" + baseName + "' → '" + stripped + "')",
+                            collectProductionRoots(versionStripped), null);
+                }
+            }
         }
 
         // Strategy 2: content-root containment, longest-match wins.
@@ -291,7 +307,7 @@ public final class DeployedClassesSync {
             for (Module m : moduleManager.getModules()) {
                 for (VirtualFile contentRoot : ModuleRootManager.getInstance(m).getContentRoots()) {
                     String crPath = contentRoot.getPath();
-                    if (deploymentPath.startsWith(crPath) && crPath.length() > bestMatchLength) {
+                    if (pathContains(crPath, deploymentPath) && crPath.length() > bestMatchLength) {
                         bestMatchLength = crPath.length();
                         bestMatch = m;
                     }
@@ -340,6 +356,59 @@ public final class DeployedClassesSync {
                             @NotNull String strategy,
                             @NotNull List<Path> sourceRoots,
                             @Nullable String diagnostic) {}
+
+    // ── Module-resolution helpers (package-private for unit tests) ──────────
+
+    /**
+     * Matches a Maven-style version tail at the end of an artifact name:
+     * a hyphen, a number, optional dot-separated numbers, and optionally a
+     * qualifier like {@code -SNAPSHOT}, {@code -RC1}, or {@code .Final}.
+     * Examples it matches: {@code -1}, {@code -1.0}, {@code -6.0.0},
+     * {@code -1.0-SNAPSHOT}, {@code -2.3.4-RC1}, {@code -3.0.RELEASE}.
+     */
+    private static final Pattern MAVEN_VERSION_SUFFIX =
+            Pattern.compile("-\\d+(?:\\.\\d+)*(?:[-.][A-Za-z0-9]+)*$");
+
+    /**
+     * If {@code name} ends with a Maven-style version tail, returns the
+     * name with that tail removed; otherwise returns {@code null}.
+     */
+    @Nullable
+    static String stripMavenVersionSuffix(@NotNull String name) {
+        Matcher m = MAVEN_VERSION_SUFFIX.matcher(name);
+        return m.find() ? name.substring(0, m.start()) : null;
+    }
+
+    /**
+     * Returns {@code true} when {@code deploymentPath} lives inside (or equals)
+     * {@code contentRoot}. Normalises path separators ({@code \} → {@code /})
+     * and respects the host filesystem's case sensitivity so a Windows path
+     * stored as {@code C:\Users\…} matches an IntelliJ content root reported
+     * as {@code C:/Users/…}.
+     */
+    static boolean pathContains(@NotNull String contentRoot, @NotNull String deploymentPath) {
+        return pathContains(contentRoot, deploymentPath, !SystemInfo.isFileSystemCaseSensitive);
+    }
+
+    /** Test seam: caller controls case sensitivity. */
+    static boolean pathContains(@NotNull String contentRoot,
+                                @NotNull String deploymentPath,
+                                boolean caseInsensitive) {
+        String cr = normalizePath(contentRoot, caseInsensitive);
+        String dp = normalizePath(deploymentPath, caseInsensitive);
+        if (cr.isEmpty() || dp.isEmpty()) return false;
+        if (!dp.startsWith(cr)) return false;
+        // Boundary check: forbid '/foo/bar' from matching content root '/foo/ba'.
+        return dp.length() == cr.length() || dp.charAt(cr.length()) == '/';
+    }
+
+    private static String normalizePath(String path, boolean caseInsensitive) {
+        String s = path.replace('\\', '/');
+        while (s.length() > 1 && s.endsWith("/")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return caseInsensitive ? s.toLowerCase(Locale.ROOT) : s;
+    }
 
     /**
      * Collects production class roots for the resolved web module
