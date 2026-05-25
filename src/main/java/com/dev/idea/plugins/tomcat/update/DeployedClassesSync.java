@@ -403,7 +403,25 @@ public final class DeployedClassesSync {
     }
 
     private static String normalizePath(String path, boolean caseInsensitive) {
+        // Unify separators ('\' → '/'), then collapse runs of '/' into one.
+        // Both come up in the wild: mixed-slash input strings (e.g. a path
+        // joined from a Windows root + a Unix-style relative tail), and
+        // double-slashes that creep in from naive string concatenation.
+        // Leading "//" on a UNC path ("\\server\share") is preserved as
+        // a single '/' here — fine, because both sides of the comparison
+        // get the same treatment and the boundary check still holds.
         String s = path.replace('\\', '/');
+        if (s.contains("//")) {
+            StringBuilder out = new StringBuilder(s.length());
+            char prev = 0;
+            for (int i = 0; i < s.length(); i++) {
+                char c = s.charAt(i);
+                if (c == '/' && prev == '/') continue;
+                out.append(c);
+                prev = c;
+            }
+            s = out.toString();
+        }
         while (s.length() > 1 && s.endsWith("/")) {
             s = s.substring(0, s.length() - 1);
         }

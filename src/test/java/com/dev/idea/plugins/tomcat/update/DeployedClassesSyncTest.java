@@ -413,5 +413,45 @@ class DeployedClassesSyncTest {
             assertFalse(DeployedClassesSync.pathContains("", "/anything", false));
             assertFalse(DeployedClassesSync.pathContains("/anything", "", false));
         }
+
+        @Test
+        @DisplayName("mixed separators inside a single string normalise consistently")
+        void mixedSeparatorsInOnePath() {
+            // A path joined from a Windows root + Unix-style relative tail
+            // (or vice versa) — happens with naive string concatenation in
+            // build scripts. Both sides should normalise to the same form.
+            assertTrue(DeployedClassesSync.pathContains(
+                    "C:/projects\\app", "C:\\projects/app/target/x", true));
+        }
+
+        @Test
+        @DisplayName("double slashes don't break containment")
+        void doubleSlashesCollapse() {
+            // Common with naive string concatenation: contentRoot + "/" + sub
+            // when contentRoot already ends with '/'.
+            assertTrue(DeployedClassesSync.pathContains(
+                    "/home/me/proj", "/home/me//proj/target", false));
+        }
+
+        @Test
+        @DisplayName("UNC-style path (\\\\server\\share) matches its own subpath")
+        void uncStylePath() {
+            // After normalisation both sides become single-slash strings;
+            // since both halves get the same treatment, containment still
+            // holds for the intended logical relationship.
+            assertTrue(DeployedClassesSync.pathContains(
+                    "\\\\server\\share\\proj",
+                    "\\\\server\\share\\proj\\target\\x",
+                    true));
+        }
+
+        @Test
+        @DisplayName("Unix-style absolute path with mixed depth")
+        void unixDeepNesting() {
+            assertTrue(DeployedClassesSync.pathContains(
+                    "/opt/workspace/repo/module-a",
+                    "/opt/workspace/repo/module-a/build/libs/exploded",
+                    false));
+        }
     }
 }
