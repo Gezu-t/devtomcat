@@ -6,7 +6,7 @@
 
 ### Fixed
 - Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
-- Update Classes/Resources: owning-module resolution now walks the IntelliJ Artifact's packaging tree (Ultimate's strategy) instead of guessing from name + path; EXTERNAL deployments skip silently.
+- Update Classes/Resources: owning-module resolution rebuilt around typed deployment kinds (Artifact / Module / External) using IntelliJ's `ArtifactPointer` and `ModulePointer`; string-matching fallbacks removed. Failures emit a single actionable line instead of a path + module-list dump.
 - Replaced the two remaining `SimpleListCellRenderer.create(...)` factory calls with the subclass form — the factory is scheduled-for-removal in 2026.2 EAP.
 
 ### Changed
