@@ -153,9 +153,13 @@ public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
             this.profile = profile;
             this.modulesModel = new ModulesTableModel(profile.webappModules());
             this.tomcatPicker = new ComboBox<>(profile.registeredTomcats().toArray(new TomcatInfo[0]));
-            this.tomcatPicker.setRenderer(SimpleListCellRenderer.create((label, v, index) -> {
-                label.setText(v == null ? "" : v.getName() + " (" + v.getVersion() + ")");
-            }));
+            this.tomcatPicker.setRenderer(new SimpleListCellRenderer<TomcatInfo>() {
+                @Override
+                public void customize(@NotNull JList<? extends TomcatInfo> list, TomcatInfo v, int index,
+                                      boolean selected, boolean hasFocus) {
+                    setText(v == null ? "" : v.getName() + " (" + v.getVersion() + ")");
+                }
+            });
             setTitle("Set Up DevTomcat from Project");
             init();
         }

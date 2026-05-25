@@ -7,6 +7,7 @@
 ### Fixed
 - Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
 - Update Classes/Resources: owning-module resolution now walks the IntelliJ Artifact's packaging tree (Ultimate's strategy) instead of guessing from name + path; EXTERNAL deployments skip silently.
+- Replaced the two remaining `SimpleListCellRenderer.create(...)` factory calls with the subclass form — the factory is scheduled-for-removal in 2026.2 EAP.
 
 ### Changed
 - `pluginSinceBuild` lowered to `242` — DevTomcat now installs on IntelliJ 2024.2+ (verified Compatible by the plugin verifier against IC-242.20224.300 and IC-251.29188.11).
