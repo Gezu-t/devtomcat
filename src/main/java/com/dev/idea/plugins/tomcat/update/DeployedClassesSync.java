@@ -286,8 +286,8 @@ public final class DeployedClassesSync {
             }
             // Maven's <finalName> defaults to ${artifactId}-${version}, so the
             // exploded artifact often carries a trailing version suffix the
-            // module name doesn't (e.g. artifact 'foo-web-6.0.0' for module
-            // 'foo-web'). Retry after stripping a Maven-style version tail.
+            // module name doesn't. Retry after stripping a Maven-style
+            // version tail.
             String stripped = stripMavenVersionSuffix(baseName);
             if (stripped != null && !stripped.isEmpty()) {
                 Module versionStripped = moduleManager.findModuleByName(stripped);
@@ -363,7 +363,7 @@ public final class DeployedClassesSync {
      * Matches a Maven-style version tail at the end of an artifact name:
      * a hyphen, a number, optional dot-separated numbers, and optionally a
      * qualifier like {@code -SNAPSHOT}, {@code -RC1}, or {@code .Final}.
-     * Examples it matches: {@code -1}, {@code -1.0}, {@code -6.0.0},
+     * Examples it matches: {@code -1}, {@code -1.0}, {@code -1.0.0},
      * {@code -1.0-SNAPSHOT}, {@code -2.3.4-RC1}, {@code -3.0.RELEASE}.
      */
     private static final Pattern MAVEN_VERSION_SUFFIX =

@@ -6,7 +6,7 @@
 
 ### Fixed
 - Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
-- Update Classes/Resources: owning-module resolver now strips Maven `-${version}` artifact suffixes and normalises Windows path separators + case, so `foo-web-6.0.0` correctly matches module `foo-web`.
+- Update Classes/Resources: owning-module resolver now strips Maven `-${version}` artifact suffixes and normalises Windows path separators + case, so versioned artifact names correctly match unversioned modules on any OS.
 
 ### Changed
 - `pluginSinceBuild` lowered to `242` — DevTomcat now installs on IntelliJ 2024.2+ (verified Compatible by the plugin verifier against IC-242.20224.300 and IC-251.29188.11).

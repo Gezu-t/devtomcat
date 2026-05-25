@@ -298,10 +298,10 @@ class DeployedClassesSyncTest {
     class StripMavenVersion {
 
         @Test
-        @DisplayName("strips '-6.0.0' three-segment version (the common Maven finalName tail)")
+        @DisplayName("strips three-segment version (the common Maven finalName tail)")
         void stripsThreeSegmentVersion() {
             assertEquals("web-module",
-                    DeployedClassesSync.stripMavenVersionSuffix("web-module-6.0.0"));
+                    DeployedClassesSync.stripMavenVersionSuffix("web-module-1.0.0"));
         }
 
         @Test
@@ -367,7 +367,7 @@ class DeployedClassesSyncTest {
             // bridge the two so a path that is literally inside the content
             // root is recognised as such.
             String contentRoot = "C:/projects/web-module";
-            String deployment = "C:\\projects\\web-module\\target\\web-module-6.0.0";
+            String deployment = "C:\\projects\\web-module\\target\\web-module-1.0.0";
             assertTrue(DeployedClassesSync.pathContains(contentRoot, deployment, true));
         }
 
