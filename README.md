@@ -27,6 +27,14 @@ Run, debug, and deploy web applications with smart diagnostics, live status trac
 - **Log file monitoring** — Standard Tomcat logs appear as console tabs; a balloon at midnight warns when Tomcat rotates dated log files so you don't keep tailing yesterday's file
 - **Remote deployment** — Deploy to a remote Tomcat instance via the Manager API
 
+## Compatibility
+
+| Requirement   | Minimum Version                            |
+|---------------|--------------------------------------------|
+| IntelliJ IDEA | 2024.2+ (Community or Ultimate)            |
+| Apache Tomcat | 7+ (legacy installs covered by auto-shims) |
+| Java (JDK)    | 17+                                        |
+
 ## Installation
 
 1. Open **Settings** > **Plugins** > **Marketplace**
