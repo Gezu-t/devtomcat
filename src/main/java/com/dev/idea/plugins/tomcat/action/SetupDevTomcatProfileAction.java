@@ -45,8 +45,8 @@ import java.util.Map;
 import java.util.Set;
 
 // Creates ONE Tomcat run config with all detected WAR modules as DeploymentArtifacts
-// — matches IntelliJ Ultimate's "multiple deployments per Tomcat" topology.
-// User picks port mode at setup time (auto-resolve vs fixed). See LOCAL_NOTES.md.
+// "multiple deployments per Tomcat" topology.
+// User picks port mode at setup time (auto-resolve vs fixed).
 public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
 
     private static final Logger LOG = Logger.getInstance(SetupDevTomcatProfileAction.class);

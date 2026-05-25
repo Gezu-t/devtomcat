@@ -129,7 +129,7 @@ public final class TomcatPreflightValidator {
         return new PreflightResult(issues);
     }
 
-    // Warn if IntelliJ's Java Compiler is Eclipse (ECJ) — see LOCAL_NOTES.md.
+    // Warn if IntelliJ's Java Compiler is Eclipse (ECJ)
     // Reflection cached at class init; any failure here just skips the check.
     private static void checkCompilerType(@NotNull TomcatRunConfiguration configuration,
                                           @NotNull List<PreflightIssue> issues) {

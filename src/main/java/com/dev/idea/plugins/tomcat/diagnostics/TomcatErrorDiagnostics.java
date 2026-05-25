@@ -92,7 +92,7 @@ public final class TomcatErrorDiagnostics {
     private static final Pattern FAILED_DUE_TO_PREVIOUS_ERRORS = Pattern.compile(
             "Context \\[([^\\]]+)] startup failed due to previous errors");
 
-    // 1.1.0 additions — rationale in LOCAL_NOTES.md. Patterns kept deliberately
+    // Patterns kept deliberately
     // library-agnostic: they describe Tomcat/JVM/network-level conditions, not
     // application-framework errors.
     private static final Pattern ECJ_UNRESOLVED_COMPILATION = Pattern.compile(

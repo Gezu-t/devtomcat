@@ -192,7 +192,7 @@ package com.dev.idea.plugins.tomcat.conf;
                     LOG.debug("Port validation warnings: " + result.getWarningMessage());
                 }
 
-                // Port-drift warning — see LOCAL_NOTES.md (1.1.0).
+                // Port-drift warning
                 int preferredHttp = ports.getPreferredHttp();
                 if (preferredHttp > 0 && preferredHttp != ports.getHttp()) {
                     throw new RuntimeConfigurationWarning(

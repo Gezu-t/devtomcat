@@ -72,7 +72,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
             int row = 0;
 
-            // Row 0: Port strategy (1.1.0). See LOCAL_NOTES.md.
+            // Row 0: Port strategy (1.1.0).
             portStrategyCombo = new com.intellij.openapi.ui.ComboBox<>(
                     com.dev.idea.plugins.tomcat.model.PortStrategy.values());
             portStrategyCombo.setRenderer(com.intellij.ui.SimpleListCellRenderer.create((label, s, index) -> {

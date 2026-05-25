@@ -326,7 +326,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        // Windows TIME_WAIT can outlast process exit. Rationale in LOCAL_NOTES.md.
+        // Windows TIME_WAIT can outlast process exit.
         verifyPortsReleased();
     }
 

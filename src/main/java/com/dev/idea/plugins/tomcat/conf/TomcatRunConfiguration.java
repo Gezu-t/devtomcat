@@ -313,7 +313,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     @Nullable public Integer getHttpPort()     { return positiveOrNull(configData.getPortConfig().getHttp()); }
     @Nullable public Integer getShutdownPort() { return positiveOrNull(configData.getPortConfig().getShutdown()); }
 
-    // Preferred (intent) ports — semantics in LOCAL_NOTES.md (1.1.0).
+    // Preferred (intent) ports — semantics
     @Nullable public Integer getPreferredHttpPort()     { return positiveOrNull(configData.getPortConfig().getPreferredHttp()); }
     @Nullable public Integer getPreferredShutdownPort() { return positiveOrNull(configData.getPortConfig().getPreferredShutdown()); }
 

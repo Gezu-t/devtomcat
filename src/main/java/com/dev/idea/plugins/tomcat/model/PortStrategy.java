@@ -3,7 +3,7 @@ package com.dev.idea.plugins.tomcat.model;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-// Per-config port-conflict policy. See LOCAL_NOTES.md (1.1.0) for design rationale.
+// Per-config port-conflict policy.
 public enum PortStrategy {
     // Kill own orphans; if port still busy, fail with a clear error.
     // Default for new configs in 1.1.0+.

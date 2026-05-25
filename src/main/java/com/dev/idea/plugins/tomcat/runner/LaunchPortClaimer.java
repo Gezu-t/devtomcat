@@ -191,7 +191,7 @@ final class LaunchPortClaimer {
                 + ", current " + seed.getHttp() + ")");
     }
 
-    // Strategy enforcement — see LOCAL_NOTES.md (1.1.0 PortStrategy).
+    // Strategy enforcement
     private void enforcePortStrategy(@NotNull PortConfig seed, @NotNull PortConfig resolved) {
         String refusal = evaluatePortStrategy(seed, resolved);
         if (refusal == null) {
@@ -330,7 +330,7 @@ final class LaunchPortClaimer {
         int previousHttps = target.getHttps();
         boolean changed = false;
         if (previousHttp != resolved.getHttp()) {
-            // setHttpResolved snapshots intent before overwriting (see LOCAL_NOTES.md).
+            // setHttpResolved snapshots intent before overwriting
             target.setHttpResolved(resolved.getHttp());
             rewriteStoredBrowserUrlForPortChange(configuration, "http",
                     previousHttp, resolved.getHttp());

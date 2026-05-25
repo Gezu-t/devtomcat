@@ -17,7 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 // Scans a Project for WAR-packaging modules and registered Tomcats.
-// Pure data; UI consumes the result. See LOCAL_NOTES.md (1.1.0) for design context.
+// Pure data; UI consumes the result.
 public final class ProjectTomcatProfileScanner {
 
     private static final Logger LOG = Logger.getInstance(ProjectTomcatProfileScanner.class);

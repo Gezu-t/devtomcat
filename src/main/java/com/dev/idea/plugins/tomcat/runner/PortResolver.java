@@ -53,7 +53,7 @@ final class PortResolver {
             return preResolved;
         }
 
-        // Seed from user's PREFERRED port to unwind prior drift (see LOCAL_NOTES.md).
+        // Seed from user's PREFERRED port to unwind prior drift
         int httpPort     = getConfigPort(configuration.getPreferredHttpPort(),     PortUtils.DEFAULT_HTTP);
         int shutdownPort = getConfigPort(configuration.getPreferredShutdownPort(), PortUtils.DEFAULT_SHUTDOWN);
         int jmxPort      = getConfigPort(configuration.getJmxPort(),               PortUtils.DEFAULT_JMX);

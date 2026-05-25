@@ -218,7 +218,7 @@ final class OrphanTomcatReclaimer {
             Thread.currentThread().interrupt();
         }
 
-        // Windows TIME_WAIT fallback — rationale in LOCAL_NOTES.md.
+        // Windows TIME_WAIT fallback
         waitForPreferredPortRelease();
 
         deploymentLogger.logServerWarning("Reclaimed " + orphans.size()

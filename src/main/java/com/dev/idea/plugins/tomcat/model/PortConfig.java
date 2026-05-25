@@ -34,12 +34,12 @@ public class PortConfig implements Serializable, Cloneable {
     private boolean jmxEnabled;
     private boolean ajpEnabled;
 
-    // Preferred-vs-resolved port snapshot. Semantics in LOCAL_NOTES.md (1.1.0).
+    // Preferred-vs-resolved port snapshot.
     // 0 = no snapshot, getPreferredHttp() falls through to http.
     private int preferredHttp = 0;
     private int preferredShutdown = 0;
 
-    // Port-conflict policy. See PortStrategy javadoc + LOCAL_NOTES.md.
+    // Port-conflict policy.
     @NotNull
     private PortStrategy strategy = PortStrategy.AUTO_BUMP;
 

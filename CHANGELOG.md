@@ -2,48 +2,22 @@
 
 ## [Unreleased]
 
-## [1.1.8]
+## [1.1.1]
 
 ### Changed
+- Diagnostic analyzer skips the ~20-regex sweep for log lines without any failure keyword.
+- Migrated 2 `SimpleListCellRenderer.create(String, Function)` call sites to the non-deprecated 3-arg Customizer form.
+- Pipeline analyzers (Startup, Deployment, Context, Reload, ArtifactFailure) early-exit on a keyword check before any regex.
+- WebResourcesSync uses a single `readAttributes` (catches NoSuchFile) instead of `exists` + `readAttributes`.
+- ContextFailureRootCauseAnalyzer: narrowed sync scope to deque mutations + atomic one-shot flag; logger callback runs outside the lock.
 - Shared MavenReflection cache: `MavenProjectsManager` class + `getInstance` / `findProject` resolved once at class init instead of per call (used by WebResourcesSync and LocalDeploymentStrategy).
 - TomcatPreflightValidator caches CompilerConfiguration reflection at class init.
 - Two unconditional `LOG.debug` string concatenations in TomcatOutputPipeline now guarded with `isDebugEnabled`.
 
-## [1.1.7]
-
-### Changed
-- ContextFailureRootCauseAnalyzer: narrowed sync scope to deque mutations + atomic one-shot flag; logger callback runs outside the lock.
-
-## [1.1.6]
-
-### Fixed
-- Failed restart no longer accumulates stale "started Tomcat" entries in the toolbar.
-
-## [1.1.5]
-
-### Changed
-- Pipeline analyzers (Startup, Deployment, Context, Reload, ArtifactFailure) early-exit on a keyword check before any regex.
-- WebResourcesSync uses a single `readAttributes` (catches NoSuchFile) instead of `exists` + `readAttributes`.
-
-## [1.1.4]
-
-### Changed
-- Migrated 2 `SimpleListCellRenderer.create(String, Function)` call sites to the non-deprecated 3-arg Customizer form.
-
-## [1.1.3]
-
-### Changed
-- Diagnostic analyzer skips the ~20-regex sweep for log lines without any failure keyword.
-
-## [1.1.2]
-
-### Fixed
-- Services panel shows FAILED for context-startup failures via LifecycleException / component-failed log forms.
-
-## [1.1.1]
-
 ### Fixed
 - Toolbar Rerun icon stays visible with multiple Tomcat configs (identity-based handler lookup).
+- Services panel shows FAILED for context-startup failures via LifecycleException / component-failed log forms.
+- Failed restart no longer accumulates stale "started Tomcat" entries in the toolbar.
 
 ## [1.1.0]
 
