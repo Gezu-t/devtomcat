@@ -49,7 +49,7 @@ Free, full-featured Apache Tomcat integration for IntelliJ IDEA — Community an
 
 | Requirement | Minimum Version |
 |-------------|----------------|
-| IntelliJ IDEA | 2024.1+ (Community or Ultimate) |
+| IntelliJ IDEA | 2024.2+ (Community or Ultimate) |
 | Apache Tomcat | 7.x or later |
 | Java (JDK) | 17+ |
 
