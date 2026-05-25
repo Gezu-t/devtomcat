@@ -139,22 +139,21 @@ public class DeploymentConfig implements Serializable, Cloneable {
     // =====================================================================
 
     /**
-     * Get the list of deployment artifacts.
-     *
-     * <p>Returns a defensive copy to prevent external modification.
-     *
-     * @return unmodifiable copy of artifacts (never null)
+     * @deprecated Use {@link #getDeployments(Project)} for the typed view.
+     * This accessor will be removed once storage flips to typed {@code
+     * Deployment} — see LOCAL_NOTES.md "Phase 4d".
      */
+    @Deprecated(forRemoval = true)
     @NotNull
     public List<DeploymentArtifact> getArtifacts() {
         return new ArrayList<>(artifacts);
     }
 
     /**
-     * Returns all non-null artifacts configured for deployment.
-     * Every artifact in the list is deployed — to exclude an artifact,
-     * remove it from the configuration.
+     * @deprecated Use {@link #getDeployments(Project)}. Returns all non-null
+     * legacy artifacts; will be removed after storage flip.
      */
+    @Deprecated(forRemoval = true)
     @NotNull
     public List<DeploymentArtifact> getDeployedArtifacts() {
         return artifacts.stream()

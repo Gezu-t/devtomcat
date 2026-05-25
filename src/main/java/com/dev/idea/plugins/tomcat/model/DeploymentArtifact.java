@@ -19,6 +19,16 @@ import java.util.Objects;
  * Author: Dev Tomcat Team
  * Project: DevTomcat Plugin
  */
+/**
+ * @deprecated Stringly-typed legacy model superseded by the sealed
+ * {@link Deployment} hierarchy ({@link ArtifactBackedDeployment} /
+ * {@link ModuleBackedDeployment} / {@link ExternalFileDeployment}). New code
+ * MUST consume {@code Deployment}; this class is retained only so legacy
+ * XML configs deserialize cleanly. Scheduled for removal once
+ * {@code DeploymentConfig} storage is flipped to typed and the XML
+ * serializer is migrated — see LOCAL_NOTES.md "Phase 4b–5 handoff".
+ */
+@Deprecated(forRemoval = true)
 public class DeploymentArtifact implements Serializable, Cloneable {
 
     @Serial

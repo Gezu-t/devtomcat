@@ -6,13 +6,13 @@ import org.jetbrains.annotations.NotNull;
 import java.nio.file.Path;
 
 /**
- * Bridge between the legacy {@link DeploymentArtifact} (stringly-typed)
- * and the typed {@link Deployment} hierarchy. Used during the
- * incremental migration: new construction sites build typed Deployments
- * but write them out as DeploymentArtifacts so the existing pipeline
- * keeps working. To be deleted in Phase 4 once all consumers speak
- * Deployment natively.
+ * @deprecated Bridge between the legacy {@link DeploymentArtifact} and the
+ * typed {@link Deployment} hierarchy. Used only by the XML serializer
+ * back-compat path and a small number of in-flight migration sites.
+ * Scheduled for removal once all callers consume {@code Deployment}
+ * directly — see LOCAL_NOTES.md "Phase 4b–5 handoff".
  */
+@Deprecated(forRemoval = true)
 public final class DeploymentAdapter {
 
     private DeploymentAdapter() {}

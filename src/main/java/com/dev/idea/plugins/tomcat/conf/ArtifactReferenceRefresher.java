@@ -21,7 +21,15 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Reconciles stored {@link DeploymentArtifact} references against the current state
+ * @deprecated Stale-name reconciliation becomes unnecessary once
+ * {@code DeploymentConfig} storage flips to typed {@code Deployment}:
+ * {@code ArtifactPointer} / {@code ModulePointer} track renames
+ * automatically via the platform. Retained until storage flip lands —
+ * see LOCAL_NOTES.md "Phase 4d/5". The three string-matching strategies
+ * here (exact-name, output-path, base-module-name) are exactly the kind
+ * of legacy the typed model makes obsolete.
+ *
+ * <p>Reconciles stored {@link DeploymentArtifact} references against the current state
  * of IntelliJ's {@link ArtifactManager}.
  *
  * <p>When a user renames a module or artifact in Project Structure, the plugin's
@@ -53,6 +61,7 @@ import java.util.Set;
  *   <li>{@link com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor} — before UI population</li>
  * </ul>
  */
+@Deprecated(forRemoval = true)
 public final class ArtifactReferenceRefresher {
 
     private static final Logger LOG = Logger.getInstance(ArtifactReferenceRefresher.class);
