@@ -112,18 +112,23 @@ intellijPlatform {
             create(IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
             create(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
             // Upper bound stays on the latest 2026.1 release rather than an
-            // EAP snapshot, even though pluginUntilBuild claims 262.*.
-            // Reason: the IntelliJ Platform Gradle Plugin 2.11.0 cannot resolve
-            // 2026.2 EAP snapshot artifacts against the cache-redirector — it
-            // computes a wrong-group-ID path (idea:idea or idea:ideaIC instead
-            // of com.jetbrains.intellij.idea:ideaIU) and the resolution 404s
-            // even with snapshots() added to the repositories block. We rely
-            // on the platform's binary-compat promise within a single yearly
-            // major (251–262 share the same API surface modulo deprecations)
-            // plus manual smoke-testing in the user's 2026.x install.
-            // Re-evaluate when bumping past 262.* — by then the Gradle plugin
-            // should support snapshot resolution and we can pin a concrete
-            // EAP build here again.
+            // EAP build, even though pluginUntilBuild claims 262.*.
+            //
+            // To add 2026.2 EAP (build 262.*) here we'd need IPGP 2.15.0+
+            // (the version that learned the new module-descriptors.jar
+            // format), and IPGP 2.12+ requires Gradle 9.0+. Our Gradle
+            // wrapper is 8.13. That's a coordinated dual-bump
+            // (Gradle 8.13 → 9.x AND IPGP 2.11.0 → 2.15.x), too big to
+            // carry inside a patch release.
+            //
+            // Until then we rely on:
+            //   1. JetBrains' binary-compat promise within a yearly major
+            //      cycle (251–262 share the same API surface modulo
+            //      deprecations), and
+            //   2. The Marketplace verifier on upload, which always runs
+            //      against the latest EAP and surfaces deprecations there.
+            //
+            // Re-evaluate this lid when starting the Gradle 9 migration.
             create(IntelliJPlatformType.IntellijIdea, "2026.1")
         }
     }
