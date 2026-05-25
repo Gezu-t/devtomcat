@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [1.1.2]
+## [1.2.0]
 
 ### Fixed
 - Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
