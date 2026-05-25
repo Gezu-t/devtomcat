@@ -11,6 +11,12 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.packaging.artifacts.ArtifactManager;
+import com.intellij.packaging.elements.CompositePackagingElement;
+import com.intellij.packaging.elements.PackagingElement;
+import com.intellij.packaging.elements.PackagingElementResolvingContext;
+import com.intellij.packaging.impl.elements.ModulePackagingElement;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -266,7 +272,37 @@ public final class DeployedClassesSync {
     @NotNull
     static ResolutionReport resolveModuleOutputRootsVerbose(@NotNull Project project,
                                                             @NotNull DeploymentArtifact artifact) {
+        // EXTERNAL deployments are paths the user picked from disk; they
+        // intentionally live outside the project model and have no owning
+        // module by construction. Skip silently — surfacing a warning would
+        // misrepresent what the user asked for.
+        if (artifact.getSource() == DeploymentArtifact.Source.EXTERNAL) {
+            return new ResolutionReport(null, "external-source-skipped", List.of(), null);
+        }
+
         ModuleManager moduleManager = ModuleManager.getInstance(project);
+
+        // Strategy 0: structural — walk the IntelliJ Artifact's packaging tree.
+        //
+        // This is how IntelliJ Ultimate's bundled Tomcat plugin links a
+        // deployment to its module: the user defined the artifact in
+        // Project Structure → Artifacts, and the tree directly names the
+        // owning module via ModulePackagingElement.findModule(...). No
+        // name guessing, no path matching, no version-suffix stripping —
+        // just read the structural relationship the user wired up.
+        Module fromTree = findOwningModuleViaArtifactTree(project, artifact.getName());
+        if (fromTree != null) {
+            return new ResolutionReport(fromTree.getName(),
+                    "artifact-tree: '" + artifact.getName() + "'",
+                    collectProductionRoots(fromTree), null);
+        }
+
+        // ── Fallback strategies for orphan configs ──
+        // The IntelliJ Artifact may have been deleted from Project Structure
+        // after the DeploymentArtifact was added to this run config. The
+        // strategies below give a best-effort answer using just the stored
+        // name + path. They are intentionally simple — Strategy 0 covers
+        // the healthy-project path.
 
         // Strategy 1: direct name match.
         String name = artifact.getName();
@@ -340,6 +376,53 @@ public final class DeployedClassesSync {
                             @NotNull String strategy,
                             @NotNull List<Path> sourceRoots,
                             @Nullable String diagnostic) {}
+
+    /**
+     * Looks up the IntelliJ {@link Artifact} by name and walks its packaging
+     * tree, returning the first {@link Module} whose output the artifact
+     * includes. This is the structural artifact↔module relationship the
+     * IDE itself uses for "Update Classes and Resources" in Ultimate.
+     *
+     * <p>Returns {@code null} when there is no IntelliJ Artifact registered
+     * with that name (e.g. orphan config after the user removed it from
+     * Project Structure), or when the artifact's tree happens to contain
+     * no {@link ModulePackagingElement} (rare; means the artifact is
+     * built entirely from files / libraries / other artifacts).
+     *
+     * <p><b>Must be called inside a read action.</b>
+     */
+    @Nullable
+    static Module findOwningModuleViaArtifactTree(@NotNull Project project,
+                                                  @NotNull String artifactName) {
+        if (artifactName.isEmpty()) return null;
+        ArtifactManager manager = ArtifactManager.getInstance(project);
+        Artifact artifact = manager.findArtifact(artifactName);
+        if (artifact == null) return null;
+        return walkPackagingTreeForModule(artifact.getRootElement(),
+                                          manager.getResolvingContext());
+    }
+
+    /**
+     * Depth-first walk over a packaging-element subtree. Returns the first
+     * {@link Module} found via {@link ModulePackagingElement#findModule}.
+     * Package-private and {@code element}-typed so tests can drive it
+     * with mocked trees without needing a real {@link ArtifactManager}.
+     */
+    @Nullable
+    static Module walkPackagingTreeForModule(@NotNull PackagingElement<?> element,
+                                             @NotNull PackagingElementResolvingContext ctx) {
+        if (element instanceof ModulePackagingElement mpe) {
+            Module m = mpe.findModule(ctx);
+            if (m != null) return m;
+        }
+        if (element instanceof CompositePackagingElement<?> composite) {
+            for (PackagingElement<?> child : composite.getChildren()) {
+                Module m = walkPackagingTreeForModule(child, ctx);
+                if (m != null) return m;
+            }
+        }
+        return null;
+    }
 
     /**
      * Collects production class roots for the resolved web module
