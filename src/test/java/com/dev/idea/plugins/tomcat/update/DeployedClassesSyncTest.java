@@ -2,7 +2,12 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.packaging.elements.CompositePackagingElement;
+import com.intellij.packaging.elements.PackagingElement;
+import com.intellij.packaging.elements.PackagingElementResolvingContext;
+import com.intellij.packaging.impl.elements.ModulePackagingElement;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -17,9 +22,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 /**
  * Unit tests for {@link DeployedClassesSync}.
@@ -290,6 +299,123 @@ class DeployedClassesSyncTest {
         @DisplayName("plain name unchanged (modulo case)")
         void plainName() {
             assertEquals("myapp", DeployedClassesSync.testStripArtifactSuffix("MyApp"));
+        }
+    }
+
+    @Nested
+    @DisplayName("walkPackagingTreeForModule — structural artifact→module resolution")
+    class WalkPackagingTree {
+
+        private final PackagingElementResolvingContext ctx =
+                mock(PackagingElementResolvingContext.class);
+
+        /**
+         * Mocks an object that implements BOTH {@link PackagingElement} and
+         * {@link ModulePackagingElement}. The real concrete classes (e.g.
+         * {@code ModuleOutputPackagingElementBase}) implement both
+         * interfaces in parallel — they don't share a parent. So in a real
+         * artifact tree, an {@code instanceof ModulePackagingElement} check
+         * on a {@code PackagingElement<?>} can be true. The mock has to
+         * replicate that shape.
+         */
+        private PackagingElement<?> mockModuleElement(Module module) {
+            PackagingElement<?> element = mock(PackagingElement.class,
+                    withSettings().extraInterfaces(ModulePackagingElement.class));
+            when(((ModulePackagingElement) element).findModule(ctx)).thenReturn(module);
+            return element;
+        }
+
+        @Test
+        @DisplayName("ModulePackagingElement at the root returns its module directly")
+        void moduleAtRoot() {
+            Module module = mock(Module.class);
+            PackagingElement<?> leaf = mockModuleElement(module);
+
+            assertSame(module,
+                    DeployedClassesSync.walkPackagingTreeForModule(leaf, ctx));
+        }
+
+        @Test
+        @DisplayName("Module element found inside a composite child")
+        void moduleInsideComposite() {
+            Module module = mock(Module.class);
+            PackagingElement<?> child = mockModuleElement(module);
+
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(child)).when(root).getChildren();
+
+            assertSame(module,
+                    DeployedClassesSync.walkPackagingTreeForModule(root, ctx));
+        }
+
+        @Test
+        @DisplayName("Deeply nested composite — depth-first walk reaches the module")
+        void deeplyNestedComposite() {
+            Module module = mock(Module.class);
+            PackagingElement<?> leaf = mockModuleElement(module);
+
+            CompositePackagingElement<?> inner = mock(CompositePackagingElement.class);
+            doReturn(List.of(leaf)).when(inner).getChildren();
+
+            CompositePackagingElement<?> outer = mock(CompositePackagingElement.class);
+            doReturn(List.of(inner)).when(outer).getChildren();
+
+            assertSame(module,
+                    DeployedClassesSync.walkPackagingTreeForModule(outer, ctx));
+        }
+
+        @Test
+        @DisplayName("No module elements in tree → null")
+        void noModuleInTree() {
+            PackagingElement<?> nonModuleLeaf = mock(PackagingElement.class);
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(nonModuleLeaf)).when(root).getChildren();
+
+            assertNull(DeployedClassesSync.walkPackagingTreeForModule(root, ctx));
+        }
+
+        @Test
+        @DisplayName("ModulePackagingElement whose findModule returns null → keep walking")
+        void moduleElementWithNullModule() {
+            // Edge case: a stale ModulePackagingElement whose target module
+            // was deleted but the element wasn't refreshed yet. The walker
+            // should keep looking instead of giving up.
+            PackagingElement<?> stale = mockModuleElement(null);
+
+            Module realModule = mock(Module.class);
+            PackagingElement<?> live = mockModuleElement(realModule);
+
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(stale, live)).when(root).getChildren();
+
+            assertSame(realModule,
+                    DeployedClassesSync.walkPackagingTreeForModule(root, ctx));
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveModuleOutputRootsVerbose — EXTERNAL source short-circuit")
+    class ExternalSourceSkip {
+
+        @Test
+        @DisplayName("EXTERNAL deployment returns empty report with strategy 'external-source-skipped' and no diagnostic")
+        void externalSourceReturnsEmptyReport() {
+            DeploymentArtifact external = new DeploymentArtifact(
+                    "anything", "/tmp/external", DeploymentArtifact.TYPE_EXPLODED);
+            external.setSource(DeploymentArtifact.Source.EXTERNAL);
+
+            // The EXTERNAL branch is the FIRST check in the method, so it
+            // returns before touching ModuleManager or any platform service.
+            // That's what makes this testable with a bare project mock.
+            DeployedClassesSync.ResolutionReport report =
+                    DeployedClassesSync.resolveModuleOutputRootsVerbose(project, external);
+
+            assertEquals("external-source-skipped", report.strategy());
+            assertNull(report.moduleName(),
+                    "EXTERNAL must not pretend to have resolved a module");
+            assertNull(report.diagnostic(),
+                    "EXTERNAL is an intentional opt-out — no warning to emit");
+            assertTrue(report.sourceRoots().isEmpty());
         }
     }
 }
