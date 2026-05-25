@@ -274,35 +274,6 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
-    @DisplayName("testStripArtifactSuffix normalises Maven/IntelliJ name conventions")
-    class StripSuffix {
-
-        @Test
-        @DisplayName("strips :war exploded suffix")
-        void stripsColonWar() {
-            assertEquals("myapp", DeployedClassesSync.testStripArtifactSuffix("MyApp:war exploded"));
-        }
-
-        @Test
-        @DisplayName("strips .war suffix")
-        void stripsDotWar() {
-            assertEquals("myapp", DeployedClassesSync.testStripArtifactSuffix("myapp.war"));
-        }
-
-        @Test
-        @DisplayName("strips trailing parenthesised qualifier")
-        void stripsParen() {
-            assertEquals("myapp", DeployedClassesSync.testStripArtifactSuffix("myapp (Custom)"));
-        }
-
-        @Test
-        @DisplayName("plain name unchanged (modulo case)")
-        void plainName() {
-            assertEquals("myapp", DeployedClassesSync.testStripArtifactSuffix("MyApp"));
-        }
-    }
-
-    @Nested
     @DisplayName("walkPackagingTreeForModule — structural artifact→module resolution")
     class WalkPackagingTree {
 
@@ -394,28 +365,61 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
-    @DisplayName("resolveModuleOutputRootsVerbose — EXTERNAL source short-circuit")
-    class ExternalSourceSkip {
+    @DisplayName("resolveTyped — type-dispatched resolution")
+    class TypedDispatch {
 
         @Test
-        @DisplayName("EXTERNAL deployment returns empty report with strategy 'external-source-skipped' and no diagnostic")
-        void externalSourceReturnsEmptyReport() {
-            DeploymentArtifact external = new DeploymentArtifact(
-                    "anything", "/tmp/external", DeploymentArtifact.TYPE_EXPLODED);
-            external.setSource(DeploymentArtifact.Source.EXTERNAL);
+        @DisplayName("EXTERNAL → silent skip, no diagnostic")
+        void externalSilentSkip() {
+            com.dev.idea.plugins.tomcat.model.ExternalFileDeployment external =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            java.nio.file.Path.of("/tmp/external"), "/c", true);
+            DeployedClassesSync.ResolutionReport r =
+                    DeployedClassesSync.resolveTyped(project, external);
+            assertEquals("external-source-skipped", r.strategy());
+            assertNull(r.moduleName());
+            assertNull(r.diagnostic());
+            assertTrue(r.sourceRoots().isEmpty());
+        }
 
-            // The EXTERNAL branch is the FIRST check in the method, so it
-            // returns before touching ModuleManager or any platform service.
-            // That's what makes this testable with a bare project mock.
-            DeployedClassesSync.ResolutionReport report =
-                    DeployedClassesSync.resolveModuleOutputRootsVerbose(project, external);
+        @Test
+        @DisplayName("ARTIFACT with deleted Artifact → 'artifact-missing' + actionable diagnostic")
+        void artifactMissing() {
+            com.intellij.packaging.artifacts.ArtifactPointer ptr =
+                    org.mockito.Mockito.mock(
+                            com.intellij.packaging.artifacts.ArtifactPointer.class);
+            org.mockito.Mockito.when(ptr.getArtifactName()).thenReturn("ghost-artifact");
+            org.mockito.Mockito.when(ptr.getArtifact()).thenReturn(null);
 
-            assertEquals("external-source-skipped", report.strategy());
-            assertNull(report.moduleName(),
-                    "EXTERNAL must not pretend to have resolved a module");
-            assertNull(report.diagnostic(),
-                    "EXTERNAL is an intentional opt-out — no warning to emit");
-            assertTrue(report.sourceRoots().isEmpty());
+            com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment d =
+                    new com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment(ptr, "/c");
+
+            DeployedClassesSync.ResolutionReport r =
+                    DeployedClassesSync.resolveTyped(project, d);
+            assertEquals("artifact-missing", r.strategy());
+            assertNull(r.moduleName());
+            assertNotNull(r.diagnostic());
+            assertTrue(r.diagnostic().contains("ghost-artifact"));
+        }
+
+        @Test
+        @DisplayName("MODULE with deleted Module → 'module-missing' + actionable diagnostic")
+        void moduleMissing() {
+            com.intellij.openapi.module.ModulePointer ptr =
+                    org.mockito.Mockito.mock(com.intellij.openapi.module.ModulePointer.class);
+            org.mockito.Mockito.when(ptr.getModuleName()).thenReturn("vanished-mod");
+            org.mockito.Mockito.when(ptr.getModule()).thenReturn(null);
+
+            com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment d =
+                    new com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment(
+                            ptr, java.nio.file.Path.of("/out"), "/c", true);
+
+            DeployedClassesSync.ResolutionReport r =
+                    DeployedClassesSync.resolveTyped(project, d);
+            assertEquals("module-missing", r.strategy());
+            assertNull(r.moduleName());
+            assertNotNull(r.diagnostic());
+            assertTrue(r.diagnostic().contains("vanished-mod"));
         }
     }
 }

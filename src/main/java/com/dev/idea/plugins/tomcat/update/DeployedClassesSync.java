@@ -1,14 +1,16 @@
 package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
-import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
@@ -30,8 +32,6 @@ import java.nio.file.attribute.FileTime;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
 
 /**
  * Mirrors freshly-compiled module output into each exploded deployment's
@@ -264,107 +264,66 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * Verbose form of {@link #resolveModuleOutputRoots} that also carries
-     * the strategy name and a diagnostic message when no module matched.
+     * Resolves the owning module via the typed {@link Deployment}
+     * hierarchy — no string matching anywhere. The three dispatch arms
+     * mirror Ultimate's {@code DeploymentSource} model rebuilt from
+     * Community primitives ({@code ArtifactPointer} / {@code ModulePointer}).
      *
      * <p><b>Must be called inside a read action.</b>
      */
     @NotNull
     static ResolutionReport resolveModuleOutputRootsVerbose(@NotNull Project project,
                                                             @NotNull DeploymentArtifact artifact) {
-        // EXTERNAL deployments are paths the user picked from disk; they
-        // intentionally live outside the project model and have no owning
-        // module by construction. Skip silently — surfacing a warning would
-        // misrepresent what the user asked for.
-        if (artifact.getSource() == DeploymentArtifact.Source.EXTERNAL) {
+        Deployment typed = DeploymentAdapter.toTyped(project, artifact);
+        return resolveTyped(project, typed);
+    }
+
+    @NotNull
+    static ResolutionReport resolveTyped(@NotNull Project project, @NotNull Deployment deployment) {
+        if (deployment instanceof ArtifactBackedDeployment a) {
+            return resolveArtifactBacked(project, a);
+        }
+        if (deployment instanceof ModuleBackedDeployment m) {
+            return resolveModuleBacked(m);
+        }
+        if (deployment instanceof ExternalFileDeployment) {
             return new ResolutionReport(null, "external-source-skipped", List.of(), null);
         }
+        throw new IllegalStateException("Unhandled Deployment subtype: " + deployment.getClass());
+    }
 
-        ModuleManager moduleManager = ModuleManager.getInstance(project);
-
-        // Strategy 0: structural — walk the IntelliJ Artifact's packaging tree.
-        //
-        // This is how IntelliJ Ultimate's bundled Tomcat plugin links a
-        // deployment to its module: the user defined the artifact in
-        // Project Structure → Artifacts, and the tree directly names the
-        // owning module via ModulePackagingElement.findModule(...). No
-        // name guessing, no path matching, no version-suffix stripping —
-        // just read the structural relationship the user wired up.
-        Module fromTree = findOwningModuleViaArtifactTree(project, artifact.getName());
-        if (fromTree != null) {
-            return new ResolutionReport(fromTree.getName(),
-                    "artifact-tree: '" + artifact.getName() + "'",
-                    collectProductionRoots(fromTree), null);
+    @NotNull
+    private static ResolutionReport resolveArtifactBacked(@NotNull Project project,
+                                                          @NotNull ArtifactBackedDeployment d) {
+        Artifact artifact = d.getArtifactPointer().getArtifact();
+        if (artifact == null) {
+            return new ResolutionReport(null, "artifact-missing", List.of(),
+                    "IntelliJ Artifact '" + d.getArtifactName() + "' is no longer registered"
+                    + " in Project Structure → Artifacts");
         }
-
-        // ── Fallback strategies for orphan configs ──
-        // The IntelliJ Artifact may have been deleted from Project Structure
-        // after the DeploymentArtifact was added to this run config. The
-        // strategies below give a best-effort answer using just the stored
-        // name + path. They are intentionally simple — Strategy 0 covers
-        // the healthy-project path.
-
-        // Strategy 1: direct name match.
-        String name = artifact.getName();
-        String baseName = name.replaceAll(":war.*$", "")
-                              .replaceAll("\\.war$", "")
-                              .replaceAll("\\s*\\(.*\\)$", "")
-                              .trim();
-        if (!baseName.isEmpty()) {
-            Module direct = moduleManager.findModuleByName(baseName);
-            if (direct != null) {
-                return new ResolutionReport(direct.getName(),
-                        "name-match: '" + baseName + "'",
-                        collectProductionRoots(direct), null);
-            }
+        Module module = walkPackagingTreeForModule(
+                artifact.getRootElement(),
+                ArtifactManager.getInstance(project).getResolvingContext());
+        if (module == null) {
+            return new ResolutionReport(null, "artifact-has-no-module", List.of(),
+                    "IntelliJ Artifact '" + d.getArtifactName() + "' contains no module-output"
+                    + " element (built from files / libraries only)");
         }
+        return new ResolutionReport(module.getName(),
+                "artifact-tree: '" + d.getArtifactName() + "'",
+                collectProductionRoots(module), null);
+    }
 
-        // Strategy 2: content-root containment, longest-match wins.
-        String deploymentPath = artifact.getPath();
-        if (!deploymentPath.isEmpty()) {
-            Module bestMatch = null;
-            int bestMatchLength = -1;
-            for (Module m : moduleManager.getModules()) {
-                for (VirtualFile contentRoot : ModuleRootManager.getInstance(m).getContentRoots()) {
-                    String crPath = contentRoot.getPath();
-                    if (deploymentPath.startsWith(crPath) && crPath.length() > bestMatchLength) {
-                        bestMatchLength = crPath.length();
-                        bestMatch = m;
-                    }
-                }
-            }
-            if (bestMatch != null) {
-                return new ResolutionReport(bestMatch.getName(),
-                        "content-root: '" + bestMatch.getName() + "' contains deployment path",
-                        collectProductionRoots(bestMatch), null);
-            }
+    @NotNull
+    private static ResolutionReport resolveModuleBacked(@NotNull ModuleBackedDeployment d) {
+        Module module = d.getModule();
+        if (module == null) {
+            return new ResolutionReport(null, "module-missing", List.of(),
+                    "Module '" + d.getModuleName() + "' no longer exists in the project");
         }
-
-        // Strategy 3: single web module fallback.
-        Module loneWeb = null;
-        int webCount = 0;
-        List<String> webModuleNames = new ArrayList<>();
-        for (Module m : moduleManager.getModules()) {
-            if (TomcatModuleUtils.isWebModule(m)) {
-                loneWeb = m;
-                webCount++;
-                webModuleNames.add(m.getName());
-            }
-        }
-        if (webCount == 1 && loneWeb != null) {
-            return new ResolutionReport(loneWeb.getName(),
-                    "single-web-module-fallback",
-                    collectProductionRoots(loneWeb), null);
-        }
-
-        String diag = "no name match for '" + baseName + "', no content-root contains '"
-                + deploymentPath + "', and "
-                + (webCount == 0
-                    ? "no web modules detected in the project"
-                    : "multiple web modules present (" + webModuleNames + ") — set the artifact"
-                            + " name to match one of these, or place the deployment path inside that"
-                            + " module's content root");
-        return new ResolutionReport(null, "no-match", List.of(), diag);
+        return new ResolutionReport(module.getName(),
+                "module-direct: '" + d.getModuleName() + "'",
+                collectProductionRoots(module), null);
     }
 
     /**
@@ -376,31 +335,6 @@ public final class DeployedClassesSync {
                             @NotNull String strategy,
                             @NotNull List<Path> sourceRoots,
                             @Nullable String diagnostic) {}
-
-    /**
-     * Looks up the IntelliJ {@link Artifact} by name and walks its packaging
-     * tree, returning the first {@link Module} whose output the artifact
-     * includes. This is the structural artifact↔module relationship the
-     * IDE itself uses for "Update Classes and Resources" in Ultimate.
-     *
-     * <p>Returns {@code null} when there is no IntelliJ Artifact registered
-     * with that name (e.g. orphan config after the user removed it from
-     * Project Structure), or when the artifact's tree happens to contain
-     * no {@link ModulePackagingElement} (rare; means the artifact is
-     * built entirely from files / libraries / other artifacts).
-     *
-     * <p><b>Must be called inside a read action.</b>
-     */
-    @Nullable
-    static Module findOwningModuleViaArtifactTree(@NotNull Project project,
-                                                  @NotNull String artifactName) {
-        if (artifactName.isEmpty()) return null;
-        ArtifactManager manager = ArtifactManager.getInstance(project);
-        Artifact artifact = manager.findArtifact(artifactName);
-        if (artifact == null) return null;
-        return walkPackagingTreeForModule(artifact.getRootElement(),
-                                          manager.getResolvingContext());
-    }
 
     /**
      * Depth-first walk over a packaging-element subtree. Returns the first
@@ -846,18 +780,4 @@ public final class DeployedClassesSync {
         }
     }
 
-    // -------------------------------------------------------------------
-    // Test seam — extracted helpers visible to the package-private tests.
-    // -------------------------------------------------------------------
-
-    /** Visible for tests: deterministic deployment-name → module-name strip. */
-    @NotNull
-    static String testStripArtifactSuffix(@NotNull String artifactName) {
-        return Objects.requireNonNull(artifactName)
-                .replaceAll(":war.*$", "")
-                .replaceAll("\\.war$", "")
-                .replaceAll("\\s*\\(.*\\)$", "")
-                .trim()
-                .toLowerCase(Locale.ROOT);
-    }
 }
