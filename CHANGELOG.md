@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [1.1.1]
+## [1.1.2]
 
 ### Fixed
 - Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
@@ -10,6 +10,10 @@
 
 ### Changed
 - `pluginSinceBuild` lowered to `242` — DevTomcat now installs on IntelliJ 2024.2+ (verified Compatible by the plugin verifier against IC-242.20224.300 and IC-251.29188.11).
+
+## [1.1.1]
+
+### Changed
 - Diagnostic analyzer skips the ~20-regex sweep for log lines without any failure keyword.
 - Migrated 2 `SimpleListCellRenderer.create(String, Function)` call sites to the non-deprecated 3-arg Customizer form.
 - Pipeline analyzers (Startup, Deployment, Context, Reload, ArtifactFailure) early-exit on a keyword check before any regex.
