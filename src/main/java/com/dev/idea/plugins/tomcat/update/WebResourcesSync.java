@@ -213,11 +213,20 @@ public final class WebResourcesSync {
     @NotNull
     static List<Path> findWebappSourceRoots(@NotNull Project project,
                                             @NotNull DeploymentArtifact artifact) {
-        // Reuse DeployedClassesSync's module-resolution strategy chain so
-        // the two syncs identify the same owning module for any given
-        // artifact — keeps diagnostics consistent across class + web sync.
+        return findWebappSourceRootsForTyped(project,
+                com.dev.idea.plugins.tomcat.model.DeploymentAdapter.toTyped(project, artifact));
+    }
+
+    /**
+     * Typed entry point. Uses the same {@link DeployedClassesSync#resolveTyped}
+     * dispatch as class sync so both pipelines pick the same module for any
+     * given deployment.
+     */
+    @NotNull
+    static List<Path> findWebappSourceRootsForTyped(@NotNull Project project,
+                                                    @NotNull com.dev.idea.plugins.tomcat.model.Deployment deployment) {
         DeployedClassesSync.ResolutionReport report =
-                DeployedClassesSync.resolveModuleOutputRootsVerbose(project, artifact);
+                DeployedClassesSync.resolveTyped(project, deployment);
         String moduleName = report.moduleName();
         if (moduleName == null) return java.util.Collections.emptyList();
         Module module = ModuleManager.getInstance(project).findModuleByName(moduleName);
