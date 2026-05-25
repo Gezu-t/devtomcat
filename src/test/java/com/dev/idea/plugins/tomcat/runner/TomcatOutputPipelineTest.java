@@ -342,7 +342,8 @@ class TomcatOutputPipelineTest {
         @Test
         @DisplayName("error takes precedence over warning on same line")
         void errorPrecedesWarning() {
-            analyzer.analyze("SEVERE WARNING: critical issue", context);
+            // Both markers in legitimate log-level positions; ERROR wins via if/else.
+            analyzer.analyze("ERROR: failed handshake. WARNING: also retry exhausted", context);
             assertEquals(1, errorCount.get());
             assertEquals(0, warningCount.get(), "Warning should not also increment when error matches");
         }
@@ -353,6 +354,54 @@ class TomcatOutputPipelineTest {
             analyzer.analyze("INFO: Server started", context);
             assertEquals(0, errorCount.get());
             assertEquals(0, warningCount.get());
+        }
+
+        @Test
+        @DisplayName("ignores level keywords appearing as config values (e.g. set X=ERROR)")
+        void ignoresConfigValueMentions() {
+            analyzer.analyze("To fail when duplicates are found, set liquibase.duplicateFileMode=ERROR", context);
+            assertEquals(0, errorCount.get(), "=ERROR is a config value, not a log level");
+            assertEquals(0, warningCount.get());
+        }
+
+        @Test
+        @DisplayName("ignores level keywords appearing mid-sentence")
+        void ignoresMidSentenceLevelMention() {
+            analyzer.analyze("Application logged at level WARN during startup", context);
+            assertEquals(0, errorCount.get());
+            assertEquals(0, warningCount.get(), "mid-sentence WARN mention is not a warning line");
+        }
+
+        @Test
+        @DisplayName("recognises logback dash-separator layout: 'ts ERROR - msg'")
+        void recognisesLogbackDashLayout() {
+            analyzer.analyze("2025-05-25 07:18:17.529 ERROR - Application run failed", context);
+            assertEquals(1, errorCount.get());
+        }
+
+        @Test
+        @DisplayName("recognises Spring Boot triple-dash layout: 'ts ERROR --- [thread] logger : msg'")
+        void recognisesSpringBootLayout() {
+            analyzer.analyze(
+                "2025-05-25 07:18:17.529 ERROR --- [main] o.s.b.SpringApplication : Application run failed",
+                context);
+            assertEquals(1, errorCount.get());
+        }
+
+        @Test
+        @DisplayName("recognises bracketed level: '[ERROR] msg'")
+        void recognisesBracketedLevel() {
+            analyzer.analyze("[ERROR] Something broke", context);
+            assertEquals(1, errorCount.get());
+        }
+
+        @Test
+        @DisplayName("recognises JUL full-format with level + bracketed thread")
+        void recognisesJulFullFormat() {
+            analyzer.analyze(
+                "25-May-2025 07:18:17.529 SEVERE [main] org.apache.catalina.startup.Catalina.start Catalina failed",
+                context);
+            assertEquals(1, errorCount.get());
         }
 
         @Test

@@ -4,6 +4,9 @@
 
 ## [1.1.1]
 
+### Fixed
+- Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
+
 ### Changed
 - `pluginSinceBuild` lowered to `242` — DevTomcat now installs on IntelliJ 2024.2+ (verified Compatible by the plugin verifier against IC-242.20224.300 and IC-251.29188.11).
 - Diagnostic analyzer skips the ~20-regex sweep for log lines without any failure keyword.

@@ -620,12 +620,27 @@ public final class TomcatOutputPipeline {
      * status service for dashboard refresh.
      */
     static final class ErrorWarningAnalyzer implements Analyzer {
+        // The level token must appear in a recognisable log-line position — not
+        // anywhere on the line. A bare \b(SEVERE|ERROR|FATAL)\b match (the old
+        // rule) misclassified informational lines that mention level names as
+        // config values, e.g. Liquibase's
+        //   "To fail when duplicates are found, set liquibase.duplicateFileMode=ERROR"
+        // The shapes we recognise:
+        //   1. Prefix:        "SEVERE: msg"               (JUL default for Tomcat)
+        //   2. Bracketed:     "[ERROR] msg"               (logback/log4j bracket layout)
+        //   3. In-layout:     "... ERROR - msg", "... ERROR [thread] msg",
+        //                     "... ERROR --- [thread] ..." (Spring Boot)
+        //   4. Stack frame:   "Caused by: ...", "java.x.YException: ..."
         private static final Pattern ERROR_PATTERN = Pattern.compile(
-                "\\b(?:SEVERE|ERROR|FATAL)\\b|" +
-                "^\\s*Caused by:\\s|" +
-                "^[a-zA-Z_$][a-zA-Z0-9_$.]*(?:Exception|Error)\\b");
+                "(?:^|\\s)(?:SEVERE|ERROR|FATAL):" +
+                "|\\[(?:SEVERE|ERROR|FATAL)\\]" +
+                "|\\s(?:SEVERE|ERROR|FATAL)\\s+(?:-|---|\\[)" +
+                "|^\\s*Caused by:\\s" +
+                "|^[a-zA-Z_$][a-zA-Z0-9_$.]*(?:Exception|Error)\\b");
         private static final Pattern WARNING_PATTERN = Pattern.compile(
-                "\\b(?:WARNING|WARN)\\b");
+                "(?:^|\\s)(?:WARNING|WARN):" +
+                "|\\[(?:WARNING|WARN)\\]" +
+                "|\\s(?:WARNING|WARN)\\s+(?:-|---|\\[)");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
