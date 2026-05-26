@@ -2,6 +2,8 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
@@ -185,10 +187,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 // run's WAR extract that would now conflict with a new WAR
                 // copy or a switched-to-exploded descriptor).
                 java.util.Set<String> activeContextNames = new java.util.HashSet<>();
-                for (DeploymentArtifact a : configuration.getDeployedArtifacts()) {
-                    if (a == null || !a.isValid()) continue;
+                for (Deployment d : configuration.getDeployments()) {
+                    if (!d.isValid()) continue;
                     try {
-                        activeContextNames.add(ContextPathUtils.resolveContextName(a.getContextPath()));
+                        activeContextNames.add(ContextPathUtils.resolveContextName(d.getContextPath()));
                     } catch (IllegalArgumentException ignored) {
                         // Invalid path is rejected by the duplicate-context
                         // validator at Apply time; skipping here is safe.
@@ -321,26 +323,32 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // being spammed every launch. Non-blocking; the launch continues.
         TomcatCompatibilityPrompt.showEolWarningOnce(project, tomcatInfo);
 
+        List<Deployment> deployments = configuration.getDeployments();
         int deployedCount = 0;
-        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
-            if (artifact == null || !artifact.isValid()) continue;
+        for (Deployment deployment : deployments) {
+            if (!deployment.isValid()) continue;
 
             String contextName;
             try {
-                contextName = ContextPathUtils.resolveContextName(artifact.getContextPath());
+                contextName = ContextPathUtils.resolveContextName(deployment.getContextPath());
             } catch (IllegalArgumentException e) {
                 throw new ExecutionException(e.getMessage());
             }
 
-            Path artifactPath = Paths.get(artifact.getPath());
-            if (!Files.exists(artifactPath)) {
-                throw new ExecutionException("Deployment artifact not found: " + artifact.getPath());
+            Path artifactPath = deployment.getResolvedPath();
+            if (artifactPath == null || !Files.exists(artifactPath)) {
+                throw new ExecutionException("Deployment artifact not found: "
+                        + (artifactPath != null ? artifactPath : deployment.getDisplayName()));
             }
 
+            // buildContextXml + the legacy-artifact-driven model-snapshot path still
+            // run off DeploymentArtifact; adapt at the call boundary so the deeper
+            // helpers can migrate in their own commit.
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(deployment);
+
             try {
-                if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
-                        || Files.isDirectory(artifactPath)) {
-                    String contextXml = buildContextXml(artifact, artifactPath, preserveSessions,
+                if (deployment.isExploded() || Files.isDirectory(artifactPath)) {
+                    String contextXml = buildContextXml(legacy, artifactPath, preserveSessions,
                             project, configuration.getTomcatInfo(), logger);
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(
                             confCatalinaLocalhost, contextName);
@@ -353,7 +361,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 }
                 deployedCount++;
             } catch (IOException e) {
-                throw new ExecutionException("Failed to deploy artifact: " + artifact.getPath(), e);
+                throw new ExecutionException("Failed to deploy artifact: " + artifactPath, e);
             }
         }
 
@@ -364,10 +372,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // misconfiguration here saves a confused trip back to the run-config
         // editor after seeing a blank welcome page.
         if (deployedCount == 0) {
-            String configured = configuration.getDeployedArtifacts() != null
-                    && !configuration.getDeployedArtifacts().isEmpty()
-                    ? "configured artifacts were all skipped as invalid"
-                    : "no artifacts are configured";
+            String configured = deployments.isEmpty()
+                    ? "no artifacts are configured"
+                    : "configured artifacts were all skipped as invalid";
             String warning = "Tomcat will start but " + configured
                     + " — nothing will be deployed. Add an artifact in the Deployment tab "
                     + "(or fix the invalid entries) to serve your webapp.";
@@ -507,16 +514,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static List<String> collectModularJarsAcrossDeployments(
             @NotNull TomcatRunConfiguration configuration) {
         java.util.TreeSet<String> all = new java.util.TreeSet<>();
-        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
-            if (artifact == null || !artifact.isValid()) continue;
-            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid() || !deployment.isExploded()) {
                 // Packaged WARs are scanned by Tomcat after extraction; we do
-                // not pre-extract here. The .war's own content is on disk in
-                // webapps/, but inspecting it would require unzipping the WAR
-                // first. Keep the scope narrow: exploded artifacts only.
+                // not pre-extract here. Keep the scope narrow: exploded only.
                 continue;
             }
-            Path artifactPath = Paths.get(artifact.getPath());
+            Path artifactPath = deployment.getResolvedPath();
+            if (artifactPath == null) continue;
             Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
             all.addAll(BcelModuleInfoCompat.findJarsContainingModuleInfo(webInfLib));
         }
@@ -535,10 +540,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static List<String> collectContainerProvidedJarsAcrossDeployments(
             @NotNull TomcatRunConfiguration configuration) {
         java.util.TreeSet<String> all = new java.util.TreeSet<>();
-        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
-            if (artifact == null || !artifact.isValid()) continue;
-            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
-            Path webInfLib = Paths.get(artifact.getPath()).resolve(WEB_INF).resolve(WEB_INF_LIB);
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid() || !deployment.isExploded()) continue;
+            Path artifactPath = deployment.getResolvedPath();
+            if (artifactPath == null) continue;
+            Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
             if (!Files.isDirectory(webInfLib)) continue;
             try (var stream = Files.list(webInfLib)) {
                 stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
@@ -561,10 +567,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static List<Path> collectWebInfDirsAcrossDeployments(
             @NotNull TomcatRunConfiguration configuration) {
         List<Path> dirs = new ArrayList<>();
-        for (DeploymentArtifact artifact : configuration.getDeployedArtifacts()) {
-            if (artifact == null || !artifact.isValid()) continue;
-            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
-            Path webInf = Paths.get(artifact.getPath()).resolve(WEB_INF);
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid() || !deployment.isExploded()) continue;
+            Path artifactPath = deployment.getResolvedPath();
+            if (artifactPath == null) continue;
+            Path webInf = artifactPath.resolve(WEB_INF);
             if (Files.isDirectory(webInf)) {
                 dirs.add(webInf);
             }
