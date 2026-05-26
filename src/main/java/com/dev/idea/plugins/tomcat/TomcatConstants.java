@@ -125,6 +125,7 @@ public final class TomcatConstants {
     public static final String EXT_JAR = ".jar";
     public static final String EXT_WAR = ".war";
     public static final String EXT_XML = ".xml";
+    public static final String EXT_CLASS = ".class";
 
     // --- POM packaging markers (raw XML element strings used for content matching) ---
     public static final String POM_PACKAGING_POM = "<packaging>pom</packaging>";

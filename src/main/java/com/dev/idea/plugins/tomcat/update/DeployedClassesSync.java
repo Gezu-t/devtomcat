@@ -31,7 +31,13 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
+
+import static com.dev.idea.plugins.tomcat.TomcatConstants.EXT_CLASS;
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
 
 /**
  * Mirrors freshly-compiled module output into each exploded deployment's
@@ -99,8 +105,42 @@ public final class DeployedClassesSync {
 
     private static final Logger LOG = Logger.getInstance(DeployedClassesSync.class);
 
-    /** Standard webapp class output sub-path. Tomcat mandates this layout. */
-    private static final String WEB_INF_CLASSES = "WEB-INF/classes";
+    /**
+     * {@code com.intellij.packaging.impl.elements.ModulePackagingElement}, loaded
+     * once at class init. {@code null} if the class moves or disappears in a
+     * future IntelliJ release — in which case {@link #walkPackagingTreeForModule}
+     * quietly returns {@code null} and the caller falls through to its
+     * downstream resolution branch.
+     *
+     * <p>Reflection on purpose: {@code ModulePackagingElement} lives in
+     * {@code com.intellij.packaging.impl.elements} — an {@code impl} package the
+     * plugin verifier flags. Same trick {@code MavenReflection} uses for the
+     * Maven plugin's APIs.
+     */
+    @Nullable
+    private static final Class<?> MODULE_PACKAGING_ELEMENT_CLASS =
+            loadClass("com.intellij.packaging.impl.elements.ModulePackagingElement");
+
+    /** {@code findModule(PackagingElementResolvingContext)} on the cached interface above. Cached at class init for the same reason. */
+    @Nullable
+    private static final Method MODULE_FIND_MODULE_METHOD =
+            findMethod(MODULE_PACKAGING_ELEMENT_CLASS, "findModule",
+                       PackagingElementResolvingContext.class);
+
+    @Nullable
+    private static Class<?> loadClass(@NotNull String fqn) {
+        try { return Class.forName(fqn); }
+        catch (ClassNotFoundException e) { return null; }
+    }
+
+    @Nullable
+    private static Method findMethod(@Nullable Class<?> cls,
+                                     @NotNull String name,
+                                     @NotNull Class<?>... params) {
+        if (cls == null) return null;
+        try { return cls.getMethod(name, params); }
+        catch (NoSuchMethodException e) { return null; }
+    }
 
     private DeployedClassesSync() {}
 
@@ -156,7 +196,7 @@ public final class DeployedClassesSync {
                 continue;
             }
 
-            Path webInfClasses = artifactRoot.resolve(WEB_INF_CLASSES);
+            Path webInfClasses = artifactRoot.resolve(WEB_INF_CLASSES_PATH);
             // Some exploded layouts don't have a WEB-INF/classes/ yet (e.g. a
             // build that never produced bytecode). Create it on demand so the
             // first sync after a fresh checkout still works — Tomcat itself
@@ -342,11 +382,27 @@ public final class DeployedClassesSync {
     @Nullable
     public static Module walkPackagingTreeForModule(@NotNull PackagingElement<?> element,
                                                     @NotNull PackagingElementResolvingContext ctx) {
+        return walkPackagingTreeForModule(element, ctx,
+                Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    /**
+     * Recursive helper with cycle protection. IntelliJ's packaging-element API
+     * doesn't guarantee an acyclic tree shape — a composite element transitively
+     * containing itself would loop forever without the visited set. The set
+     * uses identity equality because two distinct element instances with the
+     * same logical content are still different nodes worth re-visiting.
+     */
+    @Nullable
+    private static Module walkPackagingTreeForModule(@NotNull PackagingElement<?> element,
+                                                     @NotNull PackagingElementResolvingContext ctx,
+                                                     @NotNull Set<PackagingElement<?>> visited) {
+        if (!visited.add(element)) return null;
         Module direct = tryFindModuleOnElement(element, ctx);
         if (direct != null) return direct;
         if (element instanceof CompositePackagingElement<?> composite) {
             for (PackagingElement<?> child : composite.getChildren()) {
-                Module m = walkPackagingTreeForModule(child, ctx);
+                Module m = walkPackagingTreeForModule(child, ctx, visited);
                 if (m != null) return m;
             }
         }
@@ -373,41 +429,6 @@ public final class DeployedClassesSync {
             }
             return null;
         }
-    }
-
-    /**
-     * {@code com.intellij.packaging.impl.elements.ModulePackagingElement},
-     * loaded once at class init. {@code null} if the class moves or
-     * disappears in a future IntelliJ release — in which case the
-     * structural strategy quietly degrades and the fallback strategies
-     * (name match, content-root, single-web-fallback) take over.
-     */
-    @Nullable
-    private static final Class<?> MODULE_PACKAGING_ELEMENT_CLASS =
-            loadClass("com.intellij.packaging.impl.elements.ModulePackagingElement");
-
-    /**
-     * {@code findModule(PackagingElementResolvingContext)} on the cached
-     * interface above. Cached at class init for the same reason.
-     */
-    @Nullable
-    private static final Method MODULE_FIND_MODULE_METHOD =
-            findMethod(MODULE_PACKAGING_ELEMENT_CLASS, "findModule",
-                       PackagingElementResolvingContext.class);
-
-    @Nullable
-    private static Class<?> loadClass(@NotNull String fqn) {
-        try { return Class.forName(fqn); }
-        catch (ClassNotFoundException e) { return null; }
-    }
-
-    @Nullable
-    private static Method findMethod(@Nullable Class<?> cls,
-                                     @NotNull String name,
-                                     @NotNull Class<?>... params) {
-        if (cls == null) return null;
-        try { return cls.getMethod(name, params); }
-        catch (NoSuchMethodException e) { return null; }
     }
 
     /**
@@ -532,7 +553,7 @@ public final class DeployedClassesSync {
             // so it never even gets to the copy path).
             Files.walkFileTree(src, new SimpleFileVisitor<>() {
                 @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                public @NotNull FileVisitResult preVisitDirectory(Path dir, @NotNull BasicFileAttributes attrs) {
                     if (attrs.isSymbolicLink()) {
                         // Symlinked directory inside the source tree — skip.
                         // We don't trust where it points; could be an infinite
@@ -544,7 +565,7 @@ public final class DeployedClassesSync {
                 }
 
                 @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                public @NotNull FileVisitResult visitFile(Path file, @NotNull BasicFileAttributes attrs) {
                     try {
                         // Skip symlinks. The mirror's contract is "copy
                         // source-of-truth class files"; a symlink doesn't
@@ -673,7 +694,7 @@ public final class DeployedClassesSync {
      */
     static boolean isBrokenEcjClass(@NotNull Path file) {
         String fileName = file.getFileName().toString();
-        if (!fileName.endsWith(".class")) return false;
+        if (!fileName.endsWith(EXT_CLASS)) return false;
 
         long size;
         try {
