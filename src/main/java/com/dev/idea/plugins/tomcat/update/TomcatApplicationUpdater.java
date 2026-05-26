@@ -159,7 +159,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * use "Redeploy" for WAR-based deployments.
      */
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
-        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
+        List<Deployment> deployments = configuration.getDeployments();
+        warnAboutWarDeploymentsIfPresent(deployments, logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Syncing resources...",
                 "Build aborted; resource sync cancelled",
@@ -174,15 +175,13 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // but Tomcat keeps serving the previous mvn-package'd copy
                     // from target/<war>/WEB-INF/classes/ — exactly the
                     // ".properties files sometimes stale" symptom.
-                    DeployedClassesSync.syncIfNeeded(project,
-                            configuration.getDeployedArtifacts(), logger);
+                    DeployedClassesSync.syncDeployments(project, deployments, logger);
                     // Mirror webapp source files (JSP, JS, CSS, HTML, images,
                     // taglibs) into the exploded artifact root. IntelliJ's Make
                     // task doesn't copy src/main/webapp/ — only Maven's
                     // prepare-package does, which Make never triggers — so
                     // without this step JSP edits silently never reach Tomcat.
-                    WebResourcesSync.syncIfNeeded(project,
-                            configuration.getDeployedArtifacts(), logger);
+                    WebResourcesSync.syncDeployments(project, deployments, logger);
                 });
     }
 
@@ -197,7 +196,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * <p>For WAR artifacts the WAR file is re-copied to webapps after compilation.
      */
     private void doUpdateClassesAndResources(@NotNull TomcatDeploymentLogger logger) {
-        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
+        List<Deployment> deployments = configuration.getDeployments();
+        warnAboutWarDeploymentsIfPresent(deployments, logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling project...",
                 "Compilation aborted",
@@ -208,13 +208,11 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // WEB-INF/classes/ BEFORE touching context.xml — the deployer's
                     // reload trigger should see the new bytes already in place.
                     // See DeployedClassesSync javadoc for the Maven target/ rationale.
-                    DeployedClassesSync.syncIfNeeded(project,
-                            configuration.getDeployedArtifacts(), logger);
+                    DeployedClassesSync.syncDeployments(project, deployments, logger);
                     // See doUpdateResourcesOnly above for why this is needed
                     // alongside the class sync — JSP/JS/CSS edits otherwise
                     // would not reach the exploded artifact.
-                    WebResourcesSync.syncIfNeeded(project,
-                            configuration.getDeployedArtifacts(), logger);
+                    WebResourcesSync.syncDeployments(project, deployments, logger);
                     redeployWarArtifacts(logger);
                     touchExplodedContextXml(logger);
                 });
@@ -225,7 +223,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * rewrites context.xml for exploded dirs, re-copies WAR files.
      */
     private void doRedeploy(@NotNull TomcatDeploymentLogger logger) {
-        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
+        List<Deployment> deployments = configuration.getDeployments();
+        warnAboutWarDeploymentsIfPresent(deployments, logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling and redeploying...",
                 "Compilation aborted",
@@ -235,10 +234,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // Mirror fresh classes into each exploded deployment so the
                     // forced redeploy (context.xml rewrite below) lands a fresh
                     // classloader on top of fresh bytes, not the previous build's.
-                    DeployedClassesSync.syncIfNeeded(project,
-                            configuration.getDeployedArtifacts(), logger);
-                    WebResourcesSync.syncIfNeeded(project,
-                            configuration.getDeployedArtifacts(), logger);
+                    DeployedClassesSync.syncDeployments(project, deployments, logger);
+                    WebResourcesSync.syncDeployments(project, deployments, logger);
                     redeployAllArtifacts(logger);
                 });
     }
@@ -248,7 +245,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * the restarted Tomcat picks up the latest class files.
      */
     private void doRestart(@NotNull TomcatDeploymentLogger logger) {
-        warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), logger);
+        List<Deployment> deployments = configuration.getDeployments();
+        warnAboutWarDeploymentsIfPresent(deployments, logger);
         String originalExecutorId = processHandler.getExecutorId();
 
         CompilerSupport.compileAndThen(project, logger,
@@ -264,10 +262,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             // without this step the restarted Tomcat would serve the same stale
             // bytes as before the restart — exactly the "I have to mvn clean
             // install every time" pain. See DeployedClassesSync javadoc.
-            DeployedClassesSync.syncIfNeeded(project,
-                    configuration.getDeployedArtifacts(), logger);
-            WebResourcesSync.syncIfNeeded(project,
-                    configuration.getDeployedArtifacts(), logger);
+            DeployedClassesSync.syncDeployments(project, deployments, logger);
+            WebResourcesSync.syncDeployments(project, deployments, logger);
 
             // Capture before destroy — see ProcessStopSupport javadoc for race rationale
             Executor resolvedExecutor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);
@@ -339,22 +335,20 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             return;
         }
 
-        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
-
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null || !artifact.isValid()) continue;
-            if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid() || deployment.isExploded()) continue;
+            Path source = deployment.getResolvedPath();
+            if (source == null) continue;
 
             try {
-                String contextName = resolveContextName(artifact.getContextPath());
-                Path source = Path.of(artifact.getPath());
+                String contextName = resolveContextName(deployment.getContextPath());
                 Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
                 TomcatProjectUtils.atomicCopy(source, target);
-                logger.logServerInfo("Re-deployed WAR: " + artifact.getDisplayName());
+                logger.logServerInfo("Re-deployed WAR: " + deployment.getDisplayName());
             } catch (IOException e) {
-                LOG.warn("Failed to re-deploy WAR: " + artifact.getPath(), e);
+                LOG.warn("Failed to re-deploy WAR: " + source, e);
                 logger.logServerError("Failed to re-deploy WAR '" +
-                        artifact.getDisplayName() + "': " + e.getMessage());
+                        deployment.getDisplayName() + "': " + e.getMessage());
             }
         }
     }
@@ -371,23 +365,21 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         if (catalinaBase == null) return;
 
         Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
-        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
 
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null || !artifact.isValid()) continue;
-            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) continue;
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid() || !deployment.isExploded()) continue;
 
-            String contextName = resolveContextName(artifact.getContextPath());
+            String contextName = resolveContextName(deployment.getContextPath());
             Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
             if (Files.exists(contextFile)) {
                 try {
                     Files.setLastModifiedTime(contextFile,
                             FileTime.fromMillis(System.currentTimeMillis()));
-                    logger.logServerInfo("Context reload triggered: " + artifact.getDisplayName());
+                    logger.logServerInfo("Context reload triggered: " + deployment.getDisplayName());
                 } catch (IOException e) {
                     LOG.warn("Failed to touch context XML: " + contextFile, e);
                     logger.logServerWarning("Could not trigger context reload for " +
-                            artifact.getDisplayName());
+                            deployment.getDisplayName());
                 }
             }
         }
@@ -412,36 +404,37 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         boolean preserveSessions = configuration.getConfigData()
                 .getDeploymentConfig().isPreserveSessions();
 
-        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid()) continue;
+            Path artifactPath = deployment.getResolvedPath();
+            if (artifactPath == null) continue;
 
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null || !artifact.isValid()) continue;
-
-            String contextName = resolveContextName(artifact.getContextPath());
+            String contextName = resolveContextName(deployment.getContextPath());
 
             try {
-                if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
+                if (deployment.isExploded()) {
                     // Generate full context XML with PreResources/PostResources,
                     // matching initial deployment so multi-module classpath is preserved.
                     // Pass the configured TomcatInfo so the generator can omit the
                     // <Resources> block on Tomcat 7 (PreResources is a Tomcat 8 feature).
-                    Path artifactPath = Path.of(artifact.getPath());
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
+                    // DeploymentStrategy.buildContextXml still consumes a legacy
+                    // artifact; adapt at the call boundary (Phase 4d migrates it).
+                    DeploymentArtifact legacy = DeploymentAdapter.toLegacy(deployment);
                     String contextXml = DeploymentStrategy.buildContextXml(
-                            artifact, artifactPath, preserveSessions, project,
+                            legacy, artifactPath, preserveSessions, project,
                             configuration.getTomcatInfo(), logger);
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
-                    logger.logServerInfo("Redeployed (context rewrite): " + artifact.getDisplayName());
+                    logger.logServerInfo("Redeployed (context rewrite): " + deployment.getDisplayName());
                 } else {
-                    Path source = Path.of(artifact.getPath());
                     Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
-                    TomcatProjectUtils.atomicCopy(source, target);
-                    logger.logServerInfo("Redeployed WAR: " + artifact.getDisplayName());
+                    TomcatProjectUtils.atomicCopy(artifactPath, target);
+                    logger.logServerInfo("Redeployed WAR: " + deployment.getDisplayName());
                 }
             } catch (IOException e) {
-                LOG.warn("Failed to redeploy: " + artifact.getPath(), e);
+                LOG.warn("Failed to redeploy: " + artifactPath, e);
                 logger.logServerError("Failed to redeploy '" +
-                        artifact.getDisplayName() + "': " + e.getMessage());
+                        deployment.getDisplayName() + "': " + e.getMessage());
             }
         }
     }
