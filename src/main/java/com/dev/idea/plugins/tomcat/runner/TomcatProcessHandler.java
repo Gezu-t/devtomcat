@@ -4,7 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.diagnostics.DiagnosticBalloonRouter;
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.ide.browsers.BrowserLauncher;
@@ -373,19 +373,19 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             logRolloverNotifier = new LogRolloverNotifier(project);
         }
 
-        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
-        expectedArtifactCount.set(artifacts.size());
-        if (artifacts.isEmpty()) {
+        List<Deployment> deployments = configuration.getDeployments();
+        expectedArtifactCount.set(deployments.size());
+        if (deployments.isEmpty()) {
             deploymentLogger.logDeploymentStart(configurationName);
         } else {
-            for (DeploymentArtifact artifact : artifacts) {
-                deploymentLogger.logDeploymentStart(artifact.getDisplayName());
-                String contextName = resolveContextName(artifact.getContextPath());
-                contextToArtifactName.put(contextName, artifact.getDisplayName());
-                lifecycleListener.onArtifactDeploying(configurationName, artifact.getDisplayName());
+            for (Deployment deployment : deployments) {
+                String name = deployment.getDisplayName();
+                deploymentLogger.logDeploymentStart(name);
+                contextToArtifactName.put(resolveContextName(deployment.getContextPath()), name);
+                lifecycleListener.onArtifactDeploying(configurationName, name);
             }
         }
-        browserTargetContextName = resolveBrowserTargetContext(artifacts);
+        browserTargetContextName = resolveBrowserTargetContext(deployments);
     }
 
     private static String resolveContextName(@Nullable String contextPath) {
@@ -571,38 +571,38 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
     }
 
-    private @Nullable String resolveBrowserTargetContext(@NotNull List<DeploymentArtifact> artifacts) {
-        if (artifacts.isEmpty()) {
+    private @Nullable String resolveBrowserTargetContext(@NotNull List<Deployment> deployments) {
+        if (deployments.isEmpty()) {
             return null;
         }
 
-        // 1. Try matching the browser URL's context to a deployed artifact
+        // 1. Try matching the browser URL's context to a deployed entry
         String configuredUrl = configuration.getBrowserUrl();
         String contextFromUrl = extractContextNameFromBrowserUrl(configuredUrl);
         if (contextFromUrl != null) {
-            for (DeploymentArtifact artifact : artifacts) {
-                if (contextFromUrl.equals(resolveContextName(artifact.getContextPath()))) {
+            for (Deployment d : deployments) {
+                if (contextFromUrl.equals(resolveContextName(d.getContextPath()))) {
                     return contextFromUrl;
                 }
             }
         }
 
-        // 2. Single artifact — use it directly
-        if (artifacts.size() == 1) {
-            return resolveContextName(artifacts.get(0).getContextPath());
+        // 2. Single deployment — use it directly
+        if (deployments.size() == 1) {
+            return resolveContextName(deployments.get(0).getContextPath());
         }
 
-        // 3. Try matching the global context path to a deployed artifact
+        // 3. Try matching the global context path to a deployed entry
         String configuredContext = resolveContextName(configuration.getContextPath());
-        for (DeploymentArtifact artifact : artifacts) {
-            if (configuredContext.equals(resolveContextName(artifact.getContextPath()))) {
+        for (Deployment d : deployments) {
+            if (configuredContext.equals(resolveContextName(d.getContextPath()))) {
                 return configuredContext;
             }
         }
 
-        // 4. Fall back to the first artifact rather than returning null (which
+        // 4. Fall back to the first deployment rather than returning null (which
         //    silently prevents the browser from opening with no indication why)
-        String fallback = resolveContextName(artifacts.get(0).getContextPath());
+        String fallback = resolveContextName(deployments.get(0).getContextPath());
         LOG.warn("Browser URL context does not match any deployed artifact; " +
                 "falling back to first artifact's context: " + fallback);
         return fallback;
