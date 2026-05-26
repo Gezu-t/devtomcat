@@ -687,14 +687,20 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (!allDeployments.isEmpty()) {
             // Try to match deployments against IntelliJ Artifacts (Ultimate path).
             // On Community Edition, ArtifactManager exists but has zero configured
-            // artifacts, so findMatchingArtifact() returns null for every deployment.
+            // artifacts, so the typed dispatch returns null for every deployment.
             BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
-            for (DeploymentArtifact deployment : allDeployments) {
-                Artifact matched = findMatchingArtifact(deployment, artifactManager);
-                if (matched != null) {
-                    buildTask.addArtifact(matched);
+            List<Artifact> matched = TomcatReadActions.compute(() -> {
+                List<Artifact> out = new ArrayList<>();
+                for (DeploymentArtifact legacy : allDeployments) {
+                    if (legacy == null) continue;
+                    com.dev.idea.plugins.tomcat.model.Deployment typed =
+                            com.dev.idea.plugins.tomcat.model.DeploymentAdapter.toTyped(project, legacy);
+                    Artifact a = ArtifactMatchingUtils.findMatching(typed);
+                    if (a != null) out.add(a);
                 }
-            }
+                return out;
+            });
+            for (Artifact a : matched) buildTask.addArtifact(a);
 
             if (!buildTask.getArtifactPointers().isEmpty()) {
                 // Ultimate: IntelliJ Artifacts match — use native Build Artifacts task
@@ -836,13 +842,6 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
      *   <li>Base module name match (e.g. "myapp_war_exploded" ↔ "myapp:war exploded")</li>
      * </ol>
      */
-    @Nullable
-    private Artifact findMatchingArtifact(@Nullable DeploymentArtifact deployment,
-                                          @NotNull ArtifactManager artifactManager) {
-        Artifact[] allArtifacts = TomcatReadActions.compute(artifactManager::getArtifacts);
-        return ArtifactMatchingUtils.findMatchingArtifact(allArtifacts, deployment, LOG);
-    }
-
     /**
      * Locates the {@link ConfigurationSettingsEditorWrapper} by walking up the
      * Swing component hierarchy and querying each ancestor's DataContext.

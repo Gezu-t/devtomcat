@@ -454,29 +454,23 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 LOG.info("DevTomcat: Added default Build (Make) task to Before Launch");
             }
 
-            List<DeploymentArtifact> deploymentArtifacts = getDeployedArtifacts();
-            List<String> artifactDisplayNames = deploymentArtifacts.stream()
-                    .filter(a -> !a.getDisplayName().isBlank())
-                    .map(DeploymentArtifact::getDisplayName)
+            List<Deployment> deployments = getDeployments();
+            List<String> artifactDisplayNames = deployments.stream()
+                    .filter(d -> !d.getDisplayName().isBlank())
+                    .map(Deployment::getDisplayName)
                     .collect(Collectors.toList());
 
             // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager.
-            // ArtifactManager.getInstance() requires a read action — syncBeforeLaunchWithDeployments()
-            // may be called from background threads (e.g. configuration panel sync on non-EDT).
+            // ArtifactPointer.getArtifact() needs a read action; collect matches
+            // inside the read action, then mutate the task list outside.
             boolean ultimateArtifactTaskAdded = false;
             try {
-                // ArtifactManager.getInstance() and getArtifacts() both access the
-                // project model and require a read action. The read action covers
-                // only model access; list mutations happen outside.
                 List<Artifact> matchedArtifacts = TomcatReadActions.compute(() -> {
-                    if (deploymentArtifacts.isEmpty()) return Collections.<Artifact>emptyList();
-                    ArtifactManager artifactManager = ArtifactManager.getInstance(project);
+                    if (deployments.isEmpty()) return Collections.<Artifact>emptyList();
                     List<Artifact> matched = new ArrayList<>();
-                    for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
-                        Artifact a = findMatchingArtifact(artifactManager, deploymentArtifact);
-                        if (a != null) {
-                            matched.add(a);
-                        }
+                    for (Deployment d : deployments) {
+                        Artifact a = ArtifactMatchingUtils.findMatching(d);
+                        if (a != null) matched.add(a);
                     }
                     return matched;
                 });
@@ -544,19 +538,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         newTask.setArtifactNames(artifactNames);
         newTask.setEnabled(true);
         tasks.add(newTask);
-    }
-
-    /**
-     * Finds an IntelliJ Artifact that matches the given DeploymentArtifact.
-     * Uses the same cascade as {@link ArtifactReferenceRefresher} so renames that
-     * preserve the output path or base module name are still matched.
-     *
-     * <p><b>Must be called under a read action</b> (getArtifacts() accesses project model).
-     */
-    @Nullable
-    private Artifact findMatchingArtifact(@NotNull ArtifactManager artifactManager,
-                                          @NotNull DeploymentArtifact deploymentArtifact) {
-        return ArtifactMatchingUtils.findMatchingArtifact(artifactManager.getArtifacts(), deploymentArtifact, LOG);
     }
 
     // =====================================================================
