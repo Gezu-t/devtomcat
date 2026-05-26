@@ -435,13 +435,13 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
         try {
             ServerInfo serverInfo = extractServerInfo(catalinaJar);
             String name = nameGenerator != null ?
-                    nameGenerator.apply(serverInfo.serverInfo) :
-                    generateTomcatName(serverInfo.serverInfo);
+                    nameGenerator.apply(serverInfo.serverInfo()) :
+                    generateTomcatName(serverInfo.serverInfo());
 
             // Constructor: (String name, String version, String path)
-            TomcatInfo tomcatInfo = new TomcatInfo(name, serverInfo.serverNumber, tomcatHome);
+            TomcatInfo tomcatInfo = new TomcatInfo(name, serverInfo.serverNumber(), tomcatHome);
 
-            LOG.info("Created TomcatInfo: " + name + " (v" + serverInfo.serverNumber + ") at " + tomcatHome);
+            LOG.info("Created TomcatInfo: " + name + " (v" + serverInfo.serverNumber() + ") at " + tomcatHome);
             return Optional.of(tomcatInfo);
 
         } catch (IOException e) {
@@ -496,9 +496,9 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
         try {
             ServerInfo serverInfo = extractServerInfo(catalinaJar);
             String name = nameGenerator != null
-                    ? nameGenerator.apply(serverInfo.serverInfo)
-                    : generateTomcatName(serverInfo.serverInfo);
-            return Optional.of(new TomcatInfo(name, serverInfo.serverNumber, tomcatHome));
+                    ? nameGenerator.apply(serverInfo.serverInfo())
+                    : generateTomcatName(serverInfo.serverInfo());
+            return Optional.of(new TomcatInfo(name, serverInfo.serverNumber(), tomcatHome));
         } catch (IOException e) {
             if (logFailures) {
                 LOG.warn("Cannot create TomcatInfo for self-heal: failed to read version from "
@@ -562,7 +562,7 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
 
         List<String> existingNames = getInstance().getTomcatInfos().stream()
                 .map(TomcatInfo::getName)
-                .collect(Collectors.toList());
+                .toList();
 
         if (!existingNames.contains(baseName)) {
             return baseName;
@@ -649,16 +649,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     // INNER CLASS: ServerInfo
     // =====================================================================
 
-    /**
-     * Holder for server version information extracted from catalina.jar.
-     */
-    private static class ServerInfo {
-        final String serverInfo;
-        final String serverNumber;
-
-        ServerInfo(String serverInfo, String serverNumber) {
-            this.serverInfo = Objects.requireNonNull(serverInfo);
-            this.serverNumber = Objects.requireNonNull(serverNumber);
-        }
-    }
+    /** Holder for server version information extracted from {@code catalina.jar}. */
+    private record ServerInfo(@NotNull String serverInfo, @NotNull String serverNumber) {}
 }
