@@ -138,13 +138,21 @@ public class ArtifactSelectionHandler {
      * present in the deployment table.
      */
     private List<DeploymentArtifact> detectDeployables() {
-        List<DeploymentArtifact> modules = ProjectArtifactDetector.detectWebModules(project);
+        // ProjectArtifactDetector returns typed Deployments; adapt at the boundary
+        // because the rest of this handler (UI dialogs, table manager) still
+        // consumes legacy DeploymentArtifact. The full UI-tier migration moves
+        // that boundary upward.
+        List<DeploymentArtifact> modules = ProjectArtifactDetector.detectWebModules(project).stream()
+                .map(com.dev.idea.plugins.tomcat.model.DeploymentAdapter::toLegacy)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         LOG.info("Auto-detection: " + modules.size() + " web module(s) found");
         for (DeploymentArtifact m : modules) {
             LOG.info("  Web module: " + m.getName() + " [" + m.getType() + "] path=" + m.getPath());
         }
 
-        List<DeploymentArtifact> wars = ProjectArtifactDetector.scanForWarFiles(project);
+        List<DeploymentArtifact> wars = ProjectArtifactDetector.scanForWarFiles(project).stream()
+                .map(com.dev.idea.plugins.tomcat.model.DeploymentAdapter::toLegacy)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         LOG.info("Auto-detection: " + wars.size() + " WAR file(s)/exploded dir(s) found");
         for (DeploymentArtifact w : wars) {
             LOG.info("  WAR/Exploded: " + w.getName() + " [" + w.getType() + "] path=" + w.getPath());

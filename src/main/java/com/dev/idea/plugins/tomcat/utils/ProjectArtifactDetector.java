@@ -1,7 +1,10 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -18,23 +21,22 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Headless artifact detection for Tomcat deployments.
+ * Headless deployment detection for Tomcat.
  *
- * <p>Detects deployable web artifacts from IntelliJ's artifact system,
- * web modules, and build output directories (Gradle/Maven).
- *
- * <p>Detection priority (first tier with results wins):
+ * <p>Produces typed {@link Deployment} objects from one of three sources, in priority
+ * order:
  * <ol>
- *   <li>IntelliJ-configured web artifacts (Project Structure &rarr; Artifacts)</li>
- *   <li>Web modules with web roots (src/main/webapp, WEB-INF, etc.)</li>
- *   <li>WAR files in build output (build/libs, target)</li>
+ *   <li>IntelliJ-configured web artifacts → {@link ArtifactBackedDeployment}</li>
+ *   <li>Web modules with web roots → {@link ModuleBackedDeployment}</li>
+ *   <li>WAR files / exploded directories on disk → {@link ExternalFileDeployment}</li>
  * </ol>
  *
- * <p>This class is UI-free and safe to call from configuration initialization,
- * factory defaults, or any non-EDT context.
+ * <p>UI-free and safe to call from configuration initialization, factory defaults,
+ * or any non-EDT context (read-action handled internally).
  */
 public final class ProjectArtifactDetector {
 
@@ -42,24 +44,15 @@ public final class ProjectArtifactDetector {
 
     private ProjectArtifactDetector() {}
 
-    /**
-     * Detects all deployable artifacts in the project using a tiered strategy.
-     * Returns results from the highest-priority tier that produces matches.
-     *
-     * @param project the current project
-     * @return detected deployment artifacts (never null, may be empty)
-     */
     @NotNull
-    public static List<DeploymentArtifact> detect(@NotNull Project project) {
-        // Tier 1: IntelliJ-configured web artifacts (highest quality — user explicitly set these up)
-        List<DeploymentArtifact> artifacts = detectIntelliJWebArtifacts(project);
+    public static List<Deployment> detect(@NotNull Project project) {
+        List<Deployment> artifacts = detectIntelliJWebArtifacts(project);
         if (!artifacts.isEmpty()) {
             LOG.info("DevTomcat: Auto-detected " + artifacts.size() +
                     " IntelliJ web artifact(s) for project: " + project.getName());
             return artifacts;
         }
 
-        // Tier 2: Web modules with web roots (detected from project structure)
         artifacts = detectWebModules(project);
         if (!artifacts.isEmpty()) {
             LOG.info("DevTomcat: Auto-detected " + artifacts.size() +
@@ -67,7 +60,6 @@ public final class ProjectArtifactDetector {
             return artifacts;
         }
 
-        // Tier 3: WAR files in build output (Gradle/Maven artifacts)
         artifacts = scanForWarFiles(project);
         if (!artifacts.isEmpty()) {
             LOG.info("DevTomcat: Auto-detected " + artifacts.size() +
@@ -80,72 +72,65 @@ public final class ProjectArtifactDetector {
     }
 
     /**
-     * Detects IntelliJ-configured web artifacts (war, exploded-war, web-application).
-     * Filters out artifacts whose source module no longer exists (stale after rename).
+     * Detects IntelliJ-configured web artifacts as {@link ArtifactBackedDeployment}s.
+     * Filters out artifacts whose source module no longer exists.
      */
     @NotNull
-    public static List<DeploymentArtifact> detectIntelliJWebArtifacts(@NotNull Project project) {
-        return ApplicationManager.getApplication().runReadAction((Computable<List<DeploymentArtifact>>) () -> {
+    public static List<Deployment> detectIntelliJWebArtifacts(@NotNull Project project) {
+        return ApplicationManager.getApplication().runReadAction((Computable<List<Deployment>>) () -> {
             ArtifactManager artifactManager = getArtifactManager(project);
-            if (artifactManager == null) return Collections.<DeploymentArtifact>emptyList();
+            if (artifactManager == null) return Collections.<Deployment>emptyList();
 
             Set<String> activeModules = getActiveModuleNames(project);
 
-            List<DeploymentArtifact> results = new ArrayList<>();
+            List<Deployment> results = new ArrayList<>();
             for (Artifact artifact : artifactManager.getArtifacts()) {
                 if (!isWebArtifact(artifact)) continue;
                 if (!hasActiveSourceModule(artifact.getName(), activeModules)) continue;
 
-                String typeId = artifact.getArtifactType().getId().toLowerCase();
-                String type = typeId.contains("exploded")
-                        ? DeploymentArtifact.TYPE_EXPLODED
-                        : DeploymentArtifact.TYPE_WAR;
-
-                String outputPath = artifact.getOutputFilePath();
-                DeploymentArtifact deployment = new DeploymentArtifact(
+                results.add(ArtifactBackedDeployment.ofName(
+                        project,
                         artifact.getName(),
-                        outputPath != null ? outputPath : "",
-                        type
-                );
-                deployment.setContextPath(ContextPathUtils.generateContextPath(artifact.getName()));
-                results.add(deployment);
+                        ContextPathUtils.generateContextPath(artifact.getName())));
             }
             return deduplicate(results);
         });
     }
 
     /**
-     * Detects web modules with web root directories (src/main/webapp, WEB-INF, etc.).
+     * Detects web modules with web root directories as {@link ModuleBackedDeployment}s.
      */
     @NotNull
-    public static List<DeploymentArtifact> detectWebModules(@NotNull Project project) {
-        return ApplicationManager.getApplication().runReadAction((Computable<List<DeploymentArtifact>>) () -> {
-            List<DeploymentArtifact> results = new ArrayList<>();
+    public static List<Deployment> detectWebModules(@NotNull Project project) {
+        return ApplicationManager.getApplication().runReadAction((Computable<List<Deployment>>) () -> {
+            List<Deployment> results = new ArrayList<>();
 
             try {
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     if (!TomcatModuleUtils.isWebModule(module)) continue;
 
+                    String contextPath = TomcatModuleUtils.extractContextPath(module);
                     List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(module);
                     if (webRoots.isEmpty()) {
-                        // Use module content root as fallback for web modules without explicit web roots
                         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
                         if (contentRoots.length > 0) {
-                            results.add(createModuleArtifact(module, contentRoots[0].getPath()));
+                            results.add(ModuleBackedDeployment.ofName(
+                                    project, module.getName(),
+                                    Path.of(contentRoots[0].getPath()),
+                                    contextPath, /* exploded */ true));
                         }
                     } else {
                         for (VirtualFile webRoot : webRoots) {
-                            String name = module.getName();
-                            if (webRoots.size() > 1) {
-                                name = module.getName() + " (" + webRoot.getName() + ")";
-                            }
-                            DeploymentArtifact deployment = new DeploymentArtifact(
-                                    name,
-                                    webRoot.getPath(),
-                                    DeploymentArtifact.TYPE_EXPLODED
-                            );
-                            deployment.setContextPath(TomcatModuleUtils.extractContextPath(module));
-                            results.add(deployment);
+                            // The display name on ModuleBackedDeployment comes from the
+                            // ModulePointer; the multi-webroot disambiguation suffix
+                            // ("(webroot-name)") that legacy applied to a free-form
+                            // string can't ride along the pointer. Multi-webroot is rare
+                            // in practice — pick the first match for now.
+                            results.add(ModuleBackedDeployment.ofName(
+                                    project, module.getName(),
+                                    Path.of(webRoot.getPath()),
+                                    contextPath, /* exploded */ true));
+                            break;
                         }
                     }
                 }
@@ -158,29 +143,20 @@ public final class ProjectArtifactDetector {
     }
 
     /**
-     * Scans Gradle and Maven output directories for WAR files.
-     *
-     * <p>Checks the following locations at both project and module level:
-     * <ul>
-     *   <li>{@code build/libs} — Gradle default WAR output</li>
-     *   <li>{@code build/distributions} — Gradle distribution plugin</li>
-     *   <li>{@code target} — Maven default output</li>
-     *   <li>{@code out/artifacts} — IntelliJ build output</li>
-     * </ul>
+     * Scans Gradle and Maven output directories for WAR files and exploded WARs,
+     * returning {@link ExternalFileDeployment}s.
      */
     @NotNull
-    public static List<DeploymentArtifact> scanForWarFiles(@NotNull Project project) {
-        List<DeploymentArtifact> results = new ArrayList<>();
+    public static List<Deployment> scanForWarFiles(@NotNull Project project) {
+        List<Deployment> results = new ArrayList<>();
         String basePath = project.getBasePath();
         if (basePath == null) return results;
 
-        // Project-level build output
         scanWarDirectory(new File(basePath, "build/libs"), results);
         scanWarDirectory(new File(basePath, "build/distributions"), results);
         scanWarDirectory(new File(basePath, "target"), results);
         scanWarDirectory(new File(basePath, "out/artifacts"), results);
 
-        // Module-level build output (requires read access for ModuleManager)
         try {
             List<String> modulePaths = ApplicationManager.getApplication().runReadAction((Computable<List<String>>) () -> {
                 List<String> paths = new ArrayList<>();
@@ -204,13 +180,7 @@ public final class ProjectArtifactDetector {
         return deduplicate(results);
     }
 
-    /**
-     * Checks whether an IntelliJ Artifact represents a deployable web artifact.
-     *
-     * <p>Matches by artifact type ID and presentable name against known web artifact
-     * patterns across IntelliJ Ultimate and Community editions. Defensively handles
-     * null type IDs and names from third-party plugins or future IntelliJ versions.
-     */
+    /** Same web-artifact-type detection as before, on the platform {@link Artifact}. */
     public static boolean isWebArtifact(@NotNull Artifact artifact) {
         try {
             ArtifactType type = artifact.getArtifactType();
@@ -219,7 +189,6 @@ public final class ProjectArtifactDetector {
             String typeId = type.getId();
             if (typeId != null) {
                 String lower = typeId.toLowerCase();
-                // Covers: war, exploded-war, web-application, web-application-exploded
                 if (lower.contains("war") || lower.contains("web-application")) {
                     return true;
                 }
@@ -228,7 +197,6 @@ public final class ProjectArtifactDetector {
             String typeName = type.getPresentableName();
             if (typeName != null) {
                 String lower = typeName.toLowerCase();
-                // Covers: "Web Application: Archive", "Web Application: Exploded", "WAR"
                 if (lower.contains("web application") || lower.contains("war")) {
                     return true;
                 }
@@ -242,20 +210,19 @@ public final class ProjectArtifactDetector {
     }
 
     /**
-     * Filters a list of artifacts to exclude those already present in an existing collection.
-     * Matches by artifact name (case-insensitive).
+     * Filters a list of typed deployments to exclude those whose display name
+     * (case-insensitive) matches an existing entry.
      */
     @NotNull
-    public static List<DeploymentArtifact> filterExisting(
-            @NotNull List<DeploymentArtifact> candidates,
-            @NotNull Collection<String> existingNames) {
+    public static List<Deployment> filterExisting(@NotNull List<Deployment> candidates,
+                                                  @NotNull Collection<String> existingNames) {
         Set<String> lowerNames = new HashSet<>();
         for (String name : existingNames) {
             lowerNames.add(name.toLowerCase());
         }
-        List<DeploymentArtifact> filtered = new ArrayList<>();
-        for (DeploymentArtifact candidate : candidates) {
-            if (!lowerNames.contains(candidate.getName().toLowerCase())) {
+        List<Deployment> filtered = new ArrayList<>();
+        for (Deployment candidate : candidates) {
+            if (!lowerNames.contains(candidate.getDisplayName().toLowerCase())) {
                 filtered.add(candidate);
             }
         }
@@ -266,9 +233,6 @@ public final class ProjectArtifactDetector {
     // Private helpers
     // =====================================================================
 
-    /**
-     * Returns the lowercase names of all modules currently in the project.
-     */
     @NotNull
     private static Set<String> getActiveModuleNames(@NotNull Project project) {
         Set<String> names = new HashSet<>();
@@ -282,10 +246,6 @@ public final class ProjectArtifactDetector {
         return names;
     }
 
-    /**
-     * Checks whether an artifact name corresponds to a module that currently exists.
-     * Returns true (keep) when the base name is empty or matches a current module.
-     */
     private static boolean hasActiveSourceModule(@NotNull String artifactName,
                                                  @NotNull Set<String> activeModuleNames) {
         String baseName = ContextPathUtils.extractBaseModuleName(artifactName).toLowerCase();
@@ -302,18 +262,7 @@ public final class ProjectArtifactDetector {
         }
     }
 
-    @NotNull
-    private static DeploymentArtifact createModuleArtifact(@NotNull Module module, @NotNull String path) {
-        DeploymentArtifact deployment = new DeploymentArtifact(
-                module.getName(),
-                path,
-                DeploymentArtifact.TYPE_EXPLODED
-        );
-        deployment.setContextPath(TomcatModuleUtils.extractContextPath(module));
-        return deployment;
-    }
-
-    private static void scanWarDirectory(@NotNull File dir, @NotNull List<DeploymentArtifact> results) {
+    private static void scanWarDirectory(@NotNull File dir, @NotNull List<Deployment> results) {
         if (!dir.isDirectory()) return;
 
         File[] entries = dir.listFiles();
@@ -321,37 +270,25 @@ public final class ProjectArtifactDetector {
 
         for (File entry : entries) {
             if (entry.isFile() && entry.getName().toLowerCase().endsWith(".war")) {
-                DeploymentArtifact deployment = new DeploymentArtifact(
-                        entry.getName(),
-                        entry.getAbsolutePath(),
-                        DeploymentArtifact.TYPE_WAR
-                );
-                deployment.setContextPath(ContextPathUtils.generateContextPath(entry.getName()));
-                results.add(deployment);
+                results.add(new ExternalFileDeployment(
+                        Path.of(entry.getAbsolutePath()),
+                        ContextPathUtils.generateContextPath(entry.getName()),
+                        /* exploded */ false));
             } else if (entry.isDirectory()) {
-                // Check one level of subdirectories (e.g., out/artifacts/myapp_war/)
-                // for both WAR files and exploded WAR directories (containing WEB-INF)
                 File webInf = new File(entry, TomcatConstants.WEB_INF);
                 if (webInf.isDirectory()) {
-                    DeploymentArtifact deployment = new DeploymentArtifact(
-                            entry.getName(),
-                            entry.getAbsolutePath(),
-                            DeploymentArtifact.TYPE_EXPLODED
-                    );
-                    deployment.setContextPath(ContextPathUtils.generateContextPath(entry.getName()));
-                    results.add(deployment);
+                    results.add(new ExternalFileDeployment(
+                            Path.of(entry.getAbsolutePath()),
+                            ContextPathUtils.generateContextPath(entry.getName()),
+                            /* exploded */ true));
                 } else {
-                    // Scan subdirectory for WAR files
                     File[] subWarFiles = entry.listFiles((d, name) -> name.toLowerCase().endsWith(".war"));
                     if (subWarFiles != null) {
                         for (File war : subWarFiles) {
-                            DeploymentArtifact deployment = new DeploymentArtifact(
-                                    war.getName(),
-                                    war.getAbsolutePath(),
-                                    DeploymentArtifact.TYPE_WAR
-                            );
-                            deployment.setContextPath(ContextPathUtils.generateContextPath(war.getName()));
-                            results.add(deployment);
+                            results.add(new ExternalFileDeployment(
+                                    Path.of(war.getAbsolutePath()),
+                                    ContextPathUtils.generateContextPath(war.getName()),
+                                    /* exploded */ false));
                         }
                     }
                 }
@@ -360,16 +297,13 @@ public final class ProjectArtifactDetector {
     }
 
     /**
-     * Deduplicates by type+path (case-insensitive) while preserving insertion order.
+     * Deduplicates while preserving insertion order. Equality is the typed
+     * {@code Deployment.equals()} (Artifact-name, Module-name + output-path,
+     * or external Path + context).
      */
     @NotNull
-    private static List<DeploymentArtifact> deduplicate(@NotNull List<DeploymentArtifact> artifacts) {
-        Map<String, DeploymentArtifact> unique = new LinkedHashMap<>();
-        for (DeploymentArtifact item : artifacts) {
-            if (item == null) continue;
-            String key = (item.getType() + "|" + item.getPath()).toLowerCase();
-            unique.putIfAbsent(key, item);
-        }
-        return new ArrayList<>(unique.values());
+    private static List<Deployment> deduplicate(@NotNull List<Deployment> deployments) {
+        LinkedHashSet<Deployment> unique = new LinkedHashSet<>(deployments);
+        return new ArrayList<>(unique);
     }
 }

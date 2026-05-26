@@ -1,6 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.PsiTestUtil;
@@ -14,17 +14,18 @@ public class ProjectArtifactDetectorPlatformTest extends BasePlatformTestCase {
         VirtualFile webRoot = createWebRoot();
         myFixture.addFileToProject("build/libs/" + getModule().getName() + ".war", "war");
 
-        List<DeploymentArtifact> detected = ProjectArtifactDetector.detect(getProject());
+        List<Deployment> detected = ProjectArtifactDetector.detect(getProject());
 
         assertFalse(detected.isEmpty());
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, detected.get(0).getType());
-        assertEquals(webRoot.getPath(), detected.get(0).getPath());
+        assertTrue("module-tier should produce an exploded deployment",
+                detected.get(0).isExploded());
+        assertEquals(webRoot.getPath(), detected.get(0).getResolvedPath().toString());
     }
 
     public void testDetectWebModulesReturnsEmptyForNonWebProject() {
         myFixture.addFileToProject("src/main/java/com/example/App.java", "package com.example; class App {}");
 
-        List<DeploymentArtifact> detected = ProjectArtifactDetector.detectWebModules(getProject());
+        List<Deployment> detected = ProjectArtifactDetector.detectWebModules(getProject());
 
         assertTrue(detected.isEmpty());
     }
@@ -32,11 +33,11 @@ public class ProjectArtifactDetectorPlatformTest extends BasePlatformTestCase {
     public void testDetectWebModulesReturnsNormalizedContextPath() throws Exception {
         createWebRoot();
 
-        List<DeploymentArtifact> detected = ProjectArtifactDetector.detectWebModules(getProject());
+        List<Deployment> detected = ProjectArtifactDetector.detectWebModules(getProject());
 
         assertEquals(1, detected.size());
         assertEquals(TomcatModuleUtils.extractContextPath(getModule()), detected.get(0).getContextPath());
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, detected.get(0).getType());
+        assertTrue(detected.get(0).isExploded());
     }
 
     @Override
