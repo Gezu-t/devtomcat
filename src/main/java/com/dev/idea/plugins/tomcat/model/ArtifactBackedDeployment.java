@@ -7,6 +7,7 @@ import com.intellij.packaging.artifacts.ArtifactPointerManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
@@ -56,7 +57,13 @@ public final class ArtifactBackedDeployment implements Deployment {
 
     @Override
     public boolean isValid() {
-        return artifactPointer.getArtifact() != null;
+        // Match the semantic the call-sites assume: "ready to deploy right now".
+        // ModuleBackedDeployment and ExternalFileDeployment both check the output
+        // exists on disk; this subtype has to as well, or a registered-but-unbuilt
+        // Artifact (e.g. after `mvn clean`) passes the validator and fails at
+        // mid-launch when Tomcat reads a context.xml pointing at a missing file.
+        Path path = getResolvedPath();
+        return path != null && Files.exists(path);
     }
 
     public @NotNull ArtifactPointer getArtifactPointer() { return artifactPointer; }

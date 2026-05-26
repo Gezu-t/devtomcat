@@ -152,6 +152,31 @@ class DeploymentTest {
         }
 
         @Test
+        @DisplayName("isValid requires both artifact presence AND output file existence on disk")
+        void isValidRequiresArtifactAndFile(@TempDir Path dir) throws Exception {
+            Path present = Files.createDirectory(dir.resolve("built-exploded"));
+            Path absent = dir.resolve("not-built-yet");
+
+            Artifact builtArtifact = mock(Artifact.class);
+            when(builtArtifact.getOutputFilePath()).thenReturn(present.toString());
+            Artifact unbuiltArtifact = mock(Artifact.class);
+            when(unbuiltArtifact.getOutputFilePath()).thenReturn(absent.toString());
+
+            ArtifactPointer ptrBuilt = mock(ArtifactPointer.class);
+            when(ptrBuilt.getArtifactName()).thenReturn("a");
+            when(ptrBuilt.getArtifact()).thenReturn(builtArtifact);
+
+            ArtifactPointer ptrUnbuilt = mock(ArtifactPointer.class);
+            when(ptrUnbuilt.getArtifactName()).thenReturn("a");
+            when(ptrUnbuilt.getArtifact()).thenReturn(unbuiltArtifact);
+
+            assertTrue(new ArtifactBackedDeployment(ptrBuilt, "/c").isValid(),
+                    "artifact registered + output exists on disk → valid");
+            assertFalse(new ArtifactBackedDeployment(ptrUnbuilt, "/c").isValid(),
+                    "artifact registered but output missing (e.g. clean since last build) → invalid");
+        }
+
+        @Test
         @DisplayName("isExploded reads from artifact type id (substring match)")
         void isExplodedFromTypeId() {
             ArtifactType explodedType = mock(ArtifactType.class);
