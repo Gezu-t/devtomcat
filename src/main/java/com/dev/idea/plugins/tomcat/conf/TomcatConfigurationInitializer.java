@@ -7,15 +7,12 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Objects;
-
 /** Handles initialization and dynamic default configuration for run configs. */
 public class TomcatConfigurationInitializer {
 
     private static final Logger LOG = Logger.getInstance(TomcatConfigurationInitializer.class);
 
     public static void initialize(@NotNull TomcatRunConfiguration config) {
-        Objects.requireNonNull(config, "Configuration cannot be null");
         try {
             applyDynamicDefaults(config);
             LOG.debug("Initialized configuration: {}", config.getName());

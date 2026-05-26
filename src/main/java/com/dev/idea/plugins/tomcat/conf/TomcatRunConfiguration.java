@@ -42,7 +42,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -239,7 +238,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     @Override
     public void writeExternal(@NotNull Element element) throws WriteExternalException {
-        Objects.requireNonNull(element, "Element cannot be null");
         try {
             super.writeExternal(element);
             TomcatConfigurationSerializer.write(this, element);
@@ -264,7 +262,6 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
 
     @Override
     public void readExternal(@NotNull Element element) throws InvalidDataException {
-        Objects.requireNonNull(element, "Element cannot be null");
         try {
             super.readExternal(element);
             TomcatConfigurationSerializer.read(this, element);
@@ -429,6 +426,9 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
      * NOT from {@code applyEditorTo()} (panel's doApply overwrites) or
      * {@code writeExternal()} (serialization should be read-only).</p>
      */
+    // setBeforeRunTasks (and the BeforeRunTask collection generally) is declared
+    // raw on the platform API; we mirror that rawness here rather than fighting
+    // an unchecked cast at every call site.
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void syncBeforeLaunchWithDeployments() {
         try {
@@ -518,6 +518,9 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
      * task is appended. This keeps the "Build N artifact(s)" label current whenever the
      * Deployment tab is saved.
      */
+    // Same rationale as syncBeforeLaunchWithDeployments — BeforeRunTask is parameterised
+    // but the platform's task lists are stored raw, so we accept raw List<BeforeRunTask>
+    // at the boundary rather than synthesising a wildcard we can't usefully exploit.
     @SuppressWarnings("rawtypes")
     private void syncTomcatBuildArtifactsTask(@NotNull List<BeforeRunTask> tasks,
                                                @NotNull List<String> artifactNames) {

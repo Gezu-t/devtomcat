@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
@@ -112,7 +111,6 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_LOGS_SEEDED = "logsSeeded";
 
     public static void write(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
-        Objects.requireNonNull(config, "Configuration cannot be null");
         write(config.getConfigData(), element);
         // docBase lives on TomcatRunConfiguration (not ConfigData) — used by
         // TomcatRunConfigurationProducer to match configs to web roots.
@@ -123,9 +121,6 @@ public class TomcatConfigurationSerializer {
     }
 
     public static void write(@NotNull TomcatConfigurationData data, @NotNull Element element) {
-        Objects.requireNonNull(data, "Configuration data cannot be null");
-        Objects.requireNonNull(element, "Element cannot be null");
-
         PortConfig pc = data.getPortConfig();
         writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
         writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
@@ -285,7 +280,6 @@ public class TomcatConfigurationSerializer {
         element.addContent(tomcat);
     }
     public static void read(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
-        Objects.requireNonNull(config, "Configuration cannot be null");
         read(config.getConfigData(), element);
         // Restore docBase (used by TomcatRunConfigurationProducer for config matching)
         String docBase = element.getAttributeValue(ATTR_DOC_BASE);
@@ -303,9 +297,6 @@ public class TomcatConfigurationSerializer {
     }
 
     public static void read(@NotNull TomcatConfigurationData data, @NotNull Element element) {
-        Objects.requireNonNull(data, "Configuration data cannot be null");
-        Objects.requireNonNull(element, "Element cannot be null");
-
         PortConfig pc = data.getPortConfig();
         readInt(element, ATTR_HTTP_PORT, pc::setHttp);
         readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);

@@ -32,7 +32,6 @@ package com.dev.idea.plugins.tomcat.conf;
              * Called by {@link TomcatRunConfiguration#checkConfiguration()}.
              */
             public static void validate(@NotNull TomcatRunConfiguration config) throws RuntimeConfigurationException {
-                Objects.requireNonNull(config, "Configuration cannot be null");
 
                 try {
                     LOG.debug("Validating configuration: " + config.getName());
@@ -73,7 +72,6 @@ package com.dev.idea.plugins.tomcat.conf;
              * Testable without IntelliJ Project.
              */
             public static void validate(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
-                Objects.requireNonNull(data, "Configuration data cannot be null");
                 validateTomcatServer(data);
                 validatePortConfiguration(data);
                 validateContextPath(data);
@@ -254,6 +252,10 @@ package com.dev.idea.plugins.tomcat.conf;
                 // because LocalDeploymentStrategy would throw at deploy time and we
                 // want the editor's Apply button to refuse it earlier with a clear
                 // attribution to the offending artifact.
+                // Duplicate detection only matters when there are 2+ artifacts to compare.
+                // The traversal/path-validity branch above runs unconditionally so even a
+                // single-artifact config rejects '..' / '\' / ':' at Apply time.
+                final boolean canHaveDuplicates = artifacts.size() >= 2;
                 Map<String, DeploymentArtifact> seenByContextName = new HashMap<>();
                 for (DeploymentArtifact artifact : artifacts) {
                     if (artifact == null) continue;
@@ -269,7 +271,7 @@ package com.dev.idea.plugins.tomcat.conf;
                                 "Invalid context path on artifact '" + artifact.getDisplayName()
                                         + "': " + e.getMessage());
                     }
-                    if (artifacts.size() < 2) continue;
+                    if (!canHaveDuplicates) continue;
                     DeploymentArtifact previous = seenByContextName.putIfAbsent(resolvedName, artifact);
                     if (previous != null) {
                         String displayPath = resolvedName.equals(TomcatConstants.ROOT_CONTEXT_NAME)

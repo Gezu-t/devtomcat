@@ -14,7 +14,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Reconciles legacy {@link DeploymentArtifact} storage against the current
@@ -80,7 +79,6 @@ public final class ArtifactReferenceRefresher {
 
     @NotNull
     public static RefreshResult refresh(@NotNull TomcatRunConfiguration config) {
-        Objects.requireNonNull(config, "Configuration cannot be null");
         return TomcatReadActions.compute(() ->
                 refreshInternal(config.getProject(),
                         config.getConfigData().getDeploymentConfig().getArtifacts(),
@@ -95,8 +93,6 @@ public final class ArtifactReferenceRefresher {
     @NotNull
     public static RefreshResult refreshInPlace(@NotNull Project project,
                                                @NotNull List<DeploymentArtifact> artifacts) {
-        Objects.requireNonNull(project, "Project cannot be null");
-        Objects.requireNonNull(artifacts, "Artifacts list cannot be null");
         if (artifacts.isEmpty()) return RefreshResult.EMPTY;
         return TomcatReadActions.compute(() -> refreshInternal(project, artifacts, null));
     }

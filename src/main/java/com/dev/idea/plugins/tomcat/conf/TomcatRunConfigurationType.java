@@ -19,12 +19,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import com.intellij.icons.AllIcons;
+
 import javax.swing.*;
 import java.util.List;
 import java.util.Objects;
+
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 
-/** Registers Tomcat as a run configuration type, provides Local/Remote factories. */
+/**
+ * Registers Tomcat as a run configuration type, provides Local/Remote factories.
+ */
 public class TomcatRunConfigurationType implements ConfigurationType {
 
     private static final Logger LOG = Logger.getInstance(TomcatRunConfigurationType.class);
@@ -134,7 +138,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
 
         private final String factoryName;
 
-                protected TomcatConfigurationFactory(@NotNull ConfigurationType type, @NotNull String name) {
+        protected TomcatConfigurationFactory(@NotNull ConfigurationType type, @NotNull String name) {
             super(type);
             this.factoryName = name;
         }
@@ -148,8 +152,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         @Override
         @NotNull
         public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
-            Objects.requireNonNull(project, "Project cannot be null");
-
             TomcatRunConfiguration config = new TomcatRunConfiguration(project, this, "Tomcat");
             try {
                 applyDynamicDefaults(config);
@@ -195,19 +197,15 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         @SuppressWarnings("rawtypes")
         @Override
         public void configureBeforeRunTaskDefaults(Key<? extends BeforeRunTask> providerID,
-                                                    BeforeRunTask task) {
+                                                   BeforeRunTask task) {
             // Keep the default "Build" (Make) task enabled so new configurations
             // always have at least a compile step in Before Launch.
             super.configureBeforeRunTaskDefaults(providerID, task);
         }
 
         protected void applyDynamicDefaults(@NotNull TomcatRunConfiguration config) {
-            Objects.requireNonNull(config, "Configuration cannot be null");
-
             try {
                 TomcatConfigurationData data = config.getConfigData();
-                Objects.requireNonNull(data, "Configuration data cannot be null");
-
                 PortConfig portConfig = data.getPortConfig();
                 if (portConfig == null) {
                     LOG.warn("Port configuration is null, creating new one");
@@ -333,8 +331,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         }
 
         private void autoSelectTomcatServer(@NotNull TomcatRunConfiguration config) {
-            Objects.requireNonNull(config, "Configuration cannot be null");
-
             try {
                 TomcatServerManagerState manager = TomcatServerManagerState.getInstance();
                 if (manager == null) {
@@ -369,8 +365,6 @@ public class TomcatRunConfigurationType implements ConfigurationType {
         @Override
         @NotNull
         public RunConfiguration createConfiguration(@Nullable String name, @NotNull RunConfiguration template) {
-            Objects.requireNonNull(template, "Template configuration cannot be null");
-
             String configName = StringUtil.notNullize(name, "Tomcat");
             LOG.debug("Creating new configuration: " + configName);
 

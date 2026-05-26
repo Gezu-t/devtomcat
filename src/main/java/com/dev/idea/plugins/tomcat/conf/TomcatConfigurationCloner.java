@@ -8,7 +8,6 @@ package com.dev.idea.plugins.tomcat.conf;
 
          import java.util.LinkedHashMap;
          import java.util.Map;
-         import java.util.Objects;
 
          /**
           * Dev Tomcat Configuration Cloner
@@ -21,8 +20,6 @@ package com.dev.idea.plugins.tomcat.conf;
 
              @NotNull
              public static TomcatRunConfiguration clone(@NotNull TomcatRunConfiguration original) {
-                 Objects.requireNonNull(original, "Configuration cannot be null");
-
                  try {
                      LOG.debug("Cloning configuration: " + original.getName());
 
