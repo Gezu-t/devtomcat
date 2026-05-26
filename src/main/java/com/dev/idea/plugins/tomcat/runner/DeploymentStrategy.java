@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
@@ -65,13 +65,13 @@ public interface DeploymentStrategy {
      * may pass {@code null}; emission then falls back to the modern shape.
      */
     @NotNull
-    static String buildContextXml(@NotNull DeploymentArtifact artifact,
+    static String buildContextXml(@NotNull Deployment deployment,
                                   @NotNull Path artifactPath,
                                   boolean preserveSessions,
                                   @NotNull Project project,
                                   @Nullable TomcatInfo tomcatInfo,
                                   @Nullable TomcatDeploymentLogger logger) {
         return LocalDeploymentStrategy.buildContextXml(
-                artifact, artifactPath, preserveSessions, project, tomcatInfo, logger);
+                deployment, artifactPath, preserveSessions, project, tomcatInfo, logger);
     }
 }

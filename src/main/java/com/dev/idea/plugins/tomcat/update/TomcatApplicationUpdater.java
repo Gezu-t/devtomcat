@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
@@ -418,11 +417,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // Pass the configured TomcatInfo so the generator can omit the
                     // <Resources> block on Tomcat 7 (PreResources is a Tomcat 8 feature).
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
-                    // DeploymentStrategy.buildContextXml still consumes a legacy
-                    // artifact; adapt at the call boundary (Phase 4d migrates it).
-                    DeploymentArtifact legacy = DeploymentAdapter.toLegacy(deployment);
                     String contextXml = DeploymentStrategy.buildContextXml(
-                            legacy, artifactPath, preserveSessions, project,
+                            deployment, artifactPath, preserveSessions, project,
                             configuration.getTomcatInfo(), logger);
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     logger.logServerInfo("Redeployed (context rewrite): " + deployment.getDisplayName());
@@ -499,15 +495,13 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      */
     /**
      * @deprecated Use {@link #warnAboutWarDeploymentsIfPresent}; this overload
-     * adapts via {@link DeploymentAdapter#toTyped} for the few callers still
-     * holding legacy lists.
+     * keeps the legacy filter path for callers still holding
+     * {@link DeploymentArtifact} lists. Forwards to a shared emitter once the
+     * WAR-name list is built.
      */
     @Deprecated(forRemoval = true)
     public static void warnAboutWarArtifactsIfPresent(@NotNull List<DeploymentArtifact> artifacts,
                                                       @NotNull TomcatDeploymentLogger logger) {
-        // toTyped needs a Project for ARTIFACT/MODULE sources; for the WAR-name
-        // scan we only need legacy fields, so do the filtering here without
-        // going through the adapter.
         java.util.List<String> warNames = new java.util.ArrayList<>();
         for (DeploymentArtifact a : artifacts) {
             if (a != null && DeploymentArtifact.TYPE_WAR.equals(a.getType())) {

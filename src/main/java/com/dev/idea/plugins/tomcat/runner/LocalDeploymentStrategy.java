@@ -2,13 +2,13 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
+import com.dev.idea.plugins.tomcat.update.DeployedClassesSync;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
-import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
@@ -16,7 +16,6 @@ import com.intellij.execution.configurations.JavaParameters;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
@@ -341,14 +340,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                         + (artifactPath != null ? artifactPath : deployment.getDisplayName()));
             }
 
-            // buildContextXml + the legacy-artifact-driven model-snapshot path still
-            // run off DeploymentArtifact; adapt at the call boundary so the deeper
-            // helpers can migrate in their own commit.
-            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(deployment);
-
             try {
                 if (deployment.isExploded() || Files.isDirectory(artifactPath)) {
-                    String contextXml = buildContextXml(legacy, artifactPath, preserveSessions,
+                    String contextXml = buildContextXml(deployment, artifactPath, preserveSessions,
                             project, configuration.getTomcatInfo(), logger);
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(
                             confCatalinaLocalhost, contextName);
@@ -391,13 +385,13 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     @NotNull
-    static String buildContextXml(@NotNull DeploymentArtifact artifact,
+    static String buildContextXml(@NotNull Deployment deployment,
                                   @NotNull Path artifactPath,
                                   boolean preserveSessions,
                                   @NotNull Project project,
                                   @Nullable TomcatInfo tomcatInfo,
                                   @Nullable TomcatDeploymentLogger logger) {
-        String extraResources = buildExtraResourcesXml(artifact, artifactPath, project, tomcatInfo, logger);
+        String extraResources = buildExtraResourcesXml(deployment, artifactPath, project, tomcatInfo, logger);
         String jarScanFilter = buildJarScanFilter(artifactPath, tomcatInfo, logger);
 
         StringBuilder xml = new StringBuilder();
@@ -740,7 +734,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * their Maven artifactId.
      */
     @NotNull
-    private static String buildExtraResourcesXml(@NotNull DeploymentArtifact artifact,
+    private static String buildExtraResourcesXml(@NotNull Deployment deployment,
                                           @NotNull Path artifactPath,
                                           @NotNull Project project,
                                           @Nullable TomcatInfo tomcatInfo,
@@ -755,7 +749,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 logger.logServerInfo(
                         "Tomcat " + tomcatInfo.getMajorVersion()
                                 + " does not support <PreResources>/<PostResources> (added in Tomcat 8). "
-                                + "Multi-module classpath additions for '" + artifact.getName()
+                                + "Multi-module classpath additions for '" + deployment.getDisplayName()
                                 + "' will not be applied. Package any required JARs into "
                                 + "WEB-INF/lib if your application depends on them.");
             }
@@ -767,9 +761,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // is a plain Java object (Module reference + String maps/lists); no further model
         // access is needed and no threading constraint applies to the rest of this method.
         ArtifactModelSnapshot snapshot = TomcatReadActions.compute(
-                () -> collectModelSnapshot(artifact, project));
+                () -> collectModelSnapshot(deployment, project));
         if (snapshot == null) {
-            LOG.info("No module found for artifact '" + artifact.getName() + "', skipping extra classpath");
+            LOG.info("No module found for '" + deployment.getDisplayName() + "', skipping extra classpath");
             return "";
         }
 
@@ -908,7 +902,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         }
 
         LOG.info("Added " + extraDirs.size() + " class dirs and " + extraJars.size() +
-                " JARs as extra resources for artifact '" + artifact.getName() + "'");
+                " JARs as extra resources for '" + deployment.getDisplayName() + "'");
 
         // Single consolidated warning instead of one message per module to keep the console clean
         if (!skippedModules.isEmpty() && logger != null) {
@@ -1127,12 +1121,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * pipeline. After this method returns the caller holds only plain Java values and may operate
      * on any thread without further read-action constraints.
      *
-     * @return a fully populated snapshot, or {@code null} if no module can be found for the artifact
+     * @return a fully populated snapshot, or {@code null} if no module can be resolved
      */
     @Nullable
-    private static ArtifactModelSnapshot collectModelSnapshot(@NotNull DeploymentArtifact artifact,
+    private static ArtifactModelSnapshot collectModelSnapshot(@NotNull Deployment deployment,
                                                               @NotNull Project project) {
-        Module module = resolveModuleForArtifact(artifact, project);
+        Module module = resolveModuleForDeployment(deployment, project);
         if (module == null) return null;
 
         // Build dependency module output path → artifact name map
@@ -1218,85 +1212,41 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Finds the IntelliJ Module associated with a deployment artifact.
-     * Tries: artifact name match via ArtifactManager, name-based module lookup,
-     * path-based matching, and web module fallback.
+     * Resolves the owning IntelliJ Module via the typed {@link Deployment}
+     * hierarchy — same shape as Ultimate's {@code DeploymentSource} dispatch.
+     * No string-matching anywhere: {@link ArtifactBackedDeployment} walks the
+     * artifact's packaging tree for its first {@code ModulePackagingElement};
+     * {@link ModuleBackedDeployment} returns its pointer's module directly;
+     * external deployments have no project module to resolve.
      *
-     * <p><strong>Must be called under a read action</strong> — all accessed APIs
-     * (ArtifactManager, ModuleManager, ModuleRootManager) require one.
-     * The sole caller is {@link #collectModelSnapshot}, which is always invoked
-     * inside {@link TomcatReadActions#compute}.
+     * <p><strong>Must be called under a read action.</strong> The sole caller
+     * is {@link #collectModelSnapshot}, which is always invoked inside
+     * {@link TomcatReadActions#compute}.
      */
     @Nullable
-    private static Module resolveModuleForArtifact(@NotNull DeploymentArtifact artifact,
-                                                   @NotNull Project project) {
+    private static Module resolveModuleForDeployment(@NotNull Deployment deployment,
+                                                     @NotNull Project project) {
         try {
-            ModuleManager moduleManager = ModuleManager.getInstance(project);
-            String name = artifact.getName();
-
-            // 1. ArtifactManager lookup — works on Ultimate where users configure artifacts.
-            //    Wrapped in try/catch so it degrades silently on Community Edition where
-            //    the packaging plugin may not be loaded (NoClassDefFoundError).
-            try {
-                ArtifactManager artifactManager =
-                        ArtifactManager.getInstance(project);
-                if (artifactManager != null) {
-                    for (Artifact a : artifactManager.getArtifacts()) {
-                        if (name.equals(a.getName())) {
-                            String moduleName = a.getName().replaceAll(":war.*$", "").trim();
-                            Module m = moduleManager.findModuleByName(moduleName);
-                            if (m != null) return m;
-                            break;
-                        }
-                    }
+            if (deployment instanceof ArtifactBackedDeployment a) {
+                Artifact artifact = a.getArtifactPointer().getArtifact();
+                if (artifact == null) return null;
+                ArtifactManager mgr;
+                try {
+                    mgr = ArtifactManager.getInstance(project);
+                } catch (NoClassDefFoundError | Exception ignored) {
+                    return null;
                 }
-            } catch (NoClassDefFoundError | Exception ignored) {
-                // ArtifactManager not available in this IDE edition — fall through
+                if (mgr == null) return null;
+                return DeployedClassesSync.walkPackagingTreeForModule(
+                        artifact.getRootElement(), mgr.getResolvingContext());
             }
-
-            // 2. Direct name-based lookup (strip suffixes)
-            String baseName = name.replaceAll(":war.*$", "")
-                                  .replaceAll("\\.war$", "")
-                                  .replaceAll("\\s*\\(.*\\)$", "")
-                                  .trim();
-            Module module = moduleManager.findModuleByName(baseName);
-            if (module != null) return module;
-
-            // 3. Path-based: find module whose content root contains the deployment path
-            String deploymentPath = artifact.getPath();
-            if (!deploymentPath.isEmpty()) {
-                for (Module m : moduleManager.getModules()) {
-                    for (VirtualFile contentRoot : ModuleRootManager.getInstance(m).getContentRoots()) {
-                        if (deploymentPath.startsWith(contentRoot.getPath())) {
-                            if (TomcatModuleUtils.isWebModule(m)) {
-                                return m;
-                            }
-                        }
-                    }
-                }
+            if (deployment instanceof ModuleBackedDeployment m) {
+                return m.getModule();
             }
-
-            // 4. Single web module fallback
-            List<Module> webModules = new ArrayList<>();
-            for (Module m : moduleManager.getModules()) {
-                if (TomcatModuleUtils.isWebModule(m)) {
-                    webModules.add(m);
-                }
-            }
-            if (webModules.size() == 1) return webModules.get(0);
-
-            // 5. Partial name match — Locale.ROOT keeps 'WebApi' matchable across tr_TR / en_US.
-            for (Module m : webModules) {
-                String mName = m.getName().toLowerCase(Locale.ROOT);
-                String lowerBase = baseName.toLowerCase(Locale.ROOT);
-                if (mName.contains(lowerBase) || lowerBase.contains(mName)) {
-                    return m;
-                }
-            }
-
-            return null;
+            return null; // ExternalFileDeployment — no project module
         } catch (Exception e) {
-            LOG.warn("Failed to find module for artifact '" + artifact.getName() + "': " + e.getMessage());
+            LOG.warn("Failed to resolve module for '" + deployment.getDisplayName()
+                    + "': " + e.getMessage());
             return null;
         }
     }

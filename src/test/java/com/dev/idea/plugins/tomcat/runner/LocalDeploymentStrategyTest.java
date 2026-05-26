@@ -738,10 +738,9 @@ class LocalDeploymentStrategyTest {
         @DisplayName("Tomcat 7 omits the <Resources> block entirely")
         void tomcat7OmitsResourcesBlock(@TempDir Path tempDir) throws IOException {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 7", "7.0.109", "/opt/tomcat-7");
@@ -766,10 +765,9 @@ class LocalDeploymentStrategyTest {
         @DisplayName("Tomcat 7 emits a one-time info message explaining the limitation")
         void tomcat7LogsInfoMessage(@TempDir Path tempDir) throws IOException {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 7", "7.0.109", "/opt/tomcat-7");
@@ -798,10 +796,9 @@ class LocalDeploymentStrategyTest {
             // change inverts that guard, every modern user gets their multi-module
             // classpath silently dropped — pin the contract here.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.intellij.openapi.project.Project project =
                     org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
             com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger logger =
@@ -826,10 +823,9 @@ class LocalDeploymentStrategyTest {
             // parse. Treating that as "Tomcat 7" would silently break every user
             // whose install reports an unusual version string. Pin the contract.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo unknown =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat", "snapshot", "/opt/tomcat");
@@ -860,10 +856,9 @@ class LocalDeploymentStrategyTest {
             // emitted only when extra PreResources/PostResources were attached,
             // so users with no extras lost symlink support invisibly.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat8 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 8", "8.5.81", "/opt/tomcat-8.5");
@@ -886,10 +881,9 @@ class LocalDeploymentStrategyTest {
         @DisplayName("Tomcat 10 emits <Resources allowLinking=\"true\"> (modern release path)")
         void tomcat10AlwaysEmitsResourcesForSymlinks(@TempDir Path tempDir) throws IOException {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat10 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 10.1", "10.1.18", "/opt/tomcat-10.1");
@@ -910,10 +904,9 @@ class LocalDeploymentStrategyTest {
             // block always emitted) so callers / test fixtures without a real
             // install do not regress symlink support.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.intellij.openapi.project.Project project =
                     org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
 
@@ -956,10 +949,9 @@ class LocalDeploymentStrategyTest {
             writeJar(libDir.resolve("commons-lang3-3.14.0.jar"),
                     "org/apache/commons/lang3/StringUtils.class");
 
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 7", "7.0.109", "/opt/tomcat-7");
@@ -984,10 +976,9 @@ class LocalDeploymentStrategyTest {
             writeJar(libDir.resolve("jackson-core-2.17.0.jar"),
                     "META-INF/versions/9/module-info.class");
 
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat11 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 11", "11.0.0", "/opt/tomcat-11");
@@ -1009,10 +1000,9 @@ class LocalDeploymentStrategyTest {
             writeJar(libDir.resolve("byte-buddy-1.14.9.jar"),
                     "META-INF/versions/9/module-info.class");
 
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.intellij.openapi.project.Project project =
                     org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
 
@@ -1037,10 +1027,9 @@ class LocalDeploymentStrategyTest {
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
             writeJar(libDir.resolve("servlet-api-2.5.jar"), "javax/servlet/Servlet.class");
 
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat11 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 11", "11.0.0", "/opt/tomcat-11");
@@ -1070,10 +1059,9 @@ class LocalDeploymentStrategyTest {
             writeJar(libDir.resolve("servlet-api-2.5.jar"), "javax/servlet/Servlet.class");
             writeJar(libDir.resolve("jsp-api-2.2.jar"), "javax/servlet/jsp/JspPage.class");
 
-            com.dev.idea.plugins.tomcat.model.DeploymentArtifact artifact =
-                    new com.dev.idea.plugins.tomcat.model.DeploymentArtifact(
-                            "myapp", artifactPath.toString(),
-                            com.dev.idea.plugins.tomcat.model.DeploymentArtifact.TYPE_EXPLODED);
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
                             "Tomcat 7", "7.0.109", "/opt/tomcat-7");

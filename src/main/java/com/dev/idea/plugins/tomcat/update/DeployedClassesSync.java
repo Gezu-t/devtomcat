@@ -358,12 +358,13 @@ public final class DeployedClassesSync {
      * not guarantee binary compatibility for. Same trick {@code
      * MavenReflection} uses for the Maven plugin's APIs.
      *
-     * <p>Package-private and {@code PackagingElement}-typed so tests can
-     * drive it with mocked trees.
+     * <p>{@code PackagingElement}-typed so tests can drive it with mocked
+     * trees. Public so {@link com.dev.idea.plugins.tomcat.runner.LocalDeploymentStrategy}
+     * can reuse the same walk for its typed-deployment resolver.
      */
     @Nullable
-    static Module walkPackagingTreeForModule(@NotNull PackagingElement<?> element,
-                                             @NotNull PackagingElementResolvingContext ctx) {
+    public static Module walkPackagingTreeForModule(@NotNull PackagingElement<?> element,
+                                                    @NotNull PackagingElementResolvingContext ctx) {
         Module direct = tryFindModuleOnElement(element, ctx);
         if (direct != null) return direct;
         if (element instanceof CompositePackagingElement<?> composite) {
