@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.stats;
 
 import com.intellij.openapi.components.PersistentStateComponent;
-
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.components.StoragePathMacros;
@@ -27,6 +27,7 @@ import java.util.Locale;
  *
  * @author Gezahegn Lemma (Gezu)
  */
+@Service(Service.Level.PROJECT)
 @State(
         name = "DevTomcatStartupTimeTracker",
         storages = @Storage(StoragePathMacros.WORKSPACE_FILE)
@@ -63,9 +64,8 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
         public Map<String, List<Long>> startupTimes = new LinkedHashMap<>();
     }
 
-    @Nullable
     @Override
-    public synchronized State getState() {
+    public synchronized @NotNull State getState() {
         // Return a defensive copy so callers (e.g. StartupTimeTrendDialog)
         // do not read or mutate the live internal state.
         State copy = new State();

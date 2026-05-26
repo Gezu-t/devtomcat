@@ -88,9 +88,7 @@
         <applicationService
                 serviceImplementation="com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState"/>
 
-        <!-- Startup Time Tracker (DevTomcat exclusive - tracks startup performance, project-level) -->
-        <projectService
-                serviceImplementation="com.dev.idea.plugins.tomcat.stats.StartupTimeTracker"/>
+        <!-- Startup Time Tracker — registered as a light service via @Service(Service.Level.PROJECT) on the class itself. -->
 
         <!-- Port registry: atomic cross-instance port claiming to prevent debug/Tomcat port races -->
         <applicationService
