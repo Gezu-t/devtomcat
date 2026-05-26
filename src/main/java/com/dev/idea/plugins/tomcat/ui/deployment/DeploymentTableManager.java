@@ -249,6 +249,37 @@ public class DeploymentTableManager {
     }
 
     /**
+     * Typed view of the table contents — each legacy row is adapted via
+     * {@link com.dev.idea.plugins.tomcat.model.DeploymentAdapter#toTyped}.
+     * Used by the configuration apply path so the {@code DeploymentConfig}
+     * can store typed entries directly without an intermediate legacy list.
+     */
+    @NotNull
+    public List<com.dev.idea.plugins.tomcat.model.Deployment> getTypedDeployments(
+            @NotNull com.intellij.openapi.project.Project project) {
+        List<com.dev.idea.plugins.tomcat.model.Deployment> result = new ArrayList<>(listModel.getSize());
+        for (int i = 0; i < listModel.getSize(); i++) {
+            result.add(com.dev.idea.plugins.tomcat.model.DeploymentAdapter
+                    .toTyped(project, listModel.getElementAt(i)));
+        }
+        return result;
+    }
+
+    /**
+     * Replaces every row in the table with the legacy projection of the
+     * provided typed deployment list. The reverse direction of
+     * {@link #getTypedDeployments}.
+     */
+    public void setTypedDeployments(@NotNull List<com.dev.idea.plugins.tomcat.model.Deployment> deployments) {
+        listModel.removeAll();
+        for (com.dev.idea.plugins.tomcat.model.Deployment d : deployments) {
+            if (d != null) {
+                listModel.add(com.dev.idea.plugins.tomcat.model.DeploymentAdapter.toLegacy(d));
+            }
+        }
+    }
+
+    /**
      * Returns the actual {@link DeploymentArtifact} instances held by the list model.
      * Unlike {@link #getDeployments()}, these are not clones — field mutations
      * ({@code setName}, {@code setPath}) propagate directly to the UI.

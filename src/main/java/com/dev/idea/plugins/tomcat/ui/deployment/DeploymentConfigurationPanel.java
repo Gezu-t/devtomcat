@@ -236,8 +236,11 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
-        List<DeploymentArtifact> artifacts = tableManager.getDeployments();
-        config.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
+        // Flow the typed list into the config so the storage path can hold
+        // Deployment directly. The table still tracks legacy rows internally;
+        // getTypedDeployments adapts on the way out.
+        config.getConfigData().getDeploymentConfig()
+                .setDeployments(tableManager.getTypedDeployments(config.getProject()));
     }
 
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
