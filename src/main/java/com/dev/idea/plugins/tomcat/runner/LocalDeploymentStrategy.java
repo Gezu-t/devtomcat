@@ -162,6 +162,47 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             "jaspic-api"
     };
 
+    // --- IntelliJ + Maven path conventions (single-file scope) ---
+
+    /**
+     * Trailing suffix on IntelliJ's {@code VirtualFile.getPath()} for content inside a JAR — e.g.
+     * {@code file:///…/foo.jar!/}. Stripped before storing the path as a plain filesystem string.
+     */
+    private static final String JAR_URL_SUFFIX = "!/";
+
+    /** Maven's in-JAR metadata path prefix; entries beneath this hold {@code pom.properties}. */
+    private static final String META_INF_MAVEN_PREFIX = "META-INF/maven/";
+
+    /** Suffix of the Maven {@code pom.properties} entry inside a JAR. */
+    private static final String POM_PROPERTIES_SUFFIX = "/pom.properties";
+
+    /**
+     * Expected slash-separated segment count of a Maven {@code pom.properties} entry —
+     * {@code META-INF/maven/<groupId>/<artifactId>/pom.properties} → 5 segments after split.
+     */
+    private static final int META_INF_MAVEN_POM_PROPERTIES_SEGMENTS = 5;
+
+    /** Maven class output suffix — e.g. {@code .../module/target/classes}. */
+    private static final String MAVEN_CLASSES_SUFFIX = "/target/classes";
+
+    /** IntelliJ IDEA default compiler output path fragment — e.g. {@code .../out/production/ModuleName}. */
+    private static final String INTELLIJ_PRODUCTION_PATH = "/out/production/";
+
+    /** Gradle production source-set class output directories (longest-first ordering preserved). */
+    private static final List<String> GRADLE_OUTPUT_SUFFIXES = List.of(
+            "/build/classes/java/main",
+            "/build/classes/kotlin/main",
+            "/build/classes/groovy/main",
+            "/build/classes/scala/main"
+    );
+
+    /**
+     * Max number of stale-deployment filenames the balloon enumerates before
+     * truncating to "and N more". Anything past this would blow the balloon's
+     * reading length; the full list is always in the run console.
+     */
+    private static final int MAX_LISTED_STALE_FILES = 5;
+
     @Override
     public void configureDeployment(@NotNull JavaParameters params,
                                     @NotNull Path catalinaBase,
@@ -203,11 +244,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     // Tomcat process holding them open — on Windows this is the realistic
                     // root cause of every cleanup-failed path here.
                     String filesList = staleFailures.stream()
-                            .limit(5)
+                            .limit(MAX_LISTED_STALE_FILES)
                             .map(p -> p.getFileName().toString())
                             .collect(java.util.stream.Collectors.joining(", "));
-                    String suffix = staleFailures.size() > 5
-                            ? filesList + ", and " + (staleFailures.size() - 5) + " more"
+                    String suffix = staleFailures.size() > MAX_LISTED_STALE_FILES
+                            ? filesList + ", and " + (staleFailures.size() - MAX_LISTED_STALE_FILES) + " more"
                             : filesList;
                     String warning = "Stale-deployment cleanup could not delete "
                             + staleFailures.size() + " file(s) in CATALINA_BASE ("
@@ -476,7 +517,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // LinkedHashSet for deterministic order in the generated XML.
         java.util.LinkedHashSet<String> skip = new java.util.LinkedHashSet<>();
         try (var stream = Files.list(webInfLib)) {
-            stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+            stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
                   .forEach(p -> {
                       String jarName = p.getFileName().toString();
                       if (isContainerProvidedJar(jarName)) {
@@ -541,7 +582,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
             if (!Files.isDirectory(webInfLib)) continue;
             try (var stream = Files.list(webInfLib)) {
-                stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+                stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
                         .map(p -> p.getFileName().toString())
                         .filter(LocalDeploymentStrategy::isContainerProvidedJar)
                         .forEach(all::add);
@@ -648,8 +689,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                             @NotNull Path confDir,
                                             @NotNull java.util.Set<String> activeContextNames) {
         List<Path> failures = new ArrayList<>();
-        deleteEndingWith(confDir, ".xml", failures);
-        deleteEndingWith(webappsDir, ".war", failures);
+        deleteEndingWith(confDir, EXT_XML, failures);
+        deleteEndingWith(webappsDir, EXT_WAR, failures);
         for (String contextName : activeContextNames) {
             if (contextName == null || contextName.isBlank()) continue;
             Path leftover = TomcatDeploymentPaths.extractedDirectory(webappsDir, contextName);
@@ -775,7 +816,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (Files.isDirectory(webInfLib)) {
             try (var stream = Files.list(webInfLib)) {
-                stream.filter(p -> p.getFileName().toString().endsWith(".jar"))
+                stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
                       .forEach(p -> {
                           String jarName = p.getFileName().toString();
                           existingLibJars.add(jarName);
@@ -863,7 +904,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     continue;
                 }
                 extraDirs.add(nativePath);
-            } else if (rootPath.endsWith(".jar")) {
+            } else if (rootPath.endsWith(EXT_JAR)) {
                 // JAR file — skip container-provided libs and jars already packaged in WEB-INF/lib
                 String jarName = file.getName();
                 if (isContainerProvidedJar(jarName)) continue;
@@ -919,8 +960,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      */
     @Nullable
     static String stripJarVersion(@NotNull String jarName) {
-        if (!jarName.endsWith(".jar")) return null;
-        String base = jarName.substring(0, jarName.length() - 4);
+        if (!jarName.endsWith(EXT_JAR)) return null;
+        String base = jarName.substring(0, jarName.length() - EXT_JAR.length());
         // Remove -<version> suffix: version starts with a digit (1.2.3) or is a bare SNAPSHOT
         return base.replaceAll("-(\\d+.*|SNAPSHOT)$", "");
     }
@@ -938,36 +979,36 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     @Nullable
     static String extractModuleName(@NotNull String classesDir) {
         String normalized = classesDir.replace('\\', '/');
-        // Maven
-        if (normalized.endsWith("/target/classes")) {
-            String parent = normalized.substring(0, normalized.length() - "/target/classes".length());
-            int slash = parent.lastIndexOf('/');
-            return slash >= 0 ? parent.substring(slash + 1) : parent;
+
+        // Maven: .../module/target/classes
+        if (normalized.endsWith(MAVEN_CLASSES_SUFFIX)) {
+            return lastSegmentBefore(normalized, MAVEN_CLASSES_SUFFIX.length());
         }
+
         // IntelliJ IDEA default compiler output: .../out/production/ModuleName
-        int outIdx = normalized.lastIndexOf("/out/production/");
+        int outIdx = normalized.lastIndexOf(INTELLIJ_PRODUCTION_PATH);
         if (outIdx >= 0) {
-            String after = normalized.substring(outIdx + "/out/production/".length());
+            String after = normalized.substring(outIdx + INTELLIJ_PRODUCTION_PATH.length());
             int slash = after.indexOf('/');
             String candidate = slash >= 0 ? after.substring(0, slash) : after;
             if (!candidate.isEmpty()) return candidate;
         }
 
-        // Gradle
-        String[] gradlePatterns = {
-                "/build/classes/java/main",
-                "/build/classes/kotlin/main",
-                "/build/classes/groovy/main",
-                "/build/classes/scala/main"
-        };
-        for (String pattern : gradlePatterns) {
-            if (normalized.endsWith(pattern)) {
-                String parent = normalized.substring(0, normalized.length() - pattern.length());
-                int slash = parent.lastIndexOf('/');
-                return slash >= 0 ? parent.substring(slash + 1) : parent;
+        // Gradle: .../module/build/classes/<lang>/main
+        for (String suffix : GRADLE_OUTPUT_SUFFIXES) {
+            if (normalized.endsWith(suffix)) {
+                return lastSegmentBefore(normalized, suffix.length());
             }
         }
         return null;
+    }
+
+    /** Strips {@code suffixLen} trailing chars off {@code path} and returns the last slash-segment of the remainder. */
+    @NotNull
+    private static String lastSegmentBefore(@NotNull String path, int suffixLen) {
+        String parent = path.substring(0, path.length() - suffixLen);
+        int slash = parent.lastIndexOf('/');
+        return slash >= 0 ? parent.substring(slash + 1) : parent;
     }
 
     static boolean isContainerProvidedJar(@NotNull String jarName) {
@@ -1012,7 +1053,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     static JarMeta scanJar(@NotNull Path jarPath, @Nullable String baseName) {
         if (baseName == null) {
             String n = jarPath.getFileName().toString();
-            baseName = n.endsWith(".jar") ? n.substring(0, n.length() - 4) : n;
+            baseName = n.endsWith(EXT_JAR) ? n.substring(0, n.length() - EXT_JAR.length()) : n;
         }
         Set<String> entryPaths = new HashSet<>();
         Set<String> pomArtifacts = new HashSet<>();
@@ -1021,9 +1062,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 String name = e.getName();
                 entryPaths.add(name);
                 // META-INF/maven/<groupId>/<artifactId>/pom.properties — parts[3] = artifactId
-                if (name.startsWith("META-INF/maven/") && name.endsWith("/pom.properties")) {
+                if (name.startsWith(META_INF_MAVEN_PREFIX) && name.endsWith(POM_PROPERTIES_SUFFIX)) {
                     String[] parts = name.split("/");
-                    if (parts.length == 5) pomArtifacts.add(parts[3]);
+                    if (parts.length == META_INF_MAVEN_POM_PROPERTIES_SEGMENTS) {
+                        pomArtifacts.add(parts[3]);
+                    }
                 }
             });
         } catch (IOException e) {
@@ -1141,7 +1184,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 .classes()
                 .getRoots()) {
             String path = root.getPath();
-            if (path.endsWith("!/")) path = path.substring(0, path.length() - 2);
+            if (path.endsWith(JAR_URL_SUFFIX)) {
+                path = path.substring(0, path.length() - JAR_URL_SUFFIX.length());
+            }
             rootPaths.add(path);
         }
 

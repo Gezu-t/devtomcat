@@ -121,6 +121,11 @@ public final class TomcatConstants {
     public static final String GRADLE_BUILD_FILE_GROOVY = "build.gradle";
     public static final String GRADLE_BUILD_FILE_KOTLIN = "build.gradle.kts";
 
+    // --- File extensions (dot-prefixed, for use with String.endsWith / Path filename checks) ---
+    public static final String EXT_JAR = ".jar";
+    public static final String EXT_WAR = ".war";
+    public static final String EXT_XML = ".xml";
+
     // --- POM packaging markers (raw XML element strings used for content matching) ---
     public static final String POM_PACKAGING_POM = "<packaging>pom</packaging>";
     public static final String POM_PACKAGING_WAR = "<packaging>war</packaging>";
