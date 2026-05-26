@@ -723,25 +723,32 @@ public final class DeployedClassesSync {
             // copy would also have failed; no worse than pre-detector.
             return false;
         }
-        return indexOf(bytes, ECJ_ERROR_MARKER) >= 0;
+        return containsEcjErrorMarker(bytes);
     }
 
     /**
-     * Naive byte-array substring search. Adequate for our needs — needle is
-     * 31 bytes and class files are small enough that even a quadratic-worst-
-     * case scan completes in microseconds. Avoids pulling in a regex engine
-     * or KMP just for a single short pattern.
+     * Returns {@code true} iff {@link #ECJ_ERROR_MARKER} appears as a
+     * contiguous byte subsequence of {@code haystack}.
+     *
+     * <p>Naive byte-search rather than KMP / regex — the marker is a fixed
+     * 31-byte literal and {@code haystack} is capped at
+     * {@link #ECJ_SCAN_MAX_BYTES} by the caller, so even the quadratic
+     * worst case runs in microseconds. Previously written as a generic
+     * {@code indexOf(haystack, needle)}, but the only call site ever passed
+     * {@code ECJ_ERROR_MARKER} — the IDE's "parameter is always this constant"
+     * inspection flagged that as dead generality. Inlining the needle makes
+     * the call site read as the boolean question it actually asks.
      */
-    private static int indexOf(@NotNull byte[] haystack, @NotNull byte[] needle) {
-        if (needle.length == 0) return 0;
+    private static boolean containsEcjErrorMarker(@NotNull byte[] haystack) {
+        byte[] needle = ECJ_ERROR_MARKER;
         outer:
         for (int i = 0; i <= haystack.length - needle.length; i++) {
             for (int j = 0; j < needle.length; j++) {
                 if (haystack[i + j] != needle[j]) continue outer;
             }
-            return i;
+            return true;
         }
-        return -1;
+        return false;
     }
 
     /**
