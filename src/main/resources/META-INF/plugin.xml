@@ -121,7 +121,7 @@
                 order="first"
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatCoverageRunner"/>
 
-        <!-- Before Launch: "Build N artifact(s)" — visible on Community and Ultimate -->
+        <!-- Before Launch: "Verify N artifact(s)" — validates path existence/structure on launch; Build is a separate step -->
         <stepsBeforeRunProvider
                 implementation="com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTaskProvider"/>
 

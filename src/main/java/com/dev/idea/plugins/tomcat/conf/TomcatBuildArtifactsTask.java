@@ -13,8 +13,8 @@ import java.util.List;
  *
  * <p>Serves two purposes:
  * <ol>
- *   <li><b>Visibility</b> — the Before Launch panel shows "Build 'name'" or
- *       "Build N artifacts" so the user knows exactly what will be deployed,
+ *   <li><b>Visibility</b> — the Before Launch panel shows "Verify 'name'" or
+ *       "Verify N artifacts" so the user knows exactly what will be deployed,
  *       matching IntelliJ Ultimate's experience on Community Edition.</li>
  *   <li><b>Fail-fast validation</b> — {@link TomcatBuildArtifactsTaskProvider#executeTask}
  *       checks that all artifact paths exist before Tomcat starts, surfacing a clear error

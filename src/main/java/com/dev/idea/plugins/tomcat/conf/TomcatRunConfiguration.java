@@ -515,7 +515,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     /**
      * Adds or refreshes the {@link TomcatBuildArtifactsTask} in the Before Launch list.
      * If a task already exists its artifact names are updated in place; otherwise a new
-     * task is appended. This keeps the "Build N artifact(s)" label current whenever the
+     * task is appended. This keeps the "Verify N artifact(s)" label current whenever the
      * Deployment tab is saved.
      */
     // Same rationale as syncBeforeLaunchWithDeployments — BeforeRunTask is parameterised

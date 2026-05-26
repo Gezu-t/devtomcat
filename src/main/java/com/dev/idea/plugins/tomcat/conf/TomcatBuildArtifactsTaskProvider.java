@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Provides the "Build N artifact(s)" entry in the Before Launch panel for
+ * Provides the "Verify N artifact(s)" entry in the Before Launch panel for
  * DevTomcat run configurations on both Community and Ultimate editions.
  *
  * <p>On Ultimate, IntelliJ's built-in {@code BuildArtifactsBeforeRunTask} already handles
@@ -60,7 +60,10 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
 
     @Override
     public String getName() {
-        return "Build DevTomcat artifacts";
+        // Reads "Verify" not "Build" because executeTask validates path existence
+        // and structure; the actual class/WAR build comes from the "Build" (Make)
+        // step or a user-added Maven/Gradle goal earlier in the Before Launch chain.
+        return "Verify DevTomcat artifacts";
     }
 
     @Override
@@ -83,12 +86,12 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
     public String getDescription(@NotNull TomcatBuildArtifactsTask task) {
         List<String> names = task.getArtifactNames();
         if (names.isEmpty()) {
-            return "Build artifacts";
+            return "Verify artifacts";
         }
         if (names.size() == 1) {
-            return "Build '" + names.get(0) + "'";
+            return "Verify '" + names.get(0) + "'";
         }
-        return "Build " + names.size() + " artifacts";
+        return "Verify " + names.size() + " artifacts";
     }
 
     @Override
