@@ -84,9 +84,7 @@
         <javaCoverageEngineExtension
                 implementation="com.dev.idea.plugins.tomcat.coverage.TomcatJavaCoverageEngineExtension"/>
 
-        <!-- Application-level persistent state for Tomcat server configurations -->
-        <applicationService
-                serviceImplementation="com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState"/>
+        <!-- TomcatServerManagerState — registered as a light service via @Service(Service.Level.APP) on the class itself. -->
 
         <!-- Startup Time Tracker — registered as a light service via @Service(Service.Level.PROJECT) on the class itself. -->
 

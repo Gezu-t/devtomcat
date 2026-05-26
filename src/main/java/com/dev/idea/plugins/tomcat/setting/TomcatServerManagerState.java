@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.setting;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
@@ -26,38 +27,32 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 
 /**
- * Tomcat Server Manager State
+ * Application-level persistent state for every Tomcat server the user has registered.
  *
- * Application-level service that manages the persistent state of all configured
- * Tomcat servers. Handles persistence, validation, and lifecycle of server configurations.
+ * <p><b>Concurrency.</b> The backing list is a {@link CopyOnWriteArrayList} so any
+ * reader (UI table, run-config server picker, validation pass) gets a stable snapshot
+ * without synchronisation while writers (add / remove / setState during load) mutate
+ * through the COW path. No reader ever needs a lock; no iterator ever ConcurrentModifies.
  *
- * <p>100% NULL-SAFE — All parameters validated, no silent failures
- * <p>Thread-Safe — Uses volatile and synchronized collections for concurrent access
- * <p>Singleton — Managed by IntelliJ's application service framework
- * <p>Persistent — Automatically saved/loaded via PersistentStateComponent
+ * <p><b>Version extraction.</b> Reading the version from a Tomcat install opens
+ * {@code lib/catalina.jar}, walks to {@code org/apache/catalina/util/ServerInfo.properties},
+ * and parses {@code server.info} / {@code server.number}. The two values are bundled into
+ * the inner {@link ServerInfo} record. Reflection-free path; works on every Tomcat
+ * 5+ ship.
  *
- * <p>Responsibilities:
- * <ul>
- *   <li>Manage collection of TomcatInfo instances</li>
- *   <li>Persist configuration to disk</li>
- *   <li>Validate server configurations</li>
- *   <li>Extract server version information from catalina.jar</li>
- *   <li>Generate unique server names</li>
- *   <li>Provide statistics and lookups</li>
- * </ul>
- *
- * Author: Gezahegn Lemma (Gezu)
- * Project: DevTomcat Plugin
- * Created: 11/2/25
+ * <p><b>Persistence.</b> {@link PersistentStateComponent} serialises this whole class
+ * as XML into {@code dev.tomcat.servers.xml} under the IDE config dir. {@link XCollection}
+ * on {@link #tomcatInfos} keeps the list as a flat {@code <option name="…">} sequence so
+ * users can diff their stored servers cleanly.
  *
  * @see TomcatInfo
- * @see PersistentStateComponent
  */
+@Service(Service.Level.APP)
 @State(
         name = "DevTomcatServerConfiguration",
         storages = @Storage("dev.tomcat.servers.xml")
 )
-public class TomcatServerManagerState implements PersistentStateComponent<TomcatServerManagerState> {
+public final class TomcatServerManagerState implements PersistentStateComponent<TomcatServerManagerState> {
 
     private static final Logger LOG = Logger.getInstance(TomcatServerManagerState.class);
 
@@ -112,7 +107,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      * @throws NullPointerException if infos is null
      */
     public void setTomcatInfos(@NotNull List<TomcatInfo> infos) {
-        Objects.requireNonNull(infos, "TomcatInfo list cannot be null");
         tomcatInfos.clear();
         tomcatInfos.addAll(infos);
         LOG.info("Replaced all Tomcat servers: " + infos.size() + " servers");
@@ -125,7 +119,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      * @throws NullPointerException if tomcatInfo is null
      */
     public void addTomcatInfo(@NotNull TomcatInfo tomcatInfo) {
-        Objects.requireNonNull(tomcatInfo, "TomcatInfo cannot be null");
         tomcatInfos.add(tomcatInfo);
         LOG.info("Added Tomcat server: " + tomcatInfo.getName() + " (" + tomcatInfo.getVersion() + ")");
     }
@@ -138,7 +131,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      * @throws NullPointerException if tomcatInfo is null
      */
     public boolean removeTomcatInfo(@NotNull TomcatInfo tomcatInfo) {
-        Objects.requireNonNull(tomcatInfo, "TomcatInfo cannot be null");
 
         boolean removed = tomcatInfos.remove(tomcatInfo);
         if (removed) {
@@ -156,7 +148,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      */
     @Nullable
     public TomcatInfo findTomcatInfoById(@NotNull String id) {
-        Objects.requireNonNull(id, "ID cannot be null");
 
         return tomcatInfos.stream()
                 .filter(info -> id.equals(info.getId()))
@@ -173,7 +164,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      */
     @Nullable
     public TomcatInfo findTomcatInfoByName(@NotNull String name) {
-        Objects.requireNonNull(name, "Name cannot be null");
 
         return tomcatInfos.stream()
                 .filter(info -> name.equals(info.getName()))
@@ -189,7 +179,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      * @throws NullPointerException if name is null
      */
     public boolean isNameUsed(@NotNull String name) {
-        Objects.requireNonNull(name, "Name cannot be null");
 
         return tomcatInfos.stream()
                 .anyMatch(info -> name.equals(info.getName()));
@@ -197,7 +186,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
 
     @Nullable
     public TomcatInfo findTomcatInfoByPath(@NotNull String path) {
-        Objects.requireNonNull(path, "Path cannot be null");
 
         return tomcatInfos.stream()
                 .filter(info -> path.equals(info.getPath()))
@@ -361,7 +349,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      */
     @Override
     public void loadState(@NotNull TomcatServerManagerState state) {
-        Objects.requireNonNull(state, "State cannot be null");
         // Copy contents instead of copyBean to preserve CopyOnWriteArrayList type.
         // XmlSerializerUtil.copyBean replaces field references via reflection,
         // which would overwrite our thread-safe COWAL with a plain ArrayList.
@@ -407,8 +394,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     @NotNull
     public static Optional<TomcatInfo> createTomcatInfo(@NotNull String tomcatHome,
                                                         @Nullable UnaryOperator<String> nameGenerator) {
-        Objects.requireNonNull(tomcatHome, "Tomcat home cannot be null");
-
         LOG.debug("Creating TomcatInfo for: " + tomcatHome);
 
         Path tomcatPath = Paths.get(tomcatHome);
@@ -472,8 +457,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
     private static Optional<TomcatInfo> tryCreateTomcatInfoInternal(@NotNull String tomcatHome,
                                                                     @Nullable UnaryOperator<String> nameGenerator,
                                                                     boolean logFailures) {
-        Objects.requireNonNull(tomcatHome, "Tomcat home cannot be null");
-
         Path tomcatPath = Paths.get(tomcatHome);
         if (!Files.exists(tomcatPath) || !Files.isDirectory(tomcatPath)) {
             if (logFailures) {
@@ -521,7 +504,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      * @throws NullPointerException if catalinaJar is null
      */
     private static ServerInfo extractServerInfo(@NotNull File catalinaJar) throws IOException {
-        Objects.requireNonNull(catalinaJar, "Catalina JAR file cannot be null");
 
         try (JarFile jar = new JarFile(catalinaJar)) {
             ZipEntry entry = jar.getEntry(SERVER_INFO_PROPERTIES);
@@ -558,7 +540,6 @@ public class TomcatServerManagerState implements PersistentStateComponent<Tomcat
      */
     @NotNull
     private static String generateTomcatName(@NotNull String baseName) {
-        Objects.requireNonNull(baseName, "Base name cannot be null");
 
         List<String> existingNames = getInstance().getTomcatInfos().stream()
                 .map(TomcatInfo::getName)
