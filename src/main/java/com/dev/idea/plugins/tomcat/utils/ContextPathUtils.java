@@ -3,11 +3,38 @@ package com.dev.idea.plugins.tomcat.utils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Locale;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
 public final class ContextPathUtils {
+
+    /** Artifact-type strings. Match {@link com.dev.idea.plugins.tomcat.model.DeploymentArtifact#TYPE_WAR}/{@code TYPE_EXPLODED} at the persistence layer; {@code TYPE_EAR} is local-only — the persistence layer does not currently model EAR. */
+    private static final String TYPE_EXPLODED = "exploded";
+    private static final String TYPE_WAR = "war";
+    private static final String TYPE_EAR = "ear";
+
+    /** Artifact-name literal that signals an already-resolved ROOT context — short-circuits {@link #generateContextPath}. */
+    private static final String ROOT_WAR_ARTIFACT_NAME = "root.war";
+
+    /** Suffixes stripped by {@link #extractBaseModuleName} from a lowercased artifact name. Ordered longest-first to avoid a shorter suffix winning over a longer overlapping one. */
+    private static final List<String> BASE_NAME_STRIP_SUFFIXES = List.of(
+            "_war_exploded", "_war", ":war exploded", ":war", ".war", " (exploded)"
+    );
+
+    /** One row of the artifact-name → artifact-type lookup table consumed by {@link #formatArtifactDisplayName}. */
+    private record SuffixToType(@NotNull String suffix, @NotNull String type) {}
+
+    /** Ordered longest-first; the loop in {@link #formatArtifactDisplayName} breaks on first match so {@code _war_exploded} is consumed before the bare {@code _war} suffix can win. */
+    private static final List<SuffixToType> ARTIFACT_NAME_SUFFIXES_BY_TYPE = List.of(
+            new SuffixToType("_war_exploded", TYPE_EXPLODED),
+            new SuffixToType("_ear_exploded", TYPE_EXPLODED),
+            new SuffixToType("_war", TYPE_WAR),
+            new SuffixToType("_ear", TYPE_EAR),
+            new SuffixToType(".war", TYPE_WAR),
+            new SuffixToType(".ear", TYPE_EAR)
+    );
 
     private ContextPathUtils() {}
 
@@ -19,7 +46,7 @@ public final class ContextPathUtils {
                 .replaceAll("[-_]?exploded$", "");
 
         if (context.equalsIgnoreCase(ROOT_CONTEXT_NAME) ||
-                context.equalsIgnoreCase("root.war")) {
+                context.equalsIgnoreCase(ROOT_WAR_ARTIFACT_NAME)) {
             return DEFAULT_CONTEXT_PATH;
         }
 
@@ -87,8 +114,7 @@ public final class ContextPathUtils {
         // module names that may have been lowercased in a different locale,
         // causing false negatives in artifact-to-module matching.
         String lower = name.toLowerCase(Locale.ROOT);
-        String[] suffixes = {"_war_exploded", "_war", ":war exploded", ":war", ".war", " (exploded)"};
-        for (String suffix : suffixes) {
+        for (String suffix : BASE_NAME_STRIP_SUFFIXES) {
             if (lower.endsWith(suffix)) {
                 lower = lower.substring(0, lower.length() - suffix.length());
                 break;
@@ -116,50 +142,39 @@ public final class ContextPathUtils {
     @NotNull
     public static String formatArtifactDisplayName(@NotNull String name, @Nullable String type) {
         // Already in colon format — return as-is
-        if (name.contains(":war") || name.contains(":ear")) {
+        if (name.contains(ARTIFACT_SUFFIX_WAR) || name.contains(ARTIFACT_SUFFIX_EAR)) {
             return name;
         }
 
         String baseName = name;
         String resolvedType = type;
 
-        // Strip known suffixes and detect type from the name. Locale.ROOT
-        // for the same reason as extractBaseModuleName above.
+        // Strip a known suffix and infer type from it. Locale.ROOT for the same
+        // reason as extractBaseModuleName above.
         String lower = name.toLowerCase(Locale.ROOT);
-        if (lower.endsWith("_war_exploded")) {
-            baseName = name.substring(0, name.length() - "_war_exploded".length());
-            resolvedType = "exploded";
-        } else if (lower.endsWith("_ear_exploded")) {
-            baseName = name.substring(0, name.length() - "_ear_exploded".length());
-            resolvedType = "exploded";
-        } else if (lower.endsWith("_war")) {
-            baseName = name.substring(0, name.length() - "_war".length());
-            resolvedType = "war";
-        } else if (lower.endsWith("_ear")) {
-            baseName = name.substring(0, name.length() - "_ear".length());
-            resolvedType = "ear";
-        } else if (lower.endsWith(".war")) {
-            baseName = name.substring(0, name.length() - ".war".length());
-            resolvedType = "war";
-        } else if (lower.endsWith(".ear")) {
-            baseName = name.substring(0, name.length() - ".ear".length());
-            resolvedType = "ear";
+        for (SuffixToType mapping : ARTIFACT_NAME_SUFFIXES_BY_TYPE) {
+            if (lower.endsWith(mapping.suffix())) {
+                baseName = name.substring(0, name.length() - mapping.suffix().length());
+                resolvedType = mapping.type();
+                break;
+            }
         }
 
         // Strip version patterns (##5.18.0, -5.18.0, -5.18.0-SNAPSHOT)
         baseName = baseName.replaceAll("(?i)##\\d+(\\.\\d+)*(-SNAPSHOT)?$", "");
         baseName = baseName.replaceAll("(?i)-\\d+(\\.\\d+)+(-SNAPSHOT)?$", "");
 
-        // Format with colon notation
-        if ("exploded".equals(resolvedType)) {
-            return baseName + ":war exploded";
-        } else if ("war".equals(resolvedType)) {
-            return baseName + ":war";
-        } else if ("ear".equals(resolvedType)) {
-            return baseName + ":ear";
-        }
+        String displaySuffix = displaySuffixForType(resolvedType);
+        return displaySuffix == null ? name : baseName + displaySuffix;
+    }
 
-        return name;
+    /** Maps an artifact type back to its colon-notation display suffix, or {@code null} for unknown / unmatched types. */
+    @Nullable
+    private static String displaySuffixForType(@Nullable String type) {
+        if (TYPE_EXPLODED.equals(type)) return ARTIFACT_SUFFIX_WAR_EXPLODED;
+        if (TYPE_WAR.equals(type)) return ARTIFACT_SUFFIX_WAR;
+        if (TYPE_EAR.equals(type)) return ARTIFACT_SUFFIX_EAR;
+        return null;
     }
 
     /**

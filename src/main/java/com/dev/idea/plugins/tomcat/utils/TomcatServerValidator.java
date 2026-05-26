@@ -23,9 +23,6 @@ public final class TomcatServerValidator {
     private static final Logger LOG = Logger.getInstance(TomcatServerValidator.class);
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+\\.\\d+\\.\\d+)");
 
-    // Tomcat directory structure
-    private static final String DIR_BIN = "bin";
-
     // Required files
     private static final String CATALINA_SH = "catalina.sh";
     private static final String CATALINA_BAT = "catalina.bat";

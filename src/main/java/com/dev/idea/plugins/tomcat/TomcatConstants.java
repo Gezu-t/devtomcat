@@ -97,7 +97,8 @@ public final class TomcatConstants {
     public static final String CATALINA_START = "start";
     public static final String CATALINA_STOP = "stop";
 
-    // --- CATALINA_BASE directory layout ---
+    // --- CATALINA_BASE / CATALINA_HOME directory layout ---
+    public static final String DIR_BIN = "bin";
     public static final String DIR_CONF = "conf";
     public static final String DIR_TEMP = "temp";
     public static final String DIR_LOGS = "logs";

@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -31,6 +32,18 @@ import java.util.function.Function;
 public final class TomcatServerUtils {
 
     private static final Logger LOG = Logger.getInstance(TomcatServerUtils.class);
+
+    /** Directory-name prefixes that mark a folder as a Tomcat installation root — used to decide whether to reuse the directory's own name as the server display name vs. synthesize {@code "Tomcat <version>"}. */
+    private static final List<String> TOMCAT_DIR_PREFIXES = List.of("tomcat", "apache-tomcat");
+
+    /** Fallback display name used by {@link #generateUniqueName(Collection, String)} when the caller's preferred name is blank. */
+    private static final String DEFAULT_TOMCAT_SERVER_NAME = "Tomcat Server";
+
+    /** Generic fallback display name used by the formatter-driven overload of {@link #generateUniqueName(Collection, String, Function)} when the supplied base name is blank. */
+    private static final String DEFAULT_SERVER_NAME = "Server";
+
+    /** Prefix for synthesized display names of the form {@code "Tomcat <version>"}. */
+    private static final String TOMCAT_DISPLAY_NAME_PREFIX = "Tomcat ";
 
     private TomcatServerUtils() {
         // Utility class - prevent instantiation
@@ -93,9 +106,9 @@ public final class TomcatServerUtils {
 
         // Generate a default name based on the directory name
         String directoryName = selectedFile.getName();
-        String preferredName = directoryName.startsWith("tomcat") || directoryName.startsWith("apache-tomcat")
+        String preferredName = startsWithAny(directoryName, TOMCAT_DIR_PREFIXES)
                 ? directoryName
-                : "Tomcat " + version;
+                : TOMCAT_DISPLAY_NAME_PREFIX + version;
 
         // Generate unique name
         String uniqueName = nameGenerator.apply(preferredName);
@@ -119,7 +132,7 @@ public final class TomcatServerUtils {
 
         String baseName = preferredName.trim();
         if (baseName.isEmpty()) {
-            baseName = "Tomcat Server";
+            baseName = DEFAULT_TOMCAT_SERVER_NAME;
         }
 
         // If the preferred name doesn't exist, use it
@@ -153,7 +166,7 @@ public final class TomcatServerUtils {
 
         String normalizedBase = baseName.trim();
         if (normalizedBase.isEmpty()) {
-            normalizedBase = "Server";
+            normalizedBase = DEFAULT_SERVER_NAME;
         }
 
         // Try base name first
@@ -212,5 +225,13 @@ public final class TomcatServerUtils {
     public static String detectVersion(@NotNull String installPath) {
         Objects.requireNonNull(installPath, "Install path cannot be null");
         return TomcatServerValidator.detectVersion(installPath);
+    }
+
+    /** Returns true iff {@code value} starts with any of {@code prefixes}. */
+    private static boolean startsWithAny(@NotNull String value, @NotNull List<String> prefixes) {
+        for (String prefix : prefixes) {
+            if (value.startsWith(prefix)) return true;
+        }
+        return false;
     }
 }
