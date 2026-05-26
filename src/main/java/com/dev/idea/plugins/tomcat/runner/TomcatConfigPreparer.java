@@ -41,20 +41,6 @@ public final class TomcatConfigPreparer {
     private TomcatConfigPreparer() {}
 
     /**
-     * Prepares the CATALINA_BASE directory with all config files needed for launch.
-     *
-     * @param catalinaBase the catalina.base directory to prepare
-     * @param catalinaHome the catalina.home directory to copy defaults from
-     * @param httpPort     resolved HTTP port
-     * @param shutdownPort resolved shutdown port
-     * @param httpsPort    resolved HTTPS port
-     * @param httpsEnabled whether HTTPS connector should be configured
-     * @param ajpPort      resolved AJP port
-     * @param ajpEnabled   whether AJP connector should be configured
-     * @return list of warnings from server.xml mutation (may be empty)
-     * @throws IOException if directory creation or file operations fail
-     */
-    /**
      * Minimum required config files for a Tomcat launch.
      * If any of these are missing after conf copy, a warning is emitted.
      */
@@ -64,6 +50,11 @@ public final class TomcatConfigPreparer {
             CONFIG_CATALINA_PROPERTIES
     };
 
+    /**
+     * Convenience overload — no conf overlay, no log restart, no reserved context names.
+     * See the 11-arg {@link #prepare(Path, Path, int, int, int, boolean, int, boolean, Path, boolean, java.util.Set)}
+     * for the full contract.
+     */
     @NotNull
     public static List<String> prepare(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
                                        int httpPort, int shutdownPort,
@@ -73,6 +64,10 @@ public final class TomcatConfigPreparer {
                 httpsPort, httpsEnabled, ajpPort, ajpEnabled, null);
     }
 
+    /**
+     * Convenience overload — adds the user's {@code conf} overlay path. No log restart,
+     * no reserved context names. See the 11-arg overload for the full contract.
+     */
     @NotNull
     public static List<String> prepare(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
                                        int httpPort, int shutdownPort,
