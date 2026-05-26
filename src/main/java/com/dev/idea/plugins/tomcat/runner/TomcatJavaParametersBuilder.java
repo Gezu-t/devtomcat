@@ -4,7 +4,6 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.coverage.CoverageAgentAttacher;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
@@ -320,19 +319,17 @@ public class TomcatJavaParametersBuilder {
      */
     @NotNull
     private Set<String> collectIdeContextStems() {
-        List<DeploymentArtifact> artifacts =
-                configuration.getConfigData().getDeploymentConfig().getArtifacts();
-        if (artifacts == null || artifacts.isEmpty()) {
+        List<com.dev.idea.plugins.tomcat.model.Deployment> deployments = configuration.getDeployments();
+        if (deployments.isEmpty()) {
             return Set.of();
         }
         Set<String> stems = new HashSet<>();
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
+        for (com.dev.idea.plugins.tomcat.model.Deployment d : deployments) {
             try {
-                stems.add(ContextPathUtils.resolveContextName(artifact.getContextPath()));
+                stems.add(ContextPathUtils.resolveContextName(d.getContextPath()));
             } catch (IllegalArgumentException e) {
                 // Invalid context path — ignore here; deployment strategy reports it at deploy time.
-                LOG.debug("Skipping invalid context path for mirror reservation: " + artifact.getContextPath());
+                LOG.debug("Skipping invalid context path for mirror reservation: " + d.getContextPath());
             }
         }
         return stems;

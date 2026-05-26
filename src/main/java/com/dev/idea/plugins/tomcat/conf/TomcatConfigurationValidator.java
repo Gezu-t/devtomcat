@@ -1,6 +1,8 @@
 package com.dev.idea.plugins.tomcat.conf;
 
         import com.dev.idea.plugins.tomcat.TomcatConstants;
+        import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
+        import com.dev.idea.plugins.tomcat.model.Deployment;
         import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
         import com.dev.idea.plugins.tomcat.model.PortConfig;
         import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
@@ -14,8 +16,6 @@ package com.dev.idea.plugins.tomcat.conf;
         import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
         import com.intellij.openapi.diagnostic.Logger;
         import com.intellij.openapi.util.text.StringUtil;
-        import com.intellij.packaging.artifacts.Artifact;
-        import com.intellij.packaging.artifacts.ArtifactManager;
         import org.jetbrains.annotations.NotNull;
 
         import java.io.File;
@@ -335,61 +335,42 @@ package com.dev.idea.plugins.tomcat.conf;
             }
 
         /**
-         * Warns when non-external deployment artifacts cannot be resolved to any
-         * IntelliJ artifact. This is a safety net: the {@link ArtifactReferenceRefresher}
-         * runs first and fixes what it can, but if an artifact was deleted (not just renamed)
-         * or renamed beyond recognition, this validation catches it.
-         *
-         * <p>Only runs when ArtifactManager is available (Ultimate and some CE configurations).
-         * Silently skips on environments where the packaging module is not loaded.
+         * Warns when an {@link ArtifactBackedDeployment}'s {@code ArtifactPointer}
+         * no longer resolves to a live IntelliJ artifact (the artifact was
+         * removed or renamed beyond what the pointer's rename-tracking can
+         * recover). Module-backed and external deployments don't participate
+         * in this check.
          */
         private static void validateArtifactReferences(@NotNull TomcatRunConfiguration config)
                 throws RuntimeConfigurationException {
-            List<DeploymentArtifact> artifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
-            if (artifacts.isEmpty()) return;
-
-            // ArtifactManager.getInstance() and getArtifacts() access the project
-            // model and require a read action. Extract artifact names under the lock,
-            // then validate outside.
-            Set<String> platformArtifactNames;
+            List<Deployment> deployments;
             try {
-                platformArtifactNames = TomcatReadActions.compute(() -> {
-                    ArtifactManager artifactManager =
-                            ArtifactManager.getInstance(config.getProject());
-                    Artifact[] platformArtifacts = artifactManager.getArtifacts();
-                    Set<String> names = new HashSet<>(platformArtifacts.length);
-                    for (Artifact pa : platformArtifacts) {
-                        names.add(pa.getName());
-                    }
-                    return names;
-                });
+                // ArtifactPointer.getArtifact() resolves through the platform
+                // ArtifactManager and needs a read action; collect orphan names
+                // inside the action, then throw outside.
+                deployments = TomcatReadActions.compute(config::getDeployments);
             } catch (NoClassDefFoundError | Exception e) {
-                // ArtifactManager not available — skip this validation
+                // Platform model not available — skip this validation.
                 return;
             }
+            if (deployments.isEmpty()) return;
 
-            if (platformArtifactNames.isEmpty()) return;
-
-            for (DeploymentArtifact artifact : artifacts) {
-                if (artifact == null) continue;
-                // Skip EXTERNAL artifacts (user-picked files/directories) — they are
-                // by definition not IntelliJ-managed, so flagging them as "not in
-                // platform artifacts" would be a false positive. Source is the
-                // authoritative marker; the legacy TYPE_EXTERNAL string check has
-                // been retired along with the overloaded type field.
-                if (artifact.getSource() == DeploymentArtifact.Source.EXTERNAL) continue;
-
-                String name = artifact.getName();
-                if (name.isEmpty()) continue;
-
-                if (!platformArtifactNames.contains(name)) {
-                    // The refresher already ran and couldn't resolve this — it's truly orphaned
-                    throw new RuntimeConfigurationWarning(
-                            "Deployment artifact '" + artifact.getDisplayName() +
-                            "' does not match any IntelliJ artifact. It may have been renamed or " +
-                            "removed. Reconfigure it in the Deployment tab, or remove and re-add it.");
+            List<String> orphans = TomcatReadActions.compute(() -> {
+                List<String> names = new ArrayList<>();
+                for (Deployment d : deployments) {
+                    if (d instanceof ArtifactBackedDeployment a
+                            && a.getArtifactPointer().getArtifact() == null) {
+                        names.add(a.getDisplayName());
+                    }
                 }
-            }
+                return names;
+            });
+
+            if (orphans.isEmpty()) return;
+            throw new RuntimeConfigurationWarning(
+                    "Deployment artifact '" + orphans.get(0) +
+                    "' does not match any IntelliJ artifact. It may have been renamed or " +
+                    "removed. Reconfigure it in the Deployment tab, or remove and re-add it.");
         }
 
         public static String getValidationError(@NotNull TomcatRunConfiguration config) {
