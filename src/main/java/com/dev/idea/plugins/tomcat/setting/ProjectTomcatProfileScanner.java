@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.setting;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -86,7 +87,7 @@ public final class ProjectTomcatProfileScanner {
     private static DetectedWebappModule inspectModule(@NotNull Module module) {
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
         for (VirtualFile root : contentRoots) {
-            VirtualFile pom = root.findChild("pom.xml");
+            VirtualFile pom = root.findChild(TomcatConstants.MAVEN_BUILD_FILE);
             if (pom == null || !pom.exists()) continue;
             String pomText;
             try {

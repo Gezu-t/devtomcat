@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.deployment;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
@@ -234,11 +235,11 @@ public class ArtifactSelectionHandler {
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     for (VirtualFile root :
                             ModuleRootManager.getInstance(module).getContentRoots()) {
-                        VirtualFile pomFile = root.findChild("pom.xml");
+                        VirtualFile pomFile = root.findChild(TomcatConstants.MAVEN_BUILD_FILE);
                         if (pomFile != null && pomFile.exists()) {
                             try {
                                 String content = VfsUtil.loadText(pomFile);
-                                if (content.contains("<packaging>pom</packaging>")) {
+                                if (content.contains(TomcatConstants.POM_PACKAGING_POM)) {
                                     pomNames.add(module.getName().toLowerCase());
                                     break;
                                 }

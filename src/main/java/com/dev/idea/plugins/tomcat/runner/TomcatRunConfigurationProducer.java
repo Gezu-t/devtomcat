@@ -371,7 +371,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
         for (VirtualFile contentRoot : contentRoots) {
-            VirtualFile pomXml = contentRoot.findFileByRelativePath("pom.xml");
+            VirtualFile pomXml = contentRoot.findFileByRelativePath(TomcatConstants.MAVEN_BUILD_FILE);
             if (pomXml != null && pomXml.exists()) {
                 return true;
             }
@@ -384,8 +384,8 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
 
         for (VirtualFile contentRoot : contentRoots) {
-            VirtualFile buildGradle = contentRoot.findFileByRelativePath("build.gradle");
-            VirtualFile buildGradleKts = contentRoot.findFileByRelativePath("build.gradle.kts");
+            VirtualFile buildGradle = contentRoot.findFileByRelativePath(TomcatConstants.GRADLE_BUILD_FILE_GROOVY);
+            VirtualFile buildGradleKts = contentRoot.findFileByRelativePath(TomcatConstants.GRADLE_BUILD_FILE_KOTLIN);
 
             if ((buildGradle != null && buildGradle.exists()) ||
                     (buildGradleKts != null && buildGradleKts.exists())) {

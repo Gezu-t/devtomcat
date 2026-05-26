@@ -115,6 +115,15 @@ public final class TomcatConstants {
     public static final String JAR_BOOTSTRAP = "bin/bootstrap.jar";
     public static final String JAR_TOMCAT_JULI = "bin/tomcat-juli.jar";
 
+    // --- Build tool files (content-root / project-root level) ---
+    public static final String MAVEN_BUILD_FILE = "pom.xml";
+    public static final String GRADLE_BUILD_FILE_GROOVY = "build.gradle";
+    public static final String GRADLE_BUILD_FILE_KOTLIN = "build.gradle.kts";
+
+    // --- POM packaging markers (raw XML element strings used for content matching) ---
+    public static final String POM_PACKAGING_POM = "<packaging>pom</packaging>";
+    public static final String POM_PACKAGING_WAR = "<packaging>war</packaging>";
+
     // --- Connector protocol identifiers ---
     public static final String PROTOCOL_HTTP = "HTTP/1.1";
     public static final String PROTOCOL_HTTPS = "org.apache.coyote.http11.Http11NioProtocol";

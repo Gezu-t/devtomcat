@@ -18,6 +18,8 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 
+import com.dev.idea.plugins.tomcat.TomcatConstants;
+
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
 import java.util.List;
 import java.util.Set;
@@ -60,6 +62,61 @@ public final class TomcatModuleUtils {
             "html", "jsp", "xhtml", "js", "ts", // Frontend files
             "xml" // web.xml for traditional Java web apps
     );
+
+    // =====================================================================
+    // Module-name parsing
+    // =====================================================================
+
+    /** Module-name suffixes stripped before deriving a context path. Order-sensitive: outer suffixes first, so {@code foo.web.main} → {@code foo.web} → {@code foo}. */
+    private static final List<String> MODULE_NAME_TRIM_SUFFIXES = List.of(
+            ".main", ".web", "-web", "_web"
+    );
+
+    /** Module names that map to the root context "/". */
+    private static final Set<String> ROOT_CONTEXT_MODULE_NAMES = Set.of("root", "main");
+
+    /** Module-name suffixes that mark the module as test-only. */
+    private static final Set<String> TEST_MODULE_SUFFIXES = Set.of(
+            ".test", ".tests", "-test", "-tests", "_test", "_tests",
+            ".spec", "-spec", "_spec"
+    );
+
+    /** Exact module names that are always test-only. */
+    private static final Set<String> TEST_MODULE_EXACT_NAMES = Set.of("test", "tests");
+
+    /** Gradle sub-project source-set name — matched as the final dot-segment of a compound module name like {@code app.module.test}. */
+    private static final String GRADLE_TEST_SOURCE_SET = "test";
+
+    // =====================================================================
+    // Build-script content markers (used by checkMavenWebConfig / checkGradleWebConfig)
+    // =====================================================================
+
+    /** POM content fragments indicating the module produces a war artifact or is Spring-Boot-web. */
+    private static final List<String> POM_WEB_INDICATORS = List.of(
+            TomcatConstants.POM_PACKAGING_WAR,
+            "maven-war-plugin",
+            "spring-boot-starter-web"
+    );
+
+    /** Gradle build-script fragments (Groovy + Kotlin DSL) indicating war or Spring-Boot-web. */
+    private static final List<String> GRADLE_WEB_INDICATORS = List.of(
+            "apply plugin: 'war'",
+            "id(\"war\")",
+            "id 'war'",
+            "id \"war\"",
+            "plugin 'war'",
+            "org.springframework.boot",
+            "spring-boot-starter-web"
+    );
+
+    // =====================================================================
+    // Web Facet reflection (IntelliJ Ultimate JavaEE plugin)
+    // =====================================================================
+
+    /** Facet type id matched via {@code FacetType.getStringId()} — string-equality avoids a compile-time dep on Ultimate-only {@code WebFacet}. */
+    private static final String WEB_FACET_STRING_ID = "web";
+    private static final String FACET_METHOD_GET_WEB_ROOTS = "getWebRoots";
+    private static final String WEB_ROOT_METHOD_GET_FILE = "getFile";
 
     private TomcatModuleUtils() {
         // Utility class
@@ -236,12 +293,12 @@ public final class TomcatModuleUtils {
             for (com.intellij.facet.Facet<?> facet : fm.getAllFacets()) {
                 // String-ID match avoids a compile-time dependency on WebFacet
                 // (which lives in IntelliJ's JavaEE plugin, Ultimate-only).
-                if (!"web".equals(facet.getType().getStringId())) continue;
+                if (!WEB_FACET_STRING_ID.equals(facet.getType().getStringId())) continue;
                 try {
-                    Object roots = facet.getClass().getMethod("getWebRoots").invoke(facet);
+                    Object roots = facet.getClass().getMethod(FACET_METHOD_GET_WEB_ROOTS).invoke(facet);
                     if (!(roots instanceof Iterable<?>)) continue;
                     for (Object webRoot : (Iterable<?>) roots) {
-                        Object file = webRoot.getClass().getMethod("getFile").invoke(webRoot);
+                        Object file = webRoot.getClass().getMethod(WEB_ROOT_METHOD_GET_FILE).invoke(webRoot);
                         if (file instanceof VirtualFile vf && vf.isValid() && vf.isDirectory()) {
                             out.add(vf);
                         }
@@ -304,11 +361,9 @@ public final class TomcatModuleUtils {
     public static String extractContextPath(@NotNull Module module) {
         String moduleName = module.getName();
 
-        // Remove common suffixes
-        moduleName = StringUtil.trimEnd(moduleName, ".main");
-        moduleName = StringUtil.trimEnd(moduleName, ".web");
-        moduleName = StringUtil.trimEnd(moduleName, "-web");
-        moduleName = StringUtil.trimEnd(moduleName, "_web");
+        for (String suffix : MODULE_NAME_TRIM_SUFFIXES) {
+            moduleName = StringUtil.trimEnd(moduleName, suffix);
+        }
 
         // Get last component after dots
         int lastDot = moduleName.lastIndexOf('.');
@@ -326,12 +381,11 @@ public final class TomcatModuleUtils {
                 .replaceAll("-+", "-")
                 .replaceAll("^-|-$", "");
 
-        // Handle special cases
-        if (moduleName.isEmpty() || "root".equals(moduleName) || "main".equals(moduleName)) {
-            return "/";
+        if (moduleName.isEmpty() || ROOT_CONTEXT_MODULE_NAMES.contains(moduleName)) {
+            return TomcatConstants.DEFAULT_CONTEXT_PATH;
         }
 
-        return "/" + moduleName;
+        return TomcatConstants.DEFAULT_CONTEXT_PATH + moduleName;
     }
 
     public static boolean isTestSource(@Nullable com.intellij.execution.Location<? extends PsiElement> location) {
@@ -390,27 +444,15 @@ public final class TomcatModuleUtils {
         // local and survives any future suffix that does.
         String name = module.getName().toLowerCase(Locale.ROOT);
 
-        // Suffix-based checks (precise)
-        if (name.endsWith(".test") || name.endsWith(".tests") ||
-                name.endsWith("-test") || name.endsWith("-tests") ||
-                name.endsWith("_test") || name.endsWith("_tests") ||
-                name.endsWith(".spec") || name.endsWith("-spec") ||
-                name.endsWith("_spec")) {
-            return true;
+        for (String suffix : TEST_MODULE_SUFFIXES) {
+            if (name.endsWith(suffix)) return true;
         }
 
-        // Exact name checks
-        if ("test".equals(name) || "tests".equals(name)) {
-            return true;
-        }
+        if (TEST_MODULE_EXACT_NAMES.contains(name)) return true;
 
-        // Gradle sub-project test source sets: "project.module.test"
-        // Only match when "test" is the final path segment after a dot
-        if (name.contains(".") && name.substring(name.lastIndexOf('.') + 1).equals("test")) {
-            return true;
-        }
-
-        return false;
+        // Gradle sub-project test source set — "test" as the final dot-segment.
+        int lastDot = name.lastIndexOf('.');
+        return lastDot >= 0 && name.substring(lastDot + 1).equals(GRADLE_TEST_SOURCE_SET);
     }
 
     private static boolean hasWebBuildConfiguration(@NotNull Module module) {
@@ -434,18 +476,14 @@ public final class TomcatModuleUtils {
     }
 
     private static boolean checkMavenWebConfig(@NotNull VirtualFile dir) {
-        VirtualFile pomFile = dir.findChild("pom.xml");
+        VirtualFile pomFile = dir.findChild(TomcatConstants.MAVEN_BUILD_FILE);
         if (pomFile == null || !pomFile.exists()) return false;
 
         try {
             String content = VfsUtil.loadText(pomFile);
             // POM-packaged projects are aggregators/parents, not web apps
-            if (content.contains("<packaging>pom</packaging>")) {
-                return false;
-            }
-            return content.contains("<packaging>war</packaging>") ||
-                    content.contains("maven-war-plugin") ||
-                    content.contains("spring-boot-starter-web");
+            if (content.contains(TomcatConstants.POM_PACKAGING_POM)) return false;
+            return containsAny(content, POM_WEB_INDICATORS);
         } catch (IOException e) {
             return false;
         }
@@ -453,23 +491,25 @@ public final class TomcatModuleUtils {
 
     private static boolean checkGradleWebConfig(@NotNull VirtualFile dir) {
         // Check both Groovy DSL and Kotlin DSL
-        VirtualFile gradleFile = dir.findChild("build.gradle");
+        VirtualFile gradleFile = dir.findChild(TomcatConstants.GRADLE_BUILD_FILE_GROOVY);
         if (gradleFile == null) {
-            gradleFile = dir.findChild("build.gradle.kts");
+            gradleFile = dir.findChild(TomcatConstants.GRADLE_BUILD_FILE_KOTLIN);
         }
         if (gradleFile == null || !gradleFile.exists()) return false;
 
         try {
             String content = VfsUtil.loadText(gradleFile);
-            return content.contains("apply plugin: 'war'") ||
-                    content.contains("id(\"war\")") ||
-                    content.contains("id 'war'") ||
-                    content.contains("id \"war\"") ||
-                    content.contains("plugin 'war'") ||
-                    content.contains("org.springframework.boot") ||
-                    content.contains("spring-boot-starter-web");
+            return containsAny(content, GRADLE_WEB_INDICATORS);
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /** Returns true iff any of {@code markers} is a substring of {@code content}. */
+    private static boolean containsAny(@NotNull String content, @NotNull List<String> markers) {
+        for (String marker : markers) {
+            if (content.contains(marker)) return true;
+        }
+        return false;
     }
 }
