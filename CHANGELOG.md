@@ -16,6 +16,12 @@
 - `DeploymentConfig` gains typed mutators (`setDeployments` / `addDeployment` / `removeDeployment` / `getDeploymentByName`) so call sites can move off `DeploymentArtifact` without waiting on the eventual storage flip.
 - `DeployedClassesSync.syncDeployments` / `WebResourcesSync.syncDeployments` / `TomcatApplicationUpdater.warnAboutWarDeploymentsIfPresent` — new typed entry points; legacy `syncIfNeeded` / `warnAboutWarArtifactsIfPresent` overloads kept as deprecated forwarders.
 - `TomcatApplicationUpdater` orchestrators (`doUpdateResourcesOnly` / `doUpdateClassesAndResources` / `doRedeploy` / `doRestart`) hoist `getDeployments()` once instead of calling `getDeployedArtifacts()` three to four times per orchestrator.
+- `LocalDeploymentStrategy` deep helpers (`buildContextXml` / `buildExtraResourcesXml` / `collectModelSnapshot` / `resolveModuleForDeployment`) now take typed `Deployment`; the 5-fallback string-based artifact-to-module resolver (artifact-name lookup, name-stripping, content-root containment, single-web-module fallback, partial substring match) collapses into a 3-arm typed dispatch using `ArtifactPointer` / `ModulePointer`.
+- `TomcatPreflightValidator.checkDuplicateDeployments` / `checkDuplicateJars` switch to typed dispatch; the legacy `InvalidPathException` resilience is now structural (typed model rejects invalid paths at construction).
+- `ArtifactStructureValidator.validate(List<Deployment>)` + `TomcatBuildArtifactsTaskProvider.executeTask` switch to typed; `SelectArtifactsDialog` consumes typed deployments for the build-artifacts pre-launch picker.
+- `ArtifactMatchingUtils.findMatching(Deployment)` collapses the 4-strategy fuzzy matcher (exact-name, case-insensitive-name, output-path, base-module-name) plus EXTERNAL provenance guard into a single `ArtifactPointer.getArtifact()` lookup — the typed model makes every guard structural.
+- `ProjectArtifactDetector` produces typed `Deployment` directly: `ArtifactBackedDeployment` for IntelliJ artifacts, `ModuleBackedDeployment` for web modules, `ExternalFileDeployment` for WAR scans.
+- `DeploymentTableManager` gains `getTypedDeployments(Project)` / `setTypedDeployments` at the UI boundary; `DeploymentConfigurationPanel.applyTo` now feeds the typed setter.
 
 ## [1.1.1]
 
