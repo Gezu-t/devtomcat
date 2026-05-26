@@ -79,8 +79,12 @@ public class DeploymentConfig implements Serializable, Cloneable {
     /** Typed view of the deployment list. Each legacy entry is adapted via {@link DeploymentAdapter#toTyped}. */
     @NotNull
     public List<Deployment> getDeployments(@NotNull Project project) {
-        List<Deployment> out = new ArrayList<>(artifacts.size());
-        for (DeploymentArtifact a : artifacts) {
+        // Snapshot first — mirrors getArtifacts(); avoids CME when a concurrent
+        // UI Apply / setArtifacts replaces or mutates the storage list while
+        // background update/sync threads are iterating.
+        List<DeploymentArtifact> snapshot = new ArrayList<>(artifacts);
+        List<Deployment> out = new ArrayList<>(snapshot.size());
+        for (DeploymentArtifact a : snapshot) {
             if (a != null) out.add(DeploymentAdapter.toTyped(project, a));
         }
         return out;
@@ -101,7 +105,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
     @Nullable
     public DeploymentArtifact getArtifactByName(@NotNull String name) {
         Objects.requireNonNull(name, "Artifact name cannot be null");
-        return artifacts.stream()
+        // Snapshot to match the getArtifacts() / getDeployments() defensive-copy
+        // contract — concurrent setArtifacts could otherwise CME mid-stream.
+        return new ArrayList<>(artifacts).stream()
                 .filter(a -> a != null && a.getName().equals(name))
                 .findFirst()
                 .orElse(null);
