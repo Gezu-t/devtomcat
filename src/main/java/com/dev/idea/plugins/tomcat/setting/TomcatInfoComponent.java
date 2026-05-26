@@ -10,7 +10,7 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.awt.*;
+import java.awt.Font;
 
 /**
  * Tomcat Server Information Component
@@ -76,35 +76,15 @@ public class TomcatInfoComponent implements Disposable {
     }
 
     private JPanel createDetailsPanel() {
-        JPanel panel = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = JBUI.insets(2);
-
-        int row = 0;
-
-        gbc.gridx = 0;
-        gbc.gridy = row;
-        panel.add(new JBLabel("Major Version:"), gbc);
-
-        gbc.gridx = 1;
-        gbc.weightx = 1.0;
-        panel.add(new JBLabel(String.valueOf(tomcatInfo.getMajorVersion())), gbc);
-
-        row++;
-
-        gbc.gridx = 0;
-        gbc.gridy = row;
-        gbc.weightx = 0;
-        panel.add(new JBLabel("CATALINA_HOME:"), gbc);
-
-        gbc.gridx = 1;
-        gbc.weightx = 1.0;
         JBTextField homeField = new JBTextField(tomcatInfo.getCatalinaHome());
         homeField.setEditable(false);
         homeField.setBackground(UIUtil.getPanelBackground());
-        panel.add(homeField, gbc);
 
+        JPanel panel = FormBuilder.createFormBuilder()
+                .setVerticalGap(UIUtil.DEFAULT_VGAP)
+                .addLabeledComponent("Major Version:", new JBLabel(String.valueOf(tomcatInfo.getMajorVersion())))
+                .addLabeledComponent("CATALINA_HOME:", homeField)
+                .getPanel();
         panel.setBorder(JBUI.Borders.emptyTop(10));
         return panel;
     }

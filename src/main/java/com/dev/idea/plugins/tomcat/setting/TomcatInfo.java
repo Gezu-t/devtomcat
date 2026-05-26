@@ -45,9 +45,9 @@ public class TomcatInfo implements Serializable, Cloneable {
 
     public TomcatInfo(@NotNull String name, @NotNull String version, @NotNull String path) {
         this.id = UUID.randomUUID().toString();
-        this.name = Objects.requireNonNull(name);
-        this.version = Objects.requireNonNull(version);
-        this.path = Objects.requireNonNull(path);
+        this.name = name;
+        this.version = version;
+        this.path = path;
         this.catalinaBase = "";
     }
 
