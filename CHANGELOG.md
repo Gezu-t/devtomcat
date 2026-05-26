@@ -7,10 +7,15 @@
 ### Fixed
 - Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
 - Update Classes/Resources: owning-module resolution rebuilt around typed deployment kinds (Artifact / Module / External) using IntelliJ's `ArtifactPointer` and `ModulePointer`; string-matching fallbacks removed. Failures emit a single actionable line instead of a path + module-list dump.
+- Orphan-artifact check now reads from `ArtifactPointer.getArtifact()` instead of scanning every IntelliJ artifact name into a Set on every validation.
 - Replaced the two remaining `SimpleListCellRenderer.create(...)` factory calls with the subclass form — the factory is scheduled-for-removal in 2026.2 EAP.
 
 ### Changed
 - `pluginSinceBuild` lowered to `242` — DevTomcat now installs on IntelliJ 2024.2+ (verified Compatible by the plugin verifier against IC-242.20224.300 and IC-251.29188.11).
+- Launch + update + remote-deploy pipelines iterate typed `Deployment` objects end to end; legacy `DeploymentArtifact` only crosses the boundary at a small number of unmigrated downstream helpers via `DeploymentAdapter`.
+- `DeploymentConfig` gains typed mutators (`setDeployments` / `addDeployment` / `removeDeployment` / `getDeploymentByName`) so call sites can move off `DeploymentArtifact` without waiting on the eventual storage flip.
+- `DeployedClassesSync.syncDeployments` / `WebResourcesSync.syncDeployments` / `TomcatApplicationUpdater.warnAboutWarDeploymentsIfPresent` — new typed entry points; legacy `syncIfNeeded` / `warnAboutWarArtifactsIfPresent` overloads kept as deprecated forwarders.
+- `TomcatApplicationUpdater` orchestrators (`doUpdateResourcesOnly` / `doUpdateClassesAndResources` / `doRedeploy` / `doRestart`) hoist `getDeployments()` once instead of calling `getDeployedArtifacts()` three to four times per orchestrator.
 
 ## [1.1.1]
 
