@@ -5,24 +5,24 @@
 ## [1.2.0]
 
 ### Fixed
-- Console no longer flags lines that merely mention `ERROR`/`SEVERE`/`FATAL`/`WARN` as level keywords (e.g. `=ERROR` config values).
-- Update Classes/Resources: owning-module resolution rebuilt around typed deployment kinds (Artifact / Module / External) using IntelliJ's `ArtifactPointer` and `ModulePointer`; string-matching fallbacks removed. Failures emit a single actionable line instead of a path + module-list dump.
-- Orphan-artifact check now reads from `ArtifactPointer.getArtifact()` instead of scanning every IntelliJ artifact name into a Set on every validation.
-- Replaced the two remaining `SimpleListCellRenderer.create(...)` factory calls with the subclass form — the factory is scheduled-for-removal in 2026.2 EAP.
+- Owning-module resolution rebuilt on typed `ArtifactPointer`/`ModulePointer` dispatch.
+- Orphan-artifact check reads `ArtifactPointer.getArtifact()` directly.
+- Console stops flagging incidental `ERROR`/`SEVERE`/`FATAL`/`WARN` substrings as level keywords.
+- Migrated remaining `SimpleListCellRenderer.create(...)` factory calls to the subclass form.
 
 ### Changed
-- `pluginSinceBuild` lowered to `242` — DevTomcat now installs on IntelliJ 2024.2+ (verified Compatible by the plugin verifier against IC-242.20224.300 and IC-251.29188.11).
-- Launch + update + remote-deploy pipelines iterate typed `Deployment` objects end to end; legacy `DeploymentArtifact` only crosses the boundary at a small number of unmigrated downstream helpers via `DeploymentAdapter`.
-- `DeploymentConfig` gains typed mutators (`setDeployments` / `addDeployment` / `removeDeployment` / `getDeploymentByName`) so call sites can move off `DeploymentArtifact` without waiting on the eventual storage flip.
-- `DeployedClassesSync.syncDeployments` / `WebResourcesSync.syncDeployments` / `TomcatApplicationUpdater.warnAboutWarDeploymentsIfPresent` — new typed entry points; legacy `syncIfNeeded` / `warnAboutWarArtifactsIfPresent` overloads kept as deprecated forwarders.
-- `TomcatApplicationUpdater` orchestrators (`doUpdateResourcesOnly` / `doUpdateClassesAndResources` / `doRedeploy` / `doRestart`) hoist `getDeployments()` once instead of calling `getDeployedArtifacts()` three to four times per orchestrator.
-- `LocalDeploymentStrategy` deep helpers (`buildContextXml` / `buildExtraResourcesXml` / `collectModelSnapshot` / `resolveModuleForDeployment`) now take typed `Deployment`; the 5-fallback string-based artifact-to-module resolver (artifact-name lookup, name-stripping, content-root containment, single-web-module fallback, partial substring match) collapses into a 3-arm typed dispatch using `ArtifactPointer` / `ModulePointer`.
-- `TomcatPreflightValidator.checkDuplicateDeployments` / `checkDuplicateJars` switch to typed dispatch; the legacy `InvalidPathException` resilience is now structural (typed model rejects invalid paths at construction).
-- `ArtifactStructureValidator.validate(List<Deployment>)` + `TomcatBuildArtifactsTaskProvider.executeTask` switch to typed; `SelectArtifactsDialog` consumes typed deployments for the build-artifacts pre-launch picker.
-- `ArtifactMatchingUtils.findMatching(Deployment)` collapses the 4-strategy fuzzy matcher (exact-name, case-insensitive-name, output-path, base-module-name) plus EXTERNAL provenance guard into a single `ArtifactPointer.getArtifact()` lookup — the typed model makes every guard structural.
-- `ProjectArtifactDetector` produces typed `Deployment` directly: `ArtifactBackedDeployment` for IntelliJ artifacts, `ModuleBackedDeployment` for web modules, `ExternalFileDeployment` for WAR scans.
-- `DeploymentTableManager` gains `getTypedDeployments(Project)` / `setTypedDeployments` at the UI boundary; `DeploymentConfigurationPanel.applyTo` now feeds the typed setter.
-- `ArtifactReferenceRefresher` rewritten on typed-pointer dispatch: 543 lines of fuzzy 4-strategy rename tracking (exact-name / output-path / base-module-name / EXTERNAL guard) collapse to ~140 lines that build an `ArtifactBackedDeployment` per stored entry and patch the legacy name / path fields when `ArtifactPointer.getArtifact()` reports a drift. The snapshot-based test class is dropped because the unit it covered no longer exists; the new path is exercised by the live editor refresh.
+- `pluginSinceBuild` lowered to `242` (IntelliJ 2024.2+).
+- Launch / update / remote-deploy pipelines iterate typed `Deployment` end to end.
+- `DeploymentConfig` gains typed mutators: `setDeployments`, `addDeployment`, `removeDeployment`, `getDeploymentByName`.
+- Typed sync entry points added: `DeployedClassesSync.syncDeployments`, `WebResourcesSync.syncDeployments`, `warnAboutWarDeploymentsIfPresent`.
+- `TomcatApplicationUpdater` orchestrators hoist `getDeployments()` once per pass.
+- `LocalDeploymentStrategy` deep helpers take typed `Deployment`.
+- `TomcatPreflightValidator.checkDuplicateDeployments` / `checkDuplicateJars` switch to typed dispatch.
+- `ArtifactStructureValidator`, `TomcatBuildArtifactsTaskProvider`, `SelectArtifactsDialog` switch to typed.
+- `ArtifactMatchingUtils.findMatching(Deployment)` replaces the fuzzy matcher with one pointer lookup.
+- `ProjectArtifactDetector` produces typed `Deployment` directly.
+- `DeploymentTableManager` exposes typed UI-boundary accessors.
+- `ArtifactReferenceRefresher` rewritten on typed-pointer dispatch (543 → ~140 lines).
 
 ## [1.1.1]
 
