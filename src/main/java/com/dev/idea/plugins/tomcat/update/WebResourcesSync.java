@@ -4,13 +4,16 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.utils.MavenReflection;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
+import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,8 +24,14 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
 
 /**
  * Mirrors a module's {@code src/main/webapp/} tree into its exploded artifact
@@ -63,8 +72,8 @@ public final class WebResourcesSync {
      * content.
      */
     private static final Set<String> SKIP_SUBTREES = Set.of(
-            "WEB-INF/classes",
-            "WEB-INF/lib");
+            WEB_INF_CLASSES_PATH,
+            WEB_INF_LIB_PATH);
 
     private WebResourcesSync() {}
 
@@ -206,7 +215,7 @@ public final class WebResourcesSync {
     static List<Path> findWebappSourceRoots(@NotNull Project project,
                                             @NotNull DeploymentArtifact artifact) {
         return findWebappSourceRootsForTyped(project,
-                com.dev.idea.plugins.tomcat.model.DeploymentAdapter.toTyped(project, artifact));
+                DeploymentAdapter.toTyped(project, artifact));
     }
 
     /**
@@ -216,15 +225,15 @@ public final class WebResourcesSync {
      */
     @NotNull
     static List<Path> findWebappSourceRootsForTyped(@NotNull Project project,
-                                                    @NotNull com.dev.idea.plugins.tomcat.model.Deployment deployment) {
+                                                    @NotNull Deployment deployment) {
         DeployedClassesSync.ResolutionReport report =
                 DeployedClassesSync.resolveTyped(project, deployment);
         String moduleName = report.moduleName();
-        if (moduleName == null) return java.util.Collections.emptyList();
+        if (moduleName == null) return Collections.emptyList();
         Module module = ModuleManager.getInstance(project).findModuleByName(moduleName);
-        if (module == null) return java.util.Collections.emptyList();
+        if (module == null) return Collections.emptyList();
 
-        java.util.LinkedHashSet<Path> ordered = new java.util.LinkedHashSet<>();
+        LinkedHashSet<Path> ordered = new LinkedHashSet<>();
         // 1. WebFacet roots — authoritative, user-configured (Ultimate only).
         for (VirtualFile root : TomcatModuleUtils.findWebFacetRoots(module)) {
             ordered.add(Path.of(root.getPath()));
@@ -234,9 +243,7 @@ public final class WebResourcesSync {
             ordered.add(Path.of(root.getPath()));
         }
         // 3. Maven <webResources> extras (additive overlay; filtered skipped).
-        for (Path extra : findMavenExtraWebResources(module, project)) {
-            ordered.add(extra);
-        }
+        ordered.addAll(findMavenExtraWebResources(module, project));
         // 4. Unconventional fallback ONLY if steps 1-3 found nothing — avoids
         //    scanning the project filesystem (slower) when a cheaper signal
         //    already gave us the answer, and prevents the scan from
@@ -246,7 +253,7 @@ public final class WebResourcesSync {
                 ordered.add(Path.of(root.getPath()));
             }
         }
-        return new java.util.ArrayList<>(ordered);
+        return new ArrayList<>(ordered);
     }
 
     /**
@@ -259,46 +266,52 @@ public final class WebResourcesSync {
      * and Gradle-only projects where {@code MavenProjectsManager} is
      * absent — degrades to empty list.
      */
+    // --- maven-war-plugin <webResources> reflection ---
+    private static final String MAVEN_WAR_PLUGIN_GROUP_ID = "org.apache.maven.plugins";
+    private static final String MAVEN_WAR_PLUGIN_ARTIFACT_ID = "maven-war-plugin";
+    private static final String WAR_PLUGIN_WEB_RESOURCES_ELEMENT = "webResources";
+    private static final String WAR_PLUGIN_RESOURCE_ELEMENT = "resource";
+    private static final String WAR_PLUGIN_DIRECTORY_ELEMENT = "directory";
+    private static final String WAR_PLUGIN_FILTERING_ELEMENT = "filtering";
+
     @NotNull
     private static List<Path> findMavenExtraWebResources(@NotNull Module module,
                                                          @NotNull Project project) {
-        Object mavenProject = com.dev.idea.plugins.tomcat.utils.MavenReflection
-                .findMavenProject(module, project);
-        if (mavenProject == null) return java.util.Collections.emptyList();
+        Object mavenProject = MavenReflection.findMavenProject(module, project);
+        if (mavenProject == null) return Collections.emptyList();
         try {
             // MavenProject.findPlugin(groupId, artifactId) → MavenPlugin
             Object warPlugin = mavenProject.getClass()
                     .getMethod("findPlugin", String.class, String.class)
-                    .invoke(mavenProject, "org.apache.maven.plugins", "maven-war-plugin");
-            if (warPlugin == null) return java.util.Collections.emptyList();
+                    .invoke(mavenProject, MAVEN_WAR_PLUGIN_GROUP_ID, MAVEN_WAR_PLUGIN_ARTIFACT_ID);
+            if (warPlugin == null) return Collections.emptyList();
 
             // MavenPlugin.getConfigurationElement() → org.jdom.Element (or null)
             Object configObj = warPlugin.getClass().getMethod("getConfigurationElement").invoke(warPlugin);
-            if (!(configObj instanceof org.jdom.Element config)) return java.util.Collections.emptyList();
+            if (!(configObj instanceof Element config)) return Collections.emptyList();
 
-            org.jdom.Element webResources = config.getChild("webResources");
-            if (webResources == null) return java.util.Collections.emptyList();
+            Element webResources = config.getChild(WAR_PLUGIN_WEB_RESOURCES_ELEMENT);
+            if (webResources == null) return Collections.emptyList();
 
             // Module root for resolving any relative <directory> values.
-            VirtualFile[] roots = com.intellij.openapi.roots.ModuleRootManager
-                    .getInstance(module).getContentRoots();
+            VirtualFile[] roots = ModuleRootManager.getInstance(module).getContentRoots();
             Path moduleRoot = roots.length > 0 ? Path.of(roots[0].getPath()) : null;
 
-            List<Path> dirs = new java.util.ArrayList<>();
-            for (org.jdom.Element resource : webResources.getChildren("resource")) {
-                String filtering = resource.getChildText("filtering");
+            List<Path> dirs = new ArrayList<>();
+            for (Element resource : webResources.getChildren(WAR_PLUGIN_RESOURCE_ELEMENT)) {
+                String filtering = resource.getChildText(WAR_PLUGIN_FILTERING_ELEMENT);
                 if ("true".equalsIgnoreCase(filtering)) {
                     // Maven would token-substitute these. We can't safely mirror
                     // raw templates over filtered deployed copies — skip.
                     continue;
                 }
-                String dir = resource.getChildText("directory");
+                String dir = resource.getChildText(WAR_PLUGIN_DIRECTORY_ELEMENT);
                 if (dir == null || dir.isBlank()) continue;
                 Path resolved = Path.of(dir);
                 if (!resolved.isAbsolute() && moduleRoot != null) {
                     resolved = moduleRoot.resolve(dir);
                 }
-                if (java.nio.file.Files.isDirectory(resolved)) {
+                if (Files.isDirectory(resolved)) {
                     dirs.add(resolved);
                 }
             }
@@ -306,7 +319,7 @@ public final class WebResourcesSync {
         } catch (NoClassDefFoundError | Exception e) {
             // Maven plugin not present (Community-edition / Gradle-only project),
             // war-plugin not declared, or unexpected model shape — no extras.
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
     }
 

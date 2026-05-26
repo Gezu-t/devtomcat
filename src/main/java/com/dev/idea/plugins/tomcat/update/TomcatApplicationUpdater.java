@@ -73,13 +73,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
     @Override
     public String getDescription() {
-        return switch (action) {
-            case UpdateConfig.UPDATE_RESOURCES -> "Update resources";
-            case UpdateConfig.UPDATE_CLASSES_AND_RESOURCES -> "Update classes and resources";
-            case UpdateConfig.REDEPLOY -> "Redeploy";
-            case UpdateConfig.RESTART_SERVER -> "Restart server";
-            default -> "Update application";
-        };
+        return displayForAction(action, "Update application");
     }
 
     @Override
@@ -313,8 +307,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     }
                 } catch (Exception e) {
                     LOG.warn("Failed to restart Tomcat: " + configuration.getName(), e);
-                    com.dev.idea.plugins.tomcat.utils.ProcessStopSupport
-                            .purgeTerminatedDescriptors(project);
+                    ProcessStopSupport.purgeTerminatedDescriptors(project);
                     logger.logServerError("Failed to restart: " + e.getMessage());
                     notifyRestartFailed(project, configuration.getName(), e.getMessage());
                 }
@@ -493,11 +486,6 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * exploded in the Deployment tab). Public + static so the launch path
      * ({@code TomcatJavaParametersBuilder}) can call it too.
      */
-    /**
-     * Logs one aggregated warning when any deployment in the list is WAR-packaged.
-     * Public + static so the launch path ({@code TomcatJavaParametersBuilder})
-     * can call it.
-     */
     public static void warnAboutWarDeploymentsIfPresent(@NotNull List<Deployment> deployments,
                                                         @NotNull TomcatDeploymentLogger logger) {
         java.util.List<String> warNames = new java.util.ArrayList<>();
@@ -521,17 +509,28 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                         + " target/<finalName>/ for Maven, build/libs/exploded/ for Gradle).");
     }
 
-    /**
-     * Maps an {@link UpdateConfig} action constant to a user-visible display string.
-     */
+    /** Maps an {@link UpdateConfig} action constant to a user-visible display string; unrecognised actions echo back. */
     @NotNull
     public static String mapActionToDisplay(@NotNull String action) {
+        return displayForAction(action, action);
+    }
+
+    /**
+     * Source-of-truth for the action-id → display-string mapping. Two callers
+     * differ only in the fallback they want for an unrecognised action — the
+     * platform-facing {@code getDescription} returns a generic "Update application",
+     * while the diagnostic / log-line {@code mapActionToDisplay} echoes the input
+     * back so an unknown action ID stays inspectable rather than being silently
+     * relabelled.
+     */
+    @NotNull
+    private static String displayForAction(@NotNull String action, @NotNull String fallback) {
         return switch (action) {
-            case UpdateConfig.UPDATE_RESOURCES -> "Update resources";
-            case UpdateConfig.UPDATE_CLASSES_AND_RESOURCES -> "Update classes and resources";
-            case UpdateConfig.REDEPLOY -> "Redeploy";
-            case UpdateConfig.RESTART_SERVER -> "Restart server";
-            default -> action;
+            case UpdateConfig.UPDATE_RESOURCES -> ACTION_UPDATE_RESOURCES;
+            case UpdateConfig.UPDATE_CLASSES_AND_RESOURCES -> ACTION_UPDATE_CLASSES_AND_RESOURCES;
+            case UpdateConfig.REDEPLOY -> ACTION_REDEPLOY;
+            case UpdateConfig.RESTART_SERVER -> ACTION_RESTART_SERVER;
+            default -> fallback;
         };
     }
 }
