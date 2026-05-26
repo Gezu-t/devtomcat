@@ -2,8 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
-import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.execution.ParametersListUtil;
@@ -121,8 +120,9 @@ public final class TomcatPreflightValidator {
         Map<String, String> parsedProperties = parseSystemProperties(vmOptions);
 
         checkRequiredSystemProperties(parsedProperties, issues);
-        checkDuplicateDeployments(configuration.getConfigData().getDeploymentConfig(), issues);
-        checkDuplicateJars(configuration.getConfigData().getDeploymentConfig(), issues);
+        List<Deployment> deployments = configuration.getDeployments();
+        checkDuplicateDeployments(deployments, issues);
+        checkDuplicateJars(deployments, issues);
         checkLockedPaths(configuration, parsedProperties, issues);
         checkCompilerType(configuration, issues);
 
@@ -289,23 +289,18 @@ public final class TomcatPreflightValidator {
      *       doubling startup time and memory with no benefit.</li>
      * </ul>
      */
-    static void checkDuplicateDeployments(@NotNull DeploymentConfig deploymentConfig,
+    static void checkDuplicateDeployments(@NotNull List<Deployment> deployments,
                                           @NotNull List<PreflightIssue> issues) {
-        List<DeploymentArtifact> artifacts = deploymentConfig.getDeployedArtifacts();
-        if (artifacts.size() < 2) return;
+        if (deployments.size() < 2) return;
 
-        // context path → first artifact name that claimed it
         Map<String, String> contextPaths = new LinkedHashMap<>();
-        // normalised deployment path → first artifact name that used it
         Map<String, String> deployPaths = new LinkedHashMap<>();
 
-        for (DeploymentArtifact artifact : artifacts) {
-            // Use a lightweight check here — isValid() requires the path to exist on disk,
-            // but duplicate detection only needs the configured name and path strings.
-            if (artifact == null || artifact.getName().isEmpty()) continue;
+        for (Deployment d : deployments) {
+            String name = d.getDisplayName();
 
-            String ctx = artifact.getContextPath();
-            if (ctx != null && !ctx.isEmpty()) {
+            String ctx = d.getContextPath();
+            if (!ctx.isEmpty()) {
                 String normalCtx = ctx.toLowerCase(Locale.ROOT);
                 if (contextPaths.containsKey(normalCtx)) {
                     issues.add(new PreflightIssue(
@@ -313,32 +308,26 @@ public final class TomcatPreflightValidator {
                             String.format(
                                     "Duplicate context path '%s': used by both '%s' and '%s'. " +
                                     "Tomcat will only deploy one of them.",
-                                    ctx, contextPaths.get(normalCtx), artifact.getName())));
+                                    ctx, contextPaths.get(normalCtx), name)));
                 } else {
-                    contextPaths.put(normalCtx, artifact.getName());
+                    contextPaths.put(normalCtx, name);
                 }
             }
 
-            String path = artifact.getPath();
-            if (path != null && !path.isEmpty()) {
-                String normalPath;
-                try {
-                    normalPath = Paths.get(path).toAbsolutePath()
-                            .normalize().toString().toLowerCase(Locale.ROOT);
-                } catch (java.nio.file.InvalidPathException e) {
-                    LOG.debug("checkDuplicateDeployments: invalid path skipped: " + path);
-                    continue;
-                }
-                if (deployPaths.containsKey(normalPath)) {
-                    issues.add(new PreflightIssue(
-                            PreflightIssue.Severity.WARNING,
-                            String.format(
-                                    "Duplicate deployment path: '%s' and '%s' both point to '%s'. " +
-                                    "The same application will be deployed twice.",
-                                    deployPaths.get(normalPath), artifact.getName(), path)));
-                } else {
-                    deployPaths.put(normalPath, artifact.getName());
-                }
+            Path resolved = d.getResolvedPath();
+            // Empty path → resolved would normalize to CWD, producing spurious
+            // duplicates between any two empty-path entries; skip instead.
+            if (resolved == null || resolved.toString().isEmpty()) continue;
+            String normalPath = resolved.toAbsolutePath().normalize().toString().toLowerCase(Locale.ROOT);
+            if (deployPaths.containsKey(normalPath)) {
+                issues.add(new PreflightIssue(
+                        PreflightIssue.Severity.WARNING,
+                        String.format(
+                                "Duplicate deployment path: '%s' and '%s' both point to '%s'. " +
+                                "The same application will be deployed twice.",
+                                deployPaths.get(normalPath), name, resolved)));
+            } else {
+                deployPaths.put(normalPath, name);
             }
         }
     }
@@ -354,22 +343,19 @@ public final class TomcatPreflightValidator {
      * @param deploymentConfig the deployment configuration containing artifacts
      * @param issues           list to append any issues to
      */
-    static void checkDuplicateJars(@NotNull DeploymentConfig deploymentConfig,
+    static void checkDuplicateJars(@NotNull List<Deployment> deployments,
                                    @NotNull List<PreflightIssue> issues) {
-        List<DeploymentArtifact> artifacts = deploymentConfig.getDeployedArtifacts();
+        for (Deployment d : deployments) {
+            Path artifactPath = d.getResolvedPath();
+            if (artifactPath == null) continue;
 
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
-            String artifactPath = artifact.getPath();
-            if (artifactPath.isEmpty()) continue;
-
-            Path webInfLib = Paths.get(artifactPath)
+            Path webInfLib = artifactPath
                     .resolve(TomcatConstants.WEB_INF)
                     .resolve(TomcatConstants.WEB_INF_LIB);
 
             if (!Files.isDirectory(webInfLib)) continue;
 
-            checkDuplicateJarsInDirectory(webInfLib, artifact.getDisplayName(), issues);
+            checkDuplicateJarsInDirectory(webInfLib, d.getDisplayName(), issues);
         }
     }
 
