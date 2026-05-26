@@ -411,6 +411,12 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
         return configData.getDeploymentConfig().getDeployedArtifacts();
     }
 
+    /** Typed view of {@link #getDeployedArtifacts()} — see {@link DeploymentConfig#getDeployments(Project)}. */
+    @NotNull
+    public List<Deployment> getDeployments() {
+        return configData.getDeploymentConfig().getDeployments(getProject());
+    }
+
     public boolean isHotDeploymentEnabled() { return configData.getDeploymentConfig().isHotDeploymentEnabled(); }
     public void setHotDeploymentEnabled(boolean enabled) { configData.getDeploymentConfig().setHotDeploymentEnabled(enabled); }
     public boolean isPreserveSessions()     { return configData.getDeploymentConfig().isPreserveSessions(); }

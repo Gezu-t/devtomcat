@@ -2,6 +2,8 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
@@ -137,39 +139,44 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
             }
             writeInfo("Connection OK.");
 
-            // 2. Per-artifact deploy. Skip null / structurally-invalid artifacts
-            //    rather than aborting the whole task — RunConfigurationValidator
-            //    already gates structurally-invalid configs at Apply time, so an
-            //    invalid artifact here usually means the file got deleted between
-            //    save and launch, which is recoverable per-artifact.
-            List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts().stream()
-                    .filter(a -> a != null && a.isValid())
+            // 2. Per-deployment deploy. Skip structurally-invalid entries rather
+            //    than aborting the whole task — RunConfigurationValidator already
+            //    gates structurally-invalid configs at Apply time, so an invalid
+            //    entry here usually means the file got deleted between save and
+            //    launch, which is recoverable per-deployment.
+            List<Deployment> deployments = configuration.getDeployments().stream()
+                    .filter(Deployment::isValid)
                     .toList();
-            if (artifacts.isEmpty()) {
+            if (deployments.isEmpty()) {
                 writeWarning("No valid artifacts configured. Nothing to deploy.");
                 return;
             }
 
             int success = 0;
             int failed = 0;
-            int total = artifacts.size();
+            int total = deployments.size();
             for (int i = 0; i < total; i++) {
                 if (abortRequested.get()) {
                     writeWarning("Deployment cancelled. " + success + "/" + total + " artifact(s) succeeded before stop.");
                     return;
                 }
-                DeploymentArtifact artifact = artifacts.get(i);
-                String artifactName = artifact.getDisplayName();
+                Deployment deployment = deployments.get(i);
+                String artifactName = deployment.getDisplayName();
                 writeInfo("[" + (i + 1) + "/" + total + "] Deploying '" + artifactName
-                        + "' to " + artifact.getContextPath() + "...");
+                        + "' to " + deployment.getContextPath() + "...");
                 lifecycleListener.onArtifactDeploying(configurationName, artifactName);
+
+                // TomcatManagerDeployer still consumes the legacy artifact shape;
+                // adapt at the call boundary. The deployer itself migrates in a
+                // later phase (LOCAL_NOTES.md "Phase 4d").
+                DeploymentArtifact legacy = DeploymentAdapter.toLegacy(deployment);
 
                 // No ProgressIndicator — we surface progress directly to the
                 // console via the deployer's logger calls. The BooleanSupplier
                 // abort check polls our termination flag so a user Stop
                 // interrupts mid-upload, not just between artifacts.
                 TomcatManagerDeployer.DeployResult result =
-                        deployer.deployWithProgress(artifact, deploymentLogger, null, abortRequested::get);
+                        deployer.deployWithProgress(legacy, deploymentLogger, null, abortRequested::get);
 
                 switch (result) {
                     case SUCCESS -> {

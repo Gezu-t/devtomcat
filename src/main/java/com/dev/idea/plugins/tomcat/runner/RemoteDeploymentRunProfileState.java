@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
@@ -17,8 +17,6 @@ import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.List;
 
 /**
  * Run-profile state for a remote-mode Tomcat configuration.
@@ -108,20 +106,18 @@ public class RemoteDeploymentRunProfileState implements RunProfileState {
     }
 
     /**
-     * Visible for tests. Per-artifact context-path syntax check. Catches the
-     * "user typed {@code foo bar} or {@code ////}" cases that Tomcat Manager
-     * would otherwise reject with an opaque 500 error halfway through the
-     * deploy.
+     * Visible for tests. Per-deployment context-path syntax check — catches
+     * {@code "foo bar"} / {@code "////"} before the Manager API rejects them
+     * with an opaque 500 mid-deploy.
      */
     void validateArtifacts() throws ExecutionException {
-        List<DeploymentArtifact> artifacts = configuration.getDeployedArtifacts();
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null || !artifact.isValid()) continue;
+        for (Deployment deployment : configuration.getDeployments()) {
+            if (!deployment.isValid()) continue;
             try {
-                ContextPathUtils.resolveContextName(artifact.getContextPath());
+                ContextPathUtils.resolveContextName(deployment.getContextPath());
             } catch (IllegalArgumentException e) {
                 throw new ExecutionException("Invalid context path on artifact '"
-                        + artifact.getDisplayName() + "': " + e.getMessage());
+                        + deployment.getDisplayName() + "': " + e.getMessage());
             }
         }
     }
