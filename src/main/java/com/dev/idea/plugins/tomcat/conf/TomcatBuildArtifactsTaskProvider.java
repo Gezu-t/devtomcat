@@ -1,8 +1,9 @@
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStructureValidator;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
+import java.nio.file.Path;
 import com.intellij.execution.BeforeRunTaskProvider;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
@@ -111,18 +112,18 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
                                @NotNull TomcatBuildArtifactsTask task) {
         if (!(configuration instanceof TomcatRunConfiguration tomcatConfig)) return true;
 
-        List<DeploymentArtifact> artifacts = tomcatConfig.getDeployedArtifacts();
+        List<Deployment> deployments = tomcatConfig.getDeployments();
 
         boolean allValid = true;
         StringBuilder missing = new StringBuilder();
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
-            if (!artifact.isValid()) {
-                String message = "Artifact not ready: '" + artifact.getDisplayName() +
-                        "' at " + artifact.getPath();
+        for (Deployment d : deployments) {
+            if (!d.isValid()) {
+                Path p = d.getResolvedPath();
+                String message = "Artifact not ready: '" + d.getDisplayName()
+                        + "' at " + (p != null ? p : "(unresolved)");
                 LOG.warn("DevTomcat: " + message);
                 if (missing.length() > 0) missing.append("\n");
-                missing.append("• ").append(artifact.getDisplayName());
+                missing.append("• ").append(d.getDisplayName());
                 allValid = false;
             }
         }
@@ -145,7 +146,7 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         // short line + console for the file list). Soft warnings ("partially
         // populated dir") used to balloon too but were the worst offenders
         // for repeat-noise on every launch — those now stay in the console.
-        ArtifactStructureValidator.Result structure = ArtifactStructureValidator.validate(artifacts);
+        ArtifactStructureValidator.Result structure = ArtifactStructureValidator.validate(deployments);
         if (structure.hasBlockingErrors()) {
             TomcatNotifier.error(tomcatConfig.getProject(),
                     "Artifact structure invalid",
@@ -196,8 +197,8 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
             return promise;
         }
 
-        List<DeploymentArtifact> allArtifacts = tomcatConfig.getDeployedArtifacts();
-        if (allArtifacts.isEmpty()) {
+        List<Deployment> allDeployments = tomcatConfig.getDeployments();
+        if (allDeployments.isEmpty()) {
             promise.setResult(false);
             return promise;
         }
@@ -205,7 +206,7 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         Project project = configuration.getProject();
         Set<String> selected = new HashSet<>(task.getArtifactNames());
 
-        SelectArtifactsDialog dialog = new SelectArtifactsDialog(project, allArtifacts, selected);
+        SelectArtifactsDialog dialog = new SelectArtifactsDialog(project, allDeployments, selected);
         if (dialog.showAndGet()) {
             task.setArtifactNames(dialog.getSelectedNames());
             promise.setResult(true);
@@ -230,14 +231,14 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         private final CheckBoxList<String> checkBoxList;
 
         SelectArtifactsDialog(@NotNull Project project,
-                              @NotNull List<DeploymentArtifact> artifacts,
+                              @NotNull List<Deployment> deployments,
                               @NotNull Set<String> preSelected) {
             super(project, false);
             setTitle("Select Artifacts");
 
             checkBoxList = new CheckBoxList<>();
-            for (DeploymentArtifact artifact : artifacts) {
-                String name = artifact.getDisplayName();
+            for (Deployment d : deployments) {
+                String name = d.getDisplayName();
                 checkBoxList.addItem(name, name, preSelected.isEmpty() || preSelected.contains(name));
             }
 

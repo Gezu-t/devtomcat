@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.diagnostics;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -19,8 +20,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Unit tests for {@link ArtifactStructureValidator}. Every test uses real
  * temp-directory fixtures so the filesystem-level checks are exercised
  * end-to-end — these are the cases that drive the user-visible behaviour.
+ *
+ * <p>{@link ExternalFileDeployment}'s {@code getDisplayName()} returns the
+ * path's filename, so fixtures live under a named subdirectory whose name
+ * matches the assertions ("myapp", "alpha", "beta") rather than passing the
+ * raw tempDir.
  */
 class ArtifactStructureValidatorTest {
+
+    private static Deployment exploded(Path path) {
+        return new ExternalFileDeployment(path, "/", /* exploded */ true);
+    }
+
+    private static Deployment war(Path path) {
+        return new ExternalFileDeployment(path, "/", /* exploded */ false);
+    }
 
     @Nested
     @DisplayName("exploded artifact validation")
@@ -29,14 +43,12 @@ class ArtifactStructureValidatorTest {
         @Test
         @DisplayName("valid exploded webapp with WEB-INF/ passes")
         void validExplodedPasses(@TempDir Path tempDir) throws IOException {
-            Path webInf = Files.createDirectories(tempDir.resolve("WEB-INF"));
-            Files.createDirectory(webInf.resolve("classes"));
-            Files.writeString(webInf.resolve("classes").resolve("Foo.class"), "");
+            Path app = Files.createDirectories(tempDir.resolve("myapp"));
+            Files.createDirectories(app.resolve("WEB-INF").resolve("classes"));
+            Files.writeString(app.resolve("WEB-INF").resolve("classes").resolve("Foo.class"), "");
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp",
-                    tempDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(exploded(app)));
 
             assertFalse(result.hasBlockingErrors());
             assertFalse(result.hasWarnings());
@@ -44,19 +56,16 @@ class ArtifactStructureValidatorTest {
 
         @Test
         @DisplayName("missing WEB-INF/ blocks the launch")
-        void missingWebInfBlocks(@TempDir Path tempDir) {
-            // tempDir exists but contains nothing — no WEB-INF/
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp",
-                    tempDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
+        void missingWebInfBlocks(@TempDir Path tempDir) throws IOException {
+            Path app = Files.createDirectories(tempDir.resolve("myapp"));
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(exploded(app)));
 
             assertTrue(result.hasBlockingErrors());
             assertEquals(1, result.blockingErrors().size());
             String msg = result.blockingErrors().get(0);
             assertTrue(msg.contains("myapp"));
             assertTrue(msg.contains("WEB-INF"));
-            // Error message should suggest the fix
             assertTrue(msg.toLowerCase().contains("build")
                     || msg.toLowerCase().contains("package")
                     || msg.toLowerCase().contains("artifacts"),
@@ -66,13 +75,11 @@ class ArtifactStructureValidatorTest {
         @Test
         @DisplayName("empty WEB-INF/classes/ warns but does not block")
         void emptyClassesWarns(@TempDir Path tempDir) throws IOException {
-            Files.createDirectories(tempDir.resolve("WEB-INF").resolve("classes"));
-            // classes/ exists but is empty
+            Path app = Files.createDirectories(tempDir.resolve("myapp"));
+            Files.createDirectories(app.resolve("WEB-INF").resolve("classes"));
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp",
-                    tempDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(exploded(app)));
 
             assertFalse(result.hasBlockingErrors(),
                     "empty classes/ should not block — some apps put everything in WEB-INF/lib");
@@ -83,15 +90,13 @@ class ArtifactStructureValidatorTest {
         @Test
         @DisplayName("WEB-INF/ exists, no classes/ at all — passes (some legacy apps)")
         void noClassesDirAtAllPasses(@TempDir Path tempDir) throws IOException {
-            Path webInf = Files.createDirectories(tempDir.resolve("WEB-INF"));
+            Path app = Files.createDirectories(tempDir.resolve("myapp"));
+            Path webInf = Files.createDirectories(app.resolve("WEB-INF"));
             Files.createDirectory(webInf.resolve("lib"));
             Files.writeString(webInf.resolve("web.xml"), "<web-app/>");
-            // No classes/ directory at all — that's fine for some apps
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp",
-                    tempDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(exploded(app)));
 
             assertFalse(result.hasBlockingErrors());
             assertFalse(result.hasWarnings());
@@ -100,13 +105,11 @@ class ArtifactStructureValidatorTest {
         @Test
         @DisplayName("exploded path that is a file (not a directory) blocks")
         void explodedPathThatIsAFileBlocks(@TempDir Path tempDir) throws IOException {
-            Path file = tempDir.resolve("not-a-directory.war");
+            Path file = tempDir.resolve("myapp");
             Files.writeString(file, "PK");
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp",
-                    file.toString(), DeploymentArtifact.TYPE_EXPLODED);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(exploded(file)));
 
             assertTrue(result.hasBlockingErrors());
             String msg = result.blockingErrors().get(0);
@@ -125,10 +128,8 @@ class ArtifactStructureValidatorTest {
             Path war = tempDir.resolve("myapp.war");
             writeMinimalWar(war);
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
-                    war.toString(), DeploymentArtifact.TYPE_WAR);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(war(war)));
 
             assertFalse(result.hasBlockingErrors(),
                     "minimal real WAR must pass: " + result.blockingErrors());
@@ -138,12 +139,11 @@ class ArtifactStructureValidatorTest {
         @Test
         @DisplayName("WAR path pointing at a directory blocks")
         void warPathPointingAtDirectoryBlocks(@TempDir Path tempDir) throws IOException {
-            Files.createDirectories(tempDir.resolve("WEB-INF"));
+            Path app = Files.createDirectories(tempDir.resolve("myapp"));
+            Files.createDirectories(app.resolve("WEB-INF"));
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
-                    tempDir.toString(), DeploymentArtifact.TYPE_WAR);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(war(app)));
 
             assertTrue(result.hasBlockingErrors());
             String msg = result.blockingErrors().get(0);
@@ -159,10 +159,8 @@ class ArtifactStructureValidatorTest {
             Path war = tempDir.resolve("myapp.war");
             Files.writeString(war, "this is not a zip — was Maven interrupted?");
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
-                    war.toString(), DeploymentArtifact.TYPE_WAR);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(war(war)));
 
             assertTrue(result.hasBlockingErrors());
             String msg = result.blockingErrors().get(0);
@@ -183,10 +181,8 @@ class ArtifactStructureValidatorTest {
             Path war = tempDir.resolve("myapp.war");
             Files.createFile(war);
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
-                    war.toString(), DeploymentArtifact.TYPE_WAR);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(war(war)));
 
             assertTrue(result.hasBlockingErrors(),
                     "0-byte WAR must be flagged — most often a partial build artifact");
@@ -200,10 +196,8 @@ class ArtifactStructureValidatorTest {
             // just the magic plus a few bytes simulates an interrupted-write WAR.
             Files.write(war, new byte[]{'P', 'K', 0x03, 0x04, 0x14, 0x00});
 
-            DeploymentArtifact artifact = new DeploymentArtifact("myapp:war",
-                    war.toString(), DeploymentArtifact.TYPE_WAR);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(List.of(war(war)));
 
             assertTrue(result.hasBlockingErrors());
         }
@@ -224,7 +218,7 @@ class ArtifactStructureValidatorTest {
     class Degenerate {
 
         @Test
-        @DisplayName("empty artifact list yields a clean result")
+        @DisplayName("empty deployment list yields a clean result")
         void emptyList() {
             ArtifactStructureValidator.Result result =
                     ArtifactStructureValidator.validate(List.of());
@@ -233,27 +227,15 @@ class ArtifactStructureValidatorTest {
         }
 
         @Test
-        @DisplayName("artifact path that does not exist is skipped (handled by existence check)")
+        @DisplayName("deployment path that does not exist is skipped (handled by existence check)")
         void nonExistentPathSkipped(@TempDir Path tempDir) {
-            DeploymentArtifact artifact = new DeploymentArtifact("ghost",
-                    tempDir.resolve("does-not-exist").toString(),
-                    DeploymentArtifact.TYPE_EXPLODED);
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(artifact));
+                    ArtifactStructureValidator.validate(
+                            List.of(exploded(tempDir.resolve("does-not-exist"))));
 
             // Structure check defers to the upstream existence check — no double-warning.
             assertFalse(result.hasBlockingErrors());
             assertFalse(result.hasWarnings());
-        }
-
-        @Test
-        @DisplayName("null artifact in list is tolerated")
-        void nullArtifact() {
-            List<DeploymentArtifact> list = new java.util.ArrayList<>();
-            list.add(null);
-            ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(list);
-            assertFalse(result.hasBlockingErrors());
         }
     }
 
@@ -262,20 +244,15 @@ class ArtifactStructureValidatorTest {
     class MultiArtifact {
 
         @Test
-        @DisplayName("collects errors from every offending artifact")
+        @DisplayName("collects errors from every offending deployment")
         void multipleErrorsCollected(@TempDir Path tempDir) throws IOException {
-            // Artifact 1: missing WEB-INF/
-            Path a = Files.createDirectory(tempDir.resolve("a"));
-            DeploymentArtifact art1 = new DeploymentArtifact("alpha",
-                    a.toString(), DeploymentArtifact.TYPE_EXPLODED);
-
-            // Artifact 2: WAR pointing at directory
-            Path b = Files.createDirectory(tempDir.resolve("b"));
-            DeploymentArtifact art2 = new DeploymentArtifact("beta",
-                    b.toString(), DeploymentArtifact.TYPE_WAR);
+            // Deployment 1: missing WEB-INF/
+            Path alpha = Files.createDirectory(tempDir.resolve("alpha"));
+            // Deployment 2: WAR pointing at directory
+            Path beta = Files.createDirectory(tempDir.resolve("beta"));
 
             ArtifactStructureValidator.Result result =
-                    ArtifactStructureValidator.validate(List.of(art1, art2));
+                    ArtifactStructureValidator.validate(List.of(exploded(alpha), war(beta)));
 
             assertEquals(2, result.blockingErrors().size());
             assertTrue(result.blockingErrors().stream().anyMatch(m -> m.contains("alpha")));

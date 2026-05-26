@@ -1,18 +1,17 @@
 package com.dev.idea.plugins.tomcat.diagnostics;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Pre-launch validation of {@link DeploymentArtifact} on-disk structure.
+ * Pre-launch validation of a {@link Deployment}'s on-disk structure.
  *
  * <p>The platform's "Make" task and our existing path-exists check both pass
  * silently when an artifact's path EXISTS but its <em>contents</em> are not a
@@ -24,7 +23,7 @@ import java.util.stream.Stream;
  *   <li>An exploded artifact whose {@code WEB-INF/classes/} is empty — Make
  *       step is broken, or the user's IntelliJ compile output is going
  *       somewhere else.</li>
- *   <li>An artifact configured as WAR ({@link DeploymentArtifact#TYPE_WAR})
+ *   <li>An artifact configured as WAR (i.e. {@code !deployment.isExploded()})
  *       whose path is actually a directory — type / path mismatch.</li>
  * </ul>
  *
@@ -60,28 +59,18 @@ public final class ArtifactStructureValidator {
     }
 
     @NotNull
-    public static Result validate(@NotNull List<DeploymentArtifact> artifacts) {
+    public static Result validate(@NotNull List<Deployment> deployments) {
         List<String> blocking = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
-            String pathStr = artifact.getPath();
-            if (pathStr == null || pathStr.isBlank()) continue;
-
-            Path path;
-            try {
-                path = Paths.get(pathStr);
-            } catch (RuntimeException e) {
-                continue;
-            }
+        for (Deployment d : deployments) {
+            Path path = d.getResolvedPath();
+            if (path == null || path.toString().isEmpty()) continue;
             if (!Files.exists(path)) continue; // path-exists is the validator's other concern
 
-            String type = artifact.getType();
-            String displayName = artifact.getDisplayName();
-
-            if (DeploymentArtifact.TYPE_EXPLODED.equals(type)) {
+            String displayName = d.getDisplayName();
+            if (d.isExploded()) {
                 validateExploded(displayName, path, blocking, warnings);
-            } else if (DeploymentArtifact.TYPE_WAR.equals(type)) {
+            } else {
                 validateWar(displayName, path, blocking);
             }
         }
