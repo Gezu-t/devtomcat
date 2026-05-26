@@ -88,9 +88,7 @@
 
         <!-- Startup Time Tracker — registered as a light service via @Service(Service.Level.PROJECT) on the class itself. -->
 
-        <!-- Port registry: atomic cross-instance port claiming to prevent debug/Tomcat port races -->
-        <applicationService
-                serviceImplementation="com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry"/>
+        <!-- TomcatPortRegistry — registered as a light service via @Service(Service.Level.APP) on the class itself. Atomic cross-instance port claiming to prevent debug/Tomcat port races. -->
 
         <!-- Live deployment status tracking (project-level) -->
         <projectService

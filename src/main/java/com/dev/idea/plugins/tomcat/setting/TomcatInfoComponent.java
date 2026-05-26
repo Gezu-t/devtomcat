@@ -5,12 +5,12 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
+import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.awt.Font;
 
 /**
  * Tomcat Server Information Component
@@ -42,7 +42,7 @@ public class TomcatInfoComponent implements Disposable {
         idLabel.setFont(UIUtil.getLabelFont(UIUtil.FontSize.SMALL));
 
         versionLabel = new JBLabel(tomcatInfo.getVersion());
-        versionLabel.setFont(UIUtil.getLabelFont().deriveFont(Font.BOLD));
+        versionLabel.setFont(JBFont.label().asBold());
 
         locationField = new JBTextField(tomcatInfo.getPath());
         locationField.setEditable(false);
