@@ -455,12 +455,10 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             }
 
             List<DeploymentArtifact> deploymentArtifacts = getDeployedArtifacts();
-            List<String> artifactDisplayNames = deploymentArtifacts == null
-                    ? Collections.emptyList()
-                    : deploymentArtifacts.stream()
-                            .filter(a -> a != null && !a.getDisplayName().isBlank())
-                            .map(DeploymentArtifact::getDisplayName)
-                            .collect(Collectors.toList());
+            List<String> artifactDisplayNames = deploymentArtifacts.stream()
+                    .filter(a -> !a.getDisplayName().isBlank())
+                    .map(DeploymentArtifact::getDisplayName)
+                    .collect(Collectors.toList());
 
             // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager.
             // ArtifactManager.getInstance() requires a read action — syncBeforeLaunchWithDeployments()
@@ -471,10 +469,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 // project model and require a read action. The read action covers
                 // only model access; list mutations happen outside.
                 List<Artifact> matchedArtifacts = TomcatReadActions.compute(() -> {
+                    if (deploymentArtifacts.isEmpty()) return Collections.<Artifact>emptyList();
                     ArtifactManager artifactManager = ArtifactManager.getInstance(project);
-                    if (deploymentArtifacts == null || deploymentArtifacts.isEmpty()) {
-                        return Collections.<Artifact>emptyList();
-                    }
                     List<Artifact> matched = new ArrayList<>();
                     for (DeploymentArtifact deploymentArtifact : deploymentArtifacts) {
                         Artifact a = findMatchingArtifact(artifactManager, deploymentArtifact);
