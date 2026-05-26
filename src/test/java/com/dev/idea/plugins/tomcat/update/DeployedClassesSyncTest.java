@@ -1,7 +1,9 @@
 package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.elements.CompositePackagingElement;
@@ -54,67 +56,66 @@ class DeployedClassesSyncTest {
     private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
 
     @Nested
-    @DisplayName("syncIfNeeded returns an empty report on degenerate input")
+    @DisplayName("syncDeployments returns an empty report on degenerate input")
     class DegenerateInput {
 
         @Test
         @DisplayName("disposed project: no scan, empty report")
         void disposedProject() {
             when(project.isDisposed()).thenReturn(true);
-            DeployedClassesSync.SyncReport r = DeployedClassesSync.syncIfNeeded(
-                    project, List.of(new DeploymentArtifact("foo", "/tmp/x", DeploymentArtifact.TYPE_EXPLODED)),
-                    logger);
+            Deployment d = new ExternalFileDeployment(Path.of("/tmp/x"), "/", true);
+            DeployedClassesSync.SyncReport r =
+                    DeployedClassesSync.syncDeployments(project, List.of(d), logger);
             assertEquals(0, r.artifactsSynced());
             assertEquals(0, r.filesCopied());
             assertFalse(r.didAnything());
         }
 
         @Test
-        @DisplayName("empty artifact list: no scan, empty report")
-        void emptyArtifactList() {
+        @DisplayName("empty deployment list: no scan, empty report")
+        void emptyDeploymentList() {
             when(project.isDisposed()).thenReturn(false);
             DeployedClassesSync.SyncReport r =
-                    DeployedClassesSync.syncIfNeeded(project, List.of(), logger);
+                    DeployedClassesSync.syncDeployments(project, List.of(), logger);
             assertEquals(0, r.artifactsSynced());
             assertEquals(0, r.filesCopied());
         }
 
         @Test
-        @DisplayName("WAR artifact: skipped (can't hot-mirror inside a packaged WAR)")
-        void warArtifactSkipped() {
+        @DisplayName("WAR deployment: skipped (can't hot-mirror inside a packaged WAR)")
+        void warDeploymentSkipped() {
             when(project.isDisposed()).thenReturn(false);
-            DeploymentArtifact war =
-                    new DeploymentArtifact("foo", "/tmp/nope.war", DeploymentArtifact.TYPE_WAR);
+            // exploded=false → typed equivalent of TYPE_WAR. Path also missing
+            // so this could short-circuit via the validity check too — either
+            // way the report shows zero work done.
+            Deployment war = new ExternalFileDeployment(Path.of("/tmp/nope.war"), "/", false);
             DeployedClassesSync.SyncReport r =
-                    DeployedClassesSync.syncIfNeeded(project, List.of(war), logger);
-            // The artifact is invalid (file doesn't exist) so it short-circuits
-            // via the isValid() check rather than the type check, but either
-            // way the report should show zero work done.
+                    DeployedClassesSync.syncDeployments(project, List.of(war), logger);
             assertEquals(0, r.artifactsSynced());
             assertEquals(0, r.filesCopied());
         }
 
         @Test
-        @DisplayName("invalid (missing on disk) artifact is skipped")
-        void invalidArtifact() {
+        @DisplayName("invalid (missing on disk) deployment is skipped")
+        void invalidDeployment() {
             when(project.isDisposed()).thenReturn(false);
-            DeploymentArtifact missing = new DeploymentArtifact(
-                    "foo", "/tmp/devtomcat-does-not-exist-" + System.nanoTime() + "/",
-                    DeploymentArtifact.TYPE_EXPLODED);
+            Deployment missing = new ExternalFileDeployment(
+                    Path.of("/tmp/devtomcat-does-not-exist-" + System.nanoTime() + "/"),
+                    "/", true);
             DeployedClassesSync.SyncReport r =
-                    DeployedClassesSync.syncIfNeeded(project, List.of(missing), logger);
+                    DeployedClassesSync.syncDeployments(project, List.of(missing), logger);
             assertEquals(1, r.artifactsSkipped());
             assertEquals(0, r.filesCopied());
         }
 
         @Test
-        @DisplayName("null artifact in the list is tolerant")
-        void nullArtifact() {
+        @DisplayName("legacy syncIfNeeded forwarder: empty list short-circuits without project services")
+        void legacyForwarderEmptyList() {
             when(project.isDisposed()).thenReturn(false);
-            List<DeploymentArtifact> mixed = new java.util.ArrayList<>();
-            mixed.add(null);
+            // Empty list should never trigger toTyped() — the deprecated
+            // forwarder must short-circuit before touching project services.
             DeployedClassesSync.SyncReport r =
-                    DeployedClassesSync.syncIfNeeded(project, mixed, logger);
+                    DeployedClassesSync.syncIfNeeded(project, List.of(), logger);
             assertNotNull(r);
             assertEquals(0, r.filesCopied());
         }

@@ -114,58 +114,71 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * Mirrors module output into each exploded deployment's
-     * {@code WEB-INF/classes/}. Safe to call from a background thread
-     * (the compiler callback thread is the intended caller).
-     *
-     * @param project    the IntelliJ project
-     * @param artifacts  configured deployments (typically
-     *                   {@code TomcatRunConfiguration.getDeployedArtifacts()})
-     * @param logger     deployment logger for per-artifact status lines
-     * @return a {@link SyncReport} with copy counts (never {@code null})
+     * @deprecated Use {@link #syncDeployments(Project, java.util.List, TomcatDeploymentLogger)}
+     * with typed {@link Deployment} entries. Forwards via
+     * {@link DeploymentAdapter#toTyped}; will be removed once all callers
+     * produce typed deployments.
      */
+    @Deprecated(forRemoval = true)
     @NotNull
     public static SyncReport syncIfNeeded(@NotNull Project project,
                                           @NotNull List<DeploymentArtifact> artifacts,
                                           @NotNull TomcatDeploymentLogger logger) {
+        // Short-circuit before toTyped — that path needs project services
+        // (ArtifactPointerManager, etc.) that may not exist in unit-test mocks.
         if (project.isDisposed() || artifacts.isEmpty()) {
+            return new SyncReport(0, 0, 0);
+        }
+        List<Deployment> typed = new ArrayList<>(artifacts.size());
+        for (DeploymentArtifact a : artifacts) {
+            if (a != null) typed.add(DeploymentAdapter.toTyped(project, a));
+        }
+        return syncDeployments(project, typed, logger);
+    }
+
+    /**
+     * Mirrors module output into each exploded deployment's
+     * {@code WEB-INF/classes/}. Safe to call from a background thread
+     * (the compiler callback thread is the intended caller).
+     */
+    @NotNull
+    public static SyncReport syncDeployments(@NotNull Project project,
+                                             @NotNull List<Deployment> deployments,
+                                             @NotNull TomcatDeploymentLogger logger) {
+        if (project.isDisposed() || deployments.isEmpty()) {
             return new SyncReport(0, 0, 0);
         }
 
         // Header line so the user can SEE the feature engaged at all. Without
-        // this, a project where every artifact gets skipped looks identical
-        // to a project where the sync was never wired in — and that's exactly
-        // the "is anything even happening?" failure mode the diagnostics here
-        // are designed to surface.
-        logger.logServerInfo("Class sync: scanning " + artifacts.size() + " deployment(s)...");
+        // this, a project where every deployment gets skipped looks identical
+        // to one where the sync was never wired in — exactly the "is anything
+        // even happening?" failure mode the diagnostics here are designed for.
+        logger.logServerInfo("Class sync: scanning " + deployments.size() + " deployment(s)...");
 
         int syncedArtifacts = 0;
         int totalCopied = 0;
         int skipped = 0;
 
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) {
-                skipped++;
-                continue;
-            }
-            String name = artifact.getDisplayName();
+        for (Deployment deployment : deployments) {
+            String name = deployment.getDisplayName();
+            Path artifactRoot = deployment.getResolvedPath();
 
-            if (!artifact.isValid()) {
+            if (artifactRoot == null || !deployment.isValid()) {
                 logger.logServerInfo("Class sync skipped '" + name
-                        + "': artifact path missing or invalid (" + artifact.getPath() + ")");
+                        + "': deployment path missing or invalid"
+                        + (artifactRoot != null ? " (" + artifactRoot + ")" : ""));
                 skipped++;
                 continue;
             }
             // WAR files cannot be hot-mirrored — repackaging is a build-tool concern.
-            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
+            if (!deployment.isExploded()) {
                 logger.logServerInfo("Class sync skipped '" + name
-                        + "': type is " + artifact.getType()
+                        + "': type is war"
                         + " (only exploded deployments can be hot-mirrored; run mvn package or gradle war for WAR types)");
                 skipped++;
                 continue;
             }
 
-            Path artifactRoot = Path.of(artifact.getPath());
             Path webInfClasses = artifactRoot.resolve(WEB_INF_CLASSES);
             // Some exploded layouts don't have a WEB-INF/classes/ yet (e.g. a
             // build that never produced bytecode). Create it on demand so the
@@ -191,7 +204,7 @@ public final class DeployedClassesSync {
             ResolutionReport resolution;
             try {
                 resolution = TomcatReadActions.compute(() ->
-                        resolveModuleOutputRootsVerbose(project, artifact));
+                        resolveTyped(project, deployment));
             } catch (Throwable t) {
                 LOG.debug("Could not resolve module output for '" + name + "': " + t.getMessage());
                 logger.logServerWarning("Class sync skipped '" + name

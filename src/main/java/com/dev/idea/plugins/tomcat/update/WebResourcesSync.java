@@ -1,6 +1,8 @@
 package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
@@ -75,55 +77,67 @@ public final class WebResourcesSync {
     public record SyncReport(int artifactsSynced, int totalCopied, int skipped) {}
 
     /**
-     * Mirrors {@code src/main/webapp/} into the exploded artifact directory
-     * for every exploded {@link DeploymentArtifact} in {@code artifacts}.
-     * Logs per-artifact progress through {@code logger} so a stale-resource
-     * failure tells the user exactly which artifact / source root / target
-     * was scanned.
-     *
-     * @param project    the IntelliJ project (must not be disposed)
-     * @param artifacts  configured deployments
-     * @param logger     deployment logger for per-artifact status lines
-     * @return aggregate sync counts (never null)
+     * @deprecated Use {@link #syncDeployments(Project, java.util.List, TomcatDeploymentLogger)}
+     * with typed {@link Deployment} entries. Forwards via
+     * {@link DeploymentAdapter#toTyped}.
      */
+    @Deprecated(forRemoval = true)
     @NotNull
     public static SyncReport syncIfNeeded(@NotNull Project project,
                                           @NotNull List<DeploymentArtifact> artifacts,
                                           @NotNull TomcatDeploymentLogger logger) {
+        // Short-circuit before toTyped — that path needs project services
+        // (ArtifactPointerManager, etc.) that may not exist in unit-test mocks.
         if (project.isDisposed() || artifacts.isEmpty()) {
             return new SyncReport(0, 0, 0);
         }
+        java.util.List<Deployment> typed = new java.util.ArrayList<>(artifacts.size());
+        for (DeploymentArtifact a : artifacts) {
+            if (a != null) typed.add(DeploymentAdapter.toTyped(project, a));
+        }
+        return syncDeployments(project, typed, logger);
+    }
 
-        logger.logServerInfo("Web resources sync: scanning " + artifacts.size() + " deployment(s)...");
+    /**
+     * Mirrors {@code src/main/webapp/} into the exploded artifact directory
+     * for every exploded {@link Deployment} in {@code deployments}. Per-entry
+     * progress goes through {@code logger} so a stale-resource failure points
+     * at the source root / target that was scanned.
+     */
+    @NotNull
+    public static SyncReport syncDeployments(@NotNull Project project,
+                                             @NotNull List<Deployment> deployments,
+                                             @NotNull TomcatDeploymentLogger logger) {
+        if (project.isDisposed() || deployments.isEmpty()) {
+            return new SyncReport(0, 0, 0);
+        }
+
+        logger.logServerInfo("Web resources sync: scanning " + deployments.size() + " deployment(s)...");
 
         int syncedArtifacts = 0;
         int totalCopied = 0;
         int skipped = 0;
 
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) {
-                skipped++;
-                continue;
-            }
-            String name = artifact.getDisplayName();
+        for (Deployment deployment : deployments) {
+            String name = deployment.getDisplayName();
+            Path artifactRoot = deployment.getResolvedPath();
 
-            if (!artifact.isValid()) {
+            if (artifactRoot == null || !deployment.isValid()) {
                 logger.logServerInfo("Web resources sync skipped '" + name
-                        + "': artifact path missing or invalid (" + artifact.getPath() + ")");
+                        + "': deployment path missing or invalid"
+                        + (artifactRoot != null ? " (" + artifactRoot + ")" : ""));
                 skipped++;
                 continue;
             }
             // WAR artifacts cannot be hot-mirrored — only the build tool can
             // re-pack the archive. Same call-out as class sync.
-            if (!DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())) {
+            if (!deployment.isExploded()) {
                 logger.logServerInfo("Web resources sync skipped '" + name
-                        + "': type is " + artifact.getType()
+                        + "': type is war"
                         + " (only exploded deployments can be hot-mirrored)");
                 skipped++;
                 continue;
             }
-
-            Path artifactRoot = Path.of(artifact.getPath());
 
             // Resolve every applicable source directory: convention dirs (Maven
             // src/main/webapp, Eclipse WebContent, IntelliJ default web/, etc.),
@@ -133,7 +147,7 @@ public final class WebResourcesSync {
             // own webResources copy semantics.
             List<Path> webappSources;
             try {
-                webappSources = TomcatReadActions.compute(() -> findWebappSourceRoots(project, artifact));
+                webappSources = TomcatReadActions.compute(() -> findWebappSourceRootsForTyped(project, deployment));
             } catch (Throwable t) {
                 LOG.debug("Web resources sync: module resolve threw for '" + name + "': " + t.getMessage());
                 logger.logServerWarning("Web resources sync skipped '" + name

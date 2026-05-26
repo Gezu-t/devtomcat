@@ -484,19 +484,22 @@ public class TomcatJavaParametersBuilder {
         // is WAR-packaged, hot sync skips it. Users editing source then need to
         // know they must repackage — without this banner, the per-artifact
         // "skipped: type is war" lines below are easy to miss.
-        com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater
-                .warnAboutWarArtifactsIfPresent(configuration.getDeployedArtifacts(), deploymentLogger);
+        java.util.List<com.dev.idea.plugins.tomcat.model.Deployment> deployments =
+                configuration.getDeployments();
 
-        com.dev.idea.plugins.tomcat.update.DeployedClassesSync.syncIfNeeded(
-                project, configuration.getDeployedArtifacts(), deploymentLogger);
+        com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater
+                .warnAboutWarDeploymentsIfPresent(deployments, deploymentLogger);
+
+        com.dev.idea.plugins.tomcat.update.DeployedClassesSync.syncDeployments(
+                project, deployments, deploymentLogger);
 
         // Same rationale for src/main/webapp/ (JSP, JS, CSS, HTML, taglibs).
         // IntelliJ's Make never copies those into target/<war>/, so without
         // this hook a Stop+Run after editing index.jsp would still serve the
         // previous mvn-package'd copy. Runs on EVERY launch like the class
         // sync above.
-        com.dev.idea.plugins.tomcat.update.WebResourcesSync.syncIfNeeded(
-                project, configuration.getDeployedArtifacts(), deploymentLogger);
+        com.dev.idea.plugins.tomcat.update.WebResourcesSync.syncDeployments(
+                project, deployments, deploymentLogger);
 
         // Only one strategy now — remote-mode launches bypass this whole path
         // (they go through RemoteDeploymentRunProfileState and never build

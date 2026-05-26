@@ -2,6 +2,8 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
@@ -502,14 +504,42 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * exploded in the Deployment tab). Public + static so the launch path
      * ({@code TomcatJavaParametersBuilder}) can call it too.
      */
+    /**
+     * @deprecated Use {@link #warnAboutWarDeploymentsIfPresent}; this overload
+     * adapts via {@link DeploymentAdapter#toTyped} for the few callers still
+     * holding legacy lists.
+     */
+    @Deprecated(forRemoval = true)
     public static void warnAboutWarArtifactsIfPresent(@NotNull List<DeploymentArtifact> artifacts,
                                                       @NotNull TomcatDeploymentLogger logger) {
+        // toTyped needs a Project for ARTIFACT/MODULE sources; for the WAR-name
+        // scan we only need legacy fields, so do the filtering here without
+        // going through the adapter.
         java.util.List<String> warNames = new java.util.ArrayList<>();
         for (DeploymentArtifact a : artifacts) {
             if (a != null && DeploymentArtifact.TYPE_WAR.equals(a.getType())) {
                 warNames.add(a.getDisplayName());
             }
         }
+        emitWarArtifactsWarning(warNames, logger);
+    }
+
+    /**
+     * Logs one aggregated warning when any deployment in the list is WAR-packaged.
+     * Public + static so the launch path ({@code TomcatJavaParametersBuilder})
+     * can call it.
+     */
+    public static void warnAboutWarDeploymentsIfPresent(@NotNull List<Deployment> deployments,
+                                                        @NotNull TomcatDeploymentLogger logger) {
+        java.util.List<String> warNames = new java.util.ArrayList<>();
+        for (Deployment d : deployments) {
+            if (!d.isExploded()) warNames.add(d.getDisplayName());
+        }
+        emitWarArtifactsWarning(warNames, logger);
+    }
+
+    private static void emitWarArtifactsWarning(@NotNull List<String> warNames,
+                                                @NotNull TomcatDeploymentLogger logger) {
         if (warNames.isEmpty()) return;
         String plural = warNames.size() == 1 ? "artifact is" : "artifacts are";
         logger.logServerWarning(
