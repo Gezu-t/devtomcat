@@ -141,6 +141,11 @@ public final class ArtifactReferenceRefresher {
             String currentPath = platformArtifact.getOutputFilePath();
             if (currentPath == null) currentPath = storedPath;
 
+            // Sync name and path only. The 'type' field (exploded vs. WAR) is
+            // deliberately NOT re-synced here — DeploymentAdapter.toTyped() reads
+            // it live from the current Artifact on every conversion, so a type
+            // change in Project Structure takes effect on the next typed read
+            // without mutating the stored DeploymentArtifact.
             boolean nameChanged = !currentName.equals(storedName);
             boolean pathChanged = !currentPath.equals(storedPath);
             if (!nameChanged && !pathChanged) continue;

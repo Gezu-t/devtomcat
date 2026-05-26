@@ -827,12 +827,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 // For project module output directories, include as PreResources so
                 // freshly compiled classes shadow the (potentially stale) WEB-INF/classes.
                 // Record the artifact name so we can skip its JAR in the PostResources pass.
-                if (snapshot.outputToArtifactName.containsKey(rootPath)) {
+                String moduleDirName = snapshot.outputToArtifactName.get(rootPath);
+                if (moduleDirName != null) {
                     // Artifact name comes from the module graph (Maven artifactId preferred),
                     // not from file-path extraction — reliable even when directory name ≠ artifactId.
-                    String moduleDirName = snapshot.outputToArtifactName.get(rootPath);
                     // Guard 1 — name-based: fast, covers Maven and standard Gradle naming.
-                    if (moduleDirName != null && coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
+                    if (coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
                         LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — name-matched JAR in WEB-INF/lib");
                         skippedModules.add(moduleDirName);
                         continue;
@@ -845,13 +845,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     String coveringJar = findCoveringJar(nativePath, moduleDirName, jarIndex);
                     if (coveringJar != null) {
                         LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — matched by '" + coveringJar + "' in WEB-INF/lib");
-                        skippedModules.add(moduleDirName != null ? moduleDirName : coveringJar);
+                        skippedModules.add(moduleDirName);
                         continue;
                     }
                     extraDirs.add(nativePath);
-                    if (moduleDirName != null) {
-                        preResourceModuleNames.add(moduleDirName.toLowerCase(Locale.ROOT));
-                    }
+                    preResourceModuleNames.add(moduleDirName.toLowerCase(Locale.ROOT));
                     continue;
                 }
 
