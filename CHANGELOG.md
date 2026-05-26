@@ -22,6 +22,7 @@
 - `ArtifactMatchingUtils.findMatching(Deployment)` collapses the 4-strategy fuzzy matcher (exact-name, case-insensitive-name, output-path, base-module-name) plus EXTERNAL provenance guard into a single `ArtifactPointer.getArtifact()` lookup — the typed model makes every guard structural.
 - `ProjectArtifactDetector` produces typed `Deployment` directly: `ArtifactBackedDeployment` for IntelliJ artifacts, `ModuleBackedDeployment` for web modules, `ExternalFileDeployment` for WAR scans.
 - `DeploymentTableManager` gains `getTypedDeployments(Project)` / `setTypedDeployments` at the UI boundary; `DeploymentConfigurationPanel.applyTo` now feeds the typed setter.
+- `ArtifactReferenceRefresher` rewritten on typed-pointer dispatch: 543 lines of fuzzy 4-strategy rename tracking (exact-name / output-path / base-module-name / EXTERNAL guard) collapse to ~140 lines that build an `ArtifactBackedDeployment` per stored entry and patch the legacy name / path fields when `ArtifactPointer.getArtifact()` reports a drift. The snapshot-based test class is dropped because the unit it covered no longer exists; the new path is exercised by the live editor refresh.
 
 ## [1.1.1]
 
