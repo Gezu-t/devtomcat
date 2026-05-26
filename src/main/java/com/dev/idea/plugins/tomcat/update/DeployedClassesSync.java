@@ -114,29 +114,6 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * @deprecated Use {@link #syncDeployments(Project, java.util.List, TomcatDeploymentLogger)}
-     * with typed {@link Deployment} entries. Forwards via
-     * {@link DeploymentAdapter#toTyped}; will be removed once all callers
-     * produce typed deployments.
-     */
-    @Deprecated(forRemoval = true)
-    @NotNull
-    public static SyncReport syncIfNeeded(@NotNull Project project,
-                                          @NotNull List<DeploymentArtifact> artifacts,
-                                          @NotNull TomcatDeploymentLogger logger) {
-        // Short-circuit before toTyped — that path needs project services
-        // (ArtifactPointerManager, etc.) that may not exist in unit-test mocks.
-        if (project.isDisposed() || artifacts.isEmpty()) {
-            return new SyncReport(0, 0, 0);
-        }
-        List<Deployment> typed = new ArrayList<>(artifacts.size());
-        for (DeploymentArtifact a : artifacts) {
-            if (a != null) typed.add(DeploymentAdapter.toTyped(project, a));
-        }
-        return syncDeployments(project, typed, logger);
-    }
-
-    /**
      * Mirrors module output into each exploded deployment's
      * {@code WEB-INF/classes/}. Safe to call from a background thread
      * (the compiler callback thread is the intended caller).

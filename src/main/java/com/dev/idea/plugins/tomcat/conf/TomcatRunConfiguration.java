@@ -406,12 +406,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
     // Deployment accessors
     // =====================================================================
 
-    @NotNull
-    public List<DeploymentArtifact> getDeployedArtifacts() {
-        return configData.getDeploymentConfig().getDeployedArtifacts();
-    }
-
-    /** Typed view of {@link #getDeployedArtifacts()} — see {@link DeploymentConfig#getDeployments(Project)}. */
+    /** Typed view — see {@link DeploymentConfig#getDeployments(Project)}. */
     @NotNull
     public List<Deployment> getDeployments() {
         return configData.getDeploymentConfig().getDeployments(getProject());

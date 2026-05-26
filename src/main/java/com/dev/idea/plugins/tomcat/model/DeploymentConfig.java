@@ -59,28 +59,17 @@ public class DeploymentConfig implements Serializable, Cloneable {
     }
 
     // =====================================================================
-    // Legacy accessors (deprecated)
+    // Persistence-layer accessors
+    //
+    // DeploymentArtifact is the XML serialization shape — the typed
+    // Deployment hierarchy lives on top of it through DeploymentAdapter.
+    // These methods are the table-and-serializer boundary, not deprecated.
     // =====================================================================
 
-    /**
-     * @deprecated Use {@link #getDeployments(Project)}. Removal in Phase 5
-     * (LOCAL_NOTES.md "Phase 4b–5 handoff").
-     */
-    @Deprecated(forRemoval = true)
+    /** Returns a defensive copy of the persistence-layer artifact list. */
     @NotNull
     public List<DeploymentArtifact> getArtifacts() {
         return new ArrayList<>(artifacts);
-    }
-
-    /**
-     * @deprecated Alias for {@link #getArtifacts()} — nulls cannot enter via the
-     * setters, so the historical null-filter is redundant. Use
-     * {@link #getDeployments(Project)}.
-     */
-    @Deprecated(forRemoval = true)
-    @NotNull
-    public List<DeploymentArtifact> getDeployedArtifacts() {
-        return getArtifacts();
     }
 
     // =====================================================================

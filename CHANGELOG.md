@@ -23,6 +23,8 @@
 - `ProjectArtifactDetector` produces typed `Deployment` directly.
 - `DeploymentTableManager` exposes typed UI-boundary accessors.
 - `ArtifactReferenceRefresher` rewritten on typed-pointer dispatch (543 → ~140 lines).
+- Persistence boundary stabilized: `DeploymentArtifact`, `DeploymentAdapter`, `DeploymentConfig.getArtifacts()` are no longer `@Deprecated(forRemoval=true)` — they are the XML serialization shape and the typed/legacy bridge.
+- Dropped: `DeploymentConfig.getDeployedArtifacts()`, `TomcatRunConfiguration.getDeployedArtifacts()`, and the legacy `syncIfNeeded` / `warnAboutWarArtifactsIfPresent` overloads that had typed replacements.
 
 ## [1.1.1]
 

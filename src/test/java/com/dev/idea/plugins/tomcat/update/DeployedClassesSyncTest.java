@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
@@ -108,17 +107,6 @@ class DeployedClassesSyncTest {
             assertEquals(0, r.filesCopied());
         }
 
-        @Test
-        @DisplayName("legacy syncIfNeeded forwarder: empty list short-circuits without project services")
-        void legacyForwarderEmptyList() {
-            when(project.isDisposed()).thenReturn(false);
-            // Empty list should never trigger toTyped() — the deprecated
-            // forwarder must short-circuit before touching project services.
-            DeployedClassesSync.SyncReport r =
-                    DeployedClassesSync.syncIfNeeded(project, List.of(), logger);
-            assertNotNull(r);
-            assertEquals(0, r.filesCopied());
-        }
     }
 
     @Nested

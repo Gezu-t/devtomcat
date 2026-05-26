@@ -11,24 +11,14 @@ import java.io.Serializable;
 import java.util.Objects;
 
 /**
- * Deployment Artifact for Tomcat.
+ * Persistence-layer record for a deployable artifact.
  *
- * Represents a deployable artifact (WAR, exploded directory, etc.)
- * with path, name, type, and context path information.
- *
- * Author: Dev Tomcat Team
- * Project: DevTomcat Plugin
+ * <p>Carries the four XML-serialized fields (name, path, type, context path)
+ * plus a {@link Source} provenance flag. The runtime hot path operates on
+ * the sealed {@link Deployment} hierarchy; {@code DeploymentArtifact} is the
+ * shape that {@link DeploymentAdapter} bridges to and from on the
+ * serialization / UI-table boundary.
  */
-/**
- * @deprecated Stringly-typed legacy model superseded by the sealed
- * {@link Deployment} hierarchy ({@link ArtifactBackedDeployment} /
- * {@link ModuleBackedDeployment} / {@link ExternalFileDeployment}). New code
- * MUST consume {@code Deployment}; this class is retained only so legacy
- * XML configs deserialize cleanly. Scheduled for removal once
- * {@code DeploymentConfig} storage is flipped to typed and the XML
- * serializer is migrated — see LOCAL_NOTES.md "Phase 4b–5 handoff".
- */
-@Deprecated(forRemoval = true)
 public class DeploymentArtifact implements Serializable, Cloneable {
 
     @Serial

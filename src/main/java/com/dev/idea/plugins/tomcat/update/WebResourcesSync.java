@@ -77,28 +77,6 @@ public final class WebResourcesSync {
     public record SyncReport(int artifactsSynced, int totalCopied, int skipped) {}
 
     /**
-     * @deprecated Use {@link #syncDeployments(Project, java.util.List, TomcatDeploymentLogger)}
-     * with typed {@link Deployment} entries. Forwards via
-     * {@link DeploymentAdapter#toTyped}.
-     */
-    @Deprecated(forRemoval = true)
-    @NotNull
-    public static SyncReport syncIfNeeded(@NotNull Project project,
-                                          @NotNull List<DeploymentArtifact> artifacts,
-                                          @NotNull TomcatDeploymentLogger logger) {
-        // Short-circuit before toTyped — that path needs project services
-        // (ArtifactPointerManager, etc.) that may not exist in unit-test mocks.
-        if (project.isDisposed() || artifacts.isEmpty()) {
-            return new SyncReport(0, 0, 0);
-        }
-        java.util.List<Deployment> typed = new java.util.ArrayList<>(artifacts.size());
-        for (DeploymentArtifact a : artifacts) {
-            if (a != null) typed.add(DeploymentAdapter.toTyped(project, a));
-        }
-        return syncDeployments(project, typed, logger);
-    }
-
-    /**
      * Mirrors {@code src/main/webapp/} into the exploded artifact directory
      * for every exploded {@link Deployment} in {@code deployments}. Per-entry
      * progress goes through {@code logger} so a stale-resource failure points

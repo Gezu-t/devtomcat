@@ -494,24 +494,6 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * ({@code TomcatJavaParametersBuilder}) can call it too.
      */
     /**
-     * @deprecated Use {@link #warnAboutWarDeploymentsIfPresent}; this overload
-     * keeps the legacy filter path for callers still holding
-     * {@link DeploymentArtifact} lists. Forwards to a shared emitter once the
-     * WAR-name list is built.
-     */
-    @Deprecated(forRemoval = true)
-    public static void warnAboutWarArtifactsIfPresent(@NotNull List<DeploymentArtifact> artifacts,
-                                                      @NotNull TomcatDeploymentLogger logger) {
-        java.util.List<String> warNames = new java.util.ArrayList<>();
-        for (DeploymentArtifact a : artifacts) {
-            if (a != null && DeploymentArtifact.TYPE_WAR.equals(a.getType())) {
-                warNames.add(a.getDisplayName());
-            }
-        }
-        emitWarArtifactsWarning(warNames, logger);
-    }
-
-    /**
      * Logs one aggregated warning when any deployment in the list is WAR-packaged.
      * Public + static so the launch path ({@code TomcatJavaParametersBuilder})
      * can call it.
