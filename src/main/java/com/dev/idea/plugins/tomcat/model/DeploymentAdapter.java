@@ -1,7 +1,14 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.module.ModulePointerManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
 
@@ -32,15 +39,113 @@ public final class DeploymentAdapter {
             case INTELLIJ_ARTIFACT ->
                     ArtifactBackedDeployment.ofName(project, legacy.getName(), context);
 
-            case AUTO_DETECTED ->
-                    ModuleBackedDeployment.ofName(
-                            project, legacy.getName(),
-                            Path.of(legacy.getPath()), context, exploded);
+            case AUTO_DETECTED -> {
+                Path outputPath = Path.of(legacy.getPath());
+                yield buildAutoDetectedDeployment(
+                        project, legacy.getName(), outputPath, context, exploded);
+            }
 
             case EXTERNAL ->
                     new ExternalFileDeployment(
                             Path.of(legacy.getPath()), context, exploded);
         };
+    }
+
+    /**
+     * Resolves the owning {@link Module} for an AUTO_DETECTED deployment, then
+     * creates the {@link ModuleBackedDeployment} from a pointer bound to that
+     * module. Falls back through three strategies because the stored "name"
+     * field on {@link DeploymentArtifact} carries the artifact's display name
+     * (e.g. {@code webapp-deploy.war}), not the IntelliJ module name (e.g.
+     * {@code webapp-deploy}) — a long-standing data-model overload from when
+     * {@code ProjectArtifactDetector} created these entries.
+     *
+     * <p>Resolution order:
+     * <ol>
+     *   <li>{@code ModuleManager.findModuleByName(storedName)} — works when the
+     *       stored name accidentally matches a module name (rare).</li>
+     *   <li>Same lookup with the {@code .war} / {@code .ear} / {@code .jar}
+     *       suffix stripped — handles the common Maven/Gradle case where the
+     *       artifact filename is {@code <moduleName>.war}.</li>
+     *   <li>Content-root containment: walks every module and picks the one
+     *       whose content root is the deepest prefix of {@code outputPath}.
+     *       Handles Maven {@code <finalName>} with version suffixes and any
+     *       other rename that breaks the name-derived path.</li>
+     * </ol>
+     *
+     * <p>If all three fail (project not loaded, or the output path is outside
+     * every module's content roots), creates a name-only pointer as the last
+     * resort. That pointer's {@code getModule()} will return {@code null} and
+     * the deployment will fail {@code isValid()} — but the deployment object
+     * still exists, so callers can surface a clearer error.
+     */
+    @NotNull
+    private static ModuleBackedDeployment buildAutoDetectedDeployment(@NotNull Project project,
+                                                                      @NotNull String storedName,
+                                                                      @NotNull Path outputPath,
+                                                                      @NotNull String contextPath,
+                                                                      boolean exploded) {
+        Module module = ReadAction.compute(() -> resolveOwningModule(project, storedName, outputPath));
+        ModulePointerManager pm = ModulePointerManager.getInstance(project);
+        if (module != null) {
+            return new ModuleBackedDeployment(pm.create(module), outputPath, contextPath, exploded);
+        }
+        // Worst case — keep the deployment object alive so the run-config table
+        // still shows it; isValid() will return false and the user can re-add it.
+        return new ModuleBackedDeployment(pm.create(storedName), outputPath, contextPath, exploded);
+    }
+
+    @Nullable
+    private static Module resolveOwningModule(@NotNull Project project,
+                                              @NotNull String storedName,
+                                              @NotNull Path outputPath) {
+        ModuleManager mm = ModuleManager.getInstance(project);
+
+        Module direct = mm.findModuleByName(storedName);
+        if (direct != null) return direct;
+
+        String stripped = stripArtifactSuffix(storedName);
+        if (!stripped.equals(storedName)) {
+            Module withoutExtension = mm.findModuleByName(stripped);
+            if (withoutExtension != null) return withoutExtension;
+        }
+
+        // Content-root containment — pick the deepest matching root so a nested
+        // module wins over a parent project that also covers the path.
+        Path normalised;
+        try {
+            normalised = outputPath.toAbsolutePath().normalize();
+        } catch (Exception e) {
+            return null;
+        }
+        Module bestMatch = null;
+        int bestMatchLen = -1;
+        for (Module candidate : mm.getModules()) {
+            for (VirtualFile contentRoot : ModuleRootManager.getInstance(candidate).getContentRoots()) {
+                Path rootPath;
+                try {
+                    rootPath = Path.of(contentRoot.getPath()).toAbsolutePath().normalize();
+                } catch (Exception e) {
+                    continue;
+                }
+                if (normalised.startsWith(rootPath)) {
+                    int len = rootPath.toString().length();
+                    if (len > bestMatchLen) {
+                        bestMatch = candidate;
+                        bestMatchLen = len;
+                    }
+                }
+            }
+        }
+        return bestMatch;
+    }
+
+    @NotNull
+    private static String stripArtifactSuffix(@NotNull String name) {
+        if (name.endsWith(".war")) return name.substring(0, name.length() - 4);
+        if (name.endsWith(".ear")) return name.substring(0, name.length() - 4);
+        if (name.endsWith(".jar")) return name.substring(0, name.length() - 4);
+        return name;
     }
 
     /** Map a typed deployment back to legacy form for serialization. */
