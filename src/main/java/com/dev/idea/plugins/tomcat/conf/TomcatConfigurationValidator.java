@@ -213,7 +213,18 @@ public final class TomcatConfigurationValidator {
 
     private static void validateDeploymentArtifacts(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
         List<DeploymentArtifact> artifacts = data.getDeploymentConfig().getArtifacts();
-        if (artifacts.isEmpty()) return;
+        if (artifacts.isEmpty()) {
+            // Pre-launch warning, mirroring the post-launch warning in
+            // LocalDeploymentStrategy. Surfacing it here means the run-config
+            // editor shows a yellow stripe at edit time AND the Run dialog
+            // prompts before launch, instead of the user only learning after
+            // Tomcat has already started that nothing got deployed.
+            // Non-blocking: a bare Tomcat (no apps) is occasionally what the
+            // user wants — e.g. testing the server itself.
+            throw new RuntimeConfigurationWarning(
+                    "No deployments configured. Tomcat will start with nothing to serve. "
+                            + "Add a deployment in the Deployment tab.");
+        }
 
         // Validate artifact paths exist
         for (DeploymentArtifact artifact : artifacts) {

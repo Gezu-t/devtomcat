@@ -23,7 +23,7 @@ class TomcatConfigurationValidatorTest {
     private TomcatConfigurationData data;
 
     @BeforeEach
-    void setUp(@TempDir Path tempDir) {
+    void setUp(@TempDir Path tempDir) throws Exception {
         data = new TomcatConfigurationData();
         // A real directory on disk — the validator now rejects a missing path
         // as an error (previously a log warning), so the baseline must point
@@ -33,6 +33,18 @@ class TomcatConfigurationValidatorTest {
         PortConfig ports = data.getPortConfig();
         ports.setHttp(8080);
         ports.setShutdown(8005);
+
+        // The validator warns when the deployment list is empty (so the editor
+        // shows a yellow stripe instead of letting Tomcat launch with nothing
+        // to serve). Seed the baseline with one valid deployment so tests that
+        // focus on other concerns (server, port, context path) stay readable
+        // — tests that specifically exercise empty-list behaviour can clear
+        // this back out.
+        Path baselineArtifact = Files.createTempDirectory(tempDir, "baseline-app");
+        DeploymentArtifact baseline = new DeploymentArtifact(
+                "baseline-app", baselineArtifact.toString(), DeploymentArtifact.TYPE_EXPLODED);
+        baseline.setContextPath("/baseline-app");
+        data.getDeploymentConfig().addArtifact(baseline);
     }
 
     // =========================================================================
@@ -249,6 +261,27 @@ class TomcatConfigurationValidatorTest {
     @Nested
     @DisplayName("Deployment validation")
     class DeploymentValidation {
+
+        @Test
+        @DisplayName("empty deployment list throws warning at edit time")
+        void emptyDeploymentsThrowWarning() {
+            // Clear the baseline deployment seeded in setUp to exercise the
+            // empty-list code path. Previously the validator silently returned
+            // here, so the run-config editor showed no stripe and the user
+            // only learned post-launch (via LocalDeploymentStrategy's runtime
+            // warning) that Tomcat started with nothing to serve. Now the
+            // warning fires at edit time so the editor highlights the issue
+            // and the Run dialog prompts.
+            data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("No deployments configured"),
+                    "expected empty-list message, got: " + ex.getLocalizedMessage());
+            assertTrue(ex.getLocalizedMessage().contains("Deployment tab"),
+                    "expected actionable next-step in message: " + ex.getLocalizedMessage());
+        }
 
         @Test
         @DisplayName("duplicate artifact output paths throw warning")

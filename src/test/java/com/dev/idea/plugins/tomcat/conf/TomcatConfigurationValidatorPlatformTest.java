@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.conf;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
@@ -48,7 +49,7 @@ public class TomcatConfigurationValidatorPlatformTest extends BasePlatformTestCa
         return dir.getAbsolutePath();
     }
 
-    private TomcatRunConfiguration createConfig(String name) {
+    private TomcatRunConfiguration createConfig(String name) throws IOException {
         TomcatRunConfigurationType type = new TomcatRunConfigurationType();
         TomcatRunConfiguration cfg = new TomcatRunConfiguration(
                 getProject(),
@@ -58,6 +59,21 @@ public class TomcatConfigurationValidatorPlatformTest extends BasePlatformTestCa
         // server validator does.
         cfg.setHttpPort(8080);
         cfg.setShutdownPort(8005);
+        // Baseline deployment so the empty-list validator warning doesn't fire
+        // before the server-registration validator does. These tests focus on
+        // server registration, not on deployment shape. Mark as EXTERNAL so the
+        // orphan-artifact validator (which only runs in a real Project) skips
+        // it — the test fixture's ArtifactManager has no registered artifacts
+        // for the baseline to match against.
+        File artifactDir = FileUtil.createTempDirectory("devtomcat-validator-deployment-", null, true);
+        tempDirs.add(artifactDir);
+        DeploymentArtifact baseline = new DeploymentArtifact(
+                "baseline-app",
+                artifactDir.getAbsolutePath(),
+                DeploymentArtifact.TYPE_EXPLODED);
+        baseline.setContextPath("/baseline-app");
+        baseline.setSource(DeploymentArtifact.Source.EXTERNAL);
+        cfg.getConfigData().getDeploymentConfig().addArtifact(baseline);
         return cfg;
     }
 

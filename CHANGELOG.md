@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Empty-deployment warning fires at edit time, not just post-launch.
+
 ## [1.2.0]
 
 ### Fixed
