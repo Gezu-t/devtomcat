@@ -1,10 +1,11 @@
 <!-- Plugin description -->
 # DevTomcat
 
-DevTomcat is an IntelliJ IDEA plugin that provides advanced Apache Tomcat
-server management for IntelliJ Community Edition.
+DevTomcat is an IntelliJ IDEA plugin for Apache Tomcat server management,
+with built-in error diagnostics, live deployment observability, and
+security-by-default connector configuration.
 
-Run, debug, and deploy web applications with smart diagnostics, live status tracking, and zero configuration overhead. DevTomcat automatically loads webapp classes and libraries from your project — no need to manually copy files to `WEB-INF/classes` or `WEB-INF/lib`. Supports Tomcat 7+.
+Run, debug, and deploy web applications with categorized error analysis, live status tracking in the Services panel, and per-launch CATALINA_BASE isolation. Webapp classes and libraries are loaded directly from your project build output — no manual copying to `WEB-INF/classes` or `WEB-INF/lib`. Supports Tomcat 7+. Free and open source.
 <!-- Plugin description end -->
 
 ## Features

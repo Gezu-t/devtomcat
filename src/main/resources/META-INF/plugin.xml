@@ -5,22 +5,11 @@
 
     <description><![CDATA[
     <h2>DevTomcat</h2>
-    <p>Free, full-featured Apache Tomcat integration for IntelliJ IDEA.
-    Run, debug, and deploy web applications with smart diagnostics, live status tracking, and zero configuration overhead.</p>
-
-    <h3>Core Features</h3>
-    <ul>
-        <li>Full Tomcat lifecycle — start, stop, debug, and redeploy from the IDE</li>
-        <li>Deploy WAR files and exploded directories with auto-detected artifacts</li>
-        <li>Multi-artifact deployment with independent context paths</li>
-        <li>Debug with full breakpoint and hot-swap support</li>
-        <li>Code coverage via IntelliJ's coverage engine (uses your IDE-configured runner — JaCoCo or IntelliJ's own agent)</li>
-        <li>Hot deployment and Update Running Application (Ctrl+F10)</li>
-        <li>CATALINA_BASE isolation — each configuration gets its own instance directory</li>
-        <li>server.xml auto-generation with HTTP, HTTPS, AJP, and shutdown connectors</li>
-        <li>JMX monitoring support</li>
-        <li>Remote deployment via Tomcat Manager API</li>
-    </ul>
+    <p>Apache Tomcat integration for IntelliJ IDEA with built-in diagnostics,
+    observability, and secure connector defaults. DevTomcat takes a specific
+    position on Tomcat development: catch errors before they bite, isolate
+    server instances per launch, make deployment activity visible, and apply
+    security-by-default to the connectors Tomcat exposes. Free and open source.</p>
 
     <h3>Smart Diagnostics</h3>
     <ul>
@@ -47,12 +36,26 @@
         <li><b>Startup Time Trends</b> — Tracks startup performance across runs and shows trend comparisons</li>
     </ul>
 
-    <h3>Enhanced Console & Config</h3>
+    <h3>Enhanced Console &amp; Config</h3>
     <ul>
         <li><b>Smart Console Filter</b> — Clickable URLs (opens browser) and file paths (opens in editor) in Tomcat console output</li>
         <li><b>Config Export/Import</b> — Export and import run configurations as XML files for team sharing</li>
         <li><b>Per-mode Runner Settings</b> — Separate environment variables and startup scripts for Run, Debug, and Coverage modes</li>
         <li><b>Multi-log Monitoring</b> — Catalina, localhost, access, and custom log files as dedicated console tabs</li>
+    </ul>
+
+    <h3>Tomcat Workflow</h3>
+    <ul>
+        <li>Full Tomcat lifecycle — start, stop, debug, and redeploy from the IDE</li>
+        <li>Deploy WAR files and exploded directories with auto-detected artifacts</li>
+        <li>Multi-artifact deployment with independent context paths</li>
+        <li>Debug with full breakpoint and hot-swap support</li>
+        <li>Code coverage via IntelliJ's coverage engine (uses your IDE-configured runner — JaCoCo or IntelliJ's own agent)</li>
+        <li>Hot deployment and Update Running Application (Ctrl+F10)</li>
+        <li>CATALINA_BASE isolation — each configuration gets its own instance directory</li>
+        <li>server.xml auto-generation with HTTP, HTTPS, AJP, and shutdown connectors</li>
+        <li>JMX monitoring support</li>
+        <li>Remote deployment via Tomcat Manager API</li>
     </ul>
 
     <h3>Requirements</h3>

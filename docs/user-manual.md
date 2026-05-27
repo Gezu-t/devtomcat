@@ -1,6 +1,6 @@
 # DevTomcat User Manual
 
-Free, full-featured Apache Tomcat integration for IntelliJ IDEA.
+Apache Tomcat integration for IntelliJ IDEA, with built-in error diagnostics, live deployment observability, and security-by-default connector configuration.
 
 ---
 
