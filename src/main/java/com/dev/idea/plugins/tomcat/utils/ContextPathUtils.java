@@ -128,9 +128,10 @@ public final class ContextPathUtils {
     }
 
     /**
-     * Formats an artifact name for display using IntelliJ Ultimate's colon notation.
+     * Formats an artifact name for display using colon notation.
      * Converts underscore-based naming (e.g. {@code "app_war_exploded"}) to the cleaner
-     * colon format (e.g. {@code "app:war exploded"}) that IntelliJ Ultimate uses.
+     * colon format (e.g. {@code "app:war exploded"}) — the latter reads as
+     * "the {@code app} module, packaged as exploded war".
      *
      * <p>If the name already uses colon notation, it is returned as-is.
      * Version patterns like {@code ##5.18.0} are stripped for cleaner display.

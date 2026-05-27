@@ -13,10 +13,10 @@ import java.util.*;
 /**
  * Pre-launch port conflict detector.
  *
- * Checks all configured ports before Tomcat startup and provides
- * clear, actionable messages about which ports are in use.
- * This is a DevTomcat-exclusive feature — IntelliJ Ultimate only
- * shows a cryptic bind error after launch fails.
+ * <p>Checks all configured ports before Tomcat startup and surfaces
+ * clear, actionable messages about which ports are in use — so the
+ * user finds out before the launch begins instead of from a bind
+ * error after Tomcat has already started spinning up.
  *
  * @author Gezahegn Lemma (Gezu)
  */

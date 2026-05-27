@@ -420,7 +420,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
      * "Build Artifact" task appears in Before Launch. When removed, the task is cleaned up.
      *
      * <p>Also ensures a default "Build" (Make) task is present so the project
-     * is compiled before launch, matching IntelliJ Ultimate's Tomcat behaviour.</p>
+     * is compiled before launch — same convention as every Java run config.</p>
      *
      * <p><b>Important:</b> Call this only from {@code resetEditorFrom()} —
      * NOT from {@code applyEditorTo()} (panel's doApply overwrites) or
@@ -455,10 +455,11 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                     .map(Deployment::getDisplayName)
                     .collect(Collectors.toList());
 
-            // 2a. Ultimate: sync BuildArtifactsBeforeRunTask via ArtifactManager.
-            // ArtifactPointer.getArtifact() needs a read action; collect matches
-            // inside the read action, then mutate the task list outside.
-            boolean ultimateArtifactTaskAdded = false;
+            // 2a. Sync the platform's BuildArtifactsBeforeRunTask via ArtifactManager
+            //     when the project actually has configured Artifacts.
+            //     ArtifactPointer.getArtifact() needs a read action; collect matches
+            //     inside the read action, then mutate the task list outside.
+            boolean platformArtifactTaskAdded = false;
             try {
                 List<Artifact> matchedArtifacts = TomcatReadActions.compute(() -> {
                     if (deployments.isEmpty()) return Collections.<Artifact>emptyList();
@@ -481,20 +482,20 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                     if (!buildTask.getArtifactPointers().isEmpty()) {
                         buildTask.setEnabled(true);
                         currentTasks.add(buildTask);
-                        ultimateArtifactTaskAdded = true;
+                        platformArtifactTaskAdded = true;
                     }
                 }
             } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
                 // Honour IntelliJ cancellation: never swallow PCE in a broad catch.
                 throw pce;
             } catch (NoClassDefFoundError | Exception ignored) {
-                // ArtifactManager not available on Community Edition; fall through.
+                // ArtifactManager unavailable on this IDE/edition; fall through.
             }
 
-            // 2b. On Community (no ArtifactManager), add our task for visibility and validation.
-            //     On Ultimate, BuildArtifactsBeforeRunTask already covers this — skip ours
-            //     to avoid duplicate entries in the Before Launch panel.
-            if (!ultimateArtifactTaskAdded) {
+            // 2b. When the platform BuildArtifactsBeforeRunTask was added we let
+            //     it cover the artifact-build step. Otherwise our own
+            //     TomcatBuildArtifactsTask handles visibility and path validation.
+            if (!platformArtifactTaskAdded) {
                 syncTomcatBuildArtifactsTask(currentTasks, artifactDisplayNames);
             } else {
                 currentTasks.removeIf(t -> t instanceof TomcatBuildArtifactsTask);
@@ -505,7 +506,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
             // Also set directly on the config object for platforms that read from it
             setBeforeRunTasks((List) new ArrayList<>(currentTasks));
             LOG.info("DevTomcat: Before Launch sync complete — " + currentTasks.size() + " task(s)"
-                    + (ultimateArtifactTaskAdded ? " (Ultimate BuildArtifacts included)" : ""));
+                    + (platformArtifactTaskAdded ? " (platform BuildArtifacts included)" : ""));
 
         } catch (Exception e) {
             LOG.warn("DevTomcat: Error syncing Before Launch tasks: " + e.getMessage(), e);

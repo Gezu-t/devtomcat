@@ -57,7 +57,7 @@
 
     <h3>Requirements</h3>
     <ul>
-        <li>IntelliJ IDEA 2024.2+ (Community or Ultimate)</li>
+        <li>IntelliJ IDEA 2024.2+</li>
         <li>Apache Tomcat 7+ (legacy installs supported via auto-applied compatibility shims)</li>
         <li>Java 17+</li>
     </ul>

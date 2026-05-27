@@ -14,9 +14,9 @@ import java.lang.reflect.Method;
  * resolved once at class-init; callers do a single {@code Method.invoke}
  * instead of walking the class hierarchy each time.
  *
- * <p>Both manager-level and project-level reflection succeed on Ultimate and
- * other distributions that ship the Maven plugin. Community-edition or
- * Gradle-only projects degrade to {@code null} return values — same contract
+ * <p>Both manager-level and project-level reflection succeed in any IDE that
+ * ships the Maven plugin. When the Maven plugin is absent or the project is
+ * Gradle-only, the calls degrade to {@code null} return values — same contract
  * as the pre-cache code, just without the per-call lookup cost.
  */
 public final class MavenReflection {

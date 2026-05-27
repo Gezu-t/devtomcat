@@ -285,8 +285,8 @@ public final class TomcatRunConfigContributor
             return switch (liveStatus.getServerState()) {
                 // Pre-running and running states get a debug-themed icon when
                 // the live executor is the debugger, so users can tell at a
-                // glance whether the row is a Run or a Debug session. Same
-                // convention IntelliJ Ultimate's Tomcat plugin uses.
+                // glance whether the row is a Run or a Debug session — the
+                // standard platform icon convention for running configurations.
                 case STARTING, DEPLOYING ->
                         debugging ? AllIcons.Actions.StartDebugger : AllIcons.Actions.Execute;
                 case RUNNING ->

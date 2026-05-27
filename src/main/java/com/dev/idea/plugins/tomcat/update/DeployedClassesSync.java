@@ -61,8 +61,8 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
  * {@code target/<warname>/WEB-INF/classes/}. The visible symptom: "I have
  * to run {@code mvn clean install} every time".
  *
- * <p>IntelliJ Ultimate's bundled Tomcat plugin hides this step internally;
- * DevTomcat now does the same.
+ * <p>DevTomcat closes this gap automatically as part of every launch and
+ * Update, so the user never has to remember it.
  *
  * <h2>What this sync covers — and what it doesn't</h2>
  * <ul>
@@ -295,9 +295,11 @@ public final class DeployedClassesSync {
 
     /**
      * Resolves the owning module via the typed {@link Deployment}
-     * hierarchy — no string matching anywhere. The three dispatch arms
-     * mirror Ultimate's {@code DeploymentSource} model rebuilt from
-     * Community primitives ({@code ArtifactPointer} / {@code ModulePointer}).
+     * hierarchy — no string matching anywhere. Three dispatch arms cover
+     * the three deployment shapes — IntelliJ-registered artifact,
+     * project module, and external file — each backed by a stable platform
+     * pointer ({@code ArtifactPointer} / {@code ModulePointer}) so renames
+     * and reloads are tracked automatically.
      *
      * <p><b>Must be called inside a read action.</b>
      */

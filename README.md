@@ -31,7 +31,7 @@ Run, debug, and deploy web applications with smart diagnostics, live status trac
 
 | Requirement   | Minimum Version                            |
 |---------------|--------------------------------------------|
-| IntelliJ IDEA | 2024.2+ (Community or Ultimate)            |
+| IntelliJ IDEA | 2024.2+                                    |
 | Apache Tomcat | 7+ (legacy installs covered by auto-shims) |
 | Java (JDK)    | 17+                                        |
 
@@ -442,9 +442,9 @@ Bug reports, feature requests, and contributions are welcome.
 ## Inspiration & Credits
 
 DevTomcat was inspired by [Smart Tomcat](https://plugins.jetbrains.com/plugin/9492-smart-tomcat) —
-a lightweight Tomcat plugin for IntelliJ IDEA Community Edition by Victor Zheng.
-Smart Tomcat demonstrated that first-class Tomcat support was possible outside of IntelliJ Ultimate,
-and served as the original motivation for building DevTomcat.
+a lightweight Tomcat plugin for IntelliJ IDEA by Victor Zheng. Smart Tomcat
+demonstrated that a free, focused Tomcat integration could thrive as a
+standalone plugin, and served as the original motivation for building DevTomcat.
 
 DevTomcat has since taken a different direction — adding multi-artifact deployment, port conflict
 auto-resolution, CATALINA_BASE isolation, remote deployment, a state-machine process handler, and

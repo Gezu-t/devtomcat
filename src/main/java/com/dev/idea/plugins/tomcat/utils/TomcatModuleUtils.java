@@ -67,7 +67,10 @@ public final class TomcatModuleUtils {
     // Module-name parsing
     // =====================================================================
 
-    /** Module-name suffixes stripped before deriving a context path. Order-sensitive: outer suffixes first, so {@code foo.web.main} → {@code foo.web} → {@code foo}. */
+    /** Module-name suffixes stripped before deriving a context path.
+     * Order-sensitive: outer suffixes first, so {@code foo.web.main} → {@code foo.web} → {@code foo}.
+     *
+     */
     private static final List<String> MODULE_NAME_TRIM_SUFFIXES = List.of(
             ".main", ".web", "-web", "_web"
     );
@@ -110,10 +113,10 @@ public final class TomcatModuleUtils {
     );
 
     // =====================================================================
-    // Web Facet reflection (IntelliJ Ultimate JavaEE plugin)
+    // Web Facet reflection (provided by the platform's JavaEE plugin)
     // =====================================================================
 
-    /** Facet type id matched via {@code FacetType.getStringId()} — string-equality avoids a compile-time dep on Ultimate-only {@code WebFacet}. */
+    /** Facet type id matched via {@code FacetType.getStringId()} — string-equality avoids a compile-time dep on {@code WebFacet}, which lives in the optional JavaEE plugin. */
     private static final String WEB_FACET_STRING_ID = "web";
     private static final String FACET_METHOD_GET_WEB_ROOTS = "getWebRoots";
     private static final String WEB_ROOT_METHOD_GET_FILE = "getFile";
@@ -277,8 +280,8 @@ public final class TomcatModuleUtils {
     /**
      * Reads {@code WebFacet.getWebRoots()} via {@link com.intellij.facet.FacetManager}
      * for every {@code "web"}-type facet attached to {@code module}. Falls back to an
-     * empty list when the JavaEE plugin (IntelliJ Ultimate) is not present, when
-     * no Web Facets are attached, or when the reflective access fails.
+     * empty list when the JavaEE plugin is not present, when no Web Facets are
+     * attached, or when the reflective access fails.
      *
      * <p>Authoritative source: a user who has explicitly configured Web Facet roots
      * in Project Structure → Facets → Web wants those exact paths, not any
@@ -292,7 +295,7 @@ public final class TomcatModuleUtils {
             LinkedHashSet<VirtualFile> out = new LinkedHashSet<>();
             for (com.intellij.facet.Facet<?> facet : fm.getAllFacets()) {
                 // String-ID match avoids a compile-time dependency on WebFacet
-                // (which lives in IntelliJ's JavaEE plugin, Ultimate-only).
+                // (which lives in the optional JavaEE plugin).
                 if (!WEB_FACET_STRING_ID.equals(facet.getType().getStringId())) continue;
                 try {
                     Object roots = facet.getClass().getMethod(FACET_METHOD_GET_WEB_ROOTS).invoke(facet);

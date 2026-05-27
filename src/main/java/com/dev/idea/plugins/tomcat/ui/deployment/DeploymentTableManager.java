@@ -51,7 +51,7 @@ public class DeploymentTableManager {
                                                  boolean hasFocus) {
                 if (value != null) {
                     setIcon(AllIcons.Nodes.Artifact);
-                    // Format display name using colon notation like IntelliJ Ultimate
+                    // Format display name using colon notation (e.g. "app:war exploded")
                     String displayName = ContextPathUtils.formatArtifactDisplayName(
                             value.getDisplayName(), value.getType());
                     append(displayName, SimpleTextAttributes.REGULAR_ATTRIBUTES);

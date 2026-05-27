@@ -14,7 +14,8 @@ import java.util.Set;
 
 /**
  * Encapsulates execution settings specific to a single run mode (Run, Debug, Coverage).
- * Mirrors IntelliJ Ultimate's per-mode configuration capabilities.
+ * Each mode gets its own env vars, startup/shutdown scripts, and toggles so that
+ * switching mode never forces the user to reconfigure the rest of the run config.
  */
 public class RunnerSettings implements Serializable, Cloneable {
 

@@ -1256,9 +1256,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     /**
      * Resolves the owning IntelliJ Module via the typed {@link Deployment}
-     * hierarchy — same shape as Ultimate's {@code DeploymentSource} dispatch.
-     * No string-matching anywhere: {@link ArtifactBackedDeployment} walks the
-     * artifact's packaging tree for its first {@code ModulePackagingElement};
+     * hierarchy — no string-matching anywhere.
+     * {@link ArtifactBackedDeployment} walks the artifact's packaging tree
+     * for its first {@code ModulePackagingElement};
      * {@link ModuleBackedDeployment} returns its pointer's module directly;
      * external deployments have no project module to resolve.
      *

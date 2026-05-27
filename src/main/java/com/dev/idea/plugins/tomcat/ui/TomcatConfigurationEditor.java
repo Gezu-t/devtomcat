@@ -630,7 +630,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
     /**
      * Replaces the live Before Launch artifact steps so they reflect all deployment
      * artifacts consolidated into a single Build Artifacts task, while preserving non-artifact tasks.
-     * This matches IntelliJ Ultimate's behaviour of showing "Build N artifacts" as one entry.
+     * Showing one "Build N artifacts" entry keeps the Before Launch panel readable when
+     * many deployments are configured.
      */
     private void syncBeforeLaunchPanelWithSelectedDeployment(@NotNull ArtifactManager artifactManager) {
         try {
@@ -659,7 +660,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     private void doSyncBeforeLaunch(@NotNull ConfigurationSettingsEditorWrapper wrapper,
                                      @NotNull ArtifactManager artifactManager) {
-        // 1. Strip all artifact-related tasks (both Ultimate and Community types)
+        // 1. Strip every artifact-related task — both the platform-native
+        //    BuildArtifactsBeforeRunTask and our own TomcatBuildArtifactsTask.
         List<BeforeRunTask<?>> updatedSteps = new ArrayList<>();
         for (BeforeRunTask<?> task : wrapper.getStepsBeforeLaunch()) {
             if (task instanceof BuildArtifactsBeforeRunTask || task instanceof TomcatBuildArtifactsTask) {
@@ -685,9 +687,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 : Collections.emptyList();
 
         if (!allDeployments.isEmpty()) {
-            // Try to match deployments against IntelliJ Artifacts (Ultimate path).
-            // On Community Edition, ArtifactManager exists but has zero configured
-            // artifacts, so the typed dispatch returns null for every deployment.
+            // Try to match deployments against platform-registered IntelliJ Artifacts.
+            // When the project has no configured artifacts (common on Community Edition),
+            // ArtifactManager exists but returns an empty list, so the typed dispatch
+            // returns null for every deployment and we fall through to our own task.
             BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
             List<Artifact> matched = TomcatReadActions.compute(() -> {
                 List<Artifact> out = new ArrayList<>();
@@ -703,7 +706,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             for (Artifact a : matched) buildTask.addArtifact(a);
 
             if (!buildTask.getArtifactPointers().isEmpty()) {
-                // Ultimate: IntelliJ Artifacts match — use native Build Artifacts task
+                // Platform-registered IntelliJ Artifacts matched — use the native
+                // Build Artifacts task so the Make step picks them up directly.
                 buildTask.setEnabled(true);
                 updatedSteps.add(buildTask);
                 LOG.info("DevTomcat: Before Launch consolidated " +
@@ -773,7 +777,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         List<BeforeRunTask<?>> existingSteps = new ArrayList<>(wrapper.getStepsBeforeLaunch());
         List<BeforeRunTask<?>> updatedSteps = new ArrayList<>();
         for (BeforeRunTask<?> task : existingSteps) {
-            // Strip both our custom task and any stale Ultimate-style BuildArtifactsBeforeRunTask
+            // Strip both our custom task and any stale platform BuildArtifactsBeforeRunTask
             if (task instanceof TomcatBuildArtifactsTask || task instanceof BuildArtifactsBeforeRunTask) {
                 continue;
             }

@@ -10,9 +10,10 @@ import java.util.regex.Pattern;
 
 /**
  * Smart diagnostics engine for Tomcat runtime errors.
- * Parses common error patterns and generates actionable fix suggestions
- * with severity levels. This is a DevTomcat-exclusive feature that goes
- * beyond IntelliJ Ultimate's raw error output.
+ *
+ * <p>Parses common error patterns out of the Tomcat console stream and emits
+ * actionable fix suggestions with severity levels — so the user sees what
+ * went wrong and what to do about it, not just the raw stack trace.
  */
 public final class TomcatErrorDiagnostics {
 

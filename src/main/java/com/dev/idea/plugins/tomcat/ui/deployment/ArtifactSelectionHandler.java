@@ -441,12 +441,13 @@ public class ArtifactSelectionHandler {
 
     /**
      * Resolves the deployment type for an IntelliJ Artifact.
-     * Checks the artifact type ID first (works in Ultimate), then falls back
-     * to checking the artifact name and output path (needed for Community Edition
-     * where types are "plain" or "jar").
+     * Checks the artifact type ID first (authoritative when the platform provides
+     * a web-typed ID), then falls back to checking the artifact name and output
+     * path — needed when the project only carries generic type IDs like
+     * {@code "plain"} or {@code "jar"}.
      */
     static String resolveDeploymentType(@NotNull Artifact artifact) {
-        // 1. Check IntelliJ artifact type ID (authoritative in Ultimate)
+        // 1. Check IntelliJ artifact type ID (authoritative when web-typed)
         try {
             String typeId = artifact.getArtifactType().getId().toLowerCase();
             if (typeId.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;

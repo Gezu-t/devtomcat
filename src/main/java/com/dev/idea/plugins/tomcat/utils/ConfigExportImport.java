@@ -22,9 +22,10 @@ import java.util.Set;
 /**
  * Configuration Export/Import utility for DevTomcat.
  *
- * Enables sharing Tomcat run configurations across teams and machines
- * via portable XML files. This is a DevTomcat-exclusive feature —
- * IntelliJ Ultimate has no equivalent for Tomcat configuration sharing.
+ * <p>Enables sharing Tomcat run configurations across teams and machines
+ * via portable XML files — the file is checked into version control or
+ * shared directly, and any teammate with DevTomcat installed can import
+ * it and run with the same setup.
  *
  * @author Gezahegn Lemma (Gezu)
  */

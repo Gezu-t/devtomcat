@@ -31,9 +31,10 @@ public class IntelliJArtifactSelectionDialog extends ChooseElementsDialog<Artifa
     @Override
     protected String getItemText(Artifact item) {
         // Use the actual artifact type from IntelliJ's type system for accurate display.
-        // In Ultimate: type IDs are "exploded-war", "war", "web-application-exploded", etc.
-        // In Community: type IDs are "plain", "jar" — so we also check the artifact name
-        // for type hints (e.g. "myapp_war_exploded", "myapp.war").
+        // When the platform provides web-typed IDs ("exploded-war", "war",
+        // "web-application-exploded", etc.) we use those directly; when only generic
+        // types are present ("plain", "jar"), we also check the artifact name for
+        // type hints (e.g. "myapp_war_exploded", "myapp.war").
         String type = resolveDisplayType(item);
         return ContextPathUtils.formatArtifactDisplayName(item.getName(), type);
     }

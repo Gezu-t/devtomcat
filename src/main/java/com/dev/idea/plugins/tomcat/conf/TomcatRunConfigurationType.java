@@ -274,8 +274,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     deploymentConfig.setUpdateClassesAndResources(hotDeployEnabled);
                     LOG.debug("Deployment config: hotDeploy=" + hotDeployEnabled);
 
-                    // Deployment tab starts empty — users add artifacts via "+" button,
-                    // matching IntelliJ Ultimate behavior.
+                    // Deployment tab starts empty — users add artifacts via the "+" button.
                 } catch (Exception e) {
                     LOG.warn("Error configuring deployment settings", e);
                 }
@@ -316,8 +315,8 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 }
 
                 // Environment variables are NOT pre-filled — users add them manually
-                // via the Startup/Connection tab (matching IntelliJ Ultimate behavior).
-                // passParentEnvs defaults to true in RunnerSettings.
+                // via the Startup/Connection tab. passParentEnvs defaults to true in
+                // RunnerSettings so the parent shell environment is inherited.
                 try {
                     autoSelectTomcatServer(config);
                 } catch (Exception e) {

@@ -32,8 +32,9 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.DIR_WEBAPPS;
  * {@code host-manager}, {@code ROOT}, {@code examples}, and {@code docs} become
  * available to the running instance without hand-copying files.
  *
- * <h2>Two-tier strategy (more efficient than IntelliJ Ultimate's copy-everything
- * approach)</h2>
+ * <h2>Two-tier strategy</h2>
+ * <p>Avoids duplicating the entire Tomcat install on disk by choosing the cheapest
+ * link strategy per app shape:
  * <ol>
  *   <li><b>WAR files</b> → hardlinked into {@code CATALINA_BASE/webapps/} when the
  *       filesystem supports it; falls back to copy otherwise. Hardlinking saves

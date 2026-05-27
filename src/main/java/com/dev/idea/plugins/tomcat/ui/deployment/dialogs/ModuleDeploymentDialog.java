@@ -32,7 +32,7 @@ public class ModuleDeploymentDialog extends ChooseElementsDialog<DeploymentArtif
 
     @Override
     protected String getItemText(DeploymentArtifact item) {
-        // Format using colon notation like IntelliJ Ultimate (e.g. "app:war exploded")
+        // Format using colon notation (e.g. "app:war exploded")
         return ContextPathUtils.formatArtifactDisplayName(item.getDisplayName(), item.getType());
     }
 

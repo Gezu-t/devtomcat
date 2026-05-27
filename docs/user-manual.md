@@ -1,6 +1,6 @@
 # DevTomcat User Manual
 
-Free, full-featured Apache Tomcat integration for IntelliJ IDEA — Community and Ultimate editions.
+Free, full-featured Apache Tomcat integration for IntelliJ IDEA.
 
 ---
 
@@ -49,7 +49,7 @@ Free, full-featured Apache Tomcat integration for IntelliJ IDEA — Community an
 
 | Requirement | Minimum Version |
 |-------------|----------------|
-| IntelliJ IDEA | 2024.2+ (Community or Ultimate) |
+| IntelliJ IDEA | 2024.2+ |
 | Apache Tomcat | 7.x or later |
 | Java (JDK) | 17+ |
 

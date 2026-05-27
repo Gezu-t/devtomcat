@@ -31,11 +31,11 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Startup/Connection tab — mirrors IntelliJ Ultimate's Tomcat run configuration behavior.
+ * Startup/Connection tab — per-mode launch configuration for the run config.
  *
  * <p>Architecture:
  * <ul>
- *   <li><b>Horizontal mode tabs</b> — Run | Debug | Cover | Profile, matching IntelliJ Ultimate layout.</li>
+ *   <li><b>Horizontal mode tabs</b> — Run | Debug | Cover | Profile, one tab per launch mode.</li>
  *   <li><b>Mode-aware content</b> — Local: startup/shutdown scripts + env vars.
  *       Remote + Debug: host/port connection fields + env vars.
  *       Remote + Run/Cover/Profile: env vars only.</li>
@@ -236,7 +236,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
 
     /**
      * Creates the Debug configuration section — shown whenever Debug mode is selected
-     * in either local or remote server mode. Matches IntelliJ Ultimate's layout:
+     * in either local or remote server mode. Layout:
      * <ul>
      *   <li><b>Host</b> — remote mode only (JDWP target host)</li>
      *   <li><b>Port</b> — JDWP listen port (local) / attach port (remote)</li>

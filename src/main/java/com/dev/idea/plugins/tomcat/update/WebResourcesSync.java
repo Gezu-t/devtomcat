@@ -186,8 +186,8 @@ public final class WebResourcesSync {
      * overlay earlier ones on shared relative paths (matching Maven's own
      * {@code webResources} overlay semantics):
      * <ol>
-     *   <li><b>{@code WebFacet.getWebRoots()}</b> when present (IntelliJ
-     *       Ultimate + JavaEE plugin) — authoritative because the user has
+     *   <li><b>{@code WebFacet.getWebRoots()}</b> when present (requires the
+     *       platform's JavaEE plugin) — authoritative because the user has
      *       explicitly configured these roots in Project Structure → Facets.</li>
      *   <li><b>Convention sources</b> from {@link TomcatModuleUtils#findWebRoots}
      *       — Maven {@code src/main/webapp}, Eclipse {@code WebContent},
@@ -234,7 +234,9 @@ public final class WebResourcesSync {
         if (module == null) return Collections.emptyList();
 
         LinkedHashSet<Path> ordered = new LinkedHashSet<>();
-        // 1. WebFacet roots — authoritative, user-configured (Ultimate only).
+        // 1. WebFacet roots — authoritative, user-configured. Requires the
+        //    platform's JavaEE plugin to be present and the module to have
+        //    a Web facet attached.
         for (VirtualFile root : TomcatModuleUtils.findWebFacetRoots(module)) {
             ordered.add(Path.of(root.getPath()));
         }

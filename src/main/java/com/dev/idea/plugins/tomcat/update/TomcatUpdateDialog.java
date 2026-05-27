@@ -13,7 +13,8 @@ import javax.swing.*;
 import java.awt.*;
 
 /**
- * "Update 'ConfigName'" dialog — mirrors IntelliJ Ultimate's Tomcat update dialog.
+ * "Update 'ConfigName'" dialog — prompts the user for the action to take on a
+ * running Tomcat instance when they trigger Update.
  *
  * <p>Presents mutually exclusive options and returns the user's choice as an
  * {@link UpdateConfig} action constant. Defaults to the action configured in the

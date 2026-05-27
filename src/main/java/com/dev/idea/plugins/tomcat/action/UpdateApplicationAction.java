@@ -15,7 +15,7 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>Shows the same Update dialog as the Run toolbar re-run intercept and Ctrl+F10,
  * letting the user choose between Update Resources, Update Classes and Resources,
- * Redeploy, or Restart Server — matching IntelliJ Ultimate's Services panel behavior.
+ * Redeploy, or Restart Server — one Update action surfaced from every entry point.
  *
  * <p>Only enabled when a Tomcat process is running and server startup has been detected
  * (i.e. Tomcat is fully up, not still initialising).

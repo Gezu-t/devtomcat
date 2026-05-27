@@ -30,15 +30,17 @@ import java.util.Set;
 
 /**
  * Provides the "Verify N artifact(s)" entry in the Before Launch panel for
- * DevTomcat run configurations on both Community and Ultimate editions.
+ * DevTomcat run configurations.
  *
- * <p>On Ultimate, IntelliJ's built-in {@code BuildArtifactsBeforeRunTask} already handles
- * artifact building and is added by {@link TomcatRunConfiguration#syncBeforeLaunchWithDeployments()}.
- * This provider complements it (Community) or coexists alongside it (Ultimate):
+ * <p>When the project has platform-registered IntelliJ Artifacts, the platform's
+ * built-in {@code BuildArtifactsBeforeRunTask} handles building them and is added by
+ * {@link TomcatRunConfiguration#syncBeforeLaunchWithDeployments()}. This provider
+ * complements it (when no Artifacts are configured) or coexists alongside it
+ * (when some are):
  *
  * <ul>
- *   <li>Displays the configured artifact names so the user can see at a glance what will
- *       be deployed — matching the Before Launch visibility of IntelliJ Ultimate.</li>
+ *   <li>Displays the configured artifact names so the user can see at a glance what
+ *       will be deployed before the launch begins.</li>
  *   <li>Validates that every configured artifact path exists on disk before launch,
  *       giving a clear failure instead of a cryptic "artifact not found" mid-launch.</li>
  * </ul>

@@ -19,10 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * Console filter for DevTomcat that makes HTTP/HTTPS URLs clickable
- * and highlights Tomcat-specific log patterns (port bindings, context paths).
- *
- * <p>IntelliJ Ultimate's Tomcat integration lacks custom console filtering —
- * this is a DevTomcat exclusive.
+ * and highlights Tomcat-specific log patterns (port bindings, context paths)
+ * directly in the run console.
  */
 public final class TomcatConsoleFilter implements Filter {
 

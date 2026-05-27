@@ -277,7 +277,7 @@
 
 ### Added
 - Initial release of DevTomcat.
-- Free Tomcat integration for IntelliJ IDEA Community and Ultimate.
+- Free Tomcat integration for IntelliJ IDEA.
 - Run, Debug, and Coverage configurations for Tomcat 7-11.
 - Multi-artifact deployment with independent context paths.
 - Smart Diagnostics — 16+ Tomcat error patterns with actionable suggestions.

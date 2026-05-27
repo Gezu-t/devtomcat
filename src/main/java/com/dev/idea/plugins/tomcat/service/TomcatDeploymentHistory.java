@@ -16,8 +16,8 @@ import java.util.List;
 
 /**
  * Tracks deployment history across runs. Persists to project-level storage
- * so history survives IDE restarts. DevTomcat exclusive — IntelliJ Ultimate
- * has no equivalent deployment history feature.
+ * so history survives IDE restarts and is shown alongside the configuration
+ * in the Services panel.
  *
  * <p>Records: configuration name, timestamp, duration, artifact names,
  * success/failure, error count, startup time.

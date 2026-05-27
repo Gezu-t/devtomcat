@@ -152,8 +152,9 @@ public class TomcatSettingsSection implements ConfigurationSection {
             addPortRow(formPanel, gbc, row, new JBLabel("Shutdown port:"), shutdownPortField);
 
             // Row 6: CATALINA_BASE (spans both field columns for the browse button)
-            // Note: Debug port/transport are configured in the Startup/Connection tab (Debug mode),
-            // matching IntelliJ Ultimate's layout. Values persist to DebugConfig.
+            // Note: Debug port/transport are configured in the Startup/Connection tab (Debug mode)
+            // — server-wide settings live here, mode-specific settings live there. Values
+            // persist to DebugConfig.
             row++;
             catalinaBaseField = new TextFieldWithBrowseButton();
             SafeBrowseUtil.addBrowseFolderListener(
