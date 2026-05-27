@@ -37,15 +37,22 @@ public class TomcatRunConfigurationType implements ConfigurationType {
     public static final String DISPLAY_NAME = "Dev Tomcat";
     public static final String DESCRIPTION = "Apache Tomcat server integration for web application development";
 
-    private static final String ICON_PATH_SVG = "/icon/tomcat.svg";
     /**
-     * Path of the Tomcat icon that the IntelliJ platform itself ships in
-     * {@code app-client.jar} under Apache 2.0. Loading from this path uses the
-     * platform's own brand mark — the same SVG that renders next to a Tomcat
-     * run configuration in the run-config dropdown of paid editions — and
-     * automatically picks up the platform's light/dark variants and
-     * 16x16-native rendering hints. Falls back to {@link #ICON_PATH_SVG}
-     * (our bundled copy) if a future platform version moves or removes it.
+     * Our bundled Tomcat icon. This is the same SVG that ships at
+     * {@code META-INF/pluginIcon.svg} — the marketplace icon — so the
+     * brand mark stays consistent across the marketplace listing, the
+     * plugin-manager card, and the in-IDE fallback. Single source of
+     * truth: editing the marketplace icon also updates the runtime
+     * fallback.
+     */
+    private static final String ICON_PATH_SVG = "/META-INF/pluginIcon.svg";
+    /**
+     * Path of the Tomcat icon that the IntelliJ platform itself ships
+     * under Apache 2.0 (when the bundled Tomcat run configurations are
+     * available). Loading from this path uses the platform's own brand
+     * mark and automatically picks up the platform's light/dark variants
+     * and 16x16-native rendering hints. Falls back to {@link #ICON_PATH_SVG}
+     * (our bundled copy) when the platform doesn't expose this resource.
      */
     private static final String PLATFORM_TOMCAT_ICON_PATH = "/runConfigurations/tomcat.svg";
     private static final Icon DEFAULT_ICON = AllIcons.RunConfigurations.Application;
