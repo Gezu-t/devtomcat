@@ -7,7 +7,6 @@ import com.intellij.packaging.artifacts.ArtifactPointerManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
@@ -57,13 +56,18 @@ public final class ArtifactBackedDeployment implements Deployment {
 
     @Override
     public boolean isValid() {
-        // Match the semantic the call-sites assume: "ready to deploy right now".
-        // ModuleBackedDeployment and ExternalFileDeployment both check the output
-        // exists on disk; this subtype has to as well, or a registered-but-unbuilt
-        // Artifact (e.g. after `mvn clean`) passes the validator and fails at
-        // mid-launch when Tomcat reads a context.xml pointing at a missing file.
-        Path path = getResolvedPath();
-        return path != null && Files.exists(path);
+        // Check only that the Artifact is registered in the project model.
+        // Do NOT also check Files.exists(getResolvedPath()): an Artifact's
+        // configured output path is what IntelliJ Make populates, but it
+        // commonly doesn't match where the user's actual build tool writes
+        // (e.g. Artifact configured for out/artifacts/X/, but mvn/gradle
+        // produces target/X/). A file-existence check here fires the
+        // pre-launch "Artifact not ready" balloon on every launch for those
+        // setups even after a fresh build. ModuleBackedDeployment and
+        // ExternalFileDeployment can safely check file existence because
+        // their paths are the actual build-tool output / user-supplied
+        // absolute paths.
+        return artifactPointer.getArtifact() != null;
     }
 
     public @NotNull ArtifactPointer getArtifactPointer() { return artifactPointer; }
