@@ -12,7 +12,9 @@ import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.RemoteCredentialStore;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -111,7 +113,7 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_LOGS_SEEDED = "logsSeeded";
 
     public static void write(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
-        write(config.getConfigData(), element);
+        write(config.getConfigData(), element, config.getProject());
         // docBase lives on TomcatRunConfiguration (not ConfigData) — used by
         // TomcatRunConfigurationProducer to match configs to web roots.
         element.setAttribute(ATTR_DOC_BASE, StringUtil.notNullize(config.getDocBase()));
@@ -121,6 +123,10 @@ public class TomcatConfigurationSerializer {
     }
 
     public static void write(@NotNull TomcatConfigurationData data, @NotNull Element element) {
+        write(data, element, null);
+    }
+
+    public static void write(@NotNull TomcatConfigurationData data, @NotNull Element element, @Nullable Project project) {
         PortConfig pc = data.getPortConfig();
         writeInt(element, ATTR_HTTP_PORT, pc.getHttp());
         writeInt(element, ATTR_SHUTDOWN_PORT, pc.getShutdown());
@@ -167,7 +173,7 @@ public class TomcatConfigurationSerializer {
         element.setAttribute(ATTR_HOT_DEPLOYMENT_ENABLED, String.valueOf(deploymentConfig.isHotDeploymentEnabled()));
         element.setAttribute(ATTR_UPDATE_CLASSES_AND_RESOURCES, String.valueOf(deploymentConfig.isUpdateClassesAndResources()));
         element.setAttribute(ATTR_PRESERVE_SESSIONS, String.valueOf(deploymentConfig.isPreserveSessions()));
-        writeDeploymentArtifacts(element, deploymentConfig.getArtifacts());
+        writeDeploymentArtifacts(element, deploymentConfig.getArtifacts(), project);
 
         var updateConfig = data.getUpdateConfig();
         element.setAttribute(ATTR_ON_UPDATE, StringUtil.notNullize(updateConfig.getOnUpdate()));
@@ -194,7 +200,7 @@ public class TomcatConfigurationSerializer {
         // Log file config (Is Active, Skip Content, Save to File, Show Console)
         // is handled by RunConfigurationBase.writeExternal() via LogConfigurationPanel.
         // No custom serialization needed — the framework persists it natively.
-        writeTomcatInfo(element, data.getTomcatInfo());
+        writeTomcatInfo(element, data.getTomcatInfo(), project);
         writeCoverageConfig(element, data.getCoverageConfig());
 
         LOG.debug("Wrote configuration data");
@@ -252,13 +258,13 @@ public class TomcatConfigurationSerializer {
 
 
 
-    private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull List<DeploymentArtifact> artifacts) {
+    private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull List<DeploymentArtifact> artifacts, @Nullable Project project) {
         Element deployments = new Element(TAG_DEPLOYMENTS);
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null) continue;
             Element art = new Element(TAG_ARTIFACT);
             art.setAttribute(ATTR_ARTIFACT_NAME, StringUtil.notNullize(artifact.getName()));
-            art.setAttribute(ATTR_ARTIFACT_PATH, StringUtil.notNullize(artifact.getPath()));
+            art.setAttribute(ATTR_ARTIFACT_PATH, collapseMacros(artifact.getPath(), project));
             art.setAttribute(ATTR_ARTIFACT_TYPE, StringUtil.notNullize(artifact.getType()));
             art.setAttribute(ATTR_ARTIFACT_CONTEXT, StringUtil.notNullize(artifact.getContextPath(), TomcatConstants.DEFAULT_CONTEXT_PATH));
             art.setAttribute(ATTR_ARTIFACT_SOURCE, artifact.getSource().name());
@@ -269,18 +275,18 @@ public class TomcatConfigurationSerializer {
         }
     }
 
-    private static void writeTomcatInfo(@NotNull Element element, @Nullable TomcatInfo info) {
+    private static void writeTomcatInfo(@NotNull Element element, @Nullable TomcatInfo info, @Nullable Project project) {
         if (info == null) return;
 
         Element tomcat = new Element("tomcatInfo");
         tomcat.setAttribute("name", StringUtil.notNullize(info.getName()));
         tomcat.setAttribute("version", StringUtil.notNullize(info.getVersion()));
-        tomcat.setAttribute("path", StringUtil.notNullize(info.getPath()));
+        tomcat.setAttribute("path", collapseMacros(info.getPath(), project));
         tomcat.setAttribute("id", StringUtil.notNullize(info.getId()));
         element.addContent(tomcat);
     }
     public static void read(@NotNull TomcatRunConfiguration config, @NotNull Element element) {
-        read(config.getConfigData(), element);
+        read(config.getConfigData(), element, config.getProject());
         // Restore docBase (used by TomcatRunConfigurationProducer for config matching)
         String docBase = element.getAttributeValue(ATTR_DOC_BASE);
         if (docBase != null) {
@@ -297,6 +303,10 @@ public class TomcatConfigurationSerializer {
     }
 
     public static void read(@NotNull TomcatConfigurationData data, @NotNull Element element) {
+        read(data, element, null);
+    }
+
+    public static void read(@NotNull TomcatConfigurationData data, @NotNull Element element, @Nullable Project project) {
         PortConfig pc = data.getPortConfig();
         readInt(element, ATTR_HTTP_PORT, pc::setHttp);
         readInt(element, ATTR_SHUTDOWN_PORT, pc::setShutdown);
@@ -374,7 +384,7 @@ public class TomcatConfigurationSerializer {
         readBool(element, ATTR_HOT_DEPLOYMENT_ENABLED, deploymentConfig::setHotDeploymentEnabled);
         readBool(element, ATTR_UPDATE_CLASSES_AND_RESOURCES, deploymentConfig::setUpdateClassesAndResources);
         readBool(element, ATTR_PRESERVE_SESSIONS, deploymentConfig::setPreserveSessions);
-        readDeploymentArtifacts(element, deploymentConfig);
+        readDeploymentArtifacts(element, deploymentConfig, project);
 
         var updateConfig = data.getUpdateConfig();
 
@@ -445,7 +455,7 @@ public class TomcatConfigurationSerializer {
         }
         readBool(element, ATTR_USE_REMOTE_CREDENTIALS, rc::setUseCredentials);
         // Log file config is handled by RunConfigurationBase.readExternal().
-        readTomcatInfo(element, data::setTomcatInfo);
+        readTomcatInfo(element, data::setTomcatInfo, project);
         readCoverageConfig(element, data.getCoverageConfig());
 
         LOG.debug("Read configuration data");
@@ -503,14 +513,20 @@ public class TomcatConfigurationSerializer {
 
 
 
-    private static void readDeploymentArtifacts(@NotNull Element element, @NotNull DeploymentConfig deploymentConfig) {
+    private static void readDeploymentArtifacts(@NotNull Element element, @NotNull DeploymentConfig deploymentConfig, @Nullable Project project) {
         Element deployments = element.getChild(TAG_DEPLOYMENTS);
         List<DeploymentArtifact> artifacts = new ArrayList<>();
         if (deployments != null) {
             for (Element art : deployments.getChildren(TAG_ARTIFACT)) {
                 DeploymentArtifact artifact = new DeploymentArtifact();
                 artifact.setName(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_NAME)));
-                artifact.setPath(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_PATH)));
+                // Expand IntelliJ path macros (e.g. $PROJECT_DIR$) — the platform
+                // auto-contracts absolute project-relative paths on write, but
+                // does NOT auto-expand them on read for custom XML attributes.
+                // Without this call, Files.exists(stored_path) hits a literal
+                // directory named "$PROJECT_DIR$" in cwd and returns false,
+                // causing the pre-launch validator to refuse every deployment.
+                artifact.setPath(expandMacros(art.getAttributeValue(ATTR_ARTIFACT_PATH), project));
 
                 // Read type first. setType() route-maps the legacy value
                 // "external" (from pre-source-field configs) to source=EXTERNAL +
@@ -540,14 +556,19 @@ public class TomcatConfigurationSerializer {
         deploymentConfig.setArtifacts(artifacts);
     }
 
-    private static void readTomcatInfo(@NotNull Element element, Consumer<TomcatInfo> setter) {
+    private static void readTomcatInfo(@NotNull Element element, Consumer<TomcatInfo> setter, @Nullable Project project) {
         Element tomcat = element.getChild("tomcatInfo");
         if (tomcat == null) return;
 
         String name = tomcat.getAttributeValue("name");
-        String path = tomcat.getAttributeValue("path");
+        // Expand IntelliJ path macros (e.g. $PROJECT_DIR$) — same issue as
+        // readDeploymentArtifacts: the platform contracts on write but does
+        // not expand custom attributes on read. Without this, the launcher
+        // looks for catalina.jar inside a literal "$PROJECT_DIR$" directory
+        // in cwd and the entire launch fails.
+        String path = expandMacros(tomcat.getAttributeValue("path"), project);
 
-        if (name != null && path != null && !name.isEmpty() && !path.isEmpty()) {
+        if (name != null && !name.isEmpty() && !path.isEmpty()) {
             TomcatInfo info = new TomcatInfo();
             info.setName(name);
             info.setVersion(StringUtil.notNullize(tomcat.getAttributeValue("version")));
@@ -597,5 +618,30 @@ public class TomcatConfigurationSerializer {
             }
         }
         config.setExcludePatterns(excludes);
+    }
+
+    /**
+     * Expands IntelliJ path macros (e.g. {@code $PROJECT_DIR$}) to absolute paths.
+     * Returns the input unchanged when {@code project} is {@code null} (test path)
+     * or when {@code raw} is null/empty.
+     */
+    @NotNull
+    private static String expandMacros(@Nullable String raw, @Nullable Project project) {
+        if (raw == null || raw.isEmpty()) return "";
+        if (project == null) return raw;
+        return PathMacroManager.getInstance(project).expandPath(raw);
+    }
+
+    /**
+     * Collapses absolute paths inside the project tree to IntelliJ macros for
+     * cleaner XML and project-portability. Inverse of {@link #expandMacros}.
+     * Returns the input unchanged when {@code project} is {@code null} or
+     * {@code raw} is null/empty.
+     */
+    @NotNull
+    private static String collapseMacros(@Nullable String raw, @Nullable Project project) {
+        if (raw == null || raw.isEmpty()) return "";
+        if (project == null) return raw;
+        return PathMacroManager.getInstance(project).collapsePath(raw);
     }
 }
