@@ -6,6 +6,7 @@
 
 ### Fixed
 - Console no longer flags incidental error/severe/fatal/warn substrings as level keywords.
+- Reliability improvements.
 
 ### Changed
 - Code cleanup.
