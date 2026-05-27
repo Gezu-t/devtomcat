@@ -8,7 +8,6 @@
 - Console no longer flags incidental error/severe/fatal/warn substrings as level keywords.
 
 ### Changed
-- Minimum IntelliJ version lowered to 2024.2.
 - Code cleanup.
 
 ## [1.1.1]
