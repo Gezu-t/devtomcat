@@ -263,20 +263,26 @@ class TomcatConfigurationValidatorTest {
     class DeploymentValidation {
 
         @Test
-        @DisplayName("empty deployment list throws warning at edit time")
-        void emptyDeploymentsThrowWarning() {
+        @DisplayName("empty deployment list blocks launch")
+        void emptyDeploymentsBlockLaunch() {
             // Clear the baseline deployment seeded in setUp to exercise the
             // empty-list code path. Previously the validator silently returned
-            // here, so the run-config editor showed no stripe and the user
-            // only learned post-launch (via LocalDeploymentStrategy's runtime
-            // warning) that Tomcat started with nothing to serve. Now the
-            // warning fires at edit time so the editor highlights the issue
-            // and the Run dialog prompts.
+            // here, so the editor showed no stripe and the user only learned
+            // post-launch (via LocalDeploymentStrategy's runtime warning) that
+            // Tomcat started with nothing to serve. We then upgraded to a
+            // RuntimeConfigurationWarning (yellow stripe, Run still proceeds),
+            // but the user-reported feedback was that the warning was visible
+            // yet Tomcat still launched. Now this is a blocking
+            // RuntimeConfigurationException — red stripe, launch refused —
+            // because launching with zero deployments is never the happy path.
             data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
 
-            RuntimeConfigurationWarning ex = assertThrows(
-                    RuntimeConfigurationWarning.class,
+            RuntimeConfigurationException ex = assertThrows(
+                    RuntimeConfigurationException.class,
                     () -> TomcatConfigurationValidator.validate(data));
+            // Pin that it's the blocking variant, not its RuntimeConfigurationWarning subclass.
+            assertFalse(ex instanceof RuntimeConfigurationWarning,
+                    "empty list must block launch, not just warn");
             assertTrue(ex.getLocalizedMessage().contains("No deployments configured"),
                     "expected empty-list message, got: " + ex.getLocalizedMessage());
             assertTrue(ex.getLocalizedMessage().contains("Deployment tab"),

@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- Empty-deployment warning fires at edit time, not just post-launch.
+- Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.
 
 ## [1.2.0]
 

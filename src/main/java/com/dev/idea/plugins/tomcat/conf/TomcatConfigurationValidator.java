@@ -214,16 +214,18 @@ public final class TomcatConfigurationValidator {
     private static void validateDeploymentArtifacts(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
         List<DeploymentArtifact> artifacts = data.getDeploymentConfig().getArtifacts();
         if (artifacts.isEmpty()) {
-            // Pre-launch warning, mirroring the post-launch warning in
-            // LocalDeploymentStrategy. Surfacing it here means the run-config
-            // editor shows a yellow stripe at edit time AND the Run dialog
-            // prompts before launch, instead of the user only learning after
-            // Tomcat has already started that nothing got deployed.
-            // Non-blocking: a bare Tomcat (no apps) is occasionally what the
-            // user wants — e.g. testing the server itself.
-            throw new RuntimeConfigurationWarning(
-                    "No deployments configured. Tomcat will start with nothing to serve. "
-                            + "Add a deployment in the Deployment tab.");
+            // Blocking error. Previously this was a non-blocking warning, which
+            // mirrored the post-launch warning in LocalDeploymentStrategy but
+            // still let the user click Run and wait for Tomcat to come up with
+            // nothing deployed — the exact misconfiguration the warning was
+            // supposed to catch. A launch with zero deployments is never the
+            // happy path: Tomcat starts but the user's app isn't there.
+            // Failing the validation gate forces the user to add a deployment
+            // first; the run-config editor shows a red stripe at edit time and
+            // the Run button is disabled until at least one deployment exists.
+            throw new RuntimeConfigurationException(
+                    "No deployments configured. Add a deployment in the Deployment tab "
+                            + "before launching — otherwise Tomcat starts with nothing to serve.");
         }
 
         // Validate artifact paths exist
