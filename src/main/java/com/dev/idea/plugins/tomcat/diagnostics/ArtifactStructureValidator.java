@@ -8,7 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.jar.JarFile;
 import java.util.stream.Stream;
+
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES;
 
 /**
  * Pre-launch validation of a {@link Deployment}'s on-disk structure.
@@ -44,7 +48,8 @@ import java.util.stream.Stream;
  */
 public final class ArtifactStructureValidator {
 
-    private ArtifactStructureValidator() {}
+    private ArtifactStructureValidator() {
+    }
 
     public record Result(@NotNull List<String> blockingErrors,
                          @NotNull List<String> warnings) {
@@ -94,7 +99,7 @@ public final class ArtifactStructureValidator {
             return;
         }
 
-        Path webInf = path.resolve("WEB-INF");
+        Path webInf = path.resolve(WEB_INF);
         if (!Files.isDirectory(webInf)) {
             blocking.add("'" + displayName + "' is missing WEB-INF/ at " + path
                     + ". The build may be incomplete — run Build → Build Artifacts, "
@@ -102,7 +107,7 @@ public final class ArtifactStructureValidator {
             return;
         }
 
-        Path classes = webInf.resolve("classes");
+        Path classes = webInf.resolve(WEB_INF_CLASSES);
         if (Files.isDirectory(classes) && isDirectoryEmpty(classes)) {
             warnings.add("'" + displayName + "' has an empty WEB-INF/classes/ at "
                     + classes + ". If your code is not packaged as JARs in WEB-INF/lib/, "
@@ -134,9 +139,9 @@ public final class ArtifactStructureValidator {
         // bytes, non-ZIP content, etc. Touching the manifest forces a read past
         // the constructor's lazy validation. Closing immediately keeps the file
         // handle scope tight; Tomcat opens its own when it deploys.
-        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(path.toFile())) {
+        try (JarFile jar = new JarFile(path.toFile())) {
             jar.getManifest();
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             blocking.add("'" + displayName + "' at " + path + " is not a readable "
                     + "WAR archive (" + e.getClass().getSimpleName()
                     + (e.getMessage() != null ? ": " + e.getMessage() : "")
