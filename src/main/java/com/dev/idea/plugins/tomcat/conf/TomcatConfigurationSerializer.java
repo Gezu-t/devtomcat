@@ -116,7 +116,7 @@ public class TomcatConfigurationSerializer {
         write(config.getConfigData(), element, config.getProject());
         // docBase lives on TomcatRunConfiguration (not ConfigData) — used by
         // TomcatRunConfigurationProducer to match configs to web roots.
-        element.setAttribute(ATTR_DOC_BASE, StringUtil.notNullize(config.getDocBase()));
+        element.setAttribute(ATTR_DOC_BASE, collapseMacros(config.getDocBase(), config.getProject()));
         // Persist the one-shot seed marker so later reads can distinguish
         // "user removed every log entry" from "fresh config — seed defaults".
         element.setAttribute(ATTR_LOGS_SEEDED, String.valueOf(config.isLogsSeeded()));
@@ -149,18 +149,18 @@ public class TomcatConfigurationSerializer {
         element.setAttribute(ATTR_AJP_ENABLED, String.valueOf(pc.isAjpEnabled()));
         element.setAttribute(ATTR_CONTEXT_PATH, StringUtil.notNullize(data.getContextPath()));
         element.setAttribute(ATTR_SERVER_MODE, StringUtil.notNullize(data.getServerMode()));
-        element.setAttribute(ATTR_CATALINA_BASE, StringUtil.notNullize(data.getCatalinaBase()));
+        element.setAttribute(ATTR_CATALINA_BASE, collapseMacros(data.getCatalinaBase(), project));
 
         // Legacy VmConfig backward compatibility block
         var vmConfig = data.getVmConfig();
-        element.setAttribute(ATTR_VM_OPTIONS, StringUtil.notNullize(vmConfig.getVmOptions()));
+        element.setAttribute(ATTR_VM_OPTIONS, collapseMacros(vmConfig.getVmOptions(), project));
         var runProfile = data.getRunnerSettings(TomcatConstants.RUN_MODE);
         element.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(runProfile.isPassParentEnvs()));
         writeEnvironmentVariables(element, runProfile.getEnvironmentVariables());
 
         // Write Map<String, RunnerSettings>
         for (Map.Entry<String, RunnerSettings> entry : data.getRunnerSettingsMap().entrySet()) {
-            writeRunnerSettings(element, entry.getKey(), entry.getValue());
+            writeRunnerSettings(element, entry.getKey(), entry.getValue(), project);
         }
 
         var browserConfig = data.getBrowserConfig();
@@ -225,13 +225,13 @@ public class TomcatConfigurationSerializer {
         element.addContent(envElem);
     }
 
-    private static void writeRunnerSettings(@NotNull Element element, @NotNull String runnerId, @NotNull RunnerSettings rs) {
+    private static void writeRunnerSettings(@NotNull Element element, @NotNull String runnerId, @NotNull RunnerSettings rs, @Nullable Project project) {
         Element rsElem = new Element(TAG_RUNNER_SETTINGS);
         rsElem.setAttribute(ATTR_RUNNER_ID, runnerId);
         rsElem.setAttribute(ATTR_USE_DEFAULT_STARTUP, String.valueOf(rs.isUseDefaultStartup()));
-        rsElem.setAttribute(ATTR_STARTUP_SCRIPT, rs.getStartupScript());
+        rsElem.setAttribute(ATTR_STARTUP_SCRIPT, collapseMacros(rs.getStartupScript(), project));
         rsElem.setAttribute(ATTR_USE_DEFAULT_SHUTDOWN, String.valueOf(rs.isUseDefaultShutdown()));
-        rsElem.setAttribute(ATTR_SHUTDOWN_SCRIPT, rs.getShutdownScript());
+        rsElem.setAttribute(ATTR_SHUTDOWN_SCRIPT, collapseMacros(rs.getShutdownScript(), project));
         rsElem.setAttribute(ATTR_PASS_PARENT_ENVS, String.valueOf(rs.isPassParentEnvs()));
         rsElem.setAttribute(ATTR_RUNNER_DEBUG_HOST, rs.getDebugHost());
         writeInt(rsElem, ATTR_RUNNER_DEBUG_PORT, rs.getDebugPort());
@@ -290,7 +290,8 @@ public class TomcatConfigurationSerializer {
         // Restore docBase (used by TomcatRunConfigurationProducer for config matching)
         String docBase = element.getAttributeValue(ATTR_DOC_BASE);
         if (docBase != null) {
-            config.setDocBase(docBase);
+            // Same macro-expansion fix as deployment artifact paths.
+            config.setDocBase(expandMacros(docBase, config.getProject()));
         }
         // Restore the seed marker. Absent attribute is treated as false so
         // legacy XMLs (written before this attribute existed, or configs
@@ -326,10 +327,12 @@ public class TomcatConfigurationSerializer {
         readBool(element, ATTR_AJP_ENABLED, pc::setAjpEnabled);
         data.setContextPath(element.getAttributeValue(ATTR_CONTEXT_PATH));
         data.setServerMode(element.getAttributeValue(ATTR_SERVER_MODE));
-        data.setCatalinaBase(element.getAttributeValue(ATTR_CATALINA_BASE));
+        // Expand macros — catalinaBase / vmOptions can carry $PROJECT_DIR$
+        // when the user pinned them to a path under the project tree.
+        data.setCatalinaBase(expandMacros(element.getAttributeValue(ATTR_CATALINA_BASE), project));
 
         var vmConfig = data.getVmConfig();
-        vmConfig.setVmOptions(element.getAttributeValue(ATTR_VM_OPTIONS));
+        vmConfig.setVmOptions(expandMacros(element.getAttributeValue(ATTR_VM_OPTIONS), project));
 
         // Backward compatibility fallbacks -> load to Run profile
         RunnerSettings runProfile = new RunnerSettings();
@@ -346,9 +349,12 @@ public class TomcatConfigurationSerializer {
 
             RunnerSettings rs = new RunnerSettings();
             readBool(rsElem, ATTR_USE_DEFAULT_STARTUP, rs::setUseDefaultStartup);
-            rs.setStartupScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_STARTUP_SCRIPT)));
+            // Startup / shutdown scripts can reference project-relative paths
+            // (e.g. $PROJECT_DIR$/scripts/setup.sh) — expand them before passing
+            // to the launcher, which feeds them to GeneralCommandLine verbatim.
+            rs.setStartupScript(expandMacros(rsElem.getAttributeValue(ATTR_STARTUP_SCRIPT), project));
             readBool(rsElem, ATTR_USE_DEFAULT_SHUTDOWN, rs::setUseDefaultShutdown);
-            rs.setShutdownScript(StringUtil.notNullize(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT)));
+            rs.setShutdownScript(expandMacros(rsElem.getAttributeValue(ATTR_SHUTDOWN_SCRIPT), project));
             readBool(rsElem, ATTR_PASS_PARENT_ENVS, rs::setPassParentEnvs);
             String dbgHost = rsElem.getAttributeValue(ATTR_RUNNER_DEBUG_HOST);
             if (dbgHost != null) rs.setDebugHost(dbgHost);
