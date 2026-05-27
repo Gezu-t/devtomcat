@@ -7,7 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Deployment pointing at an absolute path the user picked manually. No project-model link; sync is skipped silently by design. */
+/**
+ * Deployment pointing at an absolute path the user picked manually.
+ * No project-model link; sync is skipped silently by design.
+ */
 public final class ExternalFileDeployment implements Deployment {
 
     private final @NotNull Path externalPath;
@@ -22,9 +25,15 @@ public final class ExternalFileDeployment implements Deployment {
         this.exploded = exploded;
     }
 
-    @Override public @NotNull DeploymentKind getKind() { return DeploymentKind.EXTERNAL; }
+    @Override
+    public @NotNull DeploymentKind getKind() {
+        return DeploymentKind.EXTERNAL;
+    }
 
-    @Override public @NotNull String getContextPath() { return contextPath; }
+    @Override
+    public @NotNull String getContextPath() {
+        return contextPath;
+    }
 
     @Override
     public @NotNull String getDisplayName() {
@@ -37,16 +46,23 @@ public final class ExternalFileDeployment implements Deployment {
         return externalPath;
     }
 
-    @Override public boolean isExploded() { return exploded; }
+    @Override
+    public boolean isExploded() {
+        return exploded;
+    }
 
     @Override
     public boolean isValid() {
         return Files.exists(externalPath);
     }
 
-    public @NotNull Path getExternalPath() { return externalPath; }
+    public @NotNull Path getExternalPath() {
+        return externalPath;
+    }
 
-    /** Folds "" / null / no-slash inputs to a leading-slash form; "" → "/". */
+    /**
+     * Folds "" / null / no-slash inputs to a leading-slash form; "" → "/".
+     */
     private static String normaliseContextPath(@NotNull String input) {
         String trimmed = input.trim();
         if (trimmed.isEmpty()) return "/";

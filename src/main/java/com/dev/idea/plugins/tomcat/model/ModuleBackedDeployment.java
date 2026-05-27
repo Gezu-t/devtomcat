@@ -11,7 +11,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Deployment backed directly by an IntelliJ Module — for auto-detected webapps with no registered IntelliJ Artifact. Output path is user-supplied (Maven {@code target/<warname>/} or equivalent). */
+/**
+ * Deployment backed directly by an IntelliJ Module —
+ * for auto-detected webapps with no registered IntelliJ Artifact.
+ * Output path is user-supplied (Maven {@code target/<warname>/} or equivalent).
+ */
 public final class ModuleBackedDeployment implements Deployment {
 
     private final @NotNull ModulePointer modulePointer;
@@ -41,18 +45,30 @@ public final class ModuleBackedDeployment implements Deployment {
                 exploded);
     }
 
-    @Override public @NotNull DeploymentKind getKind() { return DeploymentKind.MODULE; }
+    @Override
+    public @NotNull DeploymentKind getKind() {
+        return DeploymentKind.MODULE;
+    }
 
-    @Override public @NotNull String getContextPath() { return contextPath; }
+    @Override
+    public @NotNull String getContextPath() {
+        return contextPath;
+    }
 
-    @Override public @NotNull String getDisplayName() { return modulePointer.getModuleName(); }
+    @Override
+    public @NotNull String getDisplayName() {
+        return modulePointer.getModuleName();
+    }
 
     @Override
     public @Nullable Path getResolvedPath() {
         return outputPath;
     }
 
-    @Override public boolean isExploded() { return exploded; }
+    @Override
+    public boolean isExploded() {
+        return exploded;
+    }
 
     @Override
     public boolean isValid() {
@@ -61,13 +77,21 @@ public final class ModuleBackedDeployment implements Deployment {
         return modulePointer.getModule() != null && Files.exists(outputPath);
     }
 
-    public @NotNull ModulePointer getModulePointer() { return modulePointer; }
+    public @NotNull ModulePointer getModulePointer() {
+        return modulePointer;
+    }
 
-    public @Nullable Module getModule() { return modulePointer.getModule(); }
+    public @Nullable Module getModule() {
+        return modulePointer.getModule();
+    }
 
-    public @NotNull String getModuleName() { return modulePointer.getModuleName(); }
+    public @NotNull String getModuleName() {
+        return modulePointer.getModuleName();
+    }
 
-    public @NotNull Path getOutputPath() { return outputPath; }
+    public @NotNull Path getOutputPath() {
+        return outputPath;
+    }
 
     private static String normaliseContextPath(@NotNull String input) {
         String trimmed = input.trim();

@@ -38,9 +38,12 @@ public class DeploymentConfig implements Serializable, Cloneable {
     @NotNull
     private String deploymentPath = "";
 
-    public DeploymentConfig() {}
+    public DeploymentConfig() {
+    }
 
-    /** Deep-copy constructor. Null source produces an empty config. */
+    /**
+     * Deep-copy constructor. Null source produces an empty config.
+     */
     public DeploymentConfig(@Nullable DeploymentConfig other) {
         if (other == null) return;
         try {
@@ -66,7 +69,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
     // These methods are the table-and-serializer boundary, not deprecated.
     // =====================================================================
 
-    /** Returns a defensive copy of the persistence-layer artifact list. */
+    /**
+     * Returns a defensive copy of the persistence-layer artifact list.
+     */
     @NotNull
     public List<DeploymentArtifact> getArtifacts() {
         return new ArrayList<>(artifacts);
@@ -76,7 +81,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
     // Typed accessors
     // =====================================================================
 
-    /** Typed view of the deployment list. Each legacy entry is adapted via {@link DeploymentAdapter#toTyped}. */
+    /**
+     * Typed view of the deployment list. Each legacy entry is adapted via {@link DeploymentAdapter#toTyped}.
+     */
     @NotNull
     public List<Deployment> getDeployments(@NotNull Project project) {
         // Snapshot first — mirrors getArtifacts(); avoids CME when a concurrent
@@ -113,18 +120,30 @@ public class DeploymentConfig implements Serializable, Cloneable {
                 .orElse(null);
     }
 
-    public int getArtifactCount() { return artifacts.size(); }
+    public int getArtifactCount() {
+        return artifacts.size();
+    }
 
-    public boolean hasArtifacts() { return !artifacts.isEmpty(); }
+    public boolean hasArtifacts() {
+        return !artifacts.isEmpty();
+    }
 
-    public boolean isHotDeploymentEnabled() { return hotDeploymentEnabled; }
+    public boolean isHotDeploymentEnabled() {
+        return hotDeploymentEnabled;
+    }
 
-    public boolean isUpdateClassesAndResources() { return updateClassesAndResources; }
+    public boolean isUpdateClassesAndResources() {
+        return updateClassesAndResources;
+    }
 
-    public boolean isPreserveSessions() { return preserveSessions; }
+    public boolean isPreserveSessions() {
+        return preserveSessions;
+    }
 
     @NotNull
-    public String getDeploymentPath() { return deploymentPath; }
+    public String getDeploymentPath() {
+        return deploymentPath;
+    }
 
     // =====================================================================
     // Setters
@@ -149,7 +168,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
         this.artifacts = valid;
     }
 
-    /** Typed setter — converts each {@link Deployment} back to legacy via {@link DeploymentAdapter}. */
+    /**
+     * Typed setter — converts each {@link Deployment} back to legacy via {@link DeploymentAdapter}.
+     */
     public void setDeployments(@Nullable List<? extends Deployment> deployments) {
         if (deployments == null) {
             this.artifacts = new ArrayList<>();
@@ -162,7 +183,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
         this.artifacts = out;
     }
 
-    /** Returns {@code true} if added, {@code false} if already present. */
+    /**
+     * Returns {@code true} if added, {@code false} if already present.
+     */
     public boolean addArtifact(@NotNull DeploymentArtifact artifact) {
         Objects.requireNonNull(artifact, "Artifact cannot be null");
         if (artifacts.contains(artifact)) return false;
@@ -170,7 +193,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return true;
     }
 
-    /** Typed add — converts via {@link DeploymentAdapter#toLegacy}. */
+    /**
+     * Typed add — converts via {@link DeploymentAdapter#toLegacy}.
+     */
     public boolean addDeployment(@NotNull Deployment deployment) {
         Objects.requireNonNull(deployment, "Deployment cannot be null");
         return addArtifact(DeploymentAdapter.toLegacy(deployment));
@@ -181,7 +206,9 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return artifacts.remove(artifact);
     }
 
-    /** Typed remove — converts via {@link DeploymentAdapter#toLegacy}. */
+    /**
+     * Typed remove — converts via {@link DeploymentAdapter#toLegacy}.
+     */
     public boolean removeDeployment(@NotNull Deployment deployment) {
         Objects.requireNonNull(deployment, "Deployment cannot be null");
         return removeArtifact(DeploymentAdapter.toLegacy(deployment));
@@ -193,13 +220,21 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return artifacts.remove(index);
     }
 
-    public void clearArtifacts() { artifacts.clear(); }
+    public void clearArtifacts() {
+        artifacts.clear();
+    }
 
-    public void setHotDeploymentEnabled(boolean enabled) { this.hotDeploymentEnabled = enabled; }
+    public void setHotDeploymentEnabled(boolean enabled) {
+        this.hotDeploymentEnabled = enabled;
+    }
 
-    public void setUpdateClassesAndResources(boolean enabled) { this.updateClassesAndResources = enabled; }
+    public void setUpdateClassesAndResources(boolean enabled) {
+        this.updateClassesAndResources = enabled;
+    }
 
-    public void setPreserveSessions(boolean preserve) { this.preserveSessions = preserve; }
+    public void setPreserveSessions(boolean preserve) {
+        this.preserveSessions = preserve;
+    }
 
     public void setDeploymentPath(@Nullable String path) {
         this.deploymentPath = path != null ? path : "";
@@ -278,5 +313,7 @@ public class DeploymentConfig implements Serializable, Cloneable {
 
     @NotNull
     @Override
-    public String toString() { return getSummary(); }
+    public String toString() {
+        return getSummary();
+    }
 }
