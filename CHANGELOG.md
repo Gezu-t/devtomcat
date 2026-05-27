@@ -9,7 +9,7 @@
 - Reliability improvements.
 
 ### Changed
-- Code cleanup.
+- Internal improvements.
 
 ## [1.1.1]
 
@@ -19,7 +19,7 @@
 - Failed restart no longer accumulates stale "started Tomcat" entries in the toolbar.
 
 ### Changed
-- Code cleanup.
+- Internal improvements.
 
 ## [1.1.0]
 
@@ -70,7 +70,7 @@
 - Pre-launch WAR integrity check.
 
 ### Changed
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.13]
 
@@ -96,7 +96,7 @@
 - JRE version parser handles build tags correctly.
 - Run-config validation surfaces all errors at once.
 - Preserve-sessions checkbox tooltip.
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.11]
 
@@ -109,7 +109,7 @@
 ### Changed
 - Registry-key override for swap target version.
 - EOL warning wording simplified for default-named Tomcat installs.
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.10]
 
@@ -127,7 +127,7 @@
 
 ### Changed
 - Em-dashes scrubbed from user-facing strings.
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.9]
 
@@ -169,13 +169,13 @@
 - Bundled-app mirror produced malformed context.xml for directories containing "--".
 
 ### Changed
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.8]
 
 ### Changed
 - Minimum IntelliJ version raised to 2025.1.
-- Code cleanup.
+- Internal improvements.
 
 ### Fixed
 - Summary-failure no longer speculatively promotes in-progress artifacts to FAILED.
@@ -191,7 +191,7 @@
 - Remote deploy failure visibility: invalid artifacts filtered up front.
 
 ### Changed
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.6]
 
@@ -224,7 +224,7 @@
 ### Changed
 - VM Options field uses an expandable text field.
 - Services panel focus no longer steals from other tool windows.
-- Code cleanup.
+- Internal improvements.
 
 ### Fixed
 - Context path empty-string normalized to "/".
@@ -271,7 +271,7 @@
 - Browser launch opens only after the target context is deployed.
 
 ### Changed
-- Code cleanup.
+- Internal improvements.
 
 ## [1.0.0]
 
