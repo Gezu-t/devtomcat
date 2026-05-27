@@ -121,14 +121,17 @@ public class ArtifactSelectionHandler {
                 existingBaseNames.add(baseName);
                 String context = getUniqueContext(deployment.getContextPath());
                 deployment.setContextPath(context);
-                // Auto-detected deployments come from project scanning; rename-tracking
-                // and orphan validation are still meaningful because the source module
-                // is part of the project.
-                deployment.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
+                // Do NOT overwrite the source here. DeploymentAdapter.toLegacy already
+                // set the right source for each subtype: ModuleBackedDeployment carries
+                // AUTO_DETECTED (name = module name, suitable for rename-tracking) and
+                // ExternalFileDeployment carries EXTERNAL (name = WAR filename, no
+                // owning module). Stamping AUTO_DETECTED blindly mislabels disk-scanned
+                // WARs as module-backed, then the loader can't resolve the "module".
 
                 tableManager.addAndSelectDeployment(deployment);
                 LOG.info("Added auto-detected deployment: " + deployment.getName() +
-                        " [" + deployment.getType() + "] context=" + context);
+                        " [" + deployment.getType() + "] source=" + deployment.getSource() +
+                        " context=" + context);
             }
         }
     }

@@ -112,9 +112,18 @@ public final class DeploymentAdapter {
 
         // Content-root containment — pick the deepest matching root so a nested
         // module wins over a parent project that also covers the path.
+        // Relative paths get resolved against the project base rather than CWD:
+        // CWD is whatever launched the IDE, not the user's project root.
         Path normalised;
         try {
-            normalised = outputPath.toAbsolutePath().normalize();
+            Path candidate = outputPath;
+            if (!candidate.isAbsolute()) {
+                String basePath = project.getBasePath();
+                if (basePath != null) {
+                    candidate = Path.of(basePath).resolve(candidate);
+                }
+            }
+            normalised = candidate.toAbsolutePath().normalize();
         } catch (Exception e) {
             return null;
         }

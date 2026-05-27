@@ -629,25 +629,39 @@ public class TomcatConfigurationSerializer {
     /**
      * Expands IntelliJ path macros (e.g. {@code $PROJECT_DIR$}) to absolute paths.
      * Returns the input unchanged when {@code project} is {@code null} (test path)
-     * or when {@code raw} is null/empty.
+     * or when {@code raw} is null/empty. A failure in the platform call falls back
+     * to the raw input — a degraded path is far better than a hard load failure
+     * that loses the whole run configuration.
      */
     @NotNull
     private static String expandMacros(@Nullable String raw, @Nullable Project project) {
         if (raw == null || raw.isEmpty()) return "";
         if (project == null) return raw;
-        return PathMacroManager.getInstance(project).expandPath(raw);
+        try {
+            return PathMacroManager.getInstance(project).expandPath(raw);
+        } catch (Exception e) {
+            LOG.warn("Path macro expansion failed; keeping raw value", e);
+            return raw;
+        }
     }
 
     /**
      * Collapses absolute paths inside the project tree to IntelliJ macros for
      * cleaner XML and project-portability. Inverse of {@link #expandMacros}.
      * Returns the input unchanged when {@code project} is {@code null} or
-     * {@code raw} is null/empty.
+     * {@code raw} is null/empty. A failure in the platform call falls back
+     * to the raw input — storing an absolute path is non-portable but still
+     * functional; failing the save isn't.
      */
     @NotNull
     private static String collapseMacros(@Nullable String raw, @Nullable Project project) {
         if (raw == null || raw.isEmpty()) return "";
         if (project == null) return raw;
-        return PathMacroManager.getInstance(project).collapsePath(raw);
+        try {
+            return PathMacroManager.getInstance(project).collapsePath(raw);
+        } catch (Exception e) {
+            LOG.warn("Path macro collapse failed; keeping raw value", e);
+            return raw;
+        }
     }
 }
