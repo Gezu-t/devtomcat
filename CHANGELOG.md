@@ -13,8 +13,8 @@
 ### Changed
 - `pluginSinceBuild` lowered to `242` (IntelliJ 2024.2+).
 - Launch / update / remote-deploy pipelines iterate typed `Deployment` end to end.
-- `DeploymentConfig` gains typed mutators: `setDeployments`, `addDeployment`, `removeDeployment`, `getDeploymentByName`.
-- Typed sync entry points added: `DeployedClassesSync.syncDeployments`, `WebResourcesSync.syncDeployments`, `warnAboutWarDeploymentsIfPresent`.
+- `DeploymentConfig` gains typed mutators (`setDeployments`, `addDeployment`, `removeDeployment`, `getDeploymentByName`).
+- Typed sync entry points added (`DeployedClassesSync.syncDeployments`, `WebResourcesSync.syncDeployments`, `warnAboutWarDeploymentsIfPresent`).
 - `TomcatApplicationUpdater` orchestrators hoist `getDeployments()` once per pass.
 - `LocalDeploymentStrategy` deep helpers take typed `Deployment`.
 - `TomcatPreflightValidator.checkDuplicateDeployments` / `checkDuplicateJars` switch to typed dispatch.
@@ -23,23 +23,23 @@
 - `ProjectArtifactDetector` produces typed `Deployment` directly.
 - `DeploymentTableManager` exposes typed UI-boundary accessors.
 - `ArtifactReferenceRefresher` rewritten on typed-pointer dispatch (543 → ~140 lines).
-- Persistence boundary stabilized: `DeploymentArtifact`, `DeploymentAdapter`, `DeploymentConfig.getArtifacts()` are no longer `@Deprecated(forRemoval=true)` — they are the XML serialization shape and the typed/legacy bridge.
-- Dropped: `DeploymentConfig.getDeployedArtifacts()`, `TomcatRunConfiguration.getDeployedArtifacts()`, and the legacy `syncIfNeeded` / `warnAboutWarArtifactsIfPresent` overloads that had typed replacements.
+- Persistence boundary stabilized; `DeploymentArtifact` / `DeploymentAdapter` / `DeploymentConfig.getArtifacts()` un-deprecated.
+- Dropped: legacy `getDeployedArtifacts()` accessors and replaced-by-typed sync/warn overloads.
 
 ## [1.1.1]
 
 ### Changed
-- Diagnostic analyzer skips the ~20-regex sweep for log lines without any failure keyword.
-- Migrated 2 `SimpleListCellRenderer.create(String, Function)` call sites to the non-deprecated 3-arg Customizer form.
-- Pipeline analyzers (Startup, Deployment, Context, Reload, ArtifactFailure) early-exit on a keyword check before any regex.
-- WebResourcesSync uses a single `readAttributes` (catches NoSuchFile) instead of `exists` + `readAttributes`.
-- ContextFailureRootCauseAnalyzer: narrowed sync scope to deque mutations + atomic one-shot flag; logger callback runs outside the lock.
-- Shared MavenReflection cache: `MavenProjectsManager` class + `getInstance` / `findProject` resolved once at class init instead of per call (used by WebResourcesSync and LocalDeploymentStrategy).
+- Diagnostic analyzer skips the regex sweep for log lines without any failure keyword.
+- Migrated 2 `SimpleListCellRenderer.create(String, Function)` call sites to the non-deprecated 3-arg form.
+- Pipeline analyzers early-exit on keyword check before any regex.
+- WebResourcesSync uses a single `readAttributes` instead of `exists` + `readAttributes`.
+- ContextFailureRootCauseAnalyzer narrowed sync scope; logger callback runs outside the lock.
+- Shared MavenReflection cache resolves `MavenProjectsManager` once at class init.
 - TomcatPreflightValidator caches CompilerConfiguration reflection at class init.
-- Two unconditional `LOG.debug` string concatenations in TomcatOutputPipeline now guarded with `isDebugEnabled`.
+- Two unconditional `LOG.debug` concatenations now guarded with `isDebugEnabled`.
 
 ### Fixed
-- Toolbar Rerun icon stays visible with multiple Tomcat configs (identity-based handler lookup).
+- Toolbar Rerun icon stays visible with multiple Tomcat configs.
 - Services panel shows FAILED for context-startup failures via LifecycleException / component-failed log forms.
 - Failed restart no longer accumulates stale "started Tomcat" entries in the toolbar.
 
@@ -62,7 +62,7 @@
 
 ### Added
 - `PortStrategy` per-config policy: `AUTO_BUMP` / `RECLAIM_THEN_FAIL` / `STRICT`.
-- Tools → Set Up DevTomcat from Project: one config, N exploded deployments, port-mode picker, live duplicate-context validation.
+- Tools → Set Up DevTomcat from Project: one config, N exploded deployments, port-mode picker.
 - Four library-agnostic diagnostic patterns: ECJ stubs, localhost backend unreachable, JDK module-access, SFTP.
 - Compiler-type preflight warning when IDE compiler is Eclipse.
 - Port-drift warning in the run-config editor.
@@ -71,166 +71,158 @@
 ## [1.0.14]
 
 ### Added
-- **Clickable Java stack traces** in the run-config console; navigates to source for project, framework, and container code.
-- **Console folding for Tomcat boilerplate** — startup banner and container-internal stack frames collapse like JDK frames.
-- **Actionable balloons on common failures** — port-in-use, missing-class, OOM, JRE mismatch — with an Open Run Configuration action.
-- **Balloon when custom `server.xml` cannot be parsed**; the launch falls back to a minimal config and the user is alerted instead of silently losing custom Valves / Realms / Listeners.
+- Clickable Java stack traces in the run-config console.
+- Console folding for Tomcat startup banner and container-internal stack frames.
+- Actionable balloons on common failures (port-in-use, missing-class, OOM, JRE mismatch).
+- Balloon when custom `server.xml` cannot be parsed; launch falls back to minimal config.
 
 ### Fixed
-- **Restart Server / Update Classes / Redeploy now pick up Java edits on Maven exploded deployments** — fresh class output from Make is mirrored into each exploded deployment's `WEB-INF/classes/` before the relaunch. No more `mvn clean install` between edits. Per-artifact diagnostics in the run console name the owning module, the source roots, and exactly why a skip happened (missing module, no production output, name mismatch, multiple web modules) so silent stales are visible. Equal-mtime-different-size files are copied via a size tie-breaker that catches the edge case where fast edits land within filesystem mtime resolution.
-- **Plugin verifier "use of internal API" warning** on `PluginManagerCore.getPlugin` (2024.3+) — switched to the public `PluginManager.isPluginInstalled` for the JavaScript-plugin probe in Browser Launch.
-- **IDE main-window flicker when balloons fire from background threads** — `TomcatNotifier` now dispatches every balloon onto the EDT via `invokeLater`. Single-point fix covering all 15 call sites.
-- **Plugin now installable on IntelliJ IDEA 2026.2 EAP** — `until-build` raised from `261.*` to `262.*`.
-- **Duplicate-context-path detection catches normalized variants** (`/foo` vs `/foo/`, `""` vs `"/"`); invalid paths rejected at Apply.
-- **Stale-deployment cleanup failures surface as a balloon** naming the locked files instead of failing later with `AccessDeniedException`.
-- **Warns when the deployed artifact is older than recent source edits** — common when Maven `target/` or external WAR paths aren't rebuilt before launch.
-- **Pre-launch validation catches missing `WEB-INF/` and WAR-vs-exploded type mismatches** before Tomcat starts.
-- **Startup-failure root cause surfaced as a balloon** — deepest `Caused by:` from any context-init exception chain, library-agnostic.
-- **Midnight log-rotation notice** — when Tomcat runs past midnight, a balloon explains that existing Log tabs are now tailing yesterday's file and how to refresh.
-- **Symlinked docBase deploys on Tomcat 8+** — `<Resources allowLinking="true">` is now always emitted; previously omitted when no extra resources, causing Maven multi-module symlink targets to silently fail.
-- **Warns when no artifacts will be deployed** — empty / all-invalid artifact list now surfaces a balloon instead of silently starting Tomcat with nothing to serve.
-- **Cleans leftover `webapps/<context>/` directories from previous WAR extracts.** A switched-from-WAR or stale extract no longer collides with a new deploy at the same context. Mirrored bundled apps (ROOT, manager, host-manager) untouched.
-- **Pre-launch WAR integrity check.** A corrupted, truncated, or 0-byte WAR (interrupted Maven build, partial download) is now caught at Apply time with a rebuild hint instead of failing 10 seconds into startup with `ZipException`.
+- Restart / Update / Redeploy now pick up Java edits on Maven exploded deployments.
+- Plugin-verifier "use of internal API" warning on `PluginManagerCore.getPlugin`.
+- IDE main-window flicker when balloons fire from background threads (TomcatNotifier dispatches via EDT).
+- Plugin now installable on IntelliJ IDEA 2026.2 EAP (`until-build` raised to `262.*`).
+- Duplicate-context-path detection catches normalized variants; invalid paths rejected at Apply.
+- Stale-deployment cleanup failures surface as a balloon naming the locked files.
+- Warns when the deployed artifact is older than recent source edits.
+- Pre-launch validation catches missing `WEB-INF/` and WAR-vs-exploded type mismatches.
+- Startup-failure root cause surfaced as a balloon.
+- Midnight log-rotation notice explains why Log tabs are tailing yesterday's file.
+- Symlinked docBase deploys on Tomcat 8+ via `<Resources allowLinking="true">`.
+- Warns when no artifacts will be deployed.
+- Cleans leftover `webapps/<context>/` directories from previous WAR extracts.
+- Pre-launch WAR integrity check catches corrupted / truncated / 0-byte WARs.
 
 ## [1.0.13]
 
 ### Added
-- Right-click on a deployed artifact in the Services tree for **Open in Browser** and **Copy URL**.
-- Services tree row shows a **debugger icon** when the configuration is running under the Debug executor.
-- **Clicking Rerun on a running Tomcat now opens the Update dialog** (Update classes / Redeploy / Restart server) via the platform's `RunConfiguration.restartSingleton` hook.
+- Right-click on a deployed artifact in the Services tree for Open in Browser and Copy URL.
+- Services tree row shows a debugger icon when the configuration is running under the Debug executor.
+- Clicking Rerun on a running Tomcat now opens the Update dialog.
 
 ### Fixed
-- **Main toolbar Run button now swaps to the Rerun icon while Tomcat is running.** Configuration factory's `singletonPolicy` switched from `MULTIPLE_INSTANCE_ONLY` to `SINGLE_INSTANCE`; hot reload stays on Ctrl+F10.
-- **HTTPS-port writeback also rewrites the stored browser URL.** Pairs with the HTTP-port fix from 1.0.12.
-- **Cross-scheme writeback safety.** HTTP-port changes no longer touch HTTPS URLs and vice versa; the rewrite gates on scheme and previous-port.
+- Main toolbar Run button now swaps to the Rerun icon while Tomcat is running.
+- HTTPS-port writeback also rewrites the stored browser URL.
+- Cross-scheme writeback safety: HTTP-port changes no longer touch HTTPS URLs and vice versa.
 
 ## [1.0.12]
 
 ### Fixed
-- **After-launch URL kept the old port after auto-resolution bumped Tomcat (8082 to 8083).** Writeback now rewrites loopback URLs; custom paths and non-loopback hosts unchanged.
-- **Services tree restored on IntelliJ 2025.3+** via a new ServiceViewContributor after the platform dropped `RunDashboardCustomizer.getChildren`. Double-click a deployed artifact to open it; rows refresh live.
-- **Browser-launch isModified silently dropped pending edits on exception.** Now fails open so Apply stays enabled.
+- After-launch URL kept the old port after auto-resolution bumped Tomcat (writeback rewrites loopback URLs).
+- Services tree restored on IntelliJ 2025.3+ via a new ServiceViewContributor.
+- Browser-launch isModified silently dropped pending edits on exception.
 
 ### Changed
 - JRE combo live-refreshes when SDKs change in Project Structure.
-- JRE version parser uses `Runtime.Version.parse`; build tags like `21.0.1+12-LTS` display correctly.
-- Run-config validation surfaces all errors at once, not just the first.
+- JRE version parser uses `Runtime.Version.parse` so build tags display correctly.
+- Run-config validation surfaces all errors at once.
 - Preserve-sessions checkbox now has a tooltip.
 - Internal polish in the run-config editor sections.
 
 ## [1.0.11]
 
-Follow-up release after 1.0.10 covering four user-reported issues.
-
 ### Fixed
-- **Debug launch on Java 8 failed with `JDWP Transport dt_socket failed to initialize, TRANSPORT_INIT(510)`.** The injected `-agentlib:jdwp` argument used the `address=*:port` wildcard host syntax, added in Java 9 (JDK-8041435). The agent injection now branches on the resolved JDK: Java 9+ keeps `address=*:port`; Java 8 and earlier emit `address=port`.
-- **ECJ swap installed an ECJ JAR the runtime JVM could not load.** 1.0.10's swap installed `ecj-3.36.0.jar` unconditionally; ecj-3.36 is compiled for Java 17, so a Tomcat 7 + Java 8 host hit `UnsupportedClassVersionError` on the first JSP request. New JVM-aware picker maps the runtime JVM to the highest ECJ tier whose floor it satisfies (Java 17+ → 3.36, Java 11+ → 3.35, Java 8 → 3.24). When no tier can bridge JVM and webapp, the swap action is hidden and the JVM-upgrade requirement is surfaced instead.
-- **No recovery path for users already in the bad-swap state from a 1.0.10 swap.** Added a "Restore Previous ECJ" balloon. Stale-swap detection at deployment-prep time looks for an installed `ecj-X.Y.Z.jar` whose runtime-JVM requirement exceeds the configured JRE, paired with a `.devtomcat-bak` sibling. One-click rollback uses the existing atomic-move primitive.
-- **Container-provided JAR filter dropped JSTL and other app libraries that shared a name prefix with a Tomcat-bundled JAR.** `jakarta.servlet.jsp.jstl-*.jar` was being excluded from `WEB-INF/lib` injection because it starts with `"jakarta.servlet"`. Tightened every prefix to require a trailing `-api`, `-<version>`, or full `.jar` filename. Filter list expanded to cover every JAR Tomcat 7 through 11 ships in `lib/`.
+- Debug launch on Java 8 failed with `TRANSPORT_INIT(510)`; JDWP address syntax branches on JDK version.
+- ECJ swap installed a JAR the runtime JVM could not load; new JVM-aware picker maps JVM to ECJ tier.
+- "Restore Previous ECJ" balloon for users in the bad-swap state from a 1.0.10 swap.
+- Container-provided JAR filter no longer drops JSTL and other app libraries that share a name prefix.
 
 ### Changed
-- **Stale-swap detection now reads the installed ECJ JAR's class-file major directly** (`INameEnvironment.class` header, JVMS §4.1 mapping) instead of relying on the version-string tier table. Stays correct for any future ECJ release without a code update. Falls back to the version-string mapping when the JAR cannot be read.
-- **Multi-class probe in JAR introspection.** Detector tries four well-known ECJ entry points in order (`INameEnvironment`, `batch.Main`, `Compiler`, `CompilationProgress`) so detection still works if Eclipse moves the canonical class.
-- **Registry-key override for the swap target version: `devtomcat.ecj.target.version`.** Empty by default. When set (e.g. `3.30.0`), the picker returns that version verbatim — user accepts responsibility for the runtime constraints.
-- **ECJ version parser normalises the Eclipse Platform release filename form** (`ecj-4.20.jar`) to the matching Maven coordinate (`3.26.0`) so JARs taken from Tomcat 9 / 10 / 11 are classified correctly.
-- **EOL warning wording.** When the Tomcat install carries the default name (`Tomcat` / `Apache Tomcat`), the balloon now reads `Tomcat 7.0.30.0 reached end-of-life…` instead of `Tomcat (7.0.30.0) reached end-of-life…`. Custom user-assigned names keep the parenthesised version form.
+- Stale-swap detection reads installed ECJ JAR's class-file major directly.
+- Multi-class probe in JAR introspection tries four well-known ECJ entry points.
+- Registry-key override for swap target version: `devtomcat.ecj.target.version`.
+- ECJ version parser normalises Eclipse Platform release filename form to Maven coordinate.
+- EOL warning wording simplified for default-named Tomcat installs.
 
 ## [1.0.10]
 
-Three new diagnostic surfaces (Tomcat EOL warning, JDK mismatch quick-fix, ECJ JAR auto-swap), plus residual gap fixes from the 1.0.9 audit and release-engineering hygiene.
-
 ### Self-audit fixes (within 1.0.10)
-- `EcjJarSwapper.restoreBackup` now refuses paths missing the `.devtomcat-bak` suffix instead of silently no-op'ing the move. Regression test `wrongSuffixIsRefused`.
-- ECJ JAR download migrated from raw `HttpURLConnection` to IntelliJ's `HttpRequests` so corporate proxies, platform TLS, and redirects are honoured.
-- ECJ swap balloon deduped per IDE session by JAR path + version; was firing on every launch.
-- JDK-mismatch quick-fix balloon filtered to messages containing "Java" so unrelated blocking errors no longer surface a misleading "JDK does not match Tomcat" prompt.
+- `EcjJarSwapper.restoreBackup` refuses paths missing the `.devtomcat-bak` suffix.
+- ECJ JAR download migrated to IntelliJ's `HttpRequests`.
+- ECJ swap balloon deduped per IDE session by JAR path + version.
+- JDK-mismatch quick-fix balloon filtered to messages containing "Java".
 
 ### Added
-- **Tomcat EOL warning.** Balloon when the configured Tomcat is on an EOL branch (7.x, 8.0.x, 8.5.x, 10.0.x), with the EOL date and an upgrade recommendation tailored to `javax.servlet` (Tomcat 9) vs `jakarta.servlet` (Tomcat 10.1 / 11). Action opens Apache's "Which Version" page. Per-session dedup.
-- **JDK / Tomcat mismatch quick-fix.** Launch-blocking compatibility error now pairs with a balloon offering "Open Run Configuration" and "Open Project Structure (SDKs)" actions.
-- **One-click ECJ JAR swap** for Tomcat installs whose bundled compiler is too old for the webapp's class files. Balloon "Swap ECJ JAR..." button downloads `ecj-3.36.0.jar` from Maven Central, verifies SHA-1, atomic-moves the old JAR to `*.devtomcat-bak` and the new one into `tomcat/lib/`. Refuses on SHA mismatch, existing backup, or non-writable lib dir; rolls back on failure.
+- Tomcat EOL warning balloon for EOL branches (7.x, 8.0.x, 8.5.x, 10.0.x).
+- JDK / Tomcat mismatch quick-fix with Open Run Configuration / Open Project Structure actions.
+- One-click ECJ JAR swap for Tomcat installs whose bundled compiler is too old.
 
 ### Fixed
-- **Stock AJP connector at port 8009 leaked through to Tomcat startup when the user had AJP disabled in the run config.** Tomcat ships with `<Connector protocol="AJP/1.3" port="8009"/>` in the default server.xml; `ServerXmlMutator` only acted on AJP when `ajpEnabled=true`, so a disabled-AJP launch left the connector in place and Tomcat tried to bind 8009 anyway. With another process already on 8009 (typically a stale Tomcat from a previous sandbox run), startup failed with `java.net.BindException: Address already in use <null>:8009`. Now strips every AJP connector from server.xml when AJP is disabled, matching across all variant protocol values (`AJP/1.3`, `org.apache.coyote.ajp.AjpNioProtocol`, `AjpNio2Protocol`, `AjpAprProtocol`). Three regression tests cover the in-place-removal, the variant-protocol case, and the leave-HTTP-intact guarantee.
-- **Remote-mode config showed a generic deploy icon instead of the Tomcat brand.** `RemoteTomcatConfigurationFactory.getIcon()` returned `AllIcons.Nodes.Deploy`. Both factories now share the bundled Tomcat SVG via a single `tomcatIcon()` helper; dead `/icon/tomcat.png` fallback removed.
-- **Services tree URL hardcoded `localhost` for remote-mode configurations.** A remote config with manager URL `http://prod.example.com:8080/manager` showed `http://localhost:8080/myapp` in the tooltip, and "Open in Browser" went to the wrong host. `TomcatDeploymentNode` now takes a `host` parameter; `TomcatRunDashboardCustomizer` parses scheme + host + port from the manager URL when `isRemoteMode()`. Falls back to `(localhost, 0)` on parse failure so a malformed URL hides the link instead of rendering `http://null:0/foo`. 18 regression tests cover FQDN, HTTPS, default port, IPv4 / IPv6, and malformed-URL fallback.
-- **Container-provided JARs were silently dropped on Tomcat 7 / 8.0.x.** Same Digester gap that broke 1.0.9's modular-JAR `<JarScanFilter>` also broke the container-provided skip (`servlet-api`, `jsp-api`, `jakarta.el`, `ecj-*`, `tomcat-*`). The launcher now routes the union of modular and container-provided JARs through `catalina.properties` `jarsToSkip` via a shared `JarSkipListInjector`. The 1.0.9 BCEL-specific appendix marker is replaced in place during upgrade so a pinned `CATALINA_BASE` does not accumulate duplicate blocks.
-- **Remote-deploy upload kept running after the local Tomcat was stopped.** Cancellation didn't extend into the chunk loop inside `TomcatManagerDeployer.deployWarViaPut`. Stopping the local Tomcat mid-transfer of a large WAR now aborts the upload immediately.
+- Stock AJP connector at port 8009 leaked through when AJP was disabled in the run config.
+- Remote-mode config showed a generic deploy icon instead of the Tomcat brand.
+- Services tree URL hardcoded `localhost` for remote-mode configurations.
+- Container-provided JARs silently dropped on Tomcat 7 / 8.0.x; routed through `catalina.properties`.
+- Remote-deploy upload kept running after the local Tomcat was stopped.
 
 ### Changed
-- Em-dashes scrubbed from user-facing strings (dialog titles, run-console warnings, validator messages, notification titles, deployment history summary). Comments and `idea.log` entries left intact.
+- Em-dashes scrubbed from user-facing strings.
 
 ## [1.0.9]
-
-Deep deployment audit. Security hardening, port resolver fixes, and many smaller correctness fixes around launch, Debug on 2025.1, and remote deploy.
 
 ### Changed
 - Extracted `PortResolver` from `TomcatJavaParametersBuilder` for testability.
 
 ### Security
-- AJP without `address` reproduced CVE-2020-1938 (Ghostcat). IDE-injected AJP now binds `127.0.0.1`.
-- JMX exposed without host binding. JMX and RMI registry now bind `127.0.0.1` by default; override via VM options.
+- AJP without `address` reproduced CVE-2020-1938 (Ghostcat); IDE-injected AJP now binds `127.0.0.1`.
+- JMX and RMI registry now bind `127.0.0.1` by default; override via VM options.
 
 ### Fixed (Tomcat compatibility)
-- Tomcat's bundled Eclipse JDT compiler (ECJ) is too old to read Java 8+ class files on legacy Tomcat installs (e.g. Tomcat 7.0.30 ships ECJ 3.7.2 which only handles Java 7 class file major 51). Webapps compiled for newer Java targets failed JSP compilation at request time with a flood of `org.eclipse.jdt.internal.compiler.classfmt.ClassFormatException` SEVERE messages and no hint at the cause. New `EcjVersionCompat` shim runs at deployment-prep time, locates `tomcat/lib/ecj-*.jar`, parses its version (manifest first, filename fallback), maps to a max-supported Java version (table covering Eclipse 3.4 through 4.34), samples class file major versions across `WEB-INF/classes/**` and root entries of `WEB-INF/lib/*.jar`, and surfaces a single pre-launch warning naming the bundled ECJ, the highest webapp class major, and the three resolution paths (upgrade Tomcat, swap the ECJ JAR, or compile for an older target). Detection-only: never modifies the user's Tomcat install.
-- Tomcat 7.x, 8.0.x, 8.5.<51, and 9.0.<31 flooded the run console with `ClassFormatException: Invalid byte tag in constant pool: 19` SEVERE messages when WEB-INF/lib contained Java 9+ modular JARs (jackson, jaxb-api, byte-buddy, snakeyaml, etc.). Cause: their bundled BCEL parser does not recognise `CONSTANT_Module` (tag 19) and chokes on `module-info.class`. New `BcelModuleInfoCompat` shim detects affected versions and appends modular JARs to the existing `tomcat.util.scan.*JarScan*.jarsToSkip` list in `CATALINA_BASE/conf/catalina.properties` (property name auto-detected: `DefaultJarScanner` on Tomcat 7/8.0, `StandardJarScanFilter` on Tomcat 8.5+). The per-context `<JarScanFilter>` element approach was rejected because Tomcat 7's `ContextRuleSet` has no Digester rule for it and silently drops it with a "No rules found" warning. The catalina.properties channel is honoured uniformly across every affected version. Modern Tomcats (10.x, 11.x, 8.5.51+, 9.0.31+) are unaffected. Runtime classloading is unchanged in all cases. The appendix is rewritten in place on subsequent launches via begin/end markers so the file does not grow across rebuild cycles.
+- ECJ-too-old warning for legacy Tomcats: new `EcjVersionCompat` shim surfaces a single pre-launch warning.
+- Modular-JAR `ClassFormatException` flood on Tomcat 7.x / 8.0.x / 8.5.<51 / 9.0.<31: `BcelModuleInfoCompat` appends modular JARs to `jarsToSkip`.
 
 ### Fixed (data loss)
-- `copyConfDirectory` wiped the user's `conf/` when `CATALINA_BASE` equalled `CATALINA_HOME`. Now refused with a clear error.
-- Stale-deployment cleanup wiped pinned `CATALINA_BASE`. Cleanup gated to the IDE-managed system directory.
-- Parallel-run cleanup followed a symlink at the run-base root. Now `NOFOLLOW_LINKS` + explicit refusal.
+- `copyConfDirectory` wiping user's `conf/` when `CATALINA_BASE` equalled `CATALINA_HOME` — now refused.
+- Stale-deployment cleanup wiping pinned `CATALINA_BASE` — gated to IDE-managed system directory.
+- Parallel-run cleanup followed a symlink at the run-base root.
 
 ### Fixed
-- Services tree URL ignored HTTPS; uses HTTPS port when enabled.
-- Tomcat 7 `No rules found matching 'Context/Resources/PreResources'` warning. Generator skips PreResources on Tomcat 7.
-- Restart in Debug on 2025.1 threw `IllegalStateException: Running sync tasks on pure EDT`. `destroyProcess` now off-EDT.
+- Services tree URL ignored HTTPS.
+- Tomcat 7 `No rules found matching 'Context/Resources/PreResources'` warning suppressed.
+- Restart in Debug on 2025.1 threw `Running sync tasks on pure EDT`.
 - Services-panel Stop in Debug had the same EDT trap.
 - Remote-deploy URL injection: `?path=` paths now URL-encoded.
-- Liquibase cleanup missed under `tr_TR` (capital I to ı). Pinned `Locale.ROOT`.
-- Multi-module artifact-to-module matching broken under `tr_TR`. Both sides pinned to `Locale.ROOT`.
-- Run-config editor leaked its message-bus listener; now scoped to the editor disposable.
-- Remote-deploy progress used JVM-default decimal separator. `formatSize` pinned to `Locale.ROOT`. Same fix in run-history and trend dialogs.
-- Port resolver displaced peer services with their own preferred ports. Search is now peer-aware.
-- `TomcatConfigurationData.setContextPath` skipped slash canonicalization. Now uses `ContextPathUtils.normalizeContextPath`.
-- Smart-error console dropped the detected message. Format now includes `Category: Message. Suggestion`.
-- Manager URL with trailing slash silently fell back to localhost. Setter strips trailing slashes.
-- `CredentialResolver`, `RemoteCredentialStore.retrievePassword`, `TomcatNotifier`, `TomcatRunConfiguration.getState`, and `syncBeforeLaunchWithDeployments` swallowed `ProcessCanceledException`. PCE now rethrows.
-- `hasManualJdwpAgent` masked real `-agentlib:jdwp=` by a leading `-agentlib:jdwp_other`. Scans past rejected matches.
-- Context.xml writes were non-atomic. New `atomicWriteString` helper.
-- Renaming a running config leaked its ports. `TomcatPortRegistry` now migrates entries on rename.
-- Carry-over relaunch lost JDWP exhaustion warnings. Now logs the same warnings as the first-time debug path.
-- Silent JRE fallback when configured JRE was unregistered. Now surfaced in the run console.
-- One throwing listener silenced its peers in `TomcatLifecycleListener.composite` and `TomcatOutputPipeline.processLine`. Both isolate per-listener with WARN.
-- Remote-deploy task outlived its process and posted stale dashboard updates. Short-circuits on terminate.
-- Bundled-app mirror produced malformed `context.xml` for directories containing `--`. Dir name is now sanitised in the comment.
+- Liquibase cleanup missed under `tr_TR`; pinned `Locale.ROOT`.
+- Multi-module artifact-to-module matching broken under `tr_TR`.
+- Run-config editor leaked its message-bus listener.
+- Remote-deploy progress used JVM-default decimal separator.
+- Port resolver displaced peer services with their own preferred ports.
+- `TomcatConfigurationData.setContextPath` skipped slash canonicalization.
+- Smart-error console dropped the detected message.
+- Manager URL with trailing slash silently fell back to localhost.
+- `ProcessCanceledException` swallowed at five call sites; now rethrows.
+- `hasManualJdwpAgent` masked real `-agentlib:jdwp=` by a leading `-agentlib:jdwp_other`.
+- Context.xml writes were non-atomic.
+- Renaming a running config leaked its ports.
+- Carry-over relaunch lost JDWP exhaustion warnings.
+- Silent JRE fallback when configured JRE was unregistered.
+- One throwing listener silenced its peers in `TomcatLifecycleListener.composite` and `TomcatOutputPipeline.processLine`.
+- Remote-deploy task outlived its process and posted stale dashboard updates.
+- Bundled-app mirror produced malformed `context.xml` for directories containing `--`.
 
 ### Diagnostics
-- `TomcatServerManagerState.resolveOrAutoRegister` logs the specific failure reason (missing path, missing `catalina.jar`, IOException).
-- `runIde` sets `idea.is.internal=true` for stacktrace coverage on Disposable warnings.
+- `TomcatServerManagerState.resolveOrAutoRegister` logs the specific failure reason.
+- `runIde` sets `idea.is.internal=true` for stacktrace coverage.
 
 ### Tests
 - New `PortResolverTest` (7 cases) and slimmed `TomcatJavaParametersBuilderTest`.
 - HTTPS coverage in `TomcatDeploymentNodeTest`.
-- `TomcatVersionGate` group in `LocalDeploymentStrategyTest` pins Tomcat-7 PreResources omission.
-- Regression tests: `peerAllocationDoesNotAbortSearch`, `refusesSamePathCase`, `rejectedLeadingMatchDoesNotMaskRealAgent`, `trailingSlashAccepted`, `missingLeadingSlashCanonicalized`, plus `formatForConsole` extension.
+- `TomcatVersionGate` group in `LocalDeploymentStrategyTest`.
+- Regression tests: peer-allocation, same-path-case refusal, leading-match disambiguation, trailing-slash, missing-leading-slash, `formatForConsole`.
 
 ## [1.0.8]
 
-Resilience release. No new features — every change either reduces the surface area of future bugs or locks in a past fix with an end-to-end test.
-
 ### Changed
-- **Minimum IntelliJ version raised to 2025.1.** `pluginSinceBuild=251.29188.11`, compile against 2025.1.7. The 2024.1 permutation added verifier cost without unlocking anything (the 2026.1 dashboard builder API is not available on 2024.1/2025.1 anyway). Halves the verifier matrix and paves the road for the dashboard migration once the floor bumps again.
-- **IntelliJ Platform Gradle Plugin bump deferred** — 2.14.0 requires Gradle 9+, which is a larger migration than this release should carry. Pinned at 2.11.0 for 1.0.8; the Gradle 9 + plugin bump is a dedicated 1.0.9 task.
-- **State machine in `TomcatDeploymentStatusService`** refactored to derive the server state from a single authoritative function (`recomputeServerState`) instead of scattered ad-hoc assignments. Every event handler now updates the per-artifact state, then recomputes. `restoreRunningStateIfIdle` and the duplicated `serverState = …` writes are gone. Invariants are documented in the source.
-- **`DashboardCompat` simplified** — dead speculative-reflection fallbacks removed (the guessed replacement method names never landed on the interface; the real 2026.1 replacement is a parameter-based `updatePresentation` overload, not a new accessor). Kept as a one-file boundary with a concrete migration checklist for the eventual 2026.1 floor bump.
+- Minimum IntelliJ version raised to 2025.1 (`pluginSinceBuild=251.29188.11`).
+- IntelliJ Platform Gradle Plugin pinned at 2.11.0; Gradle 9 + plugin bump deferred to 1.0.9.
+- State machine in `TomcatDeploymentStatusService` derives server state from a single `recomputeServerState`.
+- `DashboardCompat` simplified; dead speculative-reflection fallbacks removed.
 
 ### Fixed
-- **`onDeploymentSummaryFailed` no longer speculatively promotes DEPLOYING/RELOADING artifacts to FAILED.** Real Tomcat emits the summary-failure line while other contexts are still starting; those contexts frequently succeed afterward. Per-artifact failure signals + the `StartupAnalyzer` fallback continue to decide which artifacts actually failed, precisely. Surfaced by the new integration harness running a realistic fixture.
-- **Self-healing for persisted-but-unregistered Tomcat references.** `TomcatServerManagerState.resolveOrAutoRegister` auto-registers a server when its persisted path points to a valid Tomcat install on disk. Fresh IDE installs, VCS-imported projects, and wiped sandbox profiles no longer block Run with a "Persisted Tomcat server is not registered" warning for an install that's physically present. Wired into the UI load path, the launcher, and the pre-launch validator. Broken references (empty path, missing directory, non-Tomcat directory) still block Run with a precise error.
-- **Artifact state stickiness** — per-artifact `FAILED` is now sticky across a late `onArtifactDeployed` for the same artifact within a launch; stickiness also applies across cancellation and reload events.
+- `onDeploymentSummaryFailed` no longer speculatively promotes DEPLOYING/RELOADING artifacts to FAILED.
+- Self-healing for persisted-but-unregistered Tomcat references via `resolveOrAutoRegister`.
+- Artifact state stickiness: per-artifact FAILED sticky across late `onArtifactDeployed`, cancellation, and reload events.
 
 ### Added
-- **Integration test harness** (`TomcatPipelineHarness`) — replays Tomcat output fixtures through the full pipeline → lifecycle → status-service chain. Caught the summary-failure over-promotion bug on first run.
+- Integration test harness (`TomcatPipelineHarness`) replays Tomcat output fixtures through the full pipeline.
 
 ### Tests
 - 4 fixture-driven integration tests, 3 state-machine invariants, 7 `resolveOrAutoRegister` units.
@@ -238,137 +230,127 @@ Resilience release. No new features — every change either reduces the surface 
 ## [1.0.7]
 
 ### Fixed
-- **Debug mode breakpoints** — JDWP agent is now injected directly onto the JVM's VM parameters; the old path via `GenericDebuggerRunner`'s patcher was silently bypassed, so Tomcat launched without the agent and every breakpoint was skipped
-- **Services panel mixed-success-as-success** — a new `ServerDeploymentSummaryFailureAnalyzer` catches Tomcat's summary messages ("One or more Contexts did not start successfully" and peers) and keeps the server state FAILED even when the per-artifact pattern can't name which artifact broke. Signaling is gated on this authoritative signal rather than the generic error counter, so non-fatal SEVERE noise on healthy startups no longer causes false positives
-- **Cancellation vs. failure** — user-cancelled remote deployments reset to PENDING via a new `onArtifactCancelled` hook instead of being sticky-FAILED
-- **Remote deploy failure visibility** — invalid artifacts are filtered up front; manager-connection failures fire `onArtifactFailed` for every configured artifact so the Services tree reflects the failure instead of leaving artifacts stuck in DEPLOYING
+- Debug mode breakpoints: JDWP agent injected directly onto JVM VM parameters.
+- Services panel mixed-success-as-success: `ServerDeploymentSummaryFailureAnalyzer` catches summary messages.
+- Cancellation vs. failure: user-cancelled remote deployments reset to PENDING via `onArtifactCancelled`.
+- Remote deploy failure visibility: invalid artifacts filtered up front; manager-connection failures fire `onArtifactFailed`.
 
 ### Changed
-- **2026.1 deprecation cleanup** — all 14 `ReadAction.compute(ThrowableComputable)` call sites migrated to a centralised `TomcatReadActions.compute` helper; eliminates the scheduled-for-removal warnings reported by Plugin Verifier against IU-261 while staying source-compatible with 2024.1+
+- 2026.1 deprecation cleanup: 14 `ReadAction.compute(ThrowableComputable)` call sites migrated to `TomcatReadActions.compute`.
 
 ## [1.0.6]
 
 ### Added
-- **Scoped Services actions** — "Run History" and "Startup Time Trends" in the Services panel now open for the selected configuration instead of the whole project; global views remain available in the Tools menu
+- Scoped Services actions: "Run History" and "Startup Time Trends" open for the selected configuration.
 
 ### Changed
-- **Startup time display** — Services panel shows human-readable durations (`12.3s`, `1m 23s`) instead of raw milliseconds
-- **Startup time tracker** — moved from application-level to project-level service so identically named configurations in different projects maintain separate history
-- **Run History** — renamed from "Deployment History" to better reflect the session-based model
+- Startup time display shows human-readable durations.
+- Startup time tracker moved from application-level to project-level service.
+- Run History renamed from "Deployment History".
 
 ### Fixed
-- **Services panel stale display** — editing a configuration now refreshes the Services tree immediately so updated ports, context paths, and URLs are reflected without restart
-- **Shutdown warning noise** — error/warning counters freeze when shutdown begins; Tomcat classloader cleanup warnings (JDBC driver, leaked threads) no longer inflate the Services badge
-- **Rename tracking** — renaming a run configuration now migrates all stored data (live status, run history, startup trends) from the old name to the new name using identity-based tracking
-- **Stale trend entries** — deleting a configuration now also clears its startup time history
-- **Thread-safe counters** — error/warning counts changed from `volatile int` with `++` to `AtomicInteger` with `incrementAndGet()` to prevent undercounting under concurrent output
-- **Defensive state copy** — `StartupTimeTracker.getState()` returns a deep copy so the trend dialog doesn't read mutable internals
-- **Artifact failure in history** — run history now records artifact deployment failures even when exit code is 0, so partial sessions no longer show as OK
-- **Error counts on FAILED nodes** — error/warning counts now remain visible on failed server nodes, not just running ones
-- **Reload state alignment** — hot reload pushes the parent server node to "Deploying" so parent and child states are aligned
-- **Post-mortem artifact states** — non-zero shutdown preserves FAILED artifact states in Services instead of clearing everything
-- **Navigation gate** — double-clicking a deployment node in Services now only opens the browser when the artifact is confirmed DEPLOYED, preventing 404s on failed or in-progress artifacts
+- Services panel refreshes immediately on configuration edit.
+- Shutdown warning noise: counters freeze when shutdown begins.
+- Rename tracking: stored data migrates from old to new configuration name.
+- Stale trend entries cleared when a configuration is deleted.
+- Thread-safe counters via `AtomicInteger`.
+- Defensive state copy in `StartupTimeTracker.getState()`.
+- Artifact failure in history recorded even when exit code is 0.
+- Error counts on FAILED nodes remain visible.
+- Reload state alignment between parent and child nodes.
+- Post-mortem artifact states preserved across non-zero shutdown.
+- Navigation gate: double-click only opens browser when artifact is DEPLOYED.
 
 ### Tests
-- Added `TomcatConfigurationCleanupListenerTest` — identity key mechanics, rename detection
-- Added `TomcatRunDashboardCustomizerTest` — formatDuration, formatIssueSummary
-- Added `DeploymentHistoryDialogTest` — scoped vs global, titles, clear
-- Added `StartupTimeTrendDialogTest` — scoped vs global, empty state
-- Extended: `TomcatDeploymentStatusServiceTest`, `TomcatDeploymentHistoryTest`, `TomcatDeploymentNodeTest`, `TomcatOutputPipelineTest`, `StartupTimeTrackerTest`, `TomcatLifecycleListenerTest`
+- Added `TomcatConfigurationCleanupListenerTest`, `TomcatRunDashboardCustomizerTest`, `DeploymentHistoryDialogTest`, `StartupTimeTrendDialogTest`.
+- Extended six existing test classes.
 
 ## [1.0.5]
 
 ### Added
-- **Configurable Build Artifacts task** — "Build DevTomcat Artifacts" in Before Launch is now configurable; clicking it shows all deployed artifacts with checkboxes so the user can select which artifacts to validate before launch
+- Configurable Build Artifacts task with per-artifact checkboxes.
 
 ### Changed
-- **JRE Configuration dialog** — split into focused sub-dialogs (`JdkEditorDialog`, `AutoDetectJdkDialog`) for add/edit and auto-detection flows; main dialog reduced to ~255 lines
-- **Startup/Connection tab** — env var table, actions, computed-key tracking, and Add/Edit dialog extracted to a new `EnvVarPanel` class; `StartupConnectionTab` reduced from 1003 → 542 lines
-- **TomcatJavaParametersBuilder** — inline 44-line port resolution block extracted to `resolvePortsIfNeeded()`, which returns a `PortConfig` or throws; `build()` reduced to a clean 10-step sequence; `setupVmOptions()` signature simplified from 8 params to 5
-- **VM Options field** — replaced with IntelliJ's `ExpandableTextField` for proper handling of long option strings
-- **Services panel focus** — `maybeActivateConsole()` now only activates the Run/Debug tool window when it is already visible, preventing it from stealing focus from the Services panel while scrolling
-- **Facade accessors** — added `isRemoteMode()`, `getServerMode()`, `getDeployedArtifacts()` on `TomcatRunConfiguration`; eliminates Law of Demeter violations across 15+ files
+- JRE Configuration dialog split into focused sub-dialogs.
+- Startup/Connection tab env-var table extracted to `EnvVarPanel`.
+- `TomcatJavaParametersBuilder.build()` reduced to a 10-step sequence.
+- VM Options field switched to `ExpandableTextField`.
+- Services panel focus: `maybeActivateConsole()` no longer steals focus.
+- Facade accessors added on `TomcatRunConfiguration` (`isRemoteMode`, `getServerMode`, `getDeployedArtifacts`).
 
 ### Fixed
-- **Context path empty-string edge case** — `TomcatConfigurationData.setContextPath("")` now normalizes to `"/"`. Previously `StringUtil.notNullize` only handled null; an empty string from XML deserialization would pass through as `""`, causing downstream context name resolution to silently fall back to ROOT.
-- **ReadAction scope** — `syncBeforeLaunchWithDeployments()`, `validateArtifactReferences()`, `ArtifactSelectionHandler`, and `TomcatConfigurationEditor` now wrap all `ArtifactManager`/`ModuleManager` model access inside `ReadAction.compute()`. Previously `getArtifacts()` was called outside the read action, risking read-access violations on background threads.
-- **Config import data loss** — importing a configuration no longer silently wipes startup/shutdown scripts, `passParentEnvs`, and debug host/port. The import now preserves existing runner settings and merges only the exported env var fields.
-- **Config import mode mismatch** — importing a Remote config into a Local editor now calls `reconcileTabsForMode()` to update tab structure correctly.
-- **EnvVarPanel state bugs** — `passParentEnvs` is now preserved on load; deleted computed keys can be re-added manually; `Populate Defaults` no longer resets the `Pass environment variables` checkbox.
-- **ProcessStopSupport cleanup guard** — `removeRunContent()` failure no longer blocks relaunch; wrapped in try/catch so the callback always runs.
-- **Debug restart notification** — `DebugTomcatAction` now shows a balloon notification when debug-mode restart fails, matching the pattern in `TomcatRunnerDelegate` and `TomcatApplicationUpdater`.
-- **Atomic move fallback** — `TomcatConfigPreparer.atomicWriteString()` now falls back to non-atomic `REPLACE_EXISTING` when the filesystem doesn't support `ATOMIC_MOVE`, matching `TomcatProjectUtils.atomicCopy()`.
+- Context path empty-string normalized to `"/"`.
+- ReadAction scope: model access in `syncBeforeLaunchWithDeployments` / `validateArtifactReferences` / `ArtifactSelectionHandler` / `TomcatConfigurationEditor` wrapped.
+- Config import no longer wipes startup/shutdown scripts, `passParentEnvs`, debug host/port.
+- Config import Remote→Local now reconciles tab structure.
+- `EnvVarPanel` state bugs (passParentEnvs preservation, deleted-key re-add, Populate Defaults).
+- `ProcessStopSupport.removeRunContent()` failure no longer blocks relaunch.
+- Debug restart shows a balloon when restart fails.
+- Atomic move fallback when filesystem doesn't support `ATOMIC_MOVE`.
 
 ### Refactored — Duplicate Code Elimination
-- **`ContextPathUtils.resolveContextNameSafe()`** — single source for try/catch fallback to ROOT on invalid context paths; replaced 3 private wrappers in TomcatProcessHandler, TomcatApplicationUpdater, and TomcatManagerDeployer
-- **`TomcatNotifier`** — single source for balloon notifications; replaced 3 inline `NotificationGroupManager` blocks in TomcatApplicationUpdater, TomcatRunnerDelegate, and TomcatCommandLineState
-- **`CompilerSupport.compileAndThen()`** — single source for the compile-and-then pattern; replaced 4 `CompilerManager.make()` blocks in TomcatApplicationUpdater
-- **`ProcessStopSupport`** — single source for the stop-clean-relaunch pattern; `findDescriptor()` replaces 2 inline descriptor lookup loops, `stopCleanAndThen()` replaces 3 identical ProcessListener/processTerminated/invokeLater/removeRunContent/destroyProcess blocks in TomcatRunnerDelegate, DebugTomcatAction, and TomcatApplicationUpdater
-- **`ServiceActionUtils.tryInvokeMethod()`** — single source for reflection method invocation; simplified 2 nested try/catch/loop blocks in extractProcessHandler and extractViaReflection
-- **`TomcatProjectUtils.safeDelete()`** — single source for safe file deletion; replaced 3 inline deleteIfExists blocks in atomicCopy and LocalDeploymentStrategy
-- **`ConfigurationSection.addLabelAndField()`** — single source for the label+field GridBagLayout row pattern; replaced identical GBC boilerplate in ApplicationServerSection, JreConfigurationSection, and UpdateActionsSection
-- **`TomcatSettingsSection.addPortRow()`/`addCheckBoxColumn()`** — extracted from 6 identical port-field row blocks
-- **Inline FQN cleanup** — replaced 28 inline fully-qualified names with proper imports across 18 files
+- `ContextPathUtils.resolveContextNameSafe()` replaces 3 private wrappers.
+- `TomcatNotifier` replaces 3 inline `NotificationGroupManager` blocks.
+- `CompilerSupport.compileAndThen()` replaces 4 `CompilerManager.make()` blocks.
+- `ProcessStopSupport` replaces 2 descriptor lookups and 3 stop-clean-relaunch blocks.
+- `ServiceActionUtils.tryInvokeMethod()` simplifies 2 nested reflection blocks.
+- `TomcatProjectUtils.safeDelete()` replaces 3 inline `deleteIfExists` blocks.
+- `ConfigurationSection.addLabelAndField()` replaces identical GBC boilerplate in three sections.
+- `TomcatSettingsSection.addPortRow()` / `addCheckBoxColumn()` extracted from 6 identical blocks.
+- 28 inline fully-qualified names replaced with proper imports across 18 files.
 
 ### Tests
-- Added `TomcatDebuggerTest` — covers runner ID stability
-- Added `TomcatApplicationUpdaterTest` — covers `mapActionToDisplay()` for all four update actions
-- Added `TomcatProcessHandlerTest` — covers `extractContextNameFromBrowserUrl` and `rewritePortIfNeeded` helpers
-- Added `LocalDeploymentStrategyTest` — covers `stripJarVersion()` and `extractModuleName()` static helpers
-- Added `EnvVarPanelStateTest` — covers `initializeState` (3 paths), `passParentEnvs` round-trip, delete-then-readd lifecycle, and `ensureComputedEnvVars` interaction
+- Added `TomcatDebuggerTest`, `TomcatApplicationUpdaterTest`, `TomcatProcessHandlerTest`, `LocalDeploymentStrategyTest`, `EnvVarPanelStateTest`.
 
 ## [1.0.3]
 
 ### Added
-- **Multi-module Maven/Gradle deployment** — Plugin understands the IntelliJ module dependency graph. When a shared module (e.g. `common`) is already packaged as a JAR in `WEB-INF/lib`, the plugin no longer adds a conflicting `<PreResources>` overlay. Eliminates Liquibase, CDI, and similar duplicate-classpath errors in multi-module projects.
-- **Duplicate deployment guard** — Pre-launch validator warns when two artifacts share the same context path or the same physical deployment path, preventing silent 404s and double-startup overhead.
-- **Restart/relaunch failure notification** — When a restart or cross-executor relaunch fails after the old process has already been stopped, a prominent balloon notification is shown so the user knows Tomcat is no longer running and must be restarted manually.
+- Multi-module Maven/Gradle deployment understands the IntelliJ module dependency graph.
+- Duplicate deployment guard warns when two artifacts share context path or deployment path.
+- Restart/relaunch failure notification when restart fails after the old process was stopped.
 
 ### Fixed
-- **Context path normalization** — `setContextPath("")` now correctly stores `"/"` instead of an empty string. `StringUtil.notNullize("", "/")` only substitutes `null`; empty strings were silently stored as `""`, causing incorrect duplicate detection and browser URL generation.
-- **Threading violations (multiple call sites)** — Fixed `Read access is allowed from inside read-action only` errors thrown on background coroutine threads during project load and post-build redeploy:
-  - `ArtifactReferenceRefresher.refresh()` — called from `readExternal()` during project initialization
-  - `LocalDeploymentStrategy.buildExtraResourcesXml()` — called from compiler-completion callbacks; all model access (module graph, OrderEnumerator, ArtifactManager) now collected atomically under a single `ReadAction.compute()` via `ArtifactModelSnapshot`
-  - `TomcatRunConfiguration.syncBeforeLaunchWithDeployments()` — `ArtifactManager.getInstance()` wrapped in `ReadAction`
-- **API compatibility (IntelliJ 2025.x)** — Replaced internal `ExecutionManager.getRunningDescriptors()` with `RunContentManager.getAllDescriptors()`, deprecated `UIUtil.getContextHelpForeground()` with `JBUI.CurrentTheme.ContextHelp.FOREGROUND`, and `ProgramRunnerUtil.executeConfiguration()` with `ExecutionEnvironmentBuilder`
-- **Service annotations** — Added `@Service(Level.PROJECT)` to `TomcatDeploymentStatusService` and `@Service(Level.APP)` to `TomcatPortRegistry`
+- Context path normalization: `setContextPath("")` stores `"/"`.
+- Threading violations in `ArtifactReferenceRefresher.refresh()`, `LocalDeploymentStrategy.buildExtraResourcesXml()`, `TomcatRunConfiguration.syncBeforeLaunchWithDeployments()`.
+- API compatibility (IntelliJ 2025.x): replaced internal `ExecutionManager.getRunningDescriptors()`, deprecated `UIUtil.getContextHelpForeground()`, `ProgramRunnerUtil.executeConfiguration()`.
+- Service annotations: `@Service(Level.PROJECT)` on `TomcatDeploymentStatusService`, `@Service(Level.APP)` on `TomcatPortRegistry`.
 
 ### Changed
-- Stale artifact filtering — artifacts from renamed or deleted modules are no longer shown in the artifact selector or auto-detected for deployment
+- Stale artifact filtering: artifacts from renamed/deleted modules no longer shown.
 
 ## [1.0.2]
 
 ### Added
-- **Update Application on re-run** — Run/Debug while Tomcat is running shows the Update dialog (Update Resources, Redeploy, Restart) instead of starting a duplicate process
-- **Services toolbar actions** — Update, Redeploy, and Restart available as one-click toolbar buttons in the Services panel
-- **Debug Tomcat action** — restart a running Tomcat in Debug mode from the Services panel
-- **Atomic port registry** — prevents port collisions when multiple Tomcat instances launch simultaneously
-- **Debug port field** — per-configuration JDWP debug port in Server Settings
+- Update Application on re-run: Run/Debug shows Update dialog instead of starting a duplicate process.
+- Services toolbar actions: Update, Redeploy, Restart as one-click buttons.
+- Debug Tomcat action restarts a running Tomcat in Debug mode from Services panel.
+- Atomic port registry prevents port collisions across simultaneous launches.
+- Debug port field per configuration in Server Settings.
 
 ### Fixed
-- **Redeploy preserves multi-module classpath** — generates full context XML with PreResources/PostResources matching initial deployment
-- **Thread safety** — fixed race conditions in deployment notifications, artifact count tracking, console debounce, lifecycle history, and status service state transitions
-- **Security** — URL scheme validation on remote deploy, path traversal protection, file size limit on config import, manager URL validation
-- **Resource leaks** — listener cleanup on editor disposal, ProcessListener self-removal, port release on build failure
-- **Debug architecture** — single JDWP agent ownership, resolved debug port as single source of truth, remote debug reads from Startup/Connection tab
-- **Redeploy loop** — disabled autoDeploy in server.xml; reloadable=false in context XML
-- **Browser launch** — opens only after target context is deployed, port matches auto-resolved HTTP port
+- Redeploy preserves multi-module classpath via full context XML.
+- Thread safety in deployment notifications, artifact counters, console debounce, lifecycle history, status service.
+- Security: URL scheme validation, path traversal protection, config-import file size limit, manager URL validation.
+- Resource leaks: editor disposal listener cleanup, ProcessListener self-removal, port release on build failure.
+- Debug architecture: single JDWP agent ownership, resolved debug port as single source of truth.
+- Redeploy loop: autoDeploy disabled in server.xml; reloadable=false in context XML.
+- Browser launch opens only after target context is deployed.
 
 ### Changed
-- Runner deduplication — extracted shared re-run interception into TomcatRunnerDelegate (composition)
-- Symlink protection in CATALINA_BASE file operations
-- Credential resolution tracks completion to avoid redundant PasswordSafe lookups
+- Runner deduplication via `TomcatRunnerDelegate`.
+- Symlink protection in CATALINA_BASE file operations.
+- Credential resolution tracks completion to avoid redundant PasswordSafe lookups.
 
 ## [1.0.0]
 
 ### Added
-- Initial release of DevTomcat
-- Free Tomcat integration for IntelliJ IDEA Community and Ultimate
-- Run, Debug, and Coverage configurations for Tomcat 7-11
-- Multi-artifact deployment with independent context paths
-- Smart Diagnostics — 16+ Tomcat error patterns with actionable suggestions
-- Auto-port conflict resolution and CATALINA_BASE isolation
-- Live deployment status, history, and startup trends in Services panel
-- Update Running Application (Ctrl+F10) with frame deactivation support
-- Remote deployment via Tomcat Manager API
-- Configuration export/import for team sharing
+- Initial release of DevTomcat.
+- Free Tomcat integration for IntelliJ IDEA Community and Ultimate.
+- Run, Debug, and Coverage configurations for Tomcat 7-11.
+- Multi-artifact deployment with independent context paths.
+- Smart Diagnostics — 16+ Tomcat error patterns with actionable suggestions.
+- Auto-port conflict resolution and CATALINA_BASE isolation.
+- Live deployment status, history, and startup trends in Services panel.
+- Update Running Application (Ctrl+F10) with frame deactivation support.
+- Remote deployment via Tomcat Manager API.
+- Configuration export/import for team sharing.
