@@ -10,6 +10,7 @@ import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
+import com.intellij.debugger.impl.DebuggerSession;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.Executor;
@@ -201,13 +202,30 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // WEB-INF/classes/ BEFORE touching context.xml — the deployer's
                     // reload trigger should see the new bytes already in place.
                     // See DeployedClassesSync javadoc for the Maven target/ rationale.
-                    DeployedClassesSync.syncDeployments(project, deployments, logger);
+                    DeployedClassesSync.SyncReport classReport =
+                            DeployedClassesSync.syncDeployments(project, deployments, logger);
                     // See doUpdateResourcesOnly above for why this is needed
                     // alongside the class sync — JSP/JS/CSS edits otherwise
                     // would not reach the exploded artifact.
                     WebResourcesSync.syncDeployments(project, deployments, logger);
                     redeployWarArtifacts(logger);
-                    touchExplodedContextXml(logger);
+
+                    // When Tomcat is running under the IDE debugger, redefine the
+                    // changed classes in the live JVM instead of forcing a context
+                    // reload. A method-body change applies in place — no new
+                    // classloader, no app re-init, no lost HTTP sessions or
+                    // in-memory caches, near-instant. DebugHotSwap runs the context
+                    // restart fallback (touchExplodedContextXml) automatically when
+                    // the change is structural and cannot be redefined, so a change
+                    // is never silently dropped. When not debugging, restart directly.
+                    DebuggerSession session = DebugHotSwap.findHotSwappableSession(project, processHandler);
+                    if (session != null) {
+                        DebugHotSwap.reloadThenMaybeRestart(project, session,
+                                classReport.didAnything(), logger,
+                                () -> touchExplodedContextXml(logger));
+                    } else {
+                        touchExplodedContextXml(logger);
+                    }
                 });
     }
 
