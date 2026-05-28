@@ -6,6 +6,7 @@ import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.update.DeployedClassesSync;
+import com.dev.idea.plugins.tomcat.update.WebResourcesSync;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
@@ -57,17 +58,20 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  *       mounted at {@code /WEB-INF/classes} via {@code <PreResources>}, so
  *       freshly compiled bytes shadow the (potentially stale) copy inside the
  *       deployed artifact.</li>
+ *   <li>Each webapp source directory is mounted at the web-app root
+ *       {@code /} via {@code <PreResources>}, so an edited JSP or static
+ *       resource is served straight from source — the physical mirror into
+ *       the deployed artifact stays in place as a fallback.</li>
  *   <li>Each runtime-scope library JAR not already in {@code WEB-INF/lib/} is
  *       mounted there via {@code <PostResources>}, so transitive dependencies
  *       the build didn't package are still visible.</li>
  * </ul>
  *
- * <p>Effect: when the user recompiles a class in the IDE, Tomcat picks up the
- * new bytes on the next classloader resolution — no copy step, no
- * repackaging, no full redeploy. The Update action's "Update classes and
+ * <p>Effect: when the user recompiles a class or edits a webapp resource in
+ * the IDE, Tomcat picks up the change on the next resolution — no copy step,
+ * no repackaging, no full redeploy. The Update action's "Update classes and
  * resources" path triggers a context reload (touch context.xml) so any
- * cached references are dropped and the next class lookup hits the fresh
- * output directory.
+ * cached references are dropped and the next lookup hits the fresh source.
  */
 final class LocalDeploymentStrategy implements DeploymentStrategy {
 
@@ -78,6 +82,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static final String RESOURCE_CLASS_FILE = "org.apache.catalina.webresources.FileResourceSet";
     private static final String WEBAPP_MOUNT_CLASSES = "/WEB-INF/classes";
     private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
+    // Webapp source directories mount at the web-app root so static files,
+    // JSPs, and descriptors are served straight from source.
+    private static final String WEBAPP_MOUNT_ROOT = "/";
 
     // Class output directories mount at /WEB-INF/classes via PreResources so
     // the classloader resolves freshly compiled bytes from the IDE's compile
@@ -820,6 +827,13 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      *       shadow the (potentially stale) copy inside {@code WEB-INF/classes/}.
      *       Result: zero-copy hot reload of class changes — the user
      *       recompiles in the IDE, the next request hits the fresh bytes.</li>
+     *   <li>Webapp source directories (WebFacet roots, convention dirs,
+     *       declared build-time web-resource dirs) are mounted at the web-app
+     *       root {@code /} via {@code <PreResources>}. Because PreResources are
+     *       searched ahead of docBase, an edited JSP or static file is served
+     *       from source on the next request — zero-copy hot reload of webapp
+     *       resources, layered on top of the physical mirror that still keeps
+     *       the deployed artifact self-contained.</li>
      *   <li>Library JARs from the runtime classpath that are not already
      *       packaged in {@code WEB-INF/lib/} are mounted there via
      *       {@code <PostResources>}. Lets the deployed app see transitive
@@ -912,25 +926,74 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
 
-        if (extraDirs.isEmpty() && extraJars.isEmpty()) {
+        // Webapp source directories overlay the deployed docBase at the web-app
+        // root. Because PreResources are searched ahead of docBase, an edited
+        // JSP or static file is served from source on the next request without
+        // re-copying into the exploded artifact. Same docBase-containment skip
+        // as the classpath roots: a source dir that already lives under docBase
+        // would re-mount the deployed copy onto itself.
+        List<String> webappDirs = new ArrayList<>();
+        for (String rootPath : snapshot.webappSourceRoots) {
+            if (rootPath.startsWith(artifactAbsPath)) {
+                continue;
+            }
+            String nativePath = rootPath.replace('/', File.separatorChar);
+            File file = new File(nativePath);
+            if (file.isDirectory()) {
+                webappDirs.add(nativePath);
+            }
+        }
+
+        if (extraDirs.isEmpty() && extraJars.isEmpty() && webappDirs.isEmpty()) {
             return "";
         }
 
+        LOG.info("Mounted " + extraDirs.size() + " class dir(s), "
+                + webappDirs.size() + " webapp source dir(s), and "
+                + extraJars.size() + " JAR(s) for '" + deployment.getDisplayName() + "'");
+
+        return renderExtraResourcesXml(extraDirs, webappDirs, extraJars);
+    }
+
+    /**
+     * Pure emission of the {@code <Resources>} children from already-resolved
+     * native path strings. No project-model or filesystem access — split out
+     * from {@link #buildExtraResourcesXml} so the XML shape and resource
+     * ordering can be verified in isolation.
+     *
+     * <p>Emission order is deliberate:
+     * <ol>
+     *   <li>Class output dirs → {@code <PreResources>} at
+     *       {@code /WEB-INF/classes}.</li>
+     *   <li>Webapp source dirs → {@code <PreResources>} at the web-app root
+     *       {@code /}. Emitted <em>after</em> the class dirs so that, for the
+     *       {@code /WEB-INF/classes} path, the earlier class-dir entry wins and
+     *       freshly compiled bytes are never shadowed by a stale tree that
+     *       might live under a webapp source root.</li>
+     *   <li>Library JARs → {@code <PostResources>} at
+     *       {@code /WEB-INF/lib/<name>} (searched after docBase, so they only
+     *       extend — never shadow — the packaged libraries).</li>
+     * </ol>
+     */
+    @NotNull
+    static String renderExtraResourcesXml(@NotNull List<String> classDirs,
+                                          @NotNull List<String> webappDirs,
+                                          @NotNull List<String> libJars) {
         StringBuilder sb = new StringBuilder();
-        for (String dir : extraDirs) {
+        for (String dir : classDirs) {
             sb.append(String.format(PRE_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_DIR, escapeXmlAttribute(dir), WEBAPP_MOUNT_CLASSES));
         }
-        for (String jar : extraJars) {
+        for (String webappDir : webappDirs) {
+            sb.append(String.format(PRE_RESOURCE_TEMPLATE,
+                    RESOURCE_CLASS_DIR, escapeXmlAttribute(webappDir), WEBAPP_MOUNT_ROOT));
+        }
+        for (String jar : libJars) {
             String jarName = new File(jar).getName();
             sb.append(String.format(POST_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_FILE, escapeXmlAttribute(jar),
                     WEBAPP_MOUNT_LIB + escapeXmlAttribute(jarName)));
         }
-
-        LOG.info("Mounted " + extraDirs.size() + " class dir(s) and "
-                + extraJars.size() + " JAR(s) for '" + deployment.getDisplayName() + "'");
-
         return sb.toString();
     }
 
@@ -965,13 +1028,23 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
          * Paths are plain strings with any trailing {@code !/} already stripped.
          */
         final List<String> rootPaths;
+        /**
+         * Webapp source directories for the module (WebFacet roots, convention
+         * dirs, declared build-time web-resource directories), in resolution
+         * order. Plain absolute path strings, forward-slash normalized for
+         * comparison. Mounted read-only at the web-app root so source files
+         * shadow the deployed copy without a rebuild.
+         */
+        final List<String> webappSourceRoots;
 
         ArtifactModelSnapshot(@NotNull Module module,
                               @NotNull Map<String, String> outputToArtifactName,
-                              @NotNull List<String> rootPaths) {
+                              @NotNull List<String> rootPaths,
+                              @NotNull List<String> webappSourceRoots) {
             this.module = module;
             this.outputToArtifactName = outputToArtifactName;
             this.rootPaths = rootPaths;
+            this.webappSourceRoots = webappSourceRoots;
         }
     }
 
@@ -1011,7 +1084,16 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             rootPaths.add(path);
         }
 
-        return new ArtifactModelSnapshot(module, outputToArtifactName, rootPaths);
+        // Webapp source roots, resolved through the same dispatch the mirror
+        // pipeline uses so the overlay covers exactly what gets copied. Normalize
+        // to forward slashes so the docBase-containment check below is uniform
+        // with the classpath roots above.
+        List<String> webappSourceRoots = new ArrayList<>();
+        for (Path webappRoot : WebResourcesSync.findWebappSourceRootsForTyped(project, deployment)) {
+            webappSourceRoots.add(webappRoot.toAbsolutePath().toString().replace('\\', '/'));
+        }
+
+        return new ArtifactModelSnapshot(module, outputToArtifactName, rootPaths, webappSourceRoots);
     }
 
     private static void collectModuleDependencyNames(

@@ -8,6 +8,7 @@
 
 ### Changed
 - Exploded deployments overlay the module's runtime classpath onto Tomcat's webapp classloader: class output directories mount at `/WEB-INF/classes` via `<PreResources>` (zero-copy hot reload of freshly compiled bytes), and library JARs not already in `WEB-INF/lib/` mount via `<PostResources>`. Code changes become visible on the next request without rebuilding the WAR.
+- Exploded deployments also mount the module's webapp source directories at the web-app root via `<PreResources>`, so edited JSPs and static resources are served from source on the next request without re-copying into the artifact.
 
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.

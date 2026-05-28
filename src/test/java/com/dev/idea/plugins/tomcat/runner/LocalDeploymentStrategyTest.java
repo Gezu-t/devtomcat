@@ -725,4 +725,118 @@ class LocalDeploymentStrategyTest {
             Files.write(path, baos.toByteArray());
         }
     }
+
+    // -------------------------------------------------------------------------
+    // renderExtraResourcesXml — class-dir / webapp-root / JAR overlay emission
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("renderExtraResourcesXml — overlay shape and ordering")
+    class RenderExtraResourcesXml {
+
+        /** PreResources fragment exactly as the emitter formats it. */
+        private String preResource(String base, String mount) {
+            return "\n    <PreResources className=\"org.apache.catalina.webresources.DirResourceSet\""
+                    + "\n                   base=\"" + base + "\" webAppMount=\"" + mount + "\" />";
+        }
+
+        /** PostResources fragment exactly as the emitter formats it. */
+        private String postResource(String base, String mount) {
+            return "\n    <PostResources className=\"org.apache.catalina.webresources.FileResourceSet\""
+                    + "\n                    base=\"" + base + "\" webAppMount=\"" + mount + "\" />";
+        }
+
+        @Test
+        @DisplayName("Webapp source dir mounts at the web-app root as a DirResourceSet PreResource")
+        void webappDirMountsAtRoot() {
+            String webappDir = "/projects/X/src/main/webapp";
+            String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(), List.of(webappDir), List.of());
+
+            assertTrue(xml.contains(preResource(webappDir, "/")),
+                    "webapp source must mount at '/' via DirResourceSet PreResources so source "
+                            + "files shadow the deployed copy. XML:\n" + xml);
+            // It is a PreResource (searched before docBase), never a PostResource.
+            assertFalse(xml.contains("<PostResources"),
+                    "a webapp overlay alone must not emit any PostResources. XML:\n" + xml);
+        }
+
+        @Test
+        @DisplayName("Class output dirs are emitted before webapp source dirs (precedence guarantee)")
+        void classDirsPrecedeWebappDirs() {
+            // PreResources are searched in declaration order: the class-output entry
+            // must come first so that for the /WEB-INF/classes path, freshly compiled
+            // bytes win over any stale tree that might live under a webapp source root.
+            String classDir = "/projects/X/target/classes";
+            String webappDir = "/projects/X/src/main/webapp";
+            String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(classDir), List.of(webappDir), List.of());
+
+            int classIdx = xml.indexOf("base=\"" + classDir + "\" webAppMount=\"/WEB-INF/classes\"");
+            int webappIdx = xml.indexOf("base=\"" + webappDir + "\" webAppMount=\"/\"");
+            assertTrue(classIdx >= 0, "class-dir PreResource missing. XML:\n" + xml);
+            assertTrue(webappIdx >= 0, "webapp-dir PreResource missing. XML:\n" + xml);
+            assertTrue(classIdx < webappIdx,
+                    "class output dir must be declared before the webapp source dir so "
+                            + "/WEB-INF/classes resolves to fresh bytes. XML:\n" + xml);
+        }
+
+        @Test
+        @DisplayName("PreResources (class + webapp) precede JAR PostResources")
+        void preResourcesPrecedePostResources() {
+            String classDir = "/projects/X/target/classes";
+            String webappDir = "/projects/X/src/main/webapp";
+            String jar = "/projects/X/libs/dep-1.0.0.jar";
+            String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(classDir), List.of(webappDir), List.of(jar));
+
+            int webappIdx = xml.indexOf("base=\"" + webappDir + "\" webAppMount=\"/\"");
+            int jarIdx = xml.indexOf("base=\"" + jar + "\"");
+            assertTrue(webappIdx >= 0 && jarIdx >= 0, "expected both entries. XML:\n" + xml);
+            assertTrue(webappIdx < jarIdx,
+                    "webapp PreResource must precede the JAR PostResource. XML:\n" + xml);
+            // The JAR keeps the established lib mount and FileResourceSet shape.
+            assertTrue(xml.contains(postResource(jar, "/WEB-INF/lib/dep-1.0.0.jar")),
+                    "library JAR must mount at /WEB-INF/lib/<name> via FileResourceSet PostResources. XML:\n" + xml);
+        }
+
+        @Test
+        @DisplayName("Multiple webapp source dirs preserve resolution order")
+        void multipleWebappDirsPreserveOrder() {
+            String first = "/projects/X/src/main/webapp";
+            String second = "/projects/X/src/main/extra-web";
+            String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(), List.of(first, second), List.of());
+
+            int firstIdx = xml.indexOf("base=\"" + first + "\" webAppMount=\"/\"");
+            int secondIdx = xml.indexOf("base=\"" + second + "\" webAppMount=\"/\"");
+            assertTrue(firstIdx >= 0 && secondIdx >= 0, "both webapp dirs must emit. XML:\n" + xml);
+            assertTrue(firstIdx < secondIdx,
+                    "webapp dirs must keep their resolution order so the authoritative "
+                            + "root is searched first. XML:\n" + xml);
+        }
+
+        @Test
+        @DisplayName("Webapp base attribute is XML-escaped")
+        void webappBaseIsEscaped() {
+            String webappDir = "/projects/a&b/src/main/webapp";
+            String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(), List.of(webappDir), List.of());
+
+            assertTrue(xml.contains("base=\"/projects/a&amp;b/src/main/webapp\" webAppMount=\"/\""),
+                    "ampersand in the webapp path must be escaped so the descriptor stays "
+                            + "well-formed. XML:\n" + xml);
+            assertFalse(xml.contains("a&b/src"),
+                    "raw unescaped ampersand must not appear. XML:\n" + xml);
+        }
+
+        @Test
+        @DisplayName("No resources of any kind yields the empty fragment")
+        void emptyInputsYieldEmpty() {
+            assertEquals("", LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(), List.of(), List.of()),
+                    "with nothing to mount the fragment must be empty so the caller can "
+                            + "still emit a bare <Resources allowLinking=\"true\"> block");
+        }
+    }
 }

@@ -253,10 +253,14 @@ public final class WebResourcesSync {
      * Typed entry point. Uses the same {@link DeployedClassesSync#resolveTyped}
      * dispatch as class sync so both pipelines pick the same module for any
      * given deployment.
+     *
+     * <p>Public because the deployment-strategy context-XML builder reuses the
+     * same resolver to mount these roots as a read-only overlay (so the
+     * overlay covers exactly the directories this pipeline mirrors).
      */
     @NotNull
-    static List<Path> findWebappSourceRootsForTyped(@NotNull Project project,
-                                                    @NotNull Deployment deployment) {
+    public static List<Path> findWebappSourceRootsForTyped(@NotNull Project project,
+                                                           @NotNull Deployment deployment) {
         DeployedClassesSync.ResolutionReport report =
                 DeployedClassesSync.resolveTyped(project, deployment);
         String moduleName = report.moduleName();
