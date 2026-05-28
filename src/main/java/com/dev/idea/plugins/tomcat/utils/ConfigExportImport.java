@@ -131,6 +131,7 @@ public final class ConfigExportImport {
         updateEl.addContent(createElement("onFrameDeactivation", update.getOnFrameDeactivation()));
         updateEl.addContent(createElement("showUpdateDialog", String.valueOf(update.isShowUpdateDialog())));
         updateEl.addContent(createElement("showFrameDeactivationDialog", String.valueOf(update.isShowFrameDeactivationDialog())));
+        updateEl.addContent(createElement("updateOnSave", String.valueOf(update.isUpdateOnSave())));
         root.addContent(updateEl);
 
         // Deployment artifacts and settings
@@ -280,6 +281,7 @@ public final class ConfigExportImport {
             update.setOnFrameDeactivation(getChildText(updateEl, "onFrameDeactivation", UpdateConfig.DEFAULT_ON_FRAME_DEACTIVATION));
             update.setShowUpdateDialog(getChildBool(updateEl, "showUpdateDialog", true));
             update.setShowFrameDeactivationDialog(getChildBool(updateEl, "showFrameDeactivationDialog", true));
+            update.setUpdateOnSave(getChildBool(updateEl, "updateOnSave", UpdateConfig.DEFAULT_UPDATE_ON_SAVE));
         }
 
         // Deployment artifacts and settings

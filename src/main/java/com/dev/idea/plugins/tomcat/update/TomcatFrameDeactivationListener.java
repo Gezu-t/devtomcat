@@ -63,7 +63,7 @@ public class TomcatFrameDeactivationListener implements ApplicationActivationLis
                                 Messages.getQuestionIcon());
                         if (result == Messages.YES) {
                             LOG.info("Frame deactivated — user confirmed update for: " + config.getName());
-                            new TomcatApplicationUpdater(project, tomcatHandler, config, action).executeUpdate();
+                            TomcatAutoUpdateService.getInstance(project).submit(tomcatHandler, action);
                         }
                     } finally {
                         updating.set(false);
@@ -71,8 +71,7 @@ public class TomcatFrameDeactivationListener implements ApplicationActivationLis
                 });
             } else {
                 LOG.info("Frame deactivated — triggering update for: " + config.getName());
-                ApplicationManager.getApplication().invokeLater(() ->
-                        new TomcatApplicationUpdater(project, tomcatHandler, config, action).executeUpdate());
+                TomcatAutoUpdateService.getInstance(project).submit(tomcatHandler, action);
             }
         }
     }

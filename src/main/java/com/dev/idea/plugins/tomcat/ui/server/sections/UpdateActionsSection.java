@@ -27,6 +27,7 @@ public class UpdateActionsSection implements ConfigurationSection {
     private ComboBox<String> updateActionCombo;
     private JBCheckBox showDialogCheckBox;
     private ComboBox<String> frameDeactivationCombo;
+    private JBCheckBox updateOnSaveCheckBox;
     private JPanel panel;
 
     @Override
@@ -51,6 +52,15 @@ public class UpdateActionsSection implements ConfigurationSection {
             frameDeactivationCombo = new ComboBox<>();
             ConfigurationSection.addLabelAndField(panel, gbc, 1,
                     new JBLabel("On frame deactivation:"), frameDeactivationCombo);
+
+            updateOnSaveCheckBox = new JBCheckBox("Update on save (while running)");
+            updateOnSaveCheckBox.setToolTipText(
+                    "While the server is running, saving a file automatically applies the "
+                            + "'On Update' action. Debounced; off by default.");
+            gbc.gridx = 1; gbc.gridy = 2; gbc.gridwidth = 1; gbc.weightx = 1.0;
+            gbc.fill = GridBagConstraints.HORIZONTAL; gbc.anchor = GridBagConstraints.WEST;
+            gbc.insets = JBUI.insets(2, 4, 2, 8);
+            panel.add(updateOnSaveCheckBox, gbc);
         }
         return panel;
     }
@@ -71,6 +81,8 @@ public class UpdateActionsSection implements ConfigurationSection {
             frameDeactivationCombo.addItem(option);
         }
         frameDeactivationCombo.setSelectedItem(TomcatConstants.ACTION_DO_NOTHING);
+
+        updateOnSaveCheckBox.setSelected(UpdateConfig.DEFAULT_UPDATE_ON_SAVE);
     }
 
     @Override
@@ -81,6 +93,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         // Consolidated checkbox governs both prompts. OR-read preserves the "ask before acting"
         // intent of any config (legacy or imported) that had either flag enabled.
         showDialogCheckBox.setSelected(uc.isShowUpdateDialog() || uc.isShowFrameDeactivationDialog());
+        updateOnSaveCheckBox.setSelected(uc.isUpdateOnSave());
     }
 
     @Override
@@ -94,6 +107,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         boolean show = isShowDialogEnabled();
         uc.setShowUpdateDialog(show);
         uc.setShowFrameDeactivationDialog(show);
+        uc.setUpdateOnSave(updateOnSaveCheckBox.isSelected());
     }
 
     @Override
@@ -115,7 +129,8 @@ public class UpdateActionsSection implements ConfigurationSection {
         // Modified if the UI checkbox doesn't match BOTH persisted flags — forces an apply
         // that re-syncs them, even when they were out-of-sync in storage (legacy/imported).
         boolean show = isShowDialogEnabled();
-        return uc.isShowUpdateDialog() != show || uc.isShowFrameDeactivationDialog() != show;
+        if (uc.isShowUpdateDialog() != show || uc.isShowFrameDeactivationDialog() != show) return true;
+        return uc.isUpdateOnSave() != updateOnSaveCheckBox.isSelected();
     }
 
     @Override

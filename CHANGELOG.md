@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Optional "Update on save": while a server runs, saving a project file debounce-triggers the configured Update action (off by default; auto-triggers skip configs with no module-backed deployment to avoid a wasteful whole-project compile).
 - One-click "Reclaim Deployment" action surfaces in a balloon for WAR artifacts with a sibling exploded directory and for already-exploded external deployments living under a project module, enabling hot reload (Ctrl+F10) without rebuilding.
 - Pre-launch classpath-duplicate scan for exploded deployments: warns when the same logical resource is packaged in both `WEB-INF/classes/` and a `WEB-INF/lib/` JAR (or in two JARs), filtering universally-benign cases like `META-INF/MANIFEST.MF`, `META-INF/services/*`, `META-INF/maven/*`, multi-release JAR overrides, and license files.
 

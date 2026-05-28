@@ -294,6 +294,8 @@
     <applicationListeners>
         <listener class="com.dev.idea.plugins.tomcat.update.TomcatFrameDeactivationListener"
                   topic="com.intellij.openapi.application.ApplicationActivationListener"/>
+        <listener class="com.dev.idea.plugins.tomcat.update.TomcatSaveListener"
+                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </applicationListeners>
 
     <projectListeners>

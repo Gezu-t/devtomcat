@@ -28,17 +28,20 @@ public class UpdateConfig implements Serializable, Cloneable {
     public static final String DEFAULT_ON_FRAME_DEACTIVATION = DO_NOTHING;
     public static final boolean DEFAULT_SHOW_UPDATE_DIALOG = true;
     public static final boolean DEFAULT_SHOW_FRAME_DEACTIVATION_DIALOG = true;
+    public static final boolean DEFAULT_UPDATE_ON_SAVE = false;
 
     @NotNull private String onUpdate;
     @NotNull private String onFrameDeactivation;
     private boolean showUpdateDialog;
     private boolean showFrameDeactivationDialog;
+    private boolean updateOnSave;
 
     public UpdateConfig() {
         this.onUpdate = DEFAULT_ON_UPDATE;
         this.onFrameDeactivation = DEFAULT_ON_FRAME_DEACTIVATION;
         this.showUpdateDialog = DEFAULT_SHOW_UPDATE_DIALOG;
         this.showFrameDeactivationDialog = DEFAULT_SHOW_FRAME_DEACTIVATION_DIALOG;
+        this.updateOnSave = DEFAULT_UPDATE_ON_SAVE;
     }
 
     public UpdateConfig(@NotNull UpdateConfig other) {
@@ -47,6 +50,7 @@ public class UpdateConfig implements Serializable, Cloneable {
         this.onFrameDeactivation = other.onFrameDeactivation;
         this.showUpdateDialog = other.showUpdateDialog;
         this.showFrameDeactivationDialog = other.showFrameDeactivationDialog;
+        this.updateOnSave = other.updateOnSave;
     }
 
     @NotNull
@@ -70,6 +74,14 @@ public class UpdateConfig implements Serializable, Cloneable {
 
     public boolean isShowFrameDeactivationDialog() { return showFrameDeactivationDialog; }
     public void setShowFrameDeactivationDialog(boolean show) { this.showFrameDeactivationDialog = show; }
+
+    /**
+     * When {@code true}, saving a source file while the server is running
+     * debounce-triggers the configured {@link #getOnUpdate()} action without a
+     * confirmation dialog. Off by default; opt-in per run configuration.
+     */
+    public boolean isUpdateOnSave() { return updateOnSave; }
+    public void setUpdateOnSave(boolean updateOnSave) { this.updateOnSave = updateOnSave; }
 
     @NotNull
     private String validateUpdateAction(@NotNull String action) {
@@ -96,6 +108,7 @@ public class UpdateConfig implements Serializable, Cloneable {
         this.onFrameDeactivation = DEFAULT_ON_FRAME_DEACTIVATION;
         this.showUpdateDialog = DEFAULT_SHOW_UPDATE_DIALOG;
         this.showFrameDeactivationDialog = DEFAULT_SHOW_FRAME_DEACTIVATION_DIALOG;
+        this.updateOnSave = DEFAULT_UPDATE_ON_SAVE;
     }
 
     @NotNull
@@ -115,19 +128,21 @@ public class UpdateConfig implements Serializable, Cloneable {
         UpdateConfig that = (UpdateConfig) o;
         return showUpdateDialog == that.showUpdateDialog &&
                 showFrameDeactivationDialog == that.showFrameDeactivationDialog &&
+                updateOnSave == that.updateOnSave &&
                 Objects.equals(onUpdate, that.onUpdate) &&
                 Objects.equals(onFrameDeactivation, that.onFrameDeactivation);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(onUpdate, onFrameDeactivation, showUpdateDialog, showFrameDeactivationDialog);
+        return Objects.hash(onUpdate, onFrameDeactivation, showUpdateDialog, showFrameDeactivationDialog, updateOnSave);
     }
 
     @NotNull
     @Override
     public String toString() {
         return "UpdateConfig{onUpdate='" + onUpdate + "', onFrameDeactivation='" + onFrameDeactivation +
-                "', showUpdateDialog=" + showUpdateDialog + ", showFrameDeactivationDialog=" + showFrameDeactivationDialog + '}';
+                "', showUpdateDialog=" + showUpdateDialog + ", showFrameDeactivationDialog=" + showFrameDeactivationDialog +
+                ", updateOnSave=" + updateOnSave + '}';
     }
 }
