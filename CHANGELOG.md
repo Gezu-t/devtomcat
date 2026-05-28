@@ -4,6 +4,7 @@
 
 ### Added
 - One-click "Reclaim Deployment" action surfaces in a balloon for WAR artifacts with a sibling exploded directory and for already-exploded external deployments living under a project module, enabling hot reload (Ctrl+F10) without rebuilding.
+- Pre-launch classpath-duplicate scan for exploded deployments: warns when the same logical resource is packaged in both `WEB-INF/classes/` and a `WEB-INF/lib/` JAR (or in two JARs), filtering universally-benign cases like `META-INF/MANIFEST.MF`, `META-INF/services/*`, `META-INF/maven/*`, multi-release JAR overrides, and license files.
 
 ### Changed
 - Removed the `<PreResources>` overlay of project module class directories on the deployed `WEB-INF/classes/`. The WAR module's fresh classes now reach Tomcat solely via DeployedClassesSync; dep modules are served from their `WEB-INF/lib/` JARs. Eliminates a class of duplicate-classpath problems that affected any framework auditing its own resources for uniqueness. Dep modules whose JARs are missing from `WEB-INF/lib/` surface a clear warning naming the module instead of being silently rescued.

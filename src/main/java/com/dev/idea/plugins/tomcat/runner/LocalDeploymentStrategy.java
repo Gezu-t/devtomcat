@@ -397,6 +397,13 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                             confCatalinaLocalhost, contextName);
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     LOG.info("Deployed exploded artifact via context.xml: " + contextFile);
+                    // Pre-launch classpath-duplicate scan. Surfaces files that
+                    // appear at the same logical path in WEB-INF/classes/ AND
+                    // a WEB-INF/lib/ JAR (or in 2+ JARs), filtering universally-
+                    // benign cases. The warning is non-blocking and library-
+                    // agnostic — describes what the user's build packaged, not
+                    // what any specific framework will do about it.
+                    warnAboutClasspathDuplicates(deployment, artifactPath, logger);
                 } else {
                     Path targetWar = TomcatDeploymentPaths.warFile(webappsDir, contextName);
                     TomcatProjectUtils.atomicCopy(artifactPath, targetWar);
@@ -431,6 +438,56 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                         "Tomcat will start with nothing served. Add an artifact in Deployment.");
             }
         }
+    }
+
+    /**
+     * Runs {@link com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner}
+     * against the deployed exploded artifact and, if any duplicates are
+     * found, surfaces a consolidated console warning naming each duplicate
+     * and the locations it appears in.
+     *
+     * <p>The scan is library-agnostic and the warning is non-blocking. The
+     * remedies named in the message are generic — fix the build to package
+     * each resource once, or configure whichever framework is auditing the
+     * classpath to tolerate duplicates. We don't pattern-match for any
+     * specific framework.
+     */
+    private static void warnAboutClasspathDuplicates(@NotNull Deployment deployment,
+                                                     @NotNull Path artifactPath,
+                                                     @Nullable TomcatDeploymentLogger logger) {
+        if (logger == null) return;
+        List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> duplicates;
+        try {
+            duplicates = com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.scan(artifactPath);
+        } catch (Exception e) {
+            // Defensive: the scanner already handles per-JAR I/O failures
+            // internally, but a top-level exception (disk gone, etc.) should
+            // not block deploy. The launch itself will surface the real
+            // problem if one exists.
+            LOG.debug("Classpath duplicate scan failed for "
+                    + deployment.getDisplayName() + ": " + e.getMessage());
+            return;
+        }
+        if (duplicates.isEmpty()) return;
+
+        StringBuilder msg = new StringBuilder();
+        msg.append("Classpath duplicates in deployed artifact '")
+           .append(deployment.getDisplayName())
+           .append("' — ")
+           .append(duplicates.size())
+           .append(duplicates.size() == 1 ? " path appears" : " paths appear")
+           .append(" in multiple locations:");
+        for (var group : duplicates) {
+            msg.append("\n  - ").append(group.logicalPath()).append("  →  ");
+            msg.append(String.join(" , ", group.locations()));
+        }
+        msg.append("\nFirst match wins in classloader resolution; frameworks that enumerate")
+           .append(" all instances of a resource (strict-classpath audits) may refuse to start.")
+           .append(" To fix: update your build so each resource is packaged in only one")
+           .append(" location, or — if the duplication is intentional — configure the")
+           .append(" framework that's auditing the classpath to tolerate duplicates.");
+
+        logger.logServerWarning(msg.toString());
     }
 
     @NotNull
