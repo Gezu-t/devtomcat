@@ -620,14 +620,28 @@ public final class DeployedClassesSync {
                         }
 
                         Path rel = src.relativize(file);
-                        // Record the relative path BEFORE the broken-ECJ /
-                        // copy-decision gates. The orphan-reconcile contract is
-                        // "anything in dst that isn't in src is an orphan" —
-                        // a broken stub still represents a real source file the
-                        // user authored, so it must be in contributedPaths or
-                        // the orphan pass would delete the previous good copy.
+                        // Record the relative path BEFORE any gate. The
+                        // orphan-reconcile contract is "anything in dst that
+                        // isn't in src is an orphan" — every source file the
+                        // user authored (even one we skip because it is already
+                        // up to date, or refuse because it is a broken stub)
+                        // must be in contributedPaths, or the orphan pass would
+                        // delete the matching deployed copy.
                         contributedPaths.add(rel.toString().replace('\\', '/'));
                         Path target = dst.resolve(rel.toString());
+
+                        // Cheap mtime/size gate FIRST. When the deployed copy is
+                        // already current we return before the broken-class scan
+                        // below — that scan reads the whole file, so running it
+                        // for every up-to-date class on every sync would read
+                        // the entire deployed classpath off disk each
+                        // launch/update (the dominant cost on large multi-module
+                        // projects). Gating it behind the copy decision keeps a
+                        // no-op sync at stat-only cost; only copy candidates are
+                        // ever read.
+                        if (!shouldCopy(file, attrs, target)) {
+                            return FileVisitResult.CONTINUE;
+                        }
 
                         // CRITICAL gate: if the source is a broken ECJ
                         // "compile-with-errors" class file, refuse to copy.
@@ -646,25 +660,22 @@ public final class DeployedClassesSync {
                             return FileVisitResult.CONTINUE;
                         }
 
-                        if (shouldCopy(file, attrs, target)) {
-                            Path parent = target.getParent();
-                            if (parent != null) {
-                                Files.createDirectories(parent);
-                            }
-                            try {
-                                Files.copy(file, target,
-                                        StandardCopyOption.REPLACE_EXISTING,
-                                        StandardCopyOption.COPY_ATTRIBUTES);
-                                copied[0]++;
-                            } catch (java.nio.file.NoSuchFileException vanished) {
-                                // The source file disappeared between
-                                // visitFile and copy — common when the IDE
-                                // re-compiles concurrently (Make replaces
-                                // .class atomically). Don't count as copy,
-                                // don't fail the walk; the next sync picks
-                                // it up. Debug-level only.
-                                LOG.debug("Class sync: source vanished during copy: " + file);
-                            }
+                        Path parent = target.getParent();
+                        if (parent != null) {
+                            Files.createDirectories(parent);
+                        }
+                        try {
+                            Files.copy(file, target,
+                                    StandardCopyOption.REPLACE_EXISTING,
+                                    StandardCopyOption.COPY_ATTRIBUTES);
+                            copied[0]++;
+                        } catch (java.nio.file.NoSuchFileException vanished) {
+                            // The source file disappeared between visitFile and
+                            // copy — common when the IDE re-compiles concurrently
+                            // (Make replaces .class atomically). Don't count as
+                            // copy, don't fail the walk; the next sync picks it
+                            // up. Debug-level only.
+                            LOG.debug("Class sync: source vanished during copy: " + file);
                         }
                     } catch (IOException | RuntimeException e) {
                         LOG.debug("Class sync: skipped " + file + " (" + e.getMessage() + ")");
