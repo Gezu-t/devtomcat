@@ -534,6 +534,27 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 WarToExplodedQuickFix.findFixableArtifacts(project, artifacts);
         if (candidates.isEmpty()) return;
 
+        // Log every candidate to the console BEFORE popping the balloon. The
+        // run console is the authoritative diagnostic surface — balloons can be
+        // dismissed, hidden, or arrive after the user has moved on. Naming each
+        // artifact + its target module makes it possible for the user to act
+        // even if the balloon never gets clicked.
+        StringBuilder mapping = new StringBuilder();
+        for (WarToExplodedQuickFix.FixCandidate c : candidates) {
+            if (mapping.length() > 0) mapping.append(", ");
+            mapping.append(c.artifact().getDisplayName())
+                   .append(" → module '")
+                   .append(c.moduleName())
+                   .append("'");
+        }
+        logger.logServerWarning(
+                "Hot-reload reclaim available for " + candidates.size()
+                        + " deployment(s): " + mapping + ". Class sync skips these because they"
+                        + " resolve as ExternalFileDeployment (no module link). Click 'Reclaim "
+                        + (candidates.size() == 1 ? "Deployment" : "All")
+                        + "' in the notification to fix in place — or delete + re-add the"
+                        + " deployments in the Deployment tab.");
+
         String title = candidates.size() == 1
                 ? "Deployment can be reclaimed as module-owned"
                 : candidates.size() + " deployments can be reclaimed as module-owned";

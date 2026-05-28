@@ -148,11 +148,32 @@ public final class WarToExplodedQuickFix {
         List<FixCandidate> out = new ArrayList<>();
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null) continue;
+            // Debug logging: each artifact rejection emits a structured line so a
+            // user reporting "balloon didn't fire" can hand back a log fragment
+            // that pinpoints which check failed without us having to instrument live.
+            String label = "'" + artifact.getName() + "' (type=" + artifact.getType()
+                    + ", source=" + artifact.getSource() + ", path=" + artifact.getPath() + ")";
             Path explodedPath = findCandidateExplodedPath(artifact);
-            if (explodedPath == null) continue;
-            if (!isExplodedWebapp(explodedPath)) continue;
+            if (explodedPath == null) {
+                LOG.debug("Reclaim scan: skipping " + label
+                        + " — not a fixable shape (need WAR with sibling, or EXTERNAL+EXPLODED)");
+                continue;
+            }
+            if (!isExplodedWebapp(explodedPath)) {
+                LOG.debug("Reclaim scan: skipping " + label
+                        + " — candidate path " + explodedPath
+                        + " is not a directory with WEB-INF/");
+                continue;
+            }
             String moduleName = resolver.resolveOwningModule(explodedPath);
-            if (moduleName == null) continue;
+            if (moduleName == null) {
+                LOG.debug("Reclaim scan: skipping " + label
+                        + " — candidate path " + explodedPath
+                        + " is not under any project module's content roots");
+                continue;
+            }
+            LOG.info("Reclaim scan: candidate " + label
+                    + " → module '" + moduleName + "' at " + explodedPath);
             out.add(new FixCandidate(artifact, explodedPath, moduleName));
         }
         return out;
