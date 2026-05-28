@@ -46,51 +46,49 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 /**
  * Local deployment strategy: deploys artifacts to the CATALINA_BASE filesystem.
  *
- * <p>Exploded artifacts get a context XML descriptor in {@code conf/Catalina/localhost/};
- * packaged WARs are copied to {@code webapps/}. The context descriptor may include
- * {@code <PostResources>} entries that wire in library JARs from the module's
- * classpath that aren't already packaged into {@code WEB-INF/lib/} (e.g.
- * transitive dependencies the build forgot to include).
+ * <p>Exploded artifacts get a context XML descriptor in
+ * {@code conf/Catalina/localhost/}; packaged WARs are copied to
+ * {@code webapps/}. For exploded artifacts the context descriptor overlays the
+ * module's runtime production classpath onto Tomcat's webapp classloader:
  *
- * <p><b>What this strategy does NOT do (1.2.0 architectural change):</b>
- * earlier versions also injected each project module's class output directory
- * as {@code <PreResources>}, overlaying them on the deployed
- * {@code WEB-INF/classes/} for zero-copy hot reload. The overlay made the
- * same logical resource reachable at two different URIs on the webapp
- * classloader — once via the source class directory, once via the deployed
- * copy. Any framework or library that audits its own resources for uniqueness
- * (strict classpath-duplicate detection has become common) would then refuse
- * to load, with an exception specific to that library. The exception varied;
- * the underlying cause — our overlay — did not. The overlay was dropped; the
- * WAR module's classes now reach Tomcat via {@code DeployedClassesSync}
- * copying {@code target/classes/} into the deployed {@code WEB-INF/classes/}
- * on every launch and Ctrl+F10. Dependency modules are served from their
- * {@code WEB-INF/lib/} JARs — repackaging required for code changes, same
- * contract as every other Tomcat deployment.
+ * <ul>
+ *   <li>Each class output directory the IDE knows about
+ *       ({@code target/classes/}, {@code out/production/<module>/}, etc.) is
+ *       mounted at {@code /WEB-INF/classes} via {@code <PreResources>}, so
+ *       freshly compiled bytes shadow the (potentially stale) copy inside the
+ *       deployed artifact.</li>
+ *   <li>Each runtime-scope library JAR not already in {@code WEB-INF/lib/} is
+ *       mounted there via {@code <PostResources>}, so transitive dependencies
+ *       the build didn't package are still visible.</li>
+ * </ul>
+ *
+ * <p>Effect: when the user recompiles a class in the IDE, Tomcat picks up the
+ * new bytes on the next classloader resolution — no copy step, no
+ * repackaging, no full redeploy. The Update action's "Update classes and
+ * resources" path triggers a context reload (touch context.xml) so any
+ * cached references are dropped and the next class lookup hits the fresh
+ * output directory.
  */
 final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     private static final Logger LOG = Logger.getInstance(LocalDeploymentStrategy.class);
 
     // --- Tomcat extra resources (context.xml overlay) ---
-    // RESOURCE_CLASS_DIR / WEBAPP_MOUNT_CLASSES were used by the now-removed
-    // PreResources injection of class directories. PostResources for JARs only
-    // needs RESOURCE_CLASS_FILE + WEBAPP_MOUNT_LIB.
+    private static final String RESOURCE_CLASS_DIR = "org.apache.catalina.webresources.DirResourceSet";
     private static final String RESOURCE_CLASS_FILE = "org.apache.catalina.webresources.FileResourceSet";
+    private static final String WEBAPP_MOUNT_CLASSES = "/WEB-INF/classes";
     private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
 
-    // PreResources for class directories used to overlay each module's
-    // target/classes onto the deployed WEB-INF/classes. That overlay made the
-    // same logical resource reachable at two URLs on the webapp classloader,
-    // which any framework or library that audits its own resources for
-    // uniqueness would refuse. The overlay is gone; the WAR module's fresh
-    // classes reach Tomcat via DeployedClassesSync copying target/classes →
-    // WEB-INF/classes, and dep modules are served from WEB-INF/lib JARs. The
-    // constant for the PreResources XML template was removed alongside the
-    // injection logic.
+    // Class output directories mount at /WEB-INF/classes via PreResources so
+    // the classloader resolves freshly compiled bytes from the IDE's compile
+    // output ahead of whatever copy lives inside the deployed artifact.
+    // PostResources would reverse the precedence and let stale bytes win.
+    private static final String PRE_RESOURCE_TEMPLATE =
+            "\n    <PreResources className=\"%s\"\n                   base=\"%s\" webAppMount=\"%s\" />";
 
-    // JAR files go to PostResources — they extend WEB-INF/lib with entries not already packaged
-    // in the artifact, so there is no shadowing conflict with docBase content.
+    // JAR files mount at /WEB-INF/lib/<filename> via PostResources — they
+    // extend WEB-INF/lib with entries not already packaged in the deployed
+    // artifact, so there is no shadowing conflict with docBase content.
     private static final String POST_RESOURCE_TEMPLATE =
             "\n    <PostResources className=\"%s\"\n                    base=\"%s\" webAppMount=\"%s\" />";
 
@@ -191,18 +189,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * {@code file:///…/foo.jar!/}. Stripped before storing the path as a plain filesystem string.
      */
     private static final String JAR_URL_SUFFIX = "!/";
-
-    /** Maven's in-JAR metadata path prefix; entries beneath this hold {@code pom.properties}. */
-    private static final String META_INF_MAVEN_PREFIX = "META-INF/maven/";
-
-    /** Suffix of the Maven {@code pom.properties} entry inside a JAR. */
-    private static final String POM_PROPERTIES_SUFFIX = "/pom.properties";
-
-    /**
-     * Expected slash-separated segment count of a Maven {@code pom.properties} entry —
-     * {@code META-INF/maven/<groupId>/<artifactId>/pom.properties} → 5 segments after split.
-     */
-    private static final int META_INF_MAVEN_POM_PROPERTIES_SEGMENTS = 5;
 
     /**
      * Max number of stale-deployment filenames the balloon enumerates before
@@ -520,12 +506,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // deploy without this attribute. The Maven multi-module shape
         // (target/<module>/ resolved through a symlinked staging dir) is the
         // realistic hit. Previously the Resources block was emitted only when
-        // extra PostResources were attached, so users with no extra resources
-        // lost symlink support silently. The empty-children case is well-formed
+        // extra Pre/PostResources were attached, so users with no extras lost
+        // symlink support silently. The empty-children case is well-formed
         // and harmless to Tomcat 8+.
         //
         // Tomcat 7 does NOT support <Resources> under <Context> (its Digester
-        // logs 'No rules found matching Context/Resources/PostResources' and
+        // logs 'No rules found matching Context/Resources/PreResources' and
         // drops the element). On 7, allowLinking defaults to true on the
         // Context itself so symlinks work without explicit configuration —
         // omit the block entirely. The major-version=0 (unknown) case is
@@ -824,49 +810,30 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Builds {@code <PostResources>} entries for an exploded artifact's context
-     * XML, listing library JARs from the module's full classpath that are not
-     * already packaged into the artifact's {@code WEB-INF/lib/}. Container-
-     * provided JARs (Tomcat internals, Servlet/JSP/EL APIs) are excluded so
-     * they don't fight Tomcat's own loaders.
+     * Builds extra resource entries for an exploded artifact's context XML:
      *
-     * <h2>What this method does NOT do (architectural note for 1.2.0)</h2>
-     *
-     * <p>Previous versions also emitted {@code <PreResources>} entries for
-     * project module class output directories ({@code target/classes/},
-     * {@code out/production/<module>/}, etc.). The intent was to overlay
-     * freshly compiled classes on top of the deployed {@code WEB-INF/classes/}
-     * for zero-copy hot reload. But the overlay created a class of duplicate-
-     * classpath problems: any framework or library that audits its own
-     * resources for uniqueness — strict-classpath behaviour is increasingly
-     * common — would refuse to load when our overlay made the same logical
-     * path reachable at two URIs (once via the source class dir, once via
-     * the deployed copy). The specific failure varied by library; the
-     * underlying cause did not. Each affected library would have required
-     * a dedicated guard in our overlay logic, an open-ended maintenance
-     * burden.
-     *
-     * <p>The overlay was dropped. Today:
      * <ul>
-     *   <li>The WAR module's fresh classes reach Tomcat via
-     *       {@link com.dev.idea.plugins.tomcat.update.DeployedClassesSync},
-     *       which copies {@code target/classes/} → the deployed
-     *       {@code WEB-INF/classes/} on every launch and every Ctrl+F10.
-     *       The deployed location is the sole source of truth.</li>
-     *   <li>Dependency modules' classes are served from their JARs in
-     *       {@code WEB-INF/lib/}. Editing a dep module's class requires
-     *       repackaging that module's JAR (typically {@code mvn install}).
-     *       This matches the contract of every other Tomcat deployment.</li>
-     *   <li>When a dep module's JAR is missing from {@code WEB-INF/lib/}
-     *       (the case the old overlay silently rescued), we emit a clear
-     *       pre-launch warning naming the module so the user can fix the
-     *       build rather than running on a misconfigured classpath.</li>
+     *   <li>Class output directories from the module's runtime production
+     *       classpath are mounted at {@code /WEB-INF/classes} via
+     *       {@code <PreResources>}. Tomcat's classloader searches PreResources
+     *       before the artifact's own docBase, so freshly compiled bytes
+     *       shadow the (potentially stale) copy inside {@code WEB-INF/classes/}.
+     *       Result: zero-copy hot reload of class changes — the user
+     *       recompiles in the IDE, the next request hits the fresh bytes.</li>
+     *   <li>Library JARs from the runtime classpath that are not already
+     *       packaged in {@code WEB-INF/lib/} are mounted there via
+     *       {@code <PostResources>}. Lets the deployed app see transitive
+     *       deps the build didn't include.</li>
      * </ul>
      *
-     * <p>The matching of dep modules to JARs (used both to suppress
-     * redundant PostResources entries and to identify "missing JAR"
-     * modules for the warning) uses the same two-guard approach as before:
-     * name-based and content+pom.properties.
+     * <p>Container-provided JARs (Tomcat internals, Servlet/JSP/EL APIs) are
+     * filtered out of the JAR list so they don't fight Tomcat's own loaders
+     * for the same classes.
+     *
+     * <p>Classpath roots that fall under the artifact's docBase are skipped —
+     * the recursive classpath walk includes the deployed
+     * {@code WEB-INF/classes/} and {@code WEB-INF/lib/} contents, and
+     * re-mounting them would be redundant.
      */
     @NotNull
     private static String buildExtraResourcesXml(@NotNull Deployment deployment,
@@ -874,8 +841,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                           @NotNull Project project,
                                           @Nullable TomcatInfo tomcatInfo,
                                           @Nullable TomcatDeploymentLogger logger) {
-        // PostResources is Tomcat 8+; Tomcat 7's Digester emits
-        // 'No rules found matching Context/Resources/PostResources' and drops them.
+        // PreResources / PostResources are Tomcat 8+; Tomcat 7's Digester emits
+        // 'No rules found matching Context/Resources/PreResources' and drops them.
         // Major version 0 = unknown — treat as modern (don't accidentally regress modern users).
         if (tomcatInfo != null
                 && tomcatInfo.getMajorVersion() > 0
@@ -883,10 +850,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (logger != null) {
                 logger.logServerInfo(
                         "Tomcat " + tomcatInfo.getMajorVersion()
-                                + " does not support <PostResources> (added in Tomcat 8). "
-                                + "Extra library JARs for '" + deployment.getDisplayName()
-                                + "' will not be wired in. Package any required JARs into "
-                                + "WEB-INF/lib if your application depends on them.");
+                                + " does not support <PreResources>/<PostResources> "
+                                + "(added in Tomcat 8). Module classpath additions for '"
+                                + deployment.getDisplayName()
+                                + "' will not be wired in. Package any required JARs "
+                                + "into WEB-INF/lib if your application depends on them.");
             }
             return "";
         }
@@ -902,48 +870,30 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             return "";
         }
 
-        // Phase 2 — File I/O: scan WEB-INF/lib once to build the JAR name index
-        // (used for both the dep-JAR-already-packaged check and the missing-JAR detection)
-        // and the pre-scanned JarMeta index (content + pom.properties matching).
-        // No model access — pure filesystem I/O.
+        // Phase 2 — File I/O: scan WEB-INF/lib once so we don't re-mount JARs
+        // already packaged into the artifact.
         Set<String> existingLibJars = new HashSet<>();
-        Set<String> coveredModuleNames = new HashSet<>();
-        List<JarMeta> jarIndex = new ArrayList<>();
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (Files.isDirectory(webInfLib)) {
             try (var stream = Files.list(webInfLib)) {
                 stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
-                      .forEach(p -> {
-                          String jarName = p.getFileName().toString();
-                          existingLibJars.add(jarName);
-                          String baseName = stripJarVersion(jarName);
-                          if (baseName != null) {
-                              coveredModuleNames.add(baseName.toLowerCase(Locale.ROOT));
-                          }
-                          jarIndex.add(scanJar(p, baseName));
-                      });
+                      .forEach(p -> existingLibJars.add(p.getFileName().toString()));
             } catch (IOException e) {
                 LOG.debug("Could not list WEB-INF/lib: " + e.getMessage());
             }
         }
 
-        // Phase 3 — Processing: use the snapshot to drive the context XML build.
-        // All values below are plain Java objects — no IntelliJ model access, no threading constraint.
-
-        // Normalize artifact path for cross-platform comparison.
+        // Phase 3 — Processing.
+        // Normalize artifact path for cross-platform comparison; entries
+        // already under docBase are dropped (the deployed WEB-INF/classes
+        // and WEB-INF/lib show up here via the recursive classpath walk
+        // and re-mounting them would be redundant).
         String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
 
+        List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
-        // Dep modules whose classes have no JAR backing in WEB-INF/lib. Without
-        // the old PreResources overlay these modules' classes won't be visible
-        // to Tomcat at runtime — surface a warning naming them so the user can
-        // fix the build (typically `mvn install` on the missing module).
-        List<String> missingDepJars = new ArrayList<>();
 
         for (String rootPath : snapshot.rootPaths) {
-            // Skip entries already under the artifact's docBase (the WAR's
-            // own WEB-INF/classes and WEB-INF/lib end up here via the
-            // recursive classpath walk).
             if (rootPath.startsWith(artifactAbsPath)) {
                 continue;
             }
@@ -953,28 +903,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (!file.exists()) continue;
 
             if (file.isDirectory()) {
-                // Class output directory. We no longer inject these as PreResources.
-                // Two cases worth telling the user about:
-                //   - It's a dep module's classes AND no JAR backs them → warn (build is missing this module's package).
-                //   - It's the WAR module's own classes → handled by DeployedClassesSync, no action.
-                //   - It's something else (rare) → silent skip.
-                String moduleDirName = snapshot.outputToArtifactName.get(rootPath);
-                if (moduleDirName == null) {
-                    // Not a known dep module. Could be the WAR module's own
-                    // target/classes (sync handles it) or an unrelated dir
-                    // that IntelliJ surfaced via OrderEnumerator. Either way
-                    // no PostResources work to do here.
-                    continue;
-                }
-                // Dep module: is its JAR in WEB-INF/lib?
-                if (coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
-                    continue; // name-matched
-                }
-                if (findCoveringJar(nativePath, moduleDirName, jarIndex) != null) {
-                    continue; // content + pom.properties matched
-                }
-                // Genuinely missing — the user's build didn't package this dep.
-                missingDepJars.add(moduleDirName);
+                extraDirs.add(nativePath);
             } else if (rootPath.endsWith(EXT_JAR)) {
                 String jarName = file.getName();
                 if (isContainerProvidedJar(jarName)) continue;
@@ -983,7 +912,15 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
 
+        if (extraDirs.isEmpty() && extraJars.isEmpty()) {
+            return "";
+        }
+
         StringBuilder sb = new StringBuilder();
+        for (String dir : extraDirs) {
+            sb.append(String.format(PRE_RESOURCE_TEMPLATE,
+                    RESOURCE_CLASS_DIR, escapeXmlAttribute(dir), WEBAPP_MOUNT_CLASSES));
+        }
         for (String jar : extraJars) {
             String jarName = new File(jar).getName();
             sb.append(String.format(POST_RESOURCE_TEMPLATE,
@@ -991,40 +928,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     WEBAPP_MOUNT_LIB + escapeXmlAttribute(jarName)));
         }
 
-        if (!extraJars.isEmpty()) {
-            LOG.info("Added " + extraJars.size() + " library JAR(s) as PostResources for '"
-                    + deployment.getDisplayName() + "'");
-        }
-
-        if (!missingDepJars.isEmpty() && logger != null) {
-            // Single consolidated warning, names every offender so the user can
-            // act on the whole list at once.
-            logger.logServerWarning(
-                    "Dependency module(s) " + missingDepJars + " are on the project classpath "
-                    + "but no matching JAR is packaged in WEB-INF/lib/. Tomcat will not find their "
-                    + "classes at runtime. Build the missing module(s) (typically 'mvn install' or "
-                    + "the equivalent in your build tool) or check your build's packaging "
-                    + "configuration so the JAR lands in the deployed WAR. Earlier versions of "
-                    + "DevTomcat silently overlaid these modules' target/classes onto the classpath "
-                    + "via <PreResources>; that overlay was removed because it caused duplicate-"
-                    + "classpath problems for any framework that audits its own resources for "
-                    + "uniqueness.");
-        }
+        LOG.info("Mounted " + extraDirs.size() + " class dir(s) and "
+                + extraJars.size() + " JAR(s) for '" + deployment.getDisplayName() + "'");
 
         return sb.toString();
-    }
-
-    /**
-     * Strips the version suffix from a JAR filename.
-     * e.g. "foo-bar-1.2.3.jar" → "foo-bar", "foo-bar-1.2.3-SNAPSHOT.jar" → "foo-bar"
-     * Returns null if the name cannot be parsed.
-     */
-    @Nullable
-    static String stripJarVersion(@NotNull String jarName) {
-        if (!jarName.endsWith(EXT_JAR)) return null;
-        String base = jarName.substring(0, jarName.length() - EXT_JAR.length());
-        // Remove -<version> suffix: version starts with a digit (1.2.3) or is a bare SNAPSHOT
-        return base.replaceAll("-(\\d+.*|SNAPSHOT)$", "");
     }
 
     static boolean isContainerProvidedJar(@NotNull String jarName) {
@@ -1035,108 +942,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
         return false;
-    }
-
-    /** Max number of file paths sampled from a module output directory for content matching. */
-    private static final int CONTENT_SAMPLE_SIZE = 5;
-
-    /**
-     * Pre-scanned metadata for a single JAR in {@code WEB-INF/lib}.
-     * Built once per JAR during the initial WEB-INF/lib scan so that subsequent
-     * per-module guard checks are purely in-memory — no repeated ZipFile opens.
-     */
-    static final class JarMeta {
-        /** Stripped base name, e.g. {@code "common"} from {@code "common-1.0-SNAPSHOT.jar"}. */
-        final String baseName;
-        /** All ZIP entry names — used for content-based module matching. */
-        final Set<String> entryPaths;
-        /** Maven artifactIds from {@code META-INF/maven/<g>/<a>/pom.properties} entries. */
-        final Set<String> pomArtifacts;
-
-        JarMeta(String baseName, Set<String> entryPaths, Set<String> pomArtifacts) {
-            this.baseName = baseName;
-            this.entryPaths = entryPaths;
-            this.pomArtifacts = pomArtifacts;
-        }
-    }
-
-    /**
-     * Opens {@code jarPath} once and reads all ZIP entries to build a {@link JarMeta}.
-     * {@code META-INF/maven/<g>/<a>/pom.properties} entries are parsed to extract Maven
-     * artifactIds for the metadata-based module coverage check.
-     */
-    @NotNull
-    static JarMeta scanJar(@NotNull Path jarPath, @Nullable String baseName) {
-        if (baseName == null) {
-            String n = jarPath.getFileName().toString();
-            baseName = n.endsWith(EXT_JAR) ? n.substring(0, n.length() - EXT_JAR.length()) : n;
-        }
-        Set<String> entryPaths = new HashSet<>();
-        Set<String> pomArtifacts = new HashSet<>();
-        try (var zf = new ZipFile(jarPath.toFile())) {
-            zf.stream().forEach(e -> {
-                String name = e.getName();
-                entryPaths.add(name);
-                // META-INF/maven/<groupId>/<artifactId>/pom.properties — parts[3] = artifactId
-                if (name.startsWith(META_INF_MAVEN_PREFIX) && name.endsWith(POM_PROPERTIES_SUFFIX)) {
-                    String[] parts = name.split("/");
-                    if (parts.length == META_INF_MAVEN_POM_PROPERTIES_SEGMENTS) {
-                        pomArtifacts.add(parts[3]);
-                    }
-                }
-            });
-        } catch (IOException e) {
-            LOG.debug("JAR scan: could not open '" + jarPath.getFileName() + "': " + e.getMessage());
-        }
-        return new JarMeta(baseName, entryPaths, pomArtifacts);
-    }
-
-    /**
-     * Determines whether any pre-scanned JAR in {@code jarIndex} packages the given
-     * module's output. Two complementary checks are performed against the in-memory index
-     * (no ZipFile I/O at this point — all JAR data was collected by {@link #scanJar}):
-     *
-     * <ul>
-     *   <li><b>Content check</b> — samples up to {@value #CONTENT_SAMPLE_SIZE} file paths
-     *       from {@code moduleOutputNativePath} and tests whether any indexed JAR contains
-     *       those entries. Covers any build tool regardless of JAR naming convention.</li>
-     *   <li><b>Metadata check</b> — tests whether any indexed JAR's {@code pom.properties}
-     *       declares {@code artifactName} as its Maven artifactId. Works even when the
-     *       module output directory is empty (not yet compiled).</li>
-     * </ul>
-     *
-     * @return the matching JAR's base name, or {@code null} if no JAR covers this module
-     */
-    @Nullable
-    static String findCoveringJar(@NotNull String moduleOutputNativePath,
-                                          @Nullable String artifactName,
-                                          @NotNull List<JarMeta> jarIndex) {
-        if (jarIndex.isEmpty()) return null;
-
-        // Sample file paths from the module output (may be empty if not yet compiled)
-        Path outputDir = Paths.get(moduleOutputNativePath);
-        List<String> sample = new ArrayList<>();
-        try (var walk = Files.walk(outputDir)) {
-            walk.filter(Files::isRegularFile)
-                .limit(CONTENT_SAMPLE_SIZE)
-                .forEach(p -> sample.add(
-                        outputDir.relativize(p).toString().replace(File.separatorChar, '/')));
-        } catch (IOException e) {
-            LOG.debug("JAR scan: could not walk '" + moduleOutputNativePath + "': " + e.getMessage());
-        }
-
-        if (sample.isEmpty() && artifactName == null) return null;
-
-        // Pure in-memory lookups — no I/O
-        for (JarMeta meta : jarIndex) {
-            if (!sample.isEmpty() && sample.stream().anyMatch(meta.entryPaths::contains)) {
-                return meta.baseName;
-            }
-            if (artifactName != null && meta.pomArtifacts.contains(artifactName)) {
-                return meta.baseName;
-            }
-        }
-        return null;
     }
 
     /**

@@ -54,20 +54,26 @@ public interface DeploymentStrategy {
     default void resolveCredentials(@NotNull TomcatRunConfiguration configuration) {}
 
     /**
-     * Generates a context XML descriptor for an exploded artifact, optionally
-     * including {@code <PostResources>} entries for library JARs that the
-     * project depends on but the build did not package into
-     * {@code WEB-INF/lib/}. Used by both initial deployment and redeploy to
-     * ensure consistent context configuration.
+     * Generates a context XML descriptor for an exploded artifact. The
+     * descriptor mounts the module's runtime production classpath onto
+     * Tomcat's webapp classloader so freshly compiled bytes from the IDE's
+     * compile output are visible without copying into the deployed
+     * {@code WEB-INF/classes/}:
      *
-     * <p>The {@code tomcatInfo} parameter gates the {@code <Resources>} block: Tomcat 7's
-     * Digester has no rules for {@code <PostResources>} (added in Tomcat 8), so the block
-     * is omitted when {@code tomcatInfo.getMajorVersion() < 8}. Callers that don't yet
-     * know the version may pass {@code null}; emission then falls back to the modern shape.
+     * <ul>
+     *   <li>Class output directories → {@code <PreResources>} at
+     *       {@code /WEB-INF/classes}</li>
+     *   <li>Library JARs not already in {@code WEB-INF/lib/} →
+     *       {@code <PostResources>} at {@code /WEB-INF/lib/<jar-name>}</li>
+     * </ul>
      *
-     * <p>Note: this method does <em>not</em> emit {@code <PreResources>} for project
-     * module class directories. See {@link LocalDeploymentStrategy} for the 1.2.0
-     * architectural change that removed that overlay.
+     * <p>Used by both initial deployment and redeploy so the context
+     * configuration stays consistent. The {@code tomcatInfo} parameter gates
+     * the {@code <Resources>} block: Tomcat 7's Digester has no rules for
+     * {@code <PreResources>}/{@code <PostResources>} (added in Tomcat 8), so
+     * the block is omitted when {@code tomcatInfo.getMajorVersion() < 8}.
+     * Callers that don't yet know the version may pass {@code null}; emission
+     * then falls back to the modern shape.
      */
     @NotNull
     static String buildContextXml(@NotNull Deployment deployment,

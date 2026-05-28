@@ -266,310 +266,6 @@ class LocalDeploymentStrategyTest {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // stripJarVersion
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("stripJarVersion")
-    class StripJarVersionTests {
-
-        @Test
-        @DisplayName("strips standard Maven release version")
-        void stripsReleaseVersion() {
-            assertEquals("common", LocalDeploymentStrategy.stripJarVersion("common-1.0.jar"));
-        }
-
-        @Test
-        @DisplayName("strips SNAPSHOT version")
-        void stripsSnapshot() {
-            assertEquals("common", LocalDeploymentStrategy.stripJarVersion("common-1.0-SNAPSHOT.jar"));
-        }
-
-        @Test
-        @DisplayName("strips multi-part version from multi-segment artifact name")
-        void stripsMultiSegment() {
-            assertEquals("spring-core", LocalDeploymentStrategy.stripJarVersion("spring-core-6.2.3.jar"));
-            assertEquals("log4j-api", LocalDeploymentStrategy.stripJarVersion("log4j-api-2.17.1.jar"));
-        }
-
-        @Test
-        @DisplayName("handles JAR with no version suffix")
-        void noVersion() {
-            assertEquals("common", LocalDeploymentStrategy.stripJarVersion("common.jar"));
-        }
-
-        @Test
-        @DisplayName("returns null for non-JAR extension")
-        void nonJarExtension() {
-            assertNull(LocalDeploymentStrategy.stripJarVersion("common-1.0.war"));
-            assertNull(LocalDeploymentStrategy.stripJarVersion("common-1.0.zip"));
-        }
-
-        @Test
-        @DisplayName("strips bare SNAPSHOT suffix")
-        void bareSnapshot() {
-            assertEquals("common", LocalDeploymentStrategy.stripJarVersion("common-SNAPSHOT.jar"));
-        }
-
-        @Test
-        @DisplayName("preserves non-version alphabetic suffix")
-        void preservesAlphabeticSuffix() {
-            // "common-api" — 'a' is not a digit, not SNAPSHOT → suffix is kept
-            assertEquals("common-api", LocalDeploymentStrategy.stripJarVersion("common-api.jar"));
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // scanJar
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("scanJar")
-    class ScanJarTests {
-
-        @TempDir
-        Path tempDir;
-
-        @Test
-        @DisplayName("collects all entry paths from JAR")
-        void collectsEntryPaths() throws IOException {
-            Path jar = makeJar(tempDir.resolve("lib-1.0.jar"),
-                    "org/example/Foo.class",
-                    "org/example/Bar.class",
-                    "resources/config.xml");
-
-            LocalDeploymentStrategy.JarMeta meta = LocalDeploymentStrategy.scanJar(jar, "lib");
-
-            assertEquals("lib", meta.baseName);
-            assertTrue(meta.entryPaths.contains("org/example/Foo.class"));
-            assertTrue(meta.entryPaths.contains("org/example/Bar.class"));
-            assertTrue(meta.entryPaths.contains("resources/config.xml"));
-        }
-
-        @Test
-        @DisplayName("extracts Maven artifactId from pom.properties")
-        void extractsPomArtifactId() throws IOException {
-            Path jar = makeJar(tempDir.resolve("common-1.0.jar"),
-                    "org/example/Common.class",
-                    pomPath("org.example", "common"));
-
-            LocalDeploymentStrategy.JarMeta meta = LocalDeploymentStrategy.scanJar(jar, "common");
-
-            assertTrue(meta.pomArtifacts.contains("common"));
-            assertFalse(meta.pomArtifacts.contains("org.example")); // groupId not stored
-        }
-
-        @Test
-        @DisplayName("handles multiple pom.properties entries (fat JAR scenario)")
-        void multiplePomProperties() throws IOException {
-            Path jar = makeJar(tempDir.resolve("uber-1.0.jar"),
-                    pomPath("org.example", "core"),
-                    pomPath("org.example", "utils"));
-
-            LocalDeploymentStrategy.JarMeta meta = LocalDeploymentStrategy.scanJar(jar, "uber");
-
-            assertTrue(meta.pomArtifacts.contains("core"));
-            assertTrue(meta.pomArtifacts.contains("utils"));
-        }
-
-        @Test
-        @DisplayName("uses filename as baseName when baseName param is null")
-        void derivesBaseNameFromFilename() throws IOException {
-            Path jar = makeJar(tempDir.resolve("mylib-2.3.jar"));
-
-            LocalDeploymentStrategy.JarMeta meta = LocalDeploymentStrategy.scanJar(jar, null);
-
-            assertEquals("mylib-2.3", meta.baseName); // no version to strip without the hint
-        }
-
-        @Test
-        @DisplayName("returns empty JarMeta for corrupted/non-existent JAR without throwing")
-        void gracefulOnCorruptJar() throws IOException {
-            Path notAJar = tempDir.resolve("bad.jar");
-            Files.writeString(notAJar, "not a zip");
-
-            LocalDeploymentStrategy.JarMeta meta = LocalDeploymentStrategy.scanJar(notAJar, "bad");
-
-            assertEquals("bad", meta.baseName);
-            assertTrue(meta.entryPaths.isEmpty());
-            assertTrue(meta.pomArtifacts.isEmpty());
-        }
-
-        @Test
-        @DisplayName("returns empty JarMeta for empty JAR")
-        void emptyJar() throws IOException {
-            Path jar = makeJar(tempDir.resolve("empty-1.0.jar") /* no entries */);
-
-            LocalDeploymentStrategy.JarMeta meta = LocalDeploymentStrategy.scanJar(jar, "empty");
-
-            assertTrue(meta.entryPaths.isEmpty());
-            assertTrue(meta.pomArtifacts.isEmpty());
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // findCoveringJar
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("findCoveringJar")
-    class FindCoveringJarTests {
-
-        @TempDir
-        Path tempDir;
-
-        // --- setup helpers ---
-
-        private Path moduleOutput(String name) throws IOException {
-            return Files.createDirectories(tempDir.resolve(name));
-        }
-
-        private void addFile(Path dir, String relativePath) throws IOException {
-            Path target = dir.resolve(relativePath);
-            Files.createDirectories(target.getParent());
-            Files.writeString(target, "content");
-        }
-
-        private LocalDeploymentStrategy.JarMeta meta(String baseName, String... entries)
-                throws IOException {
-            Path jar = makeJar(tempDir.resolve(baseName + "-1.0.jar"), entries);
-            return LocalDeploymentStrategy.scanJar(jar, baseName);
-        }
-
-        // --- tests ---
-
-        @Test
-        @DisplayName("returns null for empty jarIndex")
-        void emptyIndex() throws IOException {
-            Path out = moduleOutput("common");
-            addFile(out, "org/example/Common.class");
-
-            assertNull(LocalDeploymentStrategy.findCoveringJar(out.toString(), "common", List.of()));
-        }
-
-        @Test
-        @DisplayName("returns null when artifactName is null and output is empty")
-        void nullArtifactAndEmptyOutput() throws IOException {
-            Path out = moduleOutput("empty");
-
-            assertNull(LocalDeploymentStrategy.findCoveringJar(out.toString(), null,
-                    List.of(meta("irrelevant", "some/Entry.class"))));
-        }
-
-        @Test
-        @DisplayName("matches by content: sampled file found in JAR entries")
-        void contentMatch() throws IOException {
-            Path out = moduleOutput("common");
-            addFile(out, "org/example/Common.class");
-            addFile(out, "db/changelog/master.xml");
-
-            // JAR that actually contains these files
-            LocalDeploymentStrategy.JarMeta covering = meta("common",
-                    "org/example/Common.class",
-                    "db/changelog/master.xml");
-            // Another JAR that doesn't
-            LocalDeploymentStrategy.JarMeta other = meta("other",
-                    "com/other/Thing.class");
-
-            String result = LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "common", List.of(other, covering));
-
-            assertEquals("common", result);
-        }
-
-        @Test
-        @DisplayName("matches by pom.properties metadata when output directory is empty")
-        void metadataMatchEmptyOutput() throws IOException {
-            Path out = moduleOutput("common"); // empty — not compiled yet
-            Path jar = makeJar(tempDir.resolve("custom-name-1.0.jar"),
-                    pomPath("org.example", "common"),
-                    "org/example/Common.class");
-            LocalDeploymentStrategy.JarMeta covering = LocalDeploymentStrategy.scanJar(jar, "custom-name");
-
-            String result = LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "common", List.of(covering));
-
-            assertEquals("custom-name", result);
-        }
-
-        @Test
-        @DisplayName("matches by pom.properties when JAR has a custom name different from module")
-        void metadataMatchCustomJarName() throws IOException {
-            Path out = moduleOutput("common");
-            addFile(out, "org/example/Common.class");
-
-            // JAR named "my-shared-lib" but pom.properties says artifactId=common
-            Path jar = makeJar(tempDir.resolve("my-shared-lib-1.0.jar"),
-                    pomPath("org.example", "common"),
-                    "org/example/Common.class");
-            LocalDeploymentStrategy.JarMeta covering = LocalDeploymentStrategy.scanJar(jar, "my-shared-lib");
-
-            String result = LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "common", List.of(covering));
-
-            assertEquals("my-shared-lib", result);
-        }
-
-        @Test
-        @DisplayName("returns null when no JAR matches by content or metadata")
-        void noMatch() throws IOException {
-            Path out = moduleOutput("common");
-            addFile(out, "org/example/Common.class");
-
-            LocalDeploymentStrategy.JarMeta unrelated = meta("spring-core",
-                    "org/springframework/core/SpringVersion.class");
-
-            assertNull(LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "common", List.of(unrelated)));
-        }
-
-        @Test
-        @DisplayName("returns first matching JAR when multiple JARs contain the module's files")
-        void returnsFirstMatch() throws IOException {
-            Path out = moduleOutput("shared");
-            addFile(out, "org/example/Shared.class");
-
-            LocalDeploymentStrategy.JarMeta first = meta("shared-a", "org/example/Shared.class");
-            LocalDeploymentStrategy.JarMeta second = meta("shared-b", "org/example/Shared.class");
-
-            String result = LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "shared", List.of(first, second));
-
-            assertEquals("shared-a", result); // first match wins
-        }
-
-        @Test
-        @DisplayName("metadata check does not use groupId: different groupIds with same artifactId both match")
-        void metadataIgnoresGroupId() throws IOException {
-            Path out = moduleOutput("common"); // empty
-
-            // Two JARs both claiming artifactId=common (different groupIds)
-            Path jar1 = makeJar(tempDir.resolve("jar1-1.0.jar"), pomPath("org.example", "common"));
-            Path jar2 = makeJar(tempDir.resolve("jar2-1.0.jar"), pomPath("com.other", "common"));
-            LocalDeploymentStrategy.JarMeta meta1 = LocalDeploymentStrategy.scanJar(jar1, "jar1");
-            LocalDeploymentStrategy.JarMeta meta2 = LocalDeploymentStrategy.scanJar(jar2, "jar2");
-
-            // Both match — first one returned
-            assertEquals("jar1", LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "common", List.of(meta1, meta2)));
-        }
-
-        @Test
-        @DisplayName("handles non-existent module output directory gracefully")
-        void nonExistentOutputDir() throws IOException {
-            Path out = tempDir.resolve("does-not-exist"); // not created
-
-            LocalDeploymentStrategy.JarMeta covering = meta("common",
-                    pomPath("org.example", "common"));
-
-            // Content check fails (no dir), metadata check should still work
-            String result = LocalDeploymentStrategy.findCoveringJar(
-                    out.toString(), "common", List.of(covering));
-
-            assertEquals("common", result);
-        }
-    }
 
     // -------------------------------------------------------------------------
     // getMavenArtifactId — graceful degradation (no IntelliJ platform needed)
@@ -665,10 +361,11 @@ class LocalDeploymentStrategyTest {
         /**
          * Reproducer for the bug reported on GitHub: deploying a webapp on Tomcat 7
          * produced
-         *   WARNING: No rules found matching 'Context/Resources/PostResources'
-         * because PostResources (and the now-removed PreResources) are Tomcat-8-only
-         * elements that Tomcat 7's Digester does not recognise. The fix is to omit
-         * the entire &lt;Resources&gt; block when the configured Tomcat is older than 8.
+         *   WARNING: No rules found matching 'Context/Resources/PreResources'
+         * because PreResources / PostResources are Tomcat-8-only elements that
+         * Tomcat 7's Digester does not recognise. The fix is to omit the
+         * entire &lt;Resources&gt; block when the configured Tomcat is older
+         * than 8 — neither PreResources nor PostResources may appear.
          */
         @Test
         @DisplayName("Tomcat 7 omits the <Resources> block entirely")
@@ -689,13 +386,9 @@ class LocalDeploymentStrategyTest {
 
             assertFalse(contextXml.contains("<Resources"),
                     "Tomcat 7 must not receive <Resources> — its Digester logs a WARNING for "
-                            + "PostResources and silently drops the element");
+                            + "PreResources/PostResources and silently drops the elements");
+            assertFalse(contextXml.contains("<PreResources"));
             assertFalse(contextXml.contains("<PostResources"));
-            // Pin that PreResources is also absent — they were removed entirely in 1.2.0.
-            // Any reappearance is a regression that brings back the duplicate-classpath
-            // class of problems we eliminated.
-            assertFalse(contextXml.contains("<PreResources"),
-                    "PreResources injection was removed in 1.2.0; it must never reappear");
             // The shell of the descriptor must still be valid so the deployment itself works.
             assertTrue(contextXml.contains("<Context "),
                     "the <Context> root must still be present so the webapp deploys");
@@ -725,7 +418,7 @@ class LocalDeploymentStrategyTest {
             // lose those classpath additions and have no idea why their webapp can't
             // find them.
             org.mockito.Mockito.verify(logger).logServerInfo(
-                    org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
+                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
         }
 
         @Test
@@ -752,7 +445,7 @@ class LocalDeploymentStrategyTest {
             // The "tomcat 7 limitation" info message must NOT have fired when the
             // version is simply unknown.
             org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
-                    org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
+                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
             // Context shell still present.
             assertTrue(contextXml.contains("<Context "));
         }
@@ -783,43 +476,7 @@ class LocalDeploymentStrategyTest {
 
             // Same regression guard: unknown version must not fire the Tomcat 7 path.
             org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
-                    org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
-        }
-
-        @Test
-        @DisplayName("PreResources never appears in the generated context XML on any Tomcat version")
-        void preResourcesRegressionGuard(@TempDir Path tempDir) throws IOException {
-            // The PreResources overlay of class directories was removed in 1.2.0
-            // because it made the same logical resource reachable at two URIs
-            // on the webapp classloader, which any framework or library that
-            // audits its own resources for uniqueness would refuse. If a future
-            // change reintroduces the overlay, this pinned regression test
-            // fails so the reasoning is forced back to the surface before it
-            // ships.
-            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
-            com.dev.idea.plugins.tomcat.model.Deployment artifact =
-                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
-                            artifactPath, "/", /* exploded */ true);
-            com.intellij.openapi.project.Project project =
-                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
-
-            // Try every TomcatInfo shape — null (unknown), explicit modern (10),
-            // legacy (7) — none of them should ever produce a <PreResources> element.
-            com.dev.idea.plugins.tomcat.setting.TomcatInfo[] shapes = {
-                    null,
-                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
-                            "Tomcat 10", "10.1.28", "/opt/tomcat-10"),
-                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
-                            "Tomcat 7", "7.0.109", "/opt/tomcat-7"),
-            };
-            for (com.dev.idea.plugins.tomcat.setting.TomcatInfo info : shapes) {
-                String contextXml = LocalDeploymentStrategy.buildContextXml(
-                        artifact, artifactPath, /* preserveSessions */ false,
-                        project, info, /* logger */ null);
-                assertFalse(contextXml.contains("<PreResources"),
-                        "PreResources injection was removed in 1.2.0 and must never "
-                                + "reappear (Tomcat info: " + info + ")");
-            }
+                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
         }
 
         @Test

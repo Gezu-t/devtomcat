@@ -7,7 +7,7 @@
 - Pre-launch classpath-duplicate scan for exploded deployments: warns when the same logical resource is packaged in both `WEB-INF/classes/` and a `WEB-INF/lib/` JAR (or in two JARs), filtering universally-benign cases like `META-INF/MANIFEST.MF`, `META-INF/services/*`, `META-INF/maven/*`, multi-release JAR overrides, and license files.
 
 ### Changed
-- Removed the `<PreResources>` overlay of project module class directories on the deployed `WEB-INF/classes/`. The WAR module's fresh classes now reach Tomcat solely via DeployedClassesSync; dep modules are served from their `WEB-INF/lib/` JARs. Eliminates a class of duplicate-classpath problems that affected any framework auditing its own resources for uniqueness. Dep modules whose JARs are missing from `WEB-INF/lib/` surface a clear warning naming the module instead of being silently rescued.
+- Exploded deployments overlay the module's runtime classpath onto Tomcat's webapp classloader: class output directories mount at `/WEB-INF/classes` via `<PreResources>` (zero-copy hot reload of freshly compiled bytes), and library JARs not already in `WEB-INF/lib/` mount via `<PostResources>`. Code changes become visible on the next request without rebuilding the WAR.
 
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.
