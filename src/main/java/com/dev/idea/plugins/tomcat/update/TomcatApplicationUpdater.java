@@ -531,7 +531,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         java.util.List<DeploymentArtifact> artifacts =
                 configuration.getConfigData().getDeploymentConfig().getArtifacts();
         java.util.List<WarToExplodedQuickFix.FixCandidate> candidates =
-                WarToExplodedQuickFix.findFixableArtifacts(artifacts);
+                WarToExplodedQuickFix.findFixableArtifacts(project, artifacts);
         if (candidates.isEmpty()) return;
 
         String title = candidates.size() == 1

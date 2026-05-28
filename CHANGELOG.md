@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- WAR-deployment warning now offers a one-click "Switch to Exploded" action when a sibling exploded directory is on disk, enabling hot reload (Ctrl+F10) without rebuilding the WAR.
+- WAR-deployment warning now offers a one-click "Switch to Exploded" action when a sibling exploded directory is on disk and belongs to a project module, enabling hot reload (Ctrl+F10) without rebuilding the WAR.
 
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.
