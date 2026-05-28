@@ -1,9 +1,12 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.intellij.openapi.compiler.CompileScope;
+import com.intellij.openapi.compiler.CompileStatusNotification;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.function.IntConsumer;
 
@@ -33,6 +36,10 @@ public final class CompilerSupport {
      * @param startMessage  message logged before the build starts (e.g. "Compiling project...")
      * @param abortMessage  warning message logged when the build is aborted
      * @param errorMessage  error message logged when the build has errors (error count appended automatically)
+     * @param scope         the modules to build; {@code null} builds the whole project. A scoped
+     *                      build still compiles incrementally and produces the same outputs for the
+     *                      modules it covers — it just skips re-checking modules the deployment
+     *                      does not depend on (see {@code DeploymentCompileScope})
      * @param onSuccess     callback invoked only when the build completes with zero errors
      *                      and no abort; receives the compiler warning count so the caller
      *                      can include it in its own success message
@@ -42,9 +49,10 @@ public final class CompilerSupport {
                                       @NotNull String startMessage,
                                       @NotNull String abortMessage,
                                       @NotNull String errorMessage,
+                                      @Nullable CompileScope scope,
                                       @NotNull IntConsumer onSuccess) {
         logger.logServerInfo(startMessage);
-        CompilerManager.getInstance(project).make((aborted, errors, warnings, compileContext) -> {
+        CompileStatusNotification callback = (aborted, errors, warnings, compileContext) -> {
             if (aborted) {
                 logger.logServerWarning(abortMessage);
                 return;
@@ -54,6 +62,12 @@ public final class CompilerSupport {
                 return;
             }
             onSuccess.accept(warnings);
-        });
+        };
+        CompilerManager compiler = CompilerManager.getInstance(project);
+        if (scope != null) {
+            compiler.make(scope, callback);
+        } else {
+            compiler.make(callback);
+        }
     }
 }

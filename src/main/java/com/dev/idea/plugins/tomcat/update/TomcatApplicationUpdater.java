@@ -11,6 +11,7 @@ import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.debugger.impl.DebuggerSession;
+import com.intellij.openapi.compiler.CompileScope;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.Executor;
@@ -159,6 +160,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 "Syncing resources...",
                 "Build aborted; resource sync cancelled",
                 "Build failed",
+                DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
                     logger.logServerInfo("Resources synced" + warningSuffix(warnings));
                     // Mirror module output (which includes resource roots — Maven
@@ -196,6 +198,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 "Compiling project...",
                 "Compilation aborted",
                 "Compilation failed",
+                DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings));
                     // Mirror fresh class output into each exploded deployment's
@@ -240,6 +243,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 "Compiling and redeploying...",
                 "Compilation aborted",
                 "Compilation failed",
+                DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", redeploying artifacts...");
                     // Mirror fresh classes into each exploded deployment so the
@@ -264,6 +268,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 "Compiling before restart...",
                 "Compilation aborted; restart cancelled",
                 "Compilation failed; restart cancelled",
+                DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
             logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", restarting Tomcat...");
 

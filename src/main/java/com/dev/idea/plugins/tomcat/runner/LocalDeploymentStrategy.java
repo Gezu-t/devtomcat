@@ -2,10 +2,8 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
-import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
-import com.dev.idea.plugins.tomcat.update.DeployedClassesSync;
+import com.dev.idea.plugins.tomcat.update.DeploymentModuleResolver;
 import com.dev.idea.plugins.tomcat.update.WebResourcesSync;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
@@ -18,8 +16,6 @@ import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
-import com.intellij.packaging.artifacts.Artifact;
-import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.openapi.roots.ModuleOrderEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEntry;
@@ -1158,12 +1154,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Resolves the owning IntelliJ Module via the typed {@link Deployment}
-     * hierarchy — no string-matching anywhere.
-     * {@link ArtifactBackedDeployment} walks the artifact's packaging tree
-     * for its first {@code ModulePackagingElement};
-     * {@link ModuleBackedDeployment} returns its pointer's module directly;
-     * external deployments have no project module to resolve.
+     * Resolves the owning IntelliJ Module for {@code deployment}, delegating to
+     * {@link DeploymentModuleResolver} so the launch classpath and the
+     * scoped-compile module set are derived from exactly the same
+     * deployment→module mapping.
      *
      * <p><strong>Must be called under a read action.</strong> The sole caller
      * is {@link #collectModelSnapshot}, which is always invoked inside
@@ -1172,28 +1166,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     @Nullable
     private static Module resolveModuleForDeployment(@NotNull Deployment deployment,
                                                      @NotNull Project project) {
-        try {
-            if (deployment instanceof ArtifactBackedDeployment a) {
-                Artifact artifact = a.getArtifactPointer().getArtifact();
-                if (artifact == null) return null;
-                ArtifactManager mgr;
-                try {
-                    mgr = ArtifactManager.getInstance(project);
-                } catch (NoClassDefFoundError | Exception ignored) {
-                    return null;
-                }
-                if (mgr == null) return null;
-                return DeployedClassesSync.walkPackagingTreeForModule(
-                        artifact.getRootElement(), mgr.getResolvingContext());
-            }
-            if (deployment instanceof ModuleBackedDeployment m) {
-                return m.getModule();
-            }
-            return null; // ExternalFileDeployment — no project module
-        } catch (Exception e) {
-            LOG.warn("Failed to resolve module for '" + deployment.getDisplayName()
-                    + "': " + e.getMessage());
-            return null;
-        }
+        return DeploymentModuleResolver.resolve(deployment, project);
     }
 }

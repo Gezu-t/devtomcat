@@ -11,6 +11,7 @@
 - Exploded deployments also mount the module's webapp source directories at the web-app root via `<PreResources>`, so edited JSPs and static resources are served from source on the next request without re-copying into the artifact.
 - Class sync runs the broken-class byte scan only on files it is about to copy; unchanged files cost a stat, so a no-op sync no longer reads the entire deployed classpath off disk on each launch/update.
 - Under Debug, "Update classes and resources" redefines changed classes in the live JVM and preserves sessions and in-memory state, restarting the context automatically only when a change is structural and cannot be redefined.
+- Update actions compile only the deployment modules plus their upstream dependency closure instead of the whole project, falling back to a full build when no module-backed deployment resolves.
 
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.
