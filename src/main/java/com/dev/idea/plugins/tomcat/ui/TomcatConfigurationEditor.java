@@ -348,14 +348,17 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     syncBeforeLaunchPanelCommunity();
                 }
             });
-            tableManager.setSelectionChangeListener(artifact -> {
-                if (isEventsSuppressed() || tabbedPane == null) return;
-                if (capturedArtifactMgr != null) {
-                    scheduleBeforeLaunchSync(capturedArtifactMgr);
-                } else {
-                    syncBeforeLaunchPanelCommunity();
-                }
-            });
+            // Intentionally NOT wiring a selection-change listener to the Before
+            // Launch sync. The sync iterates every deployment in the table
+            // (doSyncBeforeLaunch uses getDeployments(), not the selected row),
+            // so changing which row is highlighted produces an identical task
+            // list — the sync work is pure waste. Worse, Swing's JBList fires a
+            // selection event as a side effect of model mutations (remove, move,
+            // setElementAt), so every removal used to schedule the heavy
+            // replaceBeforeLaunchSteps + fireStepsBeforeRunChanged pass twice
+            // — once for the auto-fired selection-change and once for the
+            // explicit one in removeSelectedDeployment. The artifactListChange
+            // listener below is the only signal that actually warrants a sync.
 
             deploymentTab = new DeploymentConfigurationPanel(
                     project,
