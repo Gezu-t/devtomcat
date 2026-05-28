@@ -784,7 +784,7 @@ class LocalDeploymentStrategyTest {
             // user with a multi-module project would silently lose classpath additions
             // and have no idea why their webapp can't find its sibling-module classes.
             org.mockito.Mockito.verify(logger).logServerInfo(
-                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
+                    org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
         }
 
         @Test
@@ -811,7 +811,7 @@ class LocalDeploymentStrategyTest {
             // The "tomcat 7 limitation" info message must NOT have fired when the
             // version is simply unknown.
             org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
-                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
+                    org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
             // Context shell still present.
             assertTrue(contextXml.contains("<Context "));
         }
@@ -842,7 +842,7 @@ class LocalDeploymentStrategyTest {
 
             // Same regression guard: unknown version must not fire the Tomcat 7 path.
             org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerInfo(
-                    org.mockito.ArgumentMatchers.contains("does not support <PreResources>"));
+                    org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
         }
 
         @Test

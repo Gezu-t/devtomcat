@@ -54,15 +54,20 @@ public interface DeploymentStrategy {
     default void resolveCredentials(@NotNull TomcatRunConfiguration configuration) {}
 
     /**
-     * Generates a context XML descriptor for an exploded artifact, including
-     * {@code <PreResources>} / {@code <PostResources>} for multi-module classpath support.
-     * Used by both initial deployment and redeploy to ensure consistent context configuration.
+     * Generates a context XML descriptor for an exploded artifact, optionally
+     * including {@code <PostResources>} entries for library JARs that the
+     * project depends on but the build did not package into
+     * {@code WEB-INF/lib/}. Used by both initial deployment and redeploy to
+     * ensure consistent context configuration.
      *
      * <p>The {@code tomcatInfo} parameter gates the {@code <Resources>} block: Tomcat 7's
-     * Digester has no rules for {@code <PreResources>} / {@code <PostResources>} (those
-     * elements were added in Tomcat 8), so the block is omitted when
-     * {@code tomcatInfo.getMajorVersion() < 8}. Callers that don't yet know the version
-     * may pass {@code null}; emission then falls back to the modern shape.
+     * Digester has no rules for {@code <PostResources>} (added in Tomcat 8), so the block
+     * is omitted when {@code tomcatInfo.getMajorVersion() < 8}. Callers that don't yet
+     * know the version may pass {@code null}; emission then falls back to the modern shape.
+     *
+     * <p>Note: this method does <em>not</em> emit {@code <PreResources>} for project
+     * module class directories. See {@link LocalDeploymentStrategy} for the 1.2.0
+     * architectural change that removed that overlay.
      */
     @NotNull
     static String buildContextXml(@NotNull Deployment deployment,

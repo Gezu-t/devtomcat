@@ -47,25 +47,44 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  * Local deployment strategy: deploys artifacts to the CATALINA_BASE filesystem.
  *
  * <p>Exploded artifacts get a context XML descriptor in {@code conf/Catalina/localhost/};
- * packaged WARs are copied to {@code webapps/}. Multi-module projects get
- * {@code <PostResources>} entries so the webapp classloader sees all module outputs.
+ * packaged WARs are copied to {@code webapps/}. The context descriptor may include
+ * {@code <PostResources>} entries that wire in library JARs from the module's
+ * classpath that aren't already packaged into {@code WEB-INF/lib/} (e.g.
+ * transitive dependencies the build forgot to include).
+ *
+ * <p><b>What this strategy does NOT do (1.2.0 architectural change):</b>
+ * earlier versions also injected each project module's class output directory
+ * as {@code <PreResources>}, overlaying them on the deployed
+ * {@code WEB-INF/classes/} for zero-copy hot reload. That overlay caused
+ * duplicate-classpath problems (Liquibase 4.27+ refusing duplicate changelogs,
+ * CDI duplicate-bean errors) because the same resource could be reached at two
+ * URIs. The overlay was dropped; the WAR module's classes now reach Tomcat via
+ * {@code DeployedClassesSync} copying {@code target/classes/} into the deployed
+ * {@code WEB-INF/classes/} on every launch and Ctrl+F10. Dependency modules
+ * are served from their {@code WEB-INF/lib/} JARs — repackaging required for
+ * code changes, same contract as every other Tomcat deployment.
  */
 final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     private static final Logger LOG = Logger.getInstance(LocalDeploymentStrategy.class);
 
     // --- Tomcat extra resources (context.xml overlay) ---
-    private static final String RESOURCE_CLASS_DIR = "org.apache.catalina.webresources.DirResourceSet";
+    // RESOURCE_CLASS_DIR / WEBAPP_MOUNT_CLASSES were used by the now-removed
+    // PreResources injection of class directories. PostResources for JARs only
+    // needs RESOURCE_CLASS_FILE + WEBAPP_MOUNT_LIB.
     private static final String RESOURCE_CLASS_FILE = "org.apache.catalina.webresources.FileResourceSet";
-    private static final String WEBAPP_MOUNT_CLASSES = "/WEB-INF/classes";
     private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
 
-    // Class output dirs are PreResources so they shadow the (potentially stale) WEB-INF/classes
-    // inside the exploded artifact's docBase. Tomcat resolves: Pre → docBase → Post.
-    // If we used PostResources here, docBase's WEB-INF/classes would always win and freshly
-    // compiled target/classes/ would never be seen by the classloader.
-    private static final String PRE_RESOURCE_TEMPLATE =
-            "\n    <PreResources className=\"%s\"\n                   base=\"%s\" webAppMount=\"%s\" />";
+    // PreResources for class directories used to overlay each module's
+    // target/classes onto the deployed WEB-INF/classes. That overlay caused a
+    // class of duplicate-classpath problems (Liquibase 4.27+ refusing duplicate
+    // changelogs, CDI duplicate-bean errors, etc.) because the same resource
+    // could be reached at two different URLs — once via the overlay, once via
+    // the deployed copy. The overlay is gone; the WAR module's fresh classes
+    // reach Tomcat via DeployedClassesSync copying target/classes →
+    // WEB-INF/classes, and dep modules are served from WEB-INF/lib JARs. The
+    // constant for the PreResources XML template was removed alongside the
+    // injection logic.
 
     // JAR files go to PostResources — they extend WEB-INF/lib with entries not already packaged
     // in the artifact, so there is no shadowing conflict with docBase content.
@@ -759,20 +778,46 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     }
 
     /**
-     * Builds extra resource entries for an exploded artifact's context XML:
+     * Builds {@code <PostResources>} entries for an exploded artifact's context
+     * XML, listing library JARs from the module's full classpath that are not
+     * already packaged into the artifact's {@code WEB-INF/lib/}. Container-
+     * provided JARs (Tomcat internals, Servlet/JSP/EL APIs) are excluded so
+     * they don't fight Tomcat's own loaders.
+     *
+     * <h2>What this method does NOT do (architectural note for 1.2.0)</h2>
+     *
+     * <p>Previous versions also emitted {@code <PreResources>} entries for
+     * project module class output directories ({@code target/classes/},
+     * {@code out/production/<module>/}, etc.). The intent was to overlay
+     * freshly compiled classes on top of the deployed {@code WEB-INF/classes/}
+     * for zero-copy hot reload. But the overlay created a class of duplicate-
+     * classpath problems — Liquibase 4.27+ refusing to load a changelog
+     * reachable at two URIs, CDI duplicate-bean detection, Spring component-
+     * scan double-registration — because the same resource could be reached
+     * once via the overlay and once via the deployed copy. Each new strict-
+     * classpath library would have required another defensive guard.
+     *
+     * <p>The overlay was dropped. Today:
      * <ul>
-     *   <li>Class output directories → {@code <PreResources>} so freshly compiled classes
-     *       shadow the (potentially stale) {@code WEB-INF/classes} inside the artifact.</li>
-     *   <li>Dependency JARs → {@code <PostResources>} extending {@code WEB-INF/lib} with
-     *       entries not already packaged in the artifact.</li>
+     *   <li>The WAR module's fresh classes reach Tomcat via
+     *       {@link com.dev.idea.plugins.tomcat.update.DeployedClassesSync},
+     *       which copies {@code target/classes/} → the deployed
+     *       {@code WEB-INF/classes/} on every launch and every Ctrl+F10.
+     *       The deployed location is the sole source of truth.</li>
+     *   <li>Dependency modules' classes are served from their JARs in
+     *       {@code WEB-INF/lib/}. Editing a dep module's class requires
+     *       repackaging that module's JAR (typically {@code mvn install}).
+     *       This matches the contract of every other Tomcat deployment.</li>
+     *   <li>When a dep module's JAR is missing from {@code WEB-INF/lib/}
+     *       (the case the old overlay silently rescued), we emit a clear
+     *       pre-launch warning naming the module so the user can fix the
+     *       build rather than running on a misconfigured classpath.</li>
      * </ul>
      *
-     * <p>Project module output directories are identified via {@link #collectModelSnapshot},
-     * which walks the IntelliJ module dependency graph and uses the Maven artifactId (when
-     * available) for reliable JAR-name matching. This prevents false positives where a
-     * third-party {@code api-1.0.jar} in WEB-INF/lib would suppress a project module also
-     * named {@code api}, and correctly handles modules whose directory name differs from
-     * their Maven artifactId.
+     * <p>The matching of dep modules to JARs (used both to suppress
+     * redundant PostResources entries and to identify "missing JAR"
+     * modules for the warning) uses the same two-guard approach as before:
+     * name-based and content+pom.properties.
      */
     @NotNull
     private static String buildExtraResourcesXml(@NotNull Deployment deployment,
@@ -780,8 +825,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                                           @NotNull Project project,
                                           @Nullable TomcatInfo tomcatInfo,
                                           @Nullable TomcatDeploymentLogger logger) {
-        // PreResources/PostResources are Tomcat 8+; Tomcat 7's Digester emits
-        // 'No rules found matching Context/Resources/PreResources' and drops them.
+        // PostResources is Tomcat 8+; Tomcat 7's Digester emits
+        // 'No rules found matching Context/Resources/PostResources' and drops them.
         // Major version 0 = unknown — treat as modern (don't accidentally regress modern users).
         if (tomcatInfo != null
                 && tomcatInfo.getMajorVersion() > 0
@@ -789,9 +834,9 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             if (logger != null) {
                 logger.logServerInfo(
                         "Tomcat " + tomcatInfo.getMajorVersion()
-                                + " does not support <PreResources>/<PostResources> (added in Tomcat 8). "
-                                + "Multi-module classpath additions for '" + deployment.getDisplayName()
-                                + "' will not be applied. Package any required JARs into "
+                                + " does not support <PostResources> (added in Tomcat 8). "
+                                + "Extra library JARs for '" + deployment.getDisplayName()
+                                + "' will not be wired in. Package any required JARs into "
                                 + "WEB-INF/lib if your application depends on them.");
             }
             return "";
@@ -808,8 +853,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             return "";
         }
 
-        // Phase 2 — File I/O: scan WEB-INF/lib once to build the JAR name index (Guard 1)
-        // and the pre-scanned JarMeta index (Guard 2). No model access — pure filesystem I/O.
+        // Phase 2 — File I/O: scan WEB-INF/lib once to build the JAR name index
+        // (used for both the dep-JAR-already-packaged check and the missing-JAR detection)
+        // and the pre-scanned JarMeta index (content + pom.properties matching).
+        // No model access — pure filesystem I/O.
         Set<String> existingLibJars = new HashSet<>();
         Set<String> coveredModuleNames = new HashSet<>();
         List<JarMeta> jarIndex = new ArrayList<>();
@@ -834,105 +881,60 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // Phase 3 — Processing: use the snapshot to drive the context XML build.
         // All values below are plain Java objects — no IntelliJ model access, no threading constraint.
 
-        // Normalize artifact paths for cross-platform comparison
+        // Normalize artifact path for cross-platform comparison.
         String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
-        String webInfClassesPath = artifactPath.resolve(WEB_INF).resolve(WEB_INF_CLASSES)
-                .toAbsolutePath().toString().replace('\\', '/');
 
-        List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
-        List<String> skippedModules = new ArrayList<>();
+        // Dep modules whose classes have no JAR backing in WEB-INF/lib. Without
+        // the old PreResources overlay these modules' classes won't be visible
+        // to Tomcat at runtime — surface a warning naming them so the user can
+        // fix the build (typically `mvn install` on the missing module).
+        List<String> missingDepJars = new ArrayList<>();
 
-        // Track artifact names whose output dirs are injected as PreResources.
-        // Their JARs must NOT be added as PostResources — having both the dir AND the JAR
-        // on the classpath causes duplicate resource entries that break Liquibase, CDI, etc.
-        Set<String> preResourceModuleNames = new HashSet<>();
-
-        // snapshot.rootPaths: classpath roots from the full module dependency tree.
-        // Paths are plain strings with trailing !/ already stripped (done in collectModelSnapshot).
         for (String rootPath : snapshot.rootPaths) {
-            // Skip entries already under the artifact's docBase
+            // Skip entries already under the artifact's docBase (the WAR's
+            // own WEB-INF/classes and WEB-INF/lib end up here via the
+            // recursive classpath walk).
             if (rootPath.startsWith(artifactAbsPath)) {
                 continue;
             }
 
-            // Convert to OS-native path for File operations and context XML
             String nativePath = rootPath.replace('/', File.separatorChar);
             File file = new File(nativePath);
             if (!file.exists()) continue;
 
             if (file.isDirectory()) {
-                // Class output directory — skip if it IS the artifact's WEB-INF/classes
-                if (rootPath.equals(webInfClassesPath)) continue;
-
-                // For project module output directories, include as PreResources so
-                // freshly compiled classes shadow the (potentially stale) WEB-INF/classes.
-                // Record the artifact name so we can skip its JAR in the PostResources pass.
+                // Class output directory. We no longer inject these as PreResources.
+                // Two cases worth telling the user about:
+                //   - It's a dep module's classes AND no JAR backs them → warn (build is missing this module's package).
+                //   - It's the WAR module's own classes → handled by DeployedClassesSync, no action.
+                //   - It's something else (rare) → silent skip.
                 String moduleDirName = snapshot.outputToArtifactName.get(rootPath);
-                if (moduleDirName != null) {
-                    // Artifact name comes from the module graph (Maven artifactId preferred),
-                    // not from file-path extraction — reliable even when directory name ≠ artifactId.
-                    // Guard 1 — name-based: fast, covers Maven and standard Gradle naming.
-                    if (coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
-                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — name-matched JAR in WEB-INF/lib");
-                        skippedModules.add(moduleDirName);
-                        continue;
-                    }
-                    // Guard 2 — content + metadata: covers custom JAR naming (Gradle archivesBaseName,
-                    // Ant custom jar task) AND empty/not-yet-compiled module outputs.
-                    // Content check: samples file paths from the output dir and looks for them in JARs.
-                    // Metadata check: reads META-INF/maven/<g>/<artifactId>/pom.properties inside JARs
-                    // — works even when the output dir is empty because it doesn't need any content.
-                    String coveringJar = findCoveringJar(nativePath, moduleDirName, jarIndex);
-                    if (coveringJar != null) {
-                        LOG.debug("Skipping PreResources for module '" + moduleDirName + "' — matched by '" + coveringJar + "' in WEB-INF/lib");
-                        skippedModules.add(moduleDirName);
-                        continue;
-                    }
-                    extraDirs.add(nativePath);
-                    preResourceModuleNames.add(moduleDirName.toLowerCase(Locale.ROOT));
+                if (moduleDirName == null) {
+                    // Not a known dep module. Could be the WAR module's own
+                    // target/classes (sync handles it) or an unrelated dir
+                    // that IntelliJ surfaced via OrderEnumerator. Either way
+                    // no PostResources work to do here.
                     continue;
                 }
-
-                // Not a known dependency module output — apply name-based duplicate guard
-                // as a safety net for unusual classpath layouts (e.g. the webapp's own
-                // target/classes, or output dirs from modules not in the dependency graph).
-                String moduleName = extractModuleName(nativePath);
-                if (moduleName != null && coveredModuleNames.contains(moduleName.toLowerCase(Locale.ROOT))) {
-                    LOG.debug("Skipping non-module class dir '" + nativePath + "' — already packaged as JAR in WEB-INF/lib");
-                    skippedModules.add(moduleName);
-                    continue;
+                // Dep module: is its JAR in WEB-INF/lib?
+                if (coveredModuleNames.contains(moduleDirName.toLowerCase(Locale.ROOT))) {
+                    continue; // name-matched
                 }
-                extraDirs.add(nativePath);
+                if (findCoveringJar(nativePath, moduleDirName, jarIndex) != null) {
+                    continue; // content + pom.properties matched
+                }
+                // Genuinely missing — the user's build didn't package this dep.
+                missingDepJars.add(moduleDirName);
             } else if (rootPath.endsWith(EXT_JAR)) {
-                // JAR file — skip container-provided libs and jars already packaged in WEB-INF/lib
                 String jarName = file.getName();
                 if (isContainerProvidedJar(jarName)) continue;
                 if (existingLibJars.contains(jarName)) continue;
-
-                // Skip JARs whose classes are already provided via PreResources from
-                // their module's target/classes. Adding both the classes dir AND the JAR
-                // causes duplicate classpath entries that break Liquibase, CDI, etc.
-                String jarBase = stripJarVersion(jarName);
-                if (jarBase != null && preResourceModuleNames.contains(jarBase.toLowerCase(Locale.ROOT))) {
-                    LOG.info("Skipping PostResources for '" + jarName +
-                            "' — classes already served via PreResources");
-                    continue;
-                }
-
                 extraJars.add(nativePath);
             }
         }
 
-        if (extraDirs.isEmpty() && extraJars.isEmpty()) {
-            return "";
-        }
-
         StringBuilder sb = new StringBuilder();
-        for (String dir : extraDirs) {
-            sb.append(String.format(PRE_RESOURCE_TEMPLATE,
-                    RESOURCE_CLASS_DIR, escapeXmlAttribute(dir), WEBAPP_MOUNT_CLASSES));
-        }
         for (String jar : extraJars) {
             String jarName = new File(jar).getName();
             sb.append(String.format(POST_RESOURCE_TEMPLATE,
@@ -940,14 +942,23 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                     WEBAPP_MOUNT_LIB + escapeXmlAttribute(jarName)));
         }
 
-        LOG.info("Added " + extraDirs.size() + " class dirs and " + extraJars.size() +
-                " JARs as extra resources for '" + deployment.getDisplayName() + "'");
+        if (!extraJars.isEmpty()) {
+            LOG.info("Added " + extraJars.size() + " library JAR(s) as PostResources for '"
+                    + deployment.getDisplayName() + "'");
+        }
 
-        // Single consolidated warning instead of one message per module to keep the console clean
-        if (!skippedModules.isEmpty() && logger != null) {
-            logger.logServerInfo(
-                    "Hot reload skipped for " + skippedModules.size() + " module(s) already packaged as JARs in WEB-INF/lib: "
-                    + skippedModules + ". Changes to these modules require Redeploy, not just Build.");
+        if (!missingDepJars.isEmpty() && logger != null) {
+            // Single consolidated warning, names every offender so the user can
+            // act on the whole list at once.
+            logger.logServerWarning(
+                    "Dependency module(s) " + missingDepJars + " are on the project classpath "
+                    + "but no matching JAR is packaged in WEB-INF/lib/. Tomcat will not find their "
+                    + "classes at runtime. Run 'mvn install' on the missing module(s) (or check "
+                    + "your build's <war>/<packagingIncludes>/<finalName> setup) so the JAR lands "
+                    + "in the deployed WAR. Previously DevTomcat silently overlaid these modules' "
+                    + "target/classes onto the classpath via <PreResources>, which masked the broken "
+                    + "build but caused classpath duplicates with strict libraries (Liquibase 4.27+, "
+                    + "CDI, etc.).");
         }
 
         return sb.toString();
