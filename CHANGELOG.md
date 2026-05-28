@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- WAR-deployment warning now offers a one-click "Switch to Exploded" action when a sibling exploded directory is on disk and belongs to a project module, enabling hot reload (Ctrl+F10) without rebuilding the WAR.
+- One-click "Reclaim Deployment" action surfaces in a balloon for WAR artifacts with a sibling exploded directory and for already-exploded external deployments living under a project module, enabling hot reload (Ctrl+F10) without rebuilding.
 
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.

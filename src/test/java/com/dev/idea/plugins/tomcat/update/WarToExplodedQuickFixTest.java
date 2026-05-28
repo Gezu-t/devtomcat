@@ -202,15 +202,62 @@ class WarToExplodedQuickFixTest {
         }
 
         @Test
-        @DisplayName("already-exploded artifacts are skipped")
-        void alreadyExplodedSkipped(@TempDir Path tempDir) throws IOException {
+        @DisplayName("already-exploded artifacts with non-EXTERNAL source are skipped")
+        void alreadyExplodedAutoDetectedSkipped(@TempDir Path tempDir) throws IOException {
+            // type=exploded + source=AUTO_DETECTED is the steady state — the
+            // loader builds ModuleBackedDeployment, class sync works, nothing
+            // to fix. (Default source on a fresh DeploymentArtifact is
+            // INTELLIJ_ARTIFACT, also a steady state for our purposes.)
             Path explodedDir = tempDir.resolve("app");
             Files.createDirectories(explodedDir.resolve("WEB-INF"));
             DeploymentArtifact artifact = new DeploymentArtifact(
                     "app", explodedDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            artifact.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
 
             assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
                     singleOwner(tempDir, "any"), List.of(artifact)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("recovery case: type=EXPLODED + source=EXTERNAL is fixable when module owns the path")
+        void recoveryCaseExplodedButExternal(@TempDir Path tempDir) throws IOException {
+            // The reported regression's residual state: an earlier flip
+            // changed path/type but left source=EXTERNAL. The loader builds
+            // ExternalFileDeployment, class sync reports "could not resolve
+            // owning module — null". The candidate detector must offer to
+            // reclaim this as AUTO_DETECTED so class sync wires through.
+            Path explodedDir = tempDir.resolve("app");
+            Files.createDirectories(explodedDir.resolve("WEB-INF"));
+            DeploymentArtifact artifact = new DeploymentArtifact(
+                    "app", explodedDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            artifact.setSource(DeploymentArtifact.Source.EXTERNAL);
+
+            List<WarToExplodedQuickFix.FixCandidate> candidates =
+                    WarToExplodedQuickFix.findFixableArtifacts(
+                            singleOwner(tempDir, "app-module"), List.of(artifact));
+
+            assertEquals(1, candidates.size());
+            // For the recovery case, the candidate path is the artifact's
+            // current path — no derivation, no .war stripping.
+            assertEquals(explodedDir, candidates.get(0).explodedDirectory());
+            assertEquals("app-module", candidates.get(0).moduleName());
+        }
+
+        @Test
+        @DisplayName("recovery case: skipped when external path doesn't live under any module")
+        void recoveryCaseSkippedWhenOutsideAnyModule(@TempDir Path tempDir) throws IOException {
+            // type=EXPLODED + source=EXTERNAL is only a valid recovery target
+            // when the path is genuinely under a project module. An external
+            // directory outside the project (user's deliberate choice) stays
+            // as-is.
+            Path explodedDir = tempDir.resolve("app");
+            Files.createDirectories(explodedDir.resolve("WEB-INF"));
+            DeploymentArtifact artifact = new DeploymentArtifact(
+                    "app", explodedDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
+            artifact.setSource(DeploymentArtifact.Source.EXTERNAL);
+
+            assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
+                    NO_OWNER, List.of(artifact)).isEmpty());
         }
 
         @Test

@@ -116,10 +116,31 @@ public final class WarToExplodedQuickFix {
     }
 
     /**
-     * Scans the legacy artifact list for WAR-typed entries whose sibling
-     * exploded directory exists, looks like a real webapp ({@code WEB-INF/}
-     * present), and falls under a project module's content roots. Returns a
-     * fresh list — caller may freely mutate.
+     * Scans the legacy artifact list for entries that can be reclaimed as
+     * module-owned exploded deployments. Two shapes qualify:
+     *
+     * <ol>
+     *   <li><b>WAR artifact with a sibling exploded directory</b> — the
+     *       primary case. Stored {@code type=war}; path ends with {@code .war}
+     *       and the sibling {@code target/<name>/} directory exists with
+     *       {@code WEB-INF/}. The fix changes path, type, source, and name.</li>
+     *
+     *   <li><b>Already-exploded artifact whose source is still EXTERNAL</b> —
+     *       the recovery case. {@code type=exploded}, path already points at
+     *       a directory, but {@code source=EXTERNAL} means the loader builds
+     *       {@code ExternalFileDeployment} (no module link), and class sync
+     *       reports "could not resolve owning module — null". This happens
+     *       when an earlier flip changed path/type but left source/name —
+     *       see commit {@code b4b1fd6}'s fix description for the regression
+     *       this catches. The fix changes source and name (path/type stay,
+     *       so applying twice is idempotent).</li>
+     * </ol>
+     *
+     * <p>Both shapes additionally require the exploded directory to fall
+     * under a project module's content roots — otherwise no module owns the
+     * path and class sync still wouldn't work after the flip.
+     *
+     * <p>Returns a fresh list — caller may freely mutate.
      */
     @NotNull
     static List<FixCandidate> findFixableArtifacts(@NotNull ModuleOwnershipResolver resolver,
@@ -127,15 +148,39 @@ public final class WarToExplodedQuickFix {
         List<FixCandidate> out = new ArrayList<>();
         for (DeploymentArtifact artifact : artifacts) {
             if (artifact == null) continue;
-            if (!DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) continue;
-            Path exploded = deriveExplodedPath(artifact.getPath());
-            if (exploded == null) continue;
-            if (!isExplodedWebapp(exploded)) continue;
-            String moduleName = resolver.resolveOwningModule(exploded);
+            Path explodedPath = findCandidateExplodedPath(artifact);
+            if (explodedPath == null) continue;
+            if (!isExplodedWebapp(explodedPath)) continue;
+            String moduleName = resolver.resolveOwningModule(explodedPath);
             if (moduleName == null) continue;
-            out.add(new FixCandidate(artifact, exploded, moduleName));
+            out.add(new FixCandidate(artifact, explodedPath, moduleName));
         }
         return out;
+    }
+
+    /**
+     * For a fixable artifact, returns the exploded directory the fix will
+     * point it at. Returns {@code null} when the artifact doesn't match
+     * either of the two fixable shapes (see
+     * {@link #findFixableArtifacts(ModuleOwnershipResolver, List)}).
+     */
+    @Nullable
+    private static Path findCandidateExplodedPath(@NotNull DeploymentArtifact artifact) {
+        if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
+            // Primary case: derive sibling directory from the .war filename.
+            return deriveExplodedPath(artifact.getPath());
+        }
+        if (DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
+                && artifact.getSource() == DeploymentArtifact.Source.EXTERNAL) {
+            // Recovery case: path already points at the exploded directory
+            // but source=EXTERNAL means the loader builds ExternalFileDeployment.
+            try {
+                return Path.of(artifact.getPath());
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

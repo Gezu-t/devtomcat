@@ -535,13 +535,15 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         if (candidates.isEmpty()) return;
 
         String title = candidates.size() == 1
-                ? "WAR deployment can switch to exploded"
-                : candidates.size() + " WAR deployments can switch to exploded";
-        String content = "A sibling exploded directory is on disk for "
-                + (candidates.size() == 1 ? "this artifact" : "these artifacts")
-                + ". Switching enables hot reload (Ctrl+F10) for Java and webapp resources "
-                + "without rebuilding the WAR.";
-        String actionLabel = candidates.size() == 1 ? "Switch to Exploded" : "Switch All to Exploded";
+                ? "Deployment can be reclaimed as module-owned"
+                : candidates.size() + " deployments can be reclaimed as module-owned";
+        String content = "Hot reload (Ctrl+F10) needs the deployment "
+                + (candidates.size() == 1 ? "to point" : "to point")
+                + " at the exploded webapp directory of a project module. "
+                + "Reclaiming switches WAR-typed entries to their sibling "
+                + "exploded directory and updates external-source entries to "
+                + "the module they already live in.";
+        String actionLabel = candidates.size() == 1 ? "Reclaim Deployment" : "Reclaim All";
 
         TomcatNotifier.notifyWithAction(project, title, content,
                 com.intellij.notification.NotificationType.INFORMATION,
@@ -549,8 +551,8 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 () -> {
                     int applied = WarToExplodedQuickFix.applyAll(configuration, candidates);
                     if (applied > 0) {
-                        logger.logServerInfo("Switched " + applied
-                                + " WAR deployment(s) to exploded — Ctrl+F10 will now pick up changes without rebuilding.");
+                        logger.logServerInfo("Reclaimed " + applied
+                                + " deployment(s) as module-owned — Ctrl+F10 will now pick up changes without rebuilding.");
                     }
                 });
     }
