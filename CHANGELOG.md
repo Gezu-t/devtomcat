@@ -4,10 +4,9 @@
 
 ### Added
 - One-click "Reclaim Deployment" action surfaces in a balloon for WAR artifacts with a sibling exploded directory and for already-exploded external deployments living under a project module, enabling hot reload (Ctrl+F10) without rebuilding.
-- Smart Diagnostic for Liquibase duplicate-changelog errors, naming the three remedies (mode=WARN, restricted searchPath, build-side exclude).
 
 ### Changed
-- Removed the `<PreResources>` overlay of project module class directories on the deployed `WEB-INF/classes/`. The WAR module's fresh classes now reach Tomcat solely via DeployedClassesSync; dep modules are served from their `WEB-INF/lib/` JARs. Eliminates a class of classpath-duplicate problems (Liquibase 4.27+, CDI, etc.). Dep modules whose JARs are missing from `WEB-INF/lib/` now surface a clear warning naming the module instead of being silently rescued.
+- Removed the `<PreResources>` overlay of project module class directories on the deployed `WEB-INF/classes/`. The WAR module's fresh classes now reach Tomcat solely via DeployedClassesSync; dep modules are served from their `WEB-INF/lib/` JARs. Eliminates a class of duplicate-classpath problems that affected any framework auditing its own resources for uniqueness. Dep modules whose JARs are missing from `WEB-INF/lib/` surface a clear warning naming the module instead of being silently rescued.
 
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.

@@ -107,18 +107,6 @@ public final class TomcatErrorDiagnostics {
     private static final Pattern SFTP_CONNECTION_FAILURE = Pattern.compile(
             "JSchException[^\\n]*(?:Connection refused|Connection timed out|Auth fail|UnknownHostKey)",
             Pattern.CASE_INSENSITIVE);
-    /**
-     * Liquibase 4.27+ refuses to load a changelog when the same logical path
-     * resolves to more than one classpath URI (e.g. once in the exploded WAR's
-     * {@code WEB-INF/classes/} and once inside a dependency JAR under
-     * {@code WEB-INF/lib/}). Surfaces as a {@code ChangeLogParseException}
-     * with "Found N files with the path 'X'". Three remedies, all in user
-     * application config — not in our plugin. Match is library-name only,
-     * no project-specific values.
-     */
-    private static final Pattern LIQUIBASE_DUPLICATE_CHANGELOG = Pattern.compile(
-            "(?:ChangeLogParseException|liquibase[^\\n]*)[^\\n]*Found\\s+\\d+\\s+files\\s+with\\s+the\\s+path",
-            Pattern.CASE_INSENSITIVE);
 
     /**
      * Analyzes a Tomcat log line and returns diagnostics if a known error pattern is detected.
@@ -275,24 +263,6 @@ public final class TomcatErrorDiagnostics {
                     "JDBC connection failure" + (m.group(1) != null ? ": " + m.group(1) : ""),
                     "Verify database is running and accessible. Check JDBC URL, credentials, "
                             + "and ensure the JDBC driver JAR is in WEB-INF/lib.",
-                    null));
-        }
-
-        // Liquibase duplicate-changelog: same logical path reachable via more
-        // than one classpath URI. 4.27+ refuses to silently pick one.
-        if (LIQUIBASE_DUPLICATE_CHANGELOG.matcher(text).find()) {
-            results.add(new Diagnostic(Severity.ERROR, "Liquibase Configuration",
-                    "Duplicate changelog file on classpath",
-                    "The same Liquibase changelog is reachable via two or more URIs "
-                            + "(commonly WEB-INF/classes/ AND a JAR under WEB-INF/lib/). "
-                            + "Three fixes, in increasing order of cleanliness: "
-                            + "(1) set system property liquibase.duplicateFileMode=WARN to "
-                            + "allow Liquibase to pick the first match; "
-                            + "(2) set liquibase.searchPath to a single root so duplicates "
-                            + "are unreachable; "
-                            + "(3) update your build (Maven war-plugin <packagingExcludes> "
-                            + "or equivalent) so one copy of the changelog is packaged, not both. "
-                            + "Whichever module owns the schema definition should be the sole source.",
                     null));
         }
 
@@ -453,10 +423,7 @@ public final class TomcatErrorDiagnostics {
             "JSch", "memory leak", "ThreadLocal",
             "Address already in use", "already in use",
             "already exists", "appears to have started",
-            "External configuration file",
-            // Liquibase ChangeLogParseException carries "Found" + a count when
-            // duplicate classpath URIs collide on the same logical path.
-            "Found", "ChangeLogParseException"
+            "External configuration file"
     };
 
     private static boolean mightContainDiagnostic(@NotNull String text) {

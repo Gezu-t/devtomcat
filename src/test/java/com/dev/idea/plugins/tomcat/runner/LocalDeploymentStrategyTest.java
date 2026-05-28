@@ -790,10 +790,12 @@ class LocalDeploymentStrategyTest {
         @DisplayName("PreResources never appears in the generated context XML on any Tomcat version")
         void preResourcesRegressionGuard(@TempDir Path tempDir) throws IOException {
             // The PreResources overlay of class directories was removed in 1.2.0
-            // (it caused classpath-duplicate problems with Liquibase 4.27+, CDI,
-            // Spring scanning, etc.). If a future change reintroduces it, this
-            // pinned regression test fails so the reasoning is forced back to
-            // the surface before it ships.
+            // because it made the same logical resource reachable at two URIs
+            // on the webapp classloader, which any framework or library that
+            // audits its own resources for uniqueness would refuse. If a future
+            // change reintroduces the overlay, this pinned regression test
+            // fails so the reasoning is forced back to the surface before it
+            // ships.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
                     new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(

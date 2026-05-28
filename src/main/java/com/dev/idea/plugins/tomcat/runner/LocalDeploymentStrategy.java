@@ -55,14 +55,18 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  * <p><b>What this strategy does NOT do (1.2.0 architectural change):</b>
  * earlier versions also injected each project module's class output directory
  * as {@code <PreResources>}, overlaying them on the deployed
- * {@code WEB-INF/classes/} for zero-copy hot reload. That overlay caused
- * duplicate-classpath problems (Liquibase 4.27+ refusing duplicate changelogs,
- * CDI duplicate-bean errors) because the same resource could be reached at two
- * URIs. The overlay was dropped; the WAR module's classes now reach Tomcat via
- * {@code DeployedClassesSync} copying {@code target/classes/} into the deployed
- * {@code WEB-INF/classes/} on every launch and Ctrl+F10. Dependency modules
- * are served from their {@code WEB-INF/lib/} JARs — repackaging required for
- * code changes, same contract as every other Tomcat deployment.
+ * {@code WEB-INF/classes/} for zero-copy hot reload. The overlay made the
+ * same logical resource reachable at two different URIs on the webapp
+ * classloader — once via the source class directory, once via the deployed
+ * copy. Any framework or library that audits its own resources for uniqueness
+ * (strict classpath-duplicate detection has become common) would then refuse
+ * to load, with an exception specific to that library. The exception varied;
+ * the underlying cause — our overlay — did not. The overlay was dropped; the
+ * WAR module's classes now reach Tomcat via {@code DeployedClassesSync}
+ * copying {@code target/classes/} into the deployed {@code WEB-INF/classes/}
+ * on every launch and Ctrl+F10. Dependency modules are served from their
+ * {@code WEB-INF/lib/} JARs — repackaging required for code changes, same
+ * contract as every other Tomcat deployment.
  */
 final class LocalDeploymentStrategy implements DeploymentStrategy {
 
@@ -76,12 +80,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
 
     // PreResources for class directories used to overlay each module's
-    // target/classes onto the deployed WEB-INF/classes. That overlay caused a
-    // class of duplicate-classpath problems (Liquibase 4.27+ refusing duplicate
-    // changelogs, CDI duplicate-bean errors, etc.) because the same resource
-    // could be reached at two different URLs — once via the overlay, once via
-    // the deployed copy. The overlay is gone; the WAR module's fresh classes
-    // reach Tomcat via DeployedClassesSync copying target/classes →
+    // target/classes onto the deployed WEB-INF/classes. That overlay made the
+    // same logical resource reachable at two URLs on the webapp classloader,
+    // which any framework or library that audits its own resources for
+    // uniqueness would refuse. The overlay is gone; the WAR module's fresh
+    // classes reach Tomcat via DeployedClassesSync copying target/classes →
     // WEB-INF/classes, and dep modules are served from WEB-INF/lib JARs. The
     // constant for the PreResources XML template was removed alongside the
     // injection logic.
@@ -777,11 +780,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * {@code out/production/<module>/}, etc.). The intent was to overlay
      * freshly compiled classes on top of the deployed {@code WEB-INF/classes/}
      * for zero-copy hot reload. But the overlay created a class of duplicate-
-     * classpath problems — Liquibase 4.27+ refusing to load a changelog
-     * reachable at two URIs, CDI duplicate-bean detection, Spring component-
-     * scan double-registration — because the same resource could be reached
-     * once via the overlay and once via the deployed copy. Each new strict-
-     * classpath library would have required another defensive guard.
+     * classpath problems: any framework or library that audits its own
+     * resources for uniqueness — strict-classpath behaviour is increasingly
+     * common — would refuse to load when our overlay made the same logical
+     * path reachable at two URIs (once via the source class dir, once via
+     * the deployed copy). The specific failure varied by library; the
+     * underlying cause did not. Each affected library would have required
+     * a dedicated guard in our overlay logic, an open-ended maintenance
+     * burden.
      *
      * <p>The overlay was dropped. Today:
      * <ul>
@@ -939,12 +945,13 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             logger.logServerWarning(
                     "Dependency module(s) " + missingDepJars + " are on the project classpath "
                     + "but no matching JAR is packaged in WEB-INF/lib/. Tomcat will not find their "
-                    + "classes at runtime. Run 'mvn install' on the missing module(s) (or check "
-                    + "your build's <war>/<packagingIncludes>/<finalName> setup) so the JAR lands "
-                    + "in the deployed WAR. Previously DevTomcat silently overlaid these modules' "
-                    + "target/classes onto the classpath via <PreResources>, which masked the broken "
-                    + "build but caused classpath duplicates with strict libraries (Liquibase 4.27+, "
-                    + "CDI, etc.).");
+                    + "classes at runtime. Build the missing module(s) (typically 'mvn install' or "
+                    + "the equivalent in your build tool) or check your build's packaging "
+                    + "configuration so the JAR lands in the deployed WAR. Earlier versions of "
+                    + "DevTomcat silently overlaid these modules' target/classes onto the classpath "
+                    + "via <PreResources>; that overlay was removed because it caused duplicate-"
+                    + "classpath problems for any framework that audits its own resources for "
+                    + "uniqueness.");
         }
 
         return sb.toString();

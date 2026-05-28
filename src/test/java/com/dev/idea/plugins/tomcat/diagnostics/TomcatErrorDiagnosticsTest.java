@@ -173,43 +173,6 @@ class TomcatErrorDiagnosticsTest {
     }
 
     @Test
-    @DisplayName("Liquibase duplicate changelog: detect and name all three remedies")
-    void liquibaseDuplicateChangelog() {
-        // Library-name-only pattern: ChangeLogParseException with the canonical
-        // "Found N files with the path" wording. Neutral placeholders only —
-        // no project paths, no real module/JAR names.
-        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
-                "liquibase.exception.ChangeLogParseException: Error Reading Changelog File: "
-                        + "Found 2 files with the path 'app/changelog.xml'");
-        assertFalse(results.isEmpty(), "expected at least one diagnostic");
-        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
-        assertEquals(TomcatErrorDiagnostics.Severity.ERROR, d.getSeverity());
-        assertEquals("Liquibase Configuration", d.getCategory());
-        // All three remedies named in the suggestion so the balloon is actionable
-        // without the user having to read Liquibase's own message.
-        assertTrue(d.getSuggestion().contains("duplicateFileMode"),
-                "remedy 1 (duplicateFileMode flag) must be named: " + d.getSuggestion());
-        assertTrue(d.getSuggestion().contains("searchPath"),
-                "remedy 2 (searchPath restriction) must be named: " + d.getSuggestion());
-        assertTrue(d.getSuggestion().contains("packagingExcludes")
-                        || d.getSuggestion().contains("build"),
-                "remedy 3 (build-side exclude) must be named: " + d.getSuggestion());
-    }
-
-    @Test
-    @DisplayName("Liquibase pattern ignored when count is missing")
-    void liquibasePatternIgnoredWithoutCount() {
-        // Defensive: don't fire on a generic "Found something" line that has
-        // nothing to do with Liquibase's duplicate-changelog error.
-        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
-                "INFO: Found web application root directory");
-        for (TomcatErrorDiagnostics.Diagnostic d : results) {
-            assertNotEquals("Liquibase Configuration", d.getCategory(),
-                    "false positive on unrelated 'Found' line");
-        }
-    }
-
-    @Test
     @DisplayName("TLD scan warning")
     void tldScanWarning() {
         List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
