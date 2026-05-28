@@ -405,10 +405,12 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
 
             try {
                 if (deployment.isExploded()) {
-                    // Generate full context XML with PreResources/PostResources,
-                    // matching initial deployment so multi-module classpath is preserved.
-                    // Pass the configured TomcatInfo so the generator can omit the
-                    // <Resources> block on Tomcat 7 (PreResources is a Tomcat 8 feature).
+                    // Generate full context XML (PostResources for unpackaged
+                    // library JARs included). Matches initial deployment so
+                    // the redeployed context configuration is consistent.
+                    // Pass the configured TomcatInfo so the generator can omit
+                    // the <Resources> block on Tomcat 7 (PostResources is a
+                    // Tomcat 8 element).
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
                     String contextXml = DeploymentStrategy.buildContextXml(
                             deployment, artifactPath, preserveSessions, project,

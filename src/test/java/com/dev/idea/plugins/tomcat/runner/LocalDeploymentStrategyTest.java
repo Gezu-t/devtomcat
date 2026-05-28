@@ -321,70 +321,6 @@ class LocalDeploymentStrategyTest {
     }
 
     // -------------------------------------------------------------------------
-    // extractModuleName
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("extractModuleName")
-    class ExtractModuleNameTests {
-
-        @Test
-        @DisplayName("extracts from Maven target/classes path")
-        void mavenPath() {
-            assertEquals("common",
-                    LocalDeploymentStrategy.extractModuleName("/home/user/project/common/target/classes"));
-        }
-
-        @Test
-        @DisplayName("extracts from nested Maven module path")
-        void nestedMavenPath() {
-            assertEquals("webapp-portal",
-                    LocalDeploymentStrategy.extractModuleName("/home/user/myapp/webapp-portal/target/classes"));
-        }
-
-        @Test
-        @DisplayName("extracts from Gradle Java main output")
-        void gradleJavaMain() {
-            assertEquals("common",
-                    LocalDeploymentStrategy.extractModuleName("/home/user/project/common/build/classes/java/main"));
-        }
-
-        @Test
-        @DisplayName("extracts from Gradle Kotlin main output")
-        void gradleKotlinMain() {
-            assertEquals("shared",
-                    LocalDeploymentStrategy.extractModuleName("/home/user/project/shared/build/classes/kotlin/main"));
-        }
-
-        @Test
-        @DisplayName("extracts from IntelliJ out/production layout")
-        void intellijOutProduction() {
-            assertEquals("common",
-                    LocalDeploymentStrategy.extractModuleName("/home/user/project/out/production/common"));
-        }
-
-        @Test
-        @DisplayName("extracts from IntelliJ out/production with trailing content")
-        void intellijOutProductionWithSubdir() {
-            assertEquals("common",
-                    LocalDeploymentStrategy.extractModuleName("/home/user/project/out/production/common/subdir"));
-        }
-
-        @Test
-        @DisplayName("returns null for unrecognised path pattern")
-        void unrecognisedPath() {
-            assertNull(LocalDeploymentStrategy.extractModuleName("/home/user/something/arbitrary"));
-        }
-
-        @Test
-        @DisplayName("handles Windows-style backslash paths for Maven")
-        void windowsMavenPath() {
-            assertEquals("common",
-                    LocalDeploymentStrategy.extractModuleName("C:\\Users\\user\\project\\common\\target\\classes"));
-        }
-    }
-
-    // -------------------------------------------------------------------------
     // scanJar
     // -------------------------------------------------------------------------
 
@@ -729,10 +665,10 @@ class LocalDeploymentStrategyTest {
         /**
          * Reproducer for the bug reported on GitHub: deploying a webapp on Tomcat 7
          * produced
-         *   WARNING: No rules found matching 'Context/Resources/PreResources'
-         * because PreResources / PostResources are Tomcat-8-only elements that
-         * Tomcat 7's Digester does not recognise. The fix is to omit the entire
-         * &lt;Resources&gt; block when the configured Tomcat is older than 8.
+         *   WARNING: No rules found matching 'Context/Resources/PostResources'
+         * because PostResources (and the now-removed PreResources) are Tomcat-8-only
+         * elements that Tomcat 7's Digester does not recognise. The fix is to omit
+         * the entire &lt;Resources&gt; block when the configured Tomcat is older than 8.
          */
         @Test
         @DisplayName("Tomcat 7 omits the <Resources> block entirely")
@@ -753,9 +689,13 @@ class LocalDeploymentStrategyTest {
 
             assertFalse(contextXml.contains("<Resources"),
                     "Tomcat 7 must not receive <Resources> — its Digester logs a WARNING for "
-                            + "PreResources/PostResources and silently drops the elements");
-            assertFalse(contextXml.contains("<PreResources"));
+                            + "PostResources and silently drops the element");
             assertFalse(contextXml.contains("<PostResources"));
+            // Pin that PreResources is also absent — they were removed entirely in 1.2.0.
+            // Any reappearance is a regression that brings back the duplicate-classpath
+            // class of problems we eliminated.
+            assertFalse(contextXml.contains("<PreResources"),
+                    "PreResources injection was removed in 1.2.0; it must never reappear");
             // The shell of the descriptor must still be valid so the deployment itself works.
             assertTrue(contextXml.contains("<Context "),
                     "the <Context> root must still be present so the webapp deploys");
@@ -781,8 +721,9 @@ class LocalDeploymentStrategyTest {
                     artifact, artifactPath, false, project, tomcat7, logger);
 
             // Pin that we surface the limitation to the user. Without this, a Tomcat 7
-            // user with a multi-module project would silently lose classpath additions
-            // and have no idea why their webapp can't find its sibling-module classes.
+            // user with library JARs that aren't packaged in WEB-INF/lib would silently
+            // lose those classpath additions and have no idea why their webapp can't
+            // find them.
             org.mockito.Mockito.verify(logger).logServerInfo(
                     org.mockito.ArgumentMatchers.contains("does not support <PostResources>"));
         }
@@ -793,8 +734,8 @@ class LocalDeploymentStrategyTest {
             // The skip path was specifically gated on `tomcatInfo != null` so that
             // callers that haven't yet propagated the parameter (or test fixtures
             // without a real install) keep emitting the modern shape. If a future
-            // change inverts that guard, every modern user gets their multi-module
-            // classpath silently dropped — pin the contract here.
+            // change inverts that guard, every modern user gets their library-JAR
+            // PostResources silently dropped — pin the contract here.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
                     new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
@@ -846,6 +787,40 @@ class LocalDeploymentStrategyTest {
         }
 
         @Test
+        @DisplayName("PreResources never appears in the generated context XML on any Tomcat version")
+        void preResourcesRegressionGuard(@TempDir Path tempDir) throws IOException {
+            // The PreResources overlay of class directories was removed in 1.2.0
+            // (it caused classpath-duplicate problems with Liquibase 4.27+, CDI,
+            // Spring scanning, etc.). If a future change reintroduces it, this
+            // pinned regression test fails so the reasoning is forced back to
+            // the surface before it ships.
+            Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
+            com.dev.idea.plugins.tomcat.model.Deployment artifact =
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
+                            artifactPath, "/", /* exploded */ true);
+            com.intellij.openapi.project.Project project =
+                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
+
+            // Try every TomcatInfo shape — null (unknown), explicit modern (10),
+            // legacy (7) — none of them should ever produce a <PreResources> element.
+            com.dev.idea.plugins.tomcat.setting.TomcatInfo[] shapes = {
+                    null,
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 10", "10.1.28", "/opt/tomcat-10"),
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
+                            "Tomcat 7", "7.0.109", "/opt/tomcat-7"),
+            };
+            for (com.dev.idea.plugins.tomcat.setting.TomcatInfo info : shapes) {
+                String contextXml = LocalDeploymentStrategy.buildContextXml(
+                        artifact, artifactPath, /* preserveSessions */ false,
+                        project, info, /* logger */ null);
+                assertFalse(contextXml.contains("<PreResources"),
+                        "PreResources injection was removed in 1.2.0 and must never "
+                                + "reappear (Tomcat info: " + info + ")");
+            }
+        }
+
+        @Test
         @DisplayName("Tomcat 8 always emits <Resources allowLinking=\"true\"> even with no extra resources")
         void tomcat8AlwaysEmitsResourcesForSymlinks(@TempDir Path tempDir) throws IOException {
             // Pin the symlink-friendly default. Tomcat 8+ disables symlink traversal
@@ -853,8 +828,8 @@ class LocalDeploymentStrategyTest {
             // — common in Maven multi-module projects where target/<module>/ is
             // linked from a staging dir — silently fails to deploy without an
             // explicit allowLinking="true". Previously the <Resources> block was
-            // emitted only when extra PreResources/PostResources were attached,
-            // so users with no extras lost symlink support invisibly.
+            // emitted only when extra PostResources were attached, so users with
+            // no extras lost symlink support invisibly.
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
                     new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
@@ -874,7 +849,7 @@ class LocalDeploymentStrategyTest {
                             + "docBases deploy. Output:\n" + contextXml);
             assertTrue(contextXml.contains("</Resources>"),
                     "the Resources block must be well-formed even when no extra "
-                            + "PreResources / PostResources are attached");
+                            + "PostResources are attached");
         }
 
         @Test

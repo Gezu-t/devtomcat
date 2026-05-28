@@ -201,20 +201,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      */
     private static final int META_INF_MAVEN_POM_PROPERTIES_SEGMENTS = 5;
 
-    /** Maven class output suffix — e.g. {@code .../module/target/classes}. */
-    private static final String MAVEN_CLASSES_SUFFIX = "/target/classes";
-
-    /** IntelliJ IDEA default compiler output path fragment — e.g. {@code .../out/production/ModuleName}. */
-    private static final String INTELLIJ_PRODUCTION_PATH = "/out/production/";
-
-    /** Gradle production source-set class output directories (longest-first ordering preserved). */
-    private static final List<String> GRADLE_OUTPUT_SUFFIXES = List.of(
-            "/build/classes/java/main",
-            "/build/classes/kotlin/main",
-            "/build/classes/groovy/main",
-            "/build/classes/scala/main"
-    );
-
     /**
      * Max number of stale-deployment filenames the balloon enumerates before
      * truncating to "and N more". Anything past this would blow the balloon's
@@ -474,12 +460,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // deploy without this attribute. The Maven multi-module shape
         // (target/<module>/ resolved through a symlinked staging dir) is the
         // realistic hit. Previously the Resources block was emitted only when
-        // extra PreResources / PostResources were attached, so users with no
-        // extra resources lost symlink support silently. The empty-children
-        // case is well-formed and harmless to Tomcat 8+.
+        // extra PostResources were attached, so users with no extra resources
+        // lost symlink support silently. The empty-children case is well-formed
+        // and harmless to Tomcat 8+.
         //
         // Tomcat 7 does NOT support <Resources> under <Context> (its Digester
-        // logs 'No rules found matching Context/Resources/PreResources' and
+        // logs 'No rules found matching Context/Resources/PostResources' and
         // drops the element). On 7, allowLinking defaults to true on the
         // Context itself so symlinks work without explicit configuration —
         // omit the block entirely. The major-version=0 (unknown) case is
@@ -975,51 +961,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         String base = jarName.substring(0, jarName.length() - EXT_JAR.length());
         // Remove -<version> suffix: version starts with a digit (1.2.3) or is a bare SNAPSHOT
         return base.replaceAll("-(\\d+.*|SNAPSHOT)$", "");
-    }
-
-    /**
-     * Extracts the module/project name from a class output directory path.
-     * Supports Maven ({@code .../module/target/classes}) and common Gradle layouts
-     * ({@code .../module/build/classes/java/main} etc.).
-     * Returns null if the path does not match a known pattern.
-     *
-     * <p>Used only as a fallback guard for non-module class directories.
-     * Project module output directories are identified directly via
-     * {@link com.intellij.openapi.roots.ProjectFileIndex} in the caller.
-     */
-    @Nullable
-    static String extractModuleName(@NotNull String classesDir) {
-        String normalized = classesDir.replace('\\', '/');
-
-        // Maven: .../module/target/classes
-        if (normalized.endsWith(MAVEN_CLASSES_SUFFIX)) {
-            return lastSegmentBefore(normalized, MAVEN_CLASSES_SUFFIX.length());
-        }
-
-        // IntelliJ IDEA default compiler output: .../out/production/ModuleName
-        int outIdx = normalized.lastIndexOf(INTELLIJ_PRODUCTION_PATH);
-        if (outIdx >= 0) {
-            String after = normalized.substring(outIdx + INTELLIJ_PRODUCTION_PATH.length());
-            int slash = after.indexOf('/');
-            String candidate = slash >= 0 ? after.substring(0, slash) : after;
-            if (!candidate.isEmpty()) return candidate;
-        }
-
-        // Gradle: .../module/build/classes/<lang>/main
-        for (String suffix : GRADLE_OUTPUT_SUFFIXES) {
-            if (normalized.endsWith(suffix)) {
-                return lastSegmentBefore(normalized, suffix.length());
-            }
-        }
-        return null;
-    }
-
-    /** Strips {@code suffixLen} trailing chars off {@code path} and returns the last slash-segment of the remainder. */
-    @NotNull
-    private static String lastSegmentBefore(@NotNull String path, int suffixLen) {
-        String parent = path.substring(0, path.length() - suffixLen);
-        int slash = parent.lastIndexOf('/');
-        return slash >= 0 ? parent.substring(slash + 1) : parent;
     }
 
     static boolean isContainerProvidedJar(@NotNull String jarName) {
