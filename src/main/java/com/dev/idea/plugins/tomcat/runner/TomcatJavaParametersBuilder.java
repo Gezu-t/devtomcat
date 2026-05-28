@@ -485,7 +485,7 @@ public class TomcatJavaParametersBuilder {
                 configuration.getDeployments();
 
         com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater
-                .warnAboutWarDeploymentsIfPresent(deployments, deploymentLogger);
+                .warnAboutWarDeploymentsIfPresent(configuration, deploymentLogger);
 
         com.dev.idea.plugins.tomcat.update.DeployedClassesSync.syncDeployments(
                 project, deployments, deploymentLogger);

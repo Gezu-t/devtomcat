@@ -153,7 +153,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      */
     private void doUpdateResourcesOnly(@NotNull TomcatDeploymentLogger logger) {
         List<Deployment> deployments = configuration.getDeployments();
-        warnAboutWarDeploymentsIfPresent(deployments, logger);
+        warnAboutWarDeploymentsIfPresent(configuration, logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Syncing resources...",
                 "Build aborted; resource sync cancelled",
@@ -190,7 +190,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      */
     private void doUpdateClassesAndResources(@NotNull TomcatDeploymentLogger logger) {
         List<Deployment> deployments = configuration.getDeployments();
-        warnAboutWarDeploymentsIfPresent(deployments, logger);
+        warnAboutWarDeploymentsIfPresent(configuration, logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling project...",
                 "Compilation aborted",
@@ -217,7 +217,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      */
     private void doRedeploy(@NotNull TomcatDeploymentLogger logger) {
         List<Deployment> deployments = configuration.getDeployments();
-        warnAboutWarDeploymentsIfPresent(deployments, logger);
+        warnAboutWarDeploymentsIfPresent(configuration, logger);
         CompilerSupport.compileAndThen(project, logger,
                 "Compiling and redeploying...",
                 "Compilation aborted",
@@ -239,7 +239,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      */
     private void doRestart(@NotNull TomcatDeploymentLogger logger) {
         List<Deployment> deployments = configuration.getDeployments();
-        warnAboutWarDeploymentsIfPresent(deployments, logger);
+        warnAboutWarDeploymentsIfPresent(configuration, logger);
         String originalExecutorId = processHandler.getExecutorId();
 
         CompilerSupport.compileAndThen(project, logger,
@@ -485,6 +485,11 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * concrete ways forward (build-tool repackage, or switch the artifact to
      * exploded in the Deployment tab). Public + static so the launch path
      * ({@code TomcatJavaParametersBuilder}) can call it too.
+     *
+     * <p>This overload is kept for backward compatibility and pure-console
+     * use; the {@link #warnAboutWarDeploymentsIfPresent(TomcatRunConfiguration, TomcatDeploymentLogger)}
+     * overload also pops a balloon with a one-click "Switch to exploded"
+     * action when the sibling directory is on disk.
      */
     public static void warnAboutWarDeploymentsIfPresent(@NotNull List<Deployment> deployments,
                                                         @NotNull TomcatDeploymentLogger logger) {
@@ -493,6 +498,61 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             if (!d.isExploded()) warNames.add(d.getDisplayName());
         }
         emitWarArtifactsWarning(warNames, logger);
+    }
+
+    /**
+     * Same console warning as the {@link #warnAboutWarDeploymentsIfPresent(List, TomcatDeploymentLogger)}
+     * overload, plus a balloon with a one-click "Switch to exploded" action
+     * for every WAR deployment whose sibling exploded directory exists on disk.
+     *
+     * <p>Maven's {@code maven-war-plugin} produces both {@code target/<finalName>.war}
+     * and {@code target/<finalName>/} during {@code mvn package}; Gradle's
+     * {@code war} task likewise. So almost every WAR deployment a user can
+     * accidentally pick during auto-detection has a sibling that would work
+     * for hot reload — this overload closes that loop instead of leaving the
+     * user to delete-and-re-add by hand.
+     *
+     * <p>The balloon does not fire when no fixable candidates exist (e.g. the
+     * user genuinely has only {@code .war} files with no sibling directories),
+     * so users who can't benefit from the fix don't see a misleading prompt.
+     */
+    public static void warnAboutWarDeploymentsIfPresent(@NotNull TomcatRunConfiguration configuration,
+                                                        @NotNull TomcatDeploymentLogger logger) {
+        java.util.List<Deployment> deployments = configuration.getDeployments();
+        warnAboutWarDeploymentsIfPresent(deployments, logger);
+        offerWarToExplodedFix(configuration, logger);
+    }
+
+    private static void offerWarToExplodedFix(@NotNull TomcatRunConfiguration configuration,
+                                              @NotNull TomcatDeploymentLogger logger) {
+        Project project = configuration.getProject();
+        if (project == null || project.isDisposed()) return;
+
+        java.util.List<DeploymentArtifact> artifacts =
+                configuration.getConfigData().getDeploymentConfig().getArtifacts();
+        java.util.List<WarToExplodedQuickFix.FixCandidate> candidates =
+                WarToExplodedQuickFix.findFixableArtifacts(artifacts);
+        if (candidates.isEmpty()) return;
+
+        String title = candidates.size() == 1
+                ? "WAR deployment can switch to exploded"
+                : candidates.size() + " WAR deployments can switch to exploded";
+        String content = "A sibling exploded directory is on disk for "
+                + (candidates.size() == 1 ? "this artifact" : "these artifacts")
+                + ". Switching enables hot reload (Ctrl+F10) for Java and webapp resources "
+                + "without rebuilding the WAR.";
+        String actionLabel = candidates.size() == 1 ? "Switch to Exploded" : "Switch All to Exploded";
+
+        TomcatNotifier.notifyWithAction(project, title, content,
+                com.intellij.notification.NotificationType.INFORMATION,
+                actionLabel,
+                () -> {
+                    int applied = WarToExplodedQuickFix.applyAll(configuration, candidates);
+                    if (applied > 0) {
+                        logger.logServerInfo("Switched " + applied
+                                + " WAR deployment(s) to exploded — Ctrl+F10 will now pick up changes without rebuilding.");
+                    }
+                });
     }
 
     private static void emitWarArtifactsWarning(@NotNull List<String> warNames,
