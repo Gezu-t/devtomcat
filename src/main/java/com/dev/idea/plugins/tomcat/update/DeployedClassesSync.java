@@ -254,12 +254,37 @@ public final class DeployedClassesSync {
 
             int copiedForThisArtifact = 0;
             int brokenForThisArtifact = 0;
+            // Union of every source root's contributed paths. Anything in the
+            // deployed WEB-INF/classes/ NOT in this set is an orphan that
+            // source no longer claims. With PreResources gone, the deployed
+            // copy is the sole authority for what Tomcat loads, so stale
+            // orphans aren't shadowed by anything — they keep getting
+            // resolved by the classloader and the user sees "I deleted that
+            // class, why is it still here" behaviour.
+            java.util.Set<String> contributedPaths = new java.util.HashSet<>();
             for (Path src : resolution.sourceRoots()) {
                 MirrorResult mr = mirrorTree(src, webInfClasses);
                 copiedForThisArtifact += mr.copied();
                 brokenForThisArtifact += mr.brokenSkipped();
+                contributedPaths.addAll(mr.contributedPaths());
                 if (mr.copied() > 0) {
                     logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src);
+                }
+            }
+            // Orphan-reconcile only when at least one source root actually
+            // contributed (the EMPTY MirrorResult from an unreadable / non-
+            // existent src returns no paths). Empty contributedPaths could
+            // also mean "every source root was unreadable today"; deleting
+            // everything in WEB-INF/classes/ on that failure mode would
+            // destroy a working deployment. The empty-set guard is the
+            // safety net.
+            int orphansRemovedForThisArtifact = 0;
+            if (!contributedPaths.isEmpty()) {
+                orphansRemovedForThisArtifact = removeOrphans(webInfClasses, contributedPaths);
+                if (orphansRemovedForThisArtifact > 0) {
+                    logger.logServerInfo("Class sync: removed " + orphansRemovedForThisArtifact
+                            + " orphan file(s) from '" + name
+                            + "' (no longer in source — would otherwise stay loadable by Tomcat)");
                 }
             }
             if (brokenForThisArtifact > 0) {
@@ -504,9 +529,21 @@ public final class DeployedClassesSync {
         return resolveModuleOutputRootsVerbose(project, artifact).sourceRoots();
     }
 
-    /** Result of mirroring one source root. */
-    record MirrorResult(int copied, int brokenSkipped) {
-        static final MirrorResult EMPTY = new MirrorResult(0, 0);
+    /**
+     * Result of mirroring one source root.
+     *
+     * <p>{@code contributedPaths} is the set of forward-slash-normalized
+     * relative paths the source walk visited (regardless of whether each was
+     * actually copied). These are the paths the source root claims authority
+     * over — anything in the destination tree NOT in the union of every
+     * source root's {@code contributedPaths} is an orphan that the caller
+     * may safely delete.
+     */
+    record MirrorResult(int copied,
+                        int brokenSkipped,
+                        @NotNull java.util.Set<String> contributedPaths) {
+        static final MirrorResult EMPTY = new MirrorResult(
+                0, 0, java.util.Collections.emptySet());
     }
 
     /**
@@ -546,6 +583,10 @@ public final class DeployedClassesSync {
 
         final int[] copied = {0};
         final int[] brokenSkipped = {0};
+        // Forward-slash-normalized relative paths the walker visited, regardless
+        // of copy outcome. Used by the caller to compute orphan candidates in
+        // the destination tree.
+        final java.util.Set<String> contributedPaths = new java.util.HashSet<>();
         try {
             // Default FileVisitOption set = do NOT follow symlinks. We don't
             // pass FOLLOW_LINKS: a symlinked subdirectory could point outside
@@ -579,6 +620,13 @@ public final class DeployedClassesSync {
                         }
 
                         Path rel = src.relativize(file);
+                        // Record the relative path BEFORE the broken-ECJ /
+                        // copy-decision gates. The orphan-reconcile contract is
+                        // "anything in dst that isn't in src is an orphan" —
+                        // a broken stub still represents a real source file the
+                        // user authored, so it must be in contributedPaths or
+                        // the orphan pass would delete the previous good copy.
+                        contributedPaths.add(rel.toString().replace('\\', '/'));
                         Path target = dst.resolve(rel.toString());
 
                         // CRITICAL gate: if the source is a broken ECJ
@@ -636,7 +684,62 @@ public final class DeployedClassesSync {
         } catch (IOException e) {
             LOG.debug("Class sync: walk failed for " + src + " (" + e.getMessage() + ")");
         }
-        return new MirrorResult(copied[0], brokenSkipped[0]);
+        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths);
+    }
+
+    /**
+     * Walks {@code dst} and deletes regular files whose forward-slash-
+     * normalized relative paths are NOT in {@code retain}. Used by the caller
+     * to reconcile the destination tree to the union of every source root's
+     * contributed paths after the copy pass: anything the source no longer
+     * claims is an orphan that would otherwise linger and stay loadable by
+     * Tomcat. Empty directories left behind are not pruned (harmless to
+     * Tomcat; saves a second walk).
+     *
+     * <p>Per-file IOExceptions are debug-logged and skipped — a transient
+     * Windows file-lock should not abort the whole orphan pass, and the
+     * next sync will retry.
+     *
+     * <p>Visible for testing — exercised directly in
+     * {@code DeployedClassesSyncTest} so test fixtures don't need to
+     * round-trip through {@code syncDeployments}.
+     */
+    static int removeOrphans(@NotNull Path dst,
+                             @NotNull java.util.Set<String> retain) {
+        if (!Files.isDirectory(dst)) return 0;
+        final int[] removed = {0};
+        try {
+            Files.walkFileTree(dst, new SimpleFileVisitor<>() {
+                @Override
+                public @NotNull FileVisitResult visitFile(Path file, @NotNull BasicFileAttributes attrs) {
+                    if (attrs.isSymbolicLink()) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    String rel = dst.relativize(file).toString().replace('\\', '/');
+                    if (!retain.contains(rel)) {
+                        try {
+                            Files.delete(file);
+                            removed[0]++;
+                            LOG.debug("Class sync: removed orphan " + file);
+                        } catch (IOException e) {
+                            LOG.debug("Class sync: could not delete orphan "
+                                    + file + " (" + e.getMessage() + ")");
+                        }
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public @NotNull FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    LOG.debug("Class sync: orphan walk could not visit "
+                            + file + " (" + exc.getMessage() + ")");
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            LOG.debug("Class sync: orphan walk failed for " + dst + " (" + e.getMessage() + ")");
+        }
+        return removed[0];
     }
 
     /**

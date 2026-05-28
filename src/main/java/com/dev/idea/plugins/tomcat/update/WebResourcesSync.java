@@ -77,9 +77,21 @@ public final class WebResourcesSync {
 
     private WebResourcesSync() {}
 
-    /** Result of mirroring one source webapp root. */
-    public record MirrorResult(int copied) {
-        public static final MirrorResult EMPTY = new MirrorResult(0);
+    /**
+     * Result of mirroring one source webapp root.
+     *
+     * <p>{@code contributedPaths} is the set of forward-slash-normalized
+     * relative paths the source walk visited (regardless of copy outcome).
+     * These are the paths the source claims authority over — anything in
+     * the destination's webapp tree NOT in the union of every webapp
+     * source's {@code contributedPaths} (and outside the
+     * {@link #SKIP_SUBTREES} regions, which are owned by other pipelines)
+     * is an orphan that the caller may safely delete.
+     */
+    public record MirrorResult(int copied,
+                               @NotNull java.util.Set<String> contributedPaths) {
+        public static final MirrorResult EMPTY = new MirrorResult(
+                0, java.util.Collections.emptySet());
     }
 
     /** Aggregate result across all artifacts in a single call. */
@@ -155,17 +167,36 @@ public final class WebResourcesSync {
             }
 
             int copiedForThisArtifact = 0;
+            // Union of every webapp source root's contributed paths. Anything
+            // in the deployed artifact's webapp tree NOT in this set (and
+            // outside the SKIP_SUBTREES regions, which are owned by other
+            // pipelines) is an orphan that source no longer claims.
+            java.util.Set<String> contributedPaths = new java.util.HashSet<>();
             for (Path src : webappSources) {
                 logger.logServerInfo("Web resources sync: '" + name + "' -> " + src + " -> " + artifactRoot);
                 MirrorResult mr = mirrorTree(src, artifactRoot);
                 copiedForThisArtifact += mr.copied();
+                contributedPaths.addAll(mr.contributedPaths());
                 if (mr.copied() > 0) {
                     logger.logServerInfo("Web resources sync:     " + mr.copied() + " file(s) from " + src);
                 }
             }
-            if (copiedForThisArtifact > 0) {
+            int orphansRemovedForThisArtifact = 0;
+            // Same empty-set safety as DeployedClassesSync: if every webapp
+            // source root returned empty (unreadable, missing, etc.) don't
+            // wipe the deployed webapp tree.
+            if (!contributedPaths.isEmpty()) {
+                orphansRemovedForThisArtifact = removeOrphans(artifactRoot, contributedPaths);
+                if (orphansRemovedForThisArtifact > 0) {
+                    logger.logServerInfo("Web resources sync: removed " + orphansRemovedForThisArtifact
+                            + " orphan file(s) from '" + name
+                            + "' (no longer in source — would otherwise stay served by Tomcat)");
+                }
+            }
+            if (copiedForThisArtifact > 0 || orphansRemovedForThisArtifact > 0) {
                 logger.logServerInfo("Web resources sync: " + copiedForThisArtifact
-                        + " file(s) refreshed in '" + name + "'");
+                        + " file(s) refreshed and " + orphansRemovedForThisArtifact
+                        + " orphan(s) removed in '" + name + "'");
                 syncedArtifacts++;
                 totalCopied += copiedForThisArtifact;
             } else {
@@ -351,6 +382,7 @@ public final class WebResourcesSync {
         }
 
         final int[] copied = {0};
+        final java.util.Set<String> contributedPaths = new java.util.HashSet<>();
         try {
             Files.walkFileTree(src, new SimpleFileVisitor<>() {
                 @Override
@@ -378,6 +410,7 @@ public final class WebResourcesSync {
                             return FileVisitResult.CONTINUE;
                         }
                         Path rel = src.relativize(file);
+                        contributedPaths.add(rel.toString().replace('\\', '/'));
                         Path target = dst.resolve(rel.toString());
 
                         if (shouldCopy(file, attrs, target)) {
@@ -409,7 +442,72 @@ public final class WebResourcesSync {
         } catch (IOException e) {
             LOG.debug("Web resources sync: walk failed for " + src + " (" + e.getMessage() + ")");
         }
-        return new MirrorResult(copied[0]);
+        return new MirrorResult(copied[0], contributedPaths);
+    }
+
+    /**
+     * Walks {@code dst} (the exploded artifact's webapp root) and deletes
+     * regular files whose forward-slash-normalized relative paths are NOT
+     * in {@code retain}. The {@link #SKIP_SUBTREES} regions (WEB-INF/classes/
+     * and WEB-INF/lib/) are skipped entirely — those are owned by other
+     * pipelines (class sync and the build's WAR packaging respectively),
+     * not by the webapp resource sources, and deleting from them here would
+     * step on the wrong toes.
+     *
+     * <p>Empty directories left behind are not pruned. Per-file IOExceptions
+     * are debug-logged and skipped — same defensive posture as the copy pass.
+     *
+     * <p>Visible for testing.
+     */
+    static int removeOrphans(@NotNull Path dst,
+                             @NotNull java.util.Set<String> retain) {
+        if (!Files.isDirectory(dst)) return 0;
+        final int[] removed = {0};
+        try {
+            Files.walkFileTree(dst, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    // Don't traverse into subtrees owned by other pipelines.
+                    Path rel = dst.relativize(dir);
+                    String relPath = rel.toString().replace('\\', '/');
+                    for (String skip : SKIP_SUBTREES) {
+                        if (relPath.equals(skip) || relPath.startsWith(skip + "/")) {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (attrs.isSymbolicLink()) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    String rel = dst.relativize(file).toString().replace('\\', '/');
+                    if (!retain.contains(rel)) {
+                        try {
+                            Files.delete(file);
+                            removed[0]++;
+                            LOG.debug("Web resources sync: removed orphan " + file);
+                        } catch (IOException e) {
+                            LOG.debug("Web resources sync: could not delete orphan "
+                                    + file + " (" + e.getMessage() + ")");
+                        }
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    LOG.debug("Web resources sync: orphan walk could not visit "
+                            + file + " (" + exc.getMessage() + ")");
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            LOG.debug("Web resources sync: orphan walk failed for " + dst + " (" + e.getMessage() + ")");
+        }
+        return removed[0];
     }
 
     /**

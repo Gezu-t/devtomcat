@@ -198,4 +198,124 @@ class WebResourcesSyncTest {
         assertEquals("keep me", Files.readString(dst.resolve("static/keep.css")));
         assertEquals("$();", Files.readString(dst.resolve("static/added.js")));
     }
+
+    // -----------------------------------------------------------------
+    // Orphan reconciliation: with PreResources gone, the deployed webapp
+    // tree is the sole source Tomcat serves from. Stale orphans (files
+    // the user deleted from src/main/webapp but the previous mvn-package
+    // left in the exploded dir) must be removed, EXCEPT inside the
+    // SKIP_SUBTREES regions which are owned by other pipelines.
+    // -----------------------------------------------------------------
+
+    @Test
+    @DisplayName("Orphan reconcile — deleted JSP is removed from dst")
+    void orphan01_deletedJspRemoved(@TempDir Path tmp) throws IOException {
+        Path src = Files.createDirectories(tmp.resolve("src/main/webapp"));
+        Path dst = Files.createDirectories(tmp.resolve("target/app"));
+
+        // Initial state: two pages exist in src; mirror them into dst.
+        writeFile(src.resolve("keep.jsp"), "<%-- v1 --%>");
+        writeFile(src.resolve("gone.jsp"), "<%-- delete me --%>");
+        WebResourcesSync.mirrorTree(src, dst);
+
+        // User deletes gone.jsp from source.
+        Files.delete(src.resolve("gone.jsp"));
+
+        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        int removed = WebResourcesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(1, removed);
+        assertTrue(Files.exists(dst.resolve("keep.jsp")));
+        assertFalse(Files.exists(dst.resolve("gone.jsp")), "deleted JSP must be removed from dst");
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — WEB-INF/classes is NEVER touched (owned by class-sync)")
+    void orphan02_webInfClassesPreserved(@TempDir Path tmp) throws IOException {
+        // The webapp source tree doesn't claim authority over WEB-INF/classes/;
+        // DeployedClassesSync does. If the orphan pass swept that subtree we
+        // would delete the class-sync's output every time Update Classes and
+        // Resources ran — silent and devastating.
+        Path src = Files.createDirectories(tmp.resolve("src/main/webapp"));
+        Path dst = Files.createDirectories(tmp.resolve("target/app"));
+
+        writeFile(src.resolve("index.jsp"), "page");
+        // The class-sync has populated WEB-INF/classes/ — that's its turf.
+        writeFile(dst.resolve("WEB-INF/classes/com/foo/App.class"), "compiled");
+        writeFile(dst.resolve("WEB-INF/classes/messages.properties"), "k=v");
+
+        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        int removed = WebResourcesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(0, removed,
+                "the orphan pass must NEVER touch files under WEB-INF/classes/");
+        assertTrue(Files.exists(dst.resolve("WEB-INF/classes/com/foo/App.class")));
+        assertTrue(Files.exists(dst.resolve("WEB-INF/classes/messages.properties")));
+        assertTrue(Files.exists(dst.resolve("index.jsp")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — WEB-INF/lib is NEVER touched (owned by the build tool)")
+    void orphan03_webInfLibPreserved(@TempDir Path tmp) throws IOException {
+        Path src = Files.createDirectories(tmp.resolve("src/main/webapp"));
+        Path dst = Files.createDirectories(tmp.resolve("target/app"));
+
+        writeFile(src.resolve("index.jsp"), "page");
+        // The build (maven-war-plugin / Gradle war) put dependency JARs here.
+        writeFile(dst.resolve("WEB-INF/lib/some-dep-1.0.jar"), "fake-jar-bytes");
+        writeFile(dst.resolve("WEB-INF/lib/another-dep-2.0.jar"), "fake-jar-bytes");
+
+        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        int removed = WebResourcesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(0, removed,
+                "the orphan pass must NEVER touch files under WEB-INF/lib/");
+        assertTrue(Files.exists(dst.resolve("WEB-INF/lib/some-dep-1.0.jar")));
+        assertTrue(Files.exists(dst.resolve("WEB-INF/lib/another-dep-2.0.jar")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — files outside WEB-INF/ but never in any webapp source are removed")
+    void orphan04_topLevelOrphan(@TempDir Path tmp) throws IOException {
+        Path src = Files.createDirectories(tmp.resolve("src/main/webapp"));
+        Path dst = Files.createDirectories(tmp.resolve("target/app"));
+
+        writeFile(src.resolve("index.jsp"), "page");
+        // Orphan from a previous build that produced this file but the current
+        // source tree doesn't have it.
+        writeFile(dst.resolve("legacy.html"), "<html/>");
+        writeFile(dst.resolve("static/old.css"), "obsolete");
+
+        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        int removed = WebResourcesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(2, removed);
+        assertFalse(Files.exists(dst.resolve("legacy.html")));
+        assertFalse(Files.exists(dst.resolve("static/old.css")));
+        assertTrue(Files.exists(dst.resolve("index.jsp")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — empty retain set deletes everything outside SKIP_SUBTREES")
+    void orphan05_emptyRetainOutsideSkipSubtrees(@TempDir Path tmp) throws IOException {
+        // Pins the contract for the caller: removeOrphans with an empty
+        // retain set wipes everything OUTSIDE the protected subtrees.
+        // syncDeployments guards against this with the
+        // `if (!contributedPaths.isEmpty())` gate — this test makes sure
+        // that protection over WEB-INF/classes and WEB-INF/lib is
+        // structural (lives in removeOrphans), not just behavioural.
+        Path dst = Files.createDirectories(tmp.resolve("target/app"));
+        writeFile(dst.resolve("index.jsp"), "page");
+        writeFile(dst.resolve("WEB-INF/classes/Foo.class"), "compiled");
+        writeFile(dst.resolve("WEB-INF/lib/dep.jar"), "jar");
+
+        int removed = WebResourcesSync.removeOrphans(dst, java.util.Collections.emptySet());
+
+        assertEquals(1, removed, "only index.jsp must be removed");
+        assertFalse(Files.exists(dst.resolve("index.jsp")));
+        assertTrue(Files.exists(dst.resolve("WEB-INF/classes/Foo.class")),
+                "WEB-INF/classes survives even with an empty retain set");
+        assertTrue(Files.exists(dst.resolve("WEB-INF/lib/dep.jar")),
+                "WEB-INF/lib survives even with an empty retain set");
+    }
 }

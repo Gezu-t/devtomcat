@@ -12,6 +12,7 @@
 ### Fixed
 - Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.
 - Flicker when removing a deployment from the Deployment tab.
+- Class sync and web-resources sync now remove orphan files in the deployed artifact when the source no longer claims them, so deleted/renamed source files stop being loadable by Tomcat. Class sync respects the WAR module's source-root union; webapp sync skips `WEB-INF/classes/` and `WEB-INF/lib/` (owned by other pipelines).
 
 ## [1.2.0]
 

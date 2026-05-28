@@ -854,6 +854,177 @@ class DeployedClassesSyncScenariosTest {
     }
 
     // ===========================================================================
+    // Orphan reconciliation — the destination is the sole authority for what
+    // Tomcat loads, so anything in dst that source no longer claims must be
+    // deletable. Scenarios cover: simple delete, multi-source-root union,
+    // empty-source safety net, idempotency.
+    // ===========================================================================
+
+    @Test
+    @DisplayName("Orphan reconcile — source deletes a file → dst orphan removed")
+    void orphan01_singleDelete(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        // Initial state: src and dst both have two classes.
+        writeClass(src, "com/foo/Keep.class", "keep");
+        writeClass(src, "com/foo/Gone.class", "gone");
+        DeployedClassesSync.mirrorTree(src, dst);  // populates dst
+
+        // User deletes Gone.java → IDE rebuild → src no longer has Gone.class.
+        Files.delete(src.resolve("com/foo/Gone.class"));
+
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
+        // mirrorTree itself only copies; the orphan pass is invoked by callers.
+        int removed = DeployedClassesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(1, removed, "the deleted source file must be reflected in dst");
+        assertTrue(Files.exists(dst.resolve("com/foo/Keep.class")), "live file stays");
+        assertFalse(Files.exists(dst.resolve("com/foo/Gone.class")), "orphan must be deleted");
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — files only ever in dst (never in src) are removed")
+    void orphan02_pureOrphan(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        // dst has stale content from a previous build that src no longer
+        // produces (e.g. a class file from a class that was renamed).
+        writeClass(dst, "com/foo/Stale.class", "stale-bytes");
+        writeClass(src, "com/foo/Fresh.class", "fresh-bytes");
+
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
+        int removed = DeployedClassesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(1, removed);
+        assertFalse(Files.exists(dst.resolve("com/foo/Stale.class")));
+        assertTrue(Files.exists(dst.resolve("com/foo/Fresh.class")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — multi source root: union of contributions is retained")
+    void orphan03_multipleSourceRootsUnion(@TempDir Path tmp) throws Exception {
+        // Simulating a module with separate Java + resources output dirs (some
+        // builds split target/classes/ and target/classes-resources/, or
+        // Gradle's java/main + resources/main). Union of both roots' contents
+        // must survive the orphan pass; anything in neither must be deleted.
+        Path javaSrc = Files.createDirectories(tmp.resolve("javaSrc"));
+        Path resSrc = Files.createDirectories(tmp.resolve("resSrc"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        writeClass(javaSrc, "com/foo/Foo.class", "foo");
+        writeClass(resSrc, "com/foo/messages.properties", "hello=world");
+        // Orphan that comes from neither source root.
+        writeClass(dst, "com/foo/Orphan.class", "stale");
+
+        Set<String> allContributed = new HashSet<>();
+        allContributed.addAll(DeployedClassesSync.mirrorTree(javaSrc, dst).contributedPaths());
+        allContributed.addAll(DeployedClassesSync.mirrorTree(resSrc, dst).contributedPaths());
+
+        int removed = DeployedClassesSync.removeOrphans(dst, allContributed);
+
+        assertEquals(1, removed);
+        assertTrue(Files.exists(dst.resolve("com/foo/Foo.class")));
+        assertTrue(Files.exists(dst.resolve("com/foo/messages.properties")));
+        assertFalse(Files.exists(dst.resolve("com/foo/Orphan.class")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — empty retain set deletes everything (caller MUST gate this)")
+    void orphan04_emptyRetainSetDeletesEverything(@TempDir Path tmp) throws Exception {
+        // This pins the contract: removeOrphans is destructive when the
+        // retain set is empty. The CALLER must guard against the
+        // "every source root was unreadable" case before calling — which
+        // syncDeployments does via `if (!contributedPaths.isEmpty())`. This
+        // test exists to make sure that gate is never accidentally removed,
+        // because the failure mode (empty retain set → wipe WEB-INF/classes)
+        // would silently destroy a working deployment.
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        writeClass(dst, "A.class", "a");
+        writeClass(dst, "com/b/B.class", "b");
+
+        int removed = DeployedClassesSync.removeOrphans(dst, java.util.Collections.emptySet());
+
+        assertEquals(2, removed, "removeOrphans with empty retain MUST delete every file — "
+                + "the gate against this lives in syncDeployments, NOT here");
+        assertFalse(Files.exists(dst.resolve("A.class")));
+        assertFalse(Files.exists(dst.resolve("com/b/B.class")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — idempotency: second pass after a clean sync is a no-op")
+    void orphan05_idempotent(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        writeClass(src, "X.class", "x");
+        writeClass(src, "com/y/Y.class", "y");
+
+        // First pass — populates dst.
+        DeployedClassesSync.MirrorResult first = DeployedClassesSync.mirrorTree(src, dst);
+        assertEquals(0, DeployedClassesSync.removeOrphans(dst, first.contributedPaths()),
+                "fresh mirror produces no orphans");
+
+        // Second pass — same state, must be idempotent.
+        DeployedClassesSync.MirrorResult second = DeployedClassesSync.mirrorTree(src, dst);
+        assertEquals(0, DeployedClassesSync.removeOrphans(dst, second.contributedPaths()),
+                "re-running over identical state produces no orphans");
+        assertTrue(Files.exists(dst.resolve("X.class")));
+        assertTrue(Files.exists(dst.resolve("com/y/Y.class")));
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — broken ECJ stub: source path still contributes (orphan pass skips it)")
+    void orphan06_brokenEcjStubStillContributes(@TempDir Path tmp) throws Exception {
+        // Critical edge case: when src has a broken-ECJ stub, mirrorTree
+        // refuses to overwrite the (presumably working) dst copy. But it
+        // MUST still add the relative path to contributedPaths so the orphan
+        // pass doesn't then delete the working dst copy because "the source
+        // doesn't claim it".
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        // dst has a working copy from a previous successful build.
+        writeClass(dst, "com/foo/Broken.class", "working-bytes-from-prior-build");
+        // src has the broken ECJ stub.
+        writeRaw(src.resolve("com/foo/Broken.class"), ecjBrokenPayload());
+
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
+        assertEquals(0, mr.copied(), "broken stub must not overwrite working dst");
+        assertEquals(1, mr.brokenSkipped());
+
+        int removed = DeployedClassesSync.removeOrphans(dst, mr.contributedPaths());
+        assertEquals(0, removed,
+                "the broken-stub path must still be in contributedPaths so the orphan "
+                        + "pass keeps the working dst copy");
+        assertTrue(Files.exists(dst.resolve("com/foo/Broken.class")),
+                "working dst copy must survive");
+    }
+
+    @Test
+    @DisplayName("Orphan reconcile — nested directory: orphans deep in the tree are removed")
+    void orphan07_nestedDirectory(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        writeClass(src, "com/a/b/c/Live.class", "live");
+        // Orphans at varying depths.
+        writeClass(dst, "com/a/Old1.class", "stale1");
+        writeClass(dst, "com/a/b/c/Old2.class", "stale2");
+        writeClass(dst, "com/a/b/c/d/e/Deep.class", "deep");
+
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
+        int removed = DeployedClassesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(3, removed);
+        assertTrue(Files.exists(dst.resolve("com/a/b/c/Live.class")));
+        assertFalse(Files.exists(dst.resolve("com/a/Old1.class")));
+        assertFalse(Files.exists(dst.resolve("com/a/b/c/Old2.class")));
+        assertFalse(Files.exists(dst.resolve("com/a/b/c/d/e/Deep.class")));
+    }
+
+    // ===========================================================================
     // Test fixtures and helpers
     // ===========================================================================
 
