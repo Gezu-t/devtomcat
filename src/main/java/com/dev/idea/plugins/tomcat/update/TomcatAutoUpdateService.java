@@ -155,17 +155,18 @@ public final class TomcatAutoUpdateService {
         }
 
         TomcatRunConfiguration config = handler.getConfiguration();
-        suppressingSaves.set(true);
-        try {
-            new TomcatApplicationUpdater(project, handler, config, action).executeUpdate(action);
-        } catch (Throwable t) {
-            LOG.warn("Automatic update failed for '" + config.getName() + "'", t);
-        } finally {
-            // executeUpdate has already saved documents synchronously on this EDT
-            // turn, so the reentrant-save window is closed; the async compile that
-            // follows does not save documents.
-            suppressingSaves.set(false);
-        }
+        // Hold the save-suppression flag across executeUpdate: its first step saves
+        // all documents, which fires TomcatSaveListener — the flag makes the listener
+        // decline to schedule another update, closing the loop. executeUpdate saves
+        // synchronously on this EDT turn, so the window need only span this call; the
+        // async compile that follows does not save documents.
+        runSuppressed(suppressingSaves, () -> {
+            try {
+                new TomcatApplicationUpdater(project, handler, config, action).executeUpdate(action);
+            } catch (Throwable t) {
+                LOG.warn("Automatic update failed for '" + config.getName() + "'", t);
+            }
+        });
     }
 
     /**
@@ -228,5 +229,24 @@ public final class TomcatAutoUpdateService {
     static boolean isHotSyncAction(@NotNull String action) {
         return UpdateConfig.UPDATE_CLASSES_AND_RESOURCES.equals(action)
                 || UpdateConfig.UPDATE_RESOURCES.equals(action);
+    }
+
+    /**
+     * Runs {@code body} with {@code flag} held {@code true} for its entire
+     * synchronous duration, clearing it afterwards even if {@code body} throws.
+     *
+     * <p>This is the no-infinite-loop guarantee in isolation: while an automatic
+     * update saves documents, the raised flag tells {@link TomcatSaveListener} to
+     * ignore that reentrant save rather than schedule yet another update. Pure and
+     * static so the window invariant — held across the body, always released —
+     * is unit-testable without a live service.
+     */
+    static void runSuppressed(@NotNull AtomicBoolean flag, @NotNull Runnable body) {
+        flag.set(true);
+        try {
+            body.run();
+        } finally {
+            flag.set(false);
+        }
     }
 }

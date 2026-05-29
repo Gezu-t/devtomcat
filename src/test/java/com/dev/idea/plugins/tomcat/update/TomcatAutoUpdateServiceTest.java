@@ -4,7 +4,10 @@ import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -60,5 +63,37 @@ class TomcatAutoUpdateServiceTest {
         assertFalse(TomcatAutoUpdateService.isHotSyncAction(UpdateConfig.REDEPLOY));
         assertFalse(TomcatAutoUpdateService.isHotSyncAction(UpdateConfig.RESTART_SERVER));
         assertFalse(TomcatAutoUpdateService.isHotSyncAction(UpdateConfig.DO_NOTHING));
+    }
+
+    @Test
+    @DisplayName("Suppression is active during the update and cleared once it returns")
+    void suppressionHeldDuringBodyThenCleared() {
+        AtomicBoolean flag = new AtomicBoolean(false);
+        boolean[] observedDuring = {false};
+        // The body stands in for the update saving documents; a reader inside it
+        // models the save listener checking the flag mid-update.
+        TomcatAutoUpdateService.runSuppressed(flag, () -> observedDuring[0] = flag.get());
+        assertTrue(observedDuring[0], "the save listener must see suppression active mid-update");
+        assertFalse(flag.get(), "suppression must be cleared once the update returns");
+    }
+
+    @Test
+    @DisplayName("Suppression is cleared even when the update throws")
+    void suppressionClearedOnThrow() {
+        AtomicBoolean flag = new AtomicBoolean(false);
+        assertThrows(IllegalStateException.class, () ->
+                TomcatAutoUpdateService.runSuppressed(flag, () -> {
+                    throw new IllegalStateException("update failed");
+                }));
+        assertFalse(flag.get(), "a failed update must not leave save-triggering permanently suppressed");
+    }
+
+    @Test
+    @DisplayName("Suppression starts cleared")
+    void suppressionStartsCleared() {
+        AtomicBoolean flag = new AtomicBoolean(false);
+        // Sanity guard against a future refactor that forgets to reset between runs.
+        TomcatAutoUpdateService.runSuppressed(flag, () -> { /* no-op */ });
+        assertFalse(flag.get());
     }
 }
