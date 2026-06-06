@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.compiler.CompileScope;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -71,7 +71,7 @@ public final class DeploymentCompileScope {
                                        @NotNull TomcatDeploymentLogger logger) {
         if (project.isDisposed() || deployments.isEmpty()) return null;
         try {
-            return ReadAction.compute(() -> computeScope(project, deployments, logger));
+            return TomcatReadActions.compute(() -> computeScope(project, deployments, logger));
         } catch (Throwable t) {
             // Never let scope resolution break Update — fall back to whole-project.
             LOG.warn("Scoped compile: could not resolve deployment module scope; compiling whole project", t);

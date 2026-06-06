@@ -7,10 +7,15 @@ import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
+import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
+import com.dev.idea.plugins.tomcat.utils.MavenReflection;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ModuleOrderEntry;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
@@ -28,16 +33,20 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.file.attribute.FileTime;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.EXT_CLASS;
+import static com.dev.idea.plugins.tomcat.TomcatConstants.EXT_JAR;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
 
 /**
  * Mirrors freshly-compiled module output into each exploded deployment's
@@ -80,8 +89,15 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
  *       it transitively pulls in. Tomcat's classloader searches
  *       {@code WEB-INF/classes/} before {@code WEB-INF/lib/*.jar}, so a
  *       freshly-compiled dependency class wins over its stale-JAR copy
- *       from the last {@code mvn package} run. See
- *       {@link #collectProductionRoots} for the rationale.</li>
+ *       from the last {@code mvn package} run. A dependency's resource policy
+ *       is decided per root against the deployed {@code WEB-INF/lib/}: when the
+ *       dependency is packaged there as a JAR, the root contributes its
+ *       {@code .class} files only (its resources reach Tomcat through the JAR
+ *       and must not be duplicated into {@code WEB-INF/classes/}); when the
+ *       dependency is NOT packaged there, the root is mirrored full-content so
+ *       its resources still reach Tomcat. The web module's own root is always
+ *       mirrored full-content. See {@link #collectProductionRoots} and
+ *       {@link #shouldMirrorClassesOnly} for the rationale.</li>
  * </ul>
  *
  * <h2>Safety</h2>
@@ -254,6 +270,12 @@ public final class DeployedClassesSync {
 
             int copiedForThisArtifact = 0;
             int brokenForThisArtifact = 0;
+            // Library JARs actually packaged into this deployment's WEB-INF/lib/.
+            // A dependency module's resource policy is decided against this:
+            // jarred dependency → .class-only (its resources come from the JAR);
+            // dependency NOT packaged here → full content (so its resources
+            // still reach Tomcat). Scanned once per artifact off the model.
+            Set<String> deployedLibraryKeys = scanDeployedLibraryKeys(artifactRoot);
             // Union of every source root's contributed paths. Anything in the
             // deployed WEB-INF/classes/ NOT in this set is an orphan that
             // source no longer claims. With PreResources gone, the deployed
@@ -262,13 +284,15 @@ public final class DeployedClassesSync {
             // resolved by the classloader and the user sees "I deleted that
             // class, why is it still here" behaviour.
             java.util.Set<String> contributedPaths = new java.util.HashSet<>();
-            for (Path src : resolution.sourceRoots()) {
-                MirrorResult mr = mirrorTree(src, webInfClasses);
+            for (SourceRoot src : resolution.sourceRoots()) {
+                boolean classesOnly = shouldMirrorClassesOnly(src, deployedLibraryKeys);
+                MirrorResult mr = mirrorTree(src.path(), webInfClasses, classesOnly);
                 copiedForThisArtifact += mr.copied();
                 brokenForThisArtifact += mr.brokenSkipped();
                 contributedPaths.addAll(mr.contributedPaths());
                 if (mr.copied() > 0) {
-                    logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src);
+                    logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src.path()
+                            + (classesOnly ? " (.class only)" : ""));
                 }
             }
             // Orphan-reconcile only when at least one source root actually
@@ -341,7 +365,7 @@ public final class DeployedClassesSync {
             return resolveArtifactBacked(project, a);
         }
         if (deployment instanceof ModuleBackedDeployment m) {
-            return resolveModuleBacked(m);
+            return resolveModuleBacked(project, m);
         }
         if (deployment instanceof ExternalFileDeployment) {
             return new ResolutionReport(null, "external-source-skipped", List.of(), null);
@@ -368,11 +392,12 @@ public final class DeployedClassesSync {
         }
         return new ResolutionReport(module.getName(),
                 "artifact-tree: '" + d.getArtifactName() + "'",
-                collectProductionRoots(module), null);
+                collectProductionRoots(project, module), null);
     }
 
     @NotNull
-    private static ResolutionReport resolveModuleBacked(@NotNull ModuleBackedDeployment d) {
+    private static ResolutionReport resolveModuleBacked(@NotNull Project project,
+                                                        @NotNull ModuleBackedDeployment d) {
         Module module = d.getModule();
         if (module == null) {
             return new ResolutionReport(null, "module-missing", List.of(),
@@ -380,8 +405,30 @@ public final class DeployedClassesSync {
         }
         return new ResolutionReport(module.getName(),
                 "module-direct: '" + d.getModuleName() + "'",
-                collectProductionRoots(module), null);
+                collectProductionRoots(project, module), null);
     }
+
+    /**
+     * One production class-output root plus the content policy the mirror
+     * applies to it. {@code classesOnly == true} marks a <em>dependency</em>
+     * module root (full-content mirroring it could duplicate resources that
+     * also ship in the dependency's {@code WEB-INF/lib/} JAR);
+     * {@code classesOnly == false} marks the web module's own root (always
+     * full-content — its resources belong directly in {@code WEB-INF/classes/}
+     * and are duplicated nowhere). See {@link #collectProductionRoots}.
+     *
+     * <p>{@code artifactName} is the dependency module's artifact identity
+     * (Maven artifactId, or the module-name stem when Maven is unavailable),
+     * or {@code null} for the own root and for any dependency whose identity
+     * could not be resolved. The sync uses it to decide, per dependency root,
+     * whether that dependency is actually packaged as a JAR in the deployed
+     * {@code WEB-INF/lib/}: if it is, the resources come from the JAR and the
+     * root stays {@code .class}-only; if it is not, the root is mirrored
+     * full-content so its resources still reach Tomcat. A {@code null}
+     * identity falls back to {@code .class}-only — the duplicate-safe default.
+     * See {@link #shouldMirrorClassesOnly}.
+     */
+    record SourceRoot(@NotNull Path path, boolean classesOnly, @Nullable String artifactName) {}
 
     /**
      * Verbose-resolution result. {@code moduleName} is {@code null} only when
@@ -390,7 +437,7 @@ public final class DeployedClassesSync {
      */
     record ResolutionReport(@Nullable String moduleName,
                             @NotNull String strategy,
-                            @NotNull List<Path> sourceRoots,
+                            @NotNull List<SourceRoot> sourceRoots,
                             @Nullable String diagnostic) {}
 
     /**
@@ -459,37 +506,90 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * Collects production class roots for the resolved web module
-     * <strong>and every dependency module it transitively pulls in</strong>.
+     * Collects production class-output roots for the resolved web module
+     * <strong>and every dependency module it transitively pulls in</strong>,
+     * tagging each with the content policy the mirror should apply.
      *
-     * <p>Including dependency modules was the missing piece in the first
-     * cut: a multi-module Maven project where the web module depends on a
-     * {@code shared} library has {@code shared}'s compiled classes in two
-     * places — {@code shared/target/classes/} (fresh after Make) and
-     * inside {@code WEB-INF/lib/shared-X.Y.jar} (stale until the next
-     * {@code mvn package}). Mirroring only the web module's own output
-     * never refreshes the shared classes; Tomcat's classloader then loads
-     * the stale ones from the JAR, and the user sees old behaviour after
-     * a restart. By bringing in dependency-module roots, the fresh
-     * {@code shared/target/classes/Foo.class} lands in
-     * {@code web/target/<war>/WEB-INF/classes/} and wins over the JAR's
-     * stale {@code Foo.class} via Tomcat's standard classloader precedence
-     * ({@code WEB-INF/classes/} is searched before {@code WEB-INF/lib/*.jar}).
+     * <p><b>Why dependency modules are included at all.</b> In a multi-module
+     * build the web module depends on library modules whose compiled classes
+     * live in two places — the library module's fresh compile output (after
+     * Make) and a stale copy inside {@code WEB-INF/lib/<lib>.jar} (frozen at
+     * the last {@code package} run). Mirroring only the web module's own
+     * output never refreshes the library classes, so Tomcat loads the stale
+     * ones from the JAR and the user sees old behaviour after a restart.
+     * Bringing the fresh dependency {@code .class} files into
+     * {@code WEB-INF/classes/} makes them win via Tomcat's standard
+     * classloader precedence ({@code WEB-INF/classes/} is searched before
+     * {@code WEB-INF/lib/*.jar}).
      *
-     * <p>No safety hazard: Java forbids two compile units defining the same
-     * fully-qualified class, so a class can only appear in at most one
-     * module's output — the "duplicate-class confusion" intuition doesn't
-     * apply. The mtime/size gate in {@link #shouldCopy} keeps repeated
-     * restarts cheap even on large dep graphs (~50 µs per stat on SSD).
+     * <p><b>Why a dependency root's resource policy is conditional.</b> A
+     * module's compile-output root holds more than bytecode — under Maven
+     * {@code target/classes/} also contains everything copied from
+     * {@code src/main/resources/}. When the build packages that dependency as a
+     * {@code WEB-INF/lib/<lib>.jar}, its resources already reach Tomcat through
+     * the JAR; copying them into {@code WEB-INF/classes/} too would put the
+     * same resource on the classpath twice, and any framework that discovers
+     * resources by enumerating the classpath (service registrations,
+     * descriptor lookups, factory files) fails when it finds two copies of a
+     * path it expects to find once. But when a dependency is <em>not</em>
+     * packaged as a JAR — e.g. its compile-output directory sits directly on
+     * the runtime classpath — the JAR can't carry its resources, so a
+     * {@code .class}-only mirror would silently drop them. The right policy
+     * therefore depends on the actual deployed {@code WEB-INF/lib/} contents,
+     * which only the caller knows; this method does not decide it. It tags each
+     * dependency root with {@code classesOnly == true} (the candidate policy)
+     * and resolves the dependency's <em>artifact identity</em> so the caller
+     * can check coverage and refine the decision per root (see
+     * {@link #shouldMirrorClassesOnly}). Bytecode duplication, when a root does
+     * mirror {@code .class}-only alongside its JAR, is harmless — a single
+     * fully-qualified name resolves to the first hit ({@code WEB-INF/classes/}
+     * wins) and Java forbids the same name in two compile units.
      *
-     * <p>Excluded: SDK roots (JRE classes mustn't go into the webapp) and
-     * library JARs (those stay in {@code WEB-INF/lib/} via the build tool).
+     * <p><b>Why the web module's OWN root is mirrored full-content.</b> The
+     * web module is not packaged as a library of itself, so its resources are
+     * not duplicated in any {@code WEB-INF/lib/} JAR — they belong directly in
+     * {@code WEB-INF/classes/}, which is exactly where the WAR plugin places
+     * them. Full-content mirroring there creates no duplication and keeps
+     * non-class resources authored in the web module fresh.
+     *
+     * <p>Own vs dependency is distinguished structurally, with no name
+     * matching: {@code withoutDepModules()} yields the module's own output;
+     * the recursive enumeration yields own + transitive dependencies; any
+     * root in the recursive set but not the own set is a dependency root.
+     * Artifact identity, used only to match a dependency root against deployed
+     * library JARs, comes from the Maven artifactId (or the module-name stem
+     * when Maven is unavailable) and is {@code null} for the own root.
+     *
+     * <p>Excluded entirely: SDK roots (JRE classes mustn't go into the webapp)
+     * and library JARs (those stay in {@code WEB-INF/lib/} via the build
+     * tool). The mtime/size gate in {@link #shouldCopy} keeps repeated
+     * restarts cheap even on large dependency graphs (~50 µs per stat on SSD).
      *
      * <p><b>Must be called inside a read action.</b>
      */
     @NotNull
-    private static List<Path> collectProductionRoots(@NotNull Module module) {
-        List<Path> result = new ArrayList<>();
+    private static List<SourceRoot> collectProductionRoots(@NotNull Project project,
+                                                           @NotNull Module module) {
+        // The module's OWN production output (dependency modules excluded).
+        // These paths get full-content mirroring; every other root the
+        // recursive enumeration returns is a dependency root and is a
+        // .class-only candidate, refined later against WEB-INF/lib.
+        Set<Path> ownRoots = collectRootPaths(
+                OrderEnumerator.orderEntries(module)
+                        .withoutDepModules()
+                        .productionOnly()
+                        .withoutSdk()
+                        .withoutLibraries()
+                        .classes()
+                        .getRoots());
+
+        // Maps each dependency module's output-root path to its artifact
+        // identity, so a dependency root can be matched against the JARs the
+        // build packaged into the deployed WEB-INF/lib/.
+        Map<String, String> dependencyArtifactNames =
+                collectDependencyArtifactNames(project, module);
+
+        List<SourceRoot> result = new ArrayList<>();
         for (VirtualFile root : OrderEnumerator.orderEntries(module)
                 .recursively()
                 .productionOnly()
@@ -500,13 +600,147 @@ public final class DeployedClassesSync {
             try {
                 Path p = Path.of(root.getPath());
                 if (Files.isDirectory(p)) {
-                    result.add(p);
+                    boolean dependency = !ownRoots.contains(p);
+                    String artifactName = dependency
+                            ? dependencyArtifactNames.get(root.getPath())
+                            : null;
+                    result.add(new SourceRoot(p, dependency, artifactName));
                 }
             } catch (Exception e) {
                 LOG.debug("Class sync: ignored non-filesystem output root " + root);
             }
         }
         return result;
+    }
+
+    /**
+     * Maps an {@link OrderEnumerator} root array to a set of filesystem paths
+     * for membership testing. Non-filesystem roots (e.g. in-memory test
+     * fixtures) are skipped — they can never match a real dependency root on
+     * disk, and the only use of this set is to recognise the module's own
+     * output among the recursive roots.
+     */
+    @NotNull
+    private static Set<Path> collectRootPaths(@NotNull VirtualFile[] roots) {
+        Set<Path> paths = new HashSet<>();
+        for (VirtualFile root : roots) {
+            try {
+                paths.add(Path.of(root.getPath()));
+            } catch (Exception e) {
+                LOG.debug("Class sync: ignored non-filesystem own output root " + root);
+            }
+        }
+        return paths;
+    }
+
+    /**
+     * Maps each transitive dependency module's production output-root path to
+     * its artifact identity — the Maven artifactId when available, otherwise
+     * the IntelliJ module name stripped of any compound project prefix
+     * ({@code "myapp.common"} → {@code "common"}) so it lines up with the
+     * {@code <artifactId>} stem of the JAR the build packages into
+     * {@code WEB-INF/lib/}. Keyed by the same {@link VirtualFile#getPath()}
+     * string {@link #collectProductionRoots} iterates, so a recursive root can
+     * look up its owning dependency's identity directly.
+     *
+     * <p>Walks {@code ModuleOrderEntry} edges depth-first with a visited guard;
+     * the web module's own output is intentionally absent (only dependencies
+     * are mapped). <b>Must be called inside a read action.</b>
+     */
+    @NotNull
+    private static Map<String, String> collectDependencyArtifactNames(@NotNull Project project,
+                                                                      @NotNull Module module) {
+        Map<String, String> result = new HashMap<>();
+        collectDependencyArtifactNames(project, module, result, new HashSet<>());
+        return result;
+    }
+
+    private static void collectDependencyArtifactNames(@NotNull Project project,
+                                                       @NotNull Module module,
+                                                       @NotNull Map<String, String> result,
+                                                       @NotNull Set<String> visited) {
+        if (!visited.add(module.getName())) return;
+        for (OrderEntry entry : ModuleRootManager.getInstance(module).getOrderEntries()) {
+            if (!(entry instanceof ModuleOrderEntry moduleEntry)) continue;
+            Module dep = moduleEntry.getModule();
+            if (dep == null) continue;
+
+            String artifactName = MavenReflection.getArtifactId(dep, project);
+            if (artifactName == null) {
+                String moduleName = dep.getName();
+                int dot = moduleName.lastIndexOf('.');
+                artifactName = dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
+            }
+
+            for (VirtualFile outputRoot : OrderEnumerator.orderEntries(dep)
+                    .productionOnly()
+                    .withoutSdk()
+                    .withoutLibraries()
+                    .classes()
+                    .getRoots()) {
+                result.put(outputRoot.getPath(), artifactName);
+            }
+
+            collectDependencyArtifactNames(project, dep, result, visited);
+        }
+    }
+
+    /**
+     * Decides whether a source root should mirror {@code .class} files only,
+     * given the artifact keys actually present in the deployed
+     * {@code WEB-INF/lib/}.
+     *
+     * <ul>
+     *   <li>The web module's own root ({@code classesOnly == false}) always
+     *       mirrors full content — never returns {@code true} here.</li>
+     *   <li>A dependency whose artifact is packaged as a JAR in
+     *       {@code WEB-INF/lib/} stays {@code .class}-only: its resources reach
+     *       Tomcat through that JAR, so copying them into {@code WEB-INF/classes/}
+     *       too would duplicate every shared path on the classpath.</li>
+     *   <li>A dependency confirmed <em>absent</em> from {@code WEB-INF/lib/}
+     *       mirrors full content, so its resources still reach Tomcat — nothing
+     *       else carries them, so no duplication is possible.</li>
+     *   <li>A dependency whose identity could not be resolved
+     *       ({@code artifactName == null}) falls back to {@code .class}-only,
+     *       the duplicate-safe default: copying resources a JAR also holds is
+     *       the fatal failure, whereas a missed resource is not.</li>
+     * </ul>
+     *
+     * <p>Both sides are normalized through
+     * {@link LibraryArtifactNames#libraryArtifactKey} so the dependency's
+     * identity and the deployed JAR's identity are compared on the same
+     * version-independent basis.
+     */
+    static boolean shouldMirrorClassesOnly(@NotNull SourceRoot root,
+                                           @NotNull Set<String> deployedLibraryKeys) {
+        if (!root.classesOnly()) return false;
+        String name = root.artifactName();
+        if (name == null) return true;
+        return deployedLibraryKeys.contains(
+                LibraryArtifactNames.libraryArtifactKey(name + EXT_JAR));
+    }
+
+    /**
+     * Reads the deployed {@code WEB-INF/lib/} and returns the version-independent
+     * artifact key (via {@link LibraryArtifactNames#libraryArtifactKey}) of
+     * every JAR present. Empty when the directory is absent or unreadable.
+     * Plain file I/O — no read action or project-model access, safe on the
+     * background sync thread.
+     */
+    @NotNull
+    static Set<String> scanDeployedLibraryKeys(@NotNull Path artifactRoot) {
+        Set<String> keys = new HashSet<>();
+        Path webInfLib = artifactRoot.resolve(WEB_INF_LIB_PATH);
+        if (!Files.isDirectory(webInfLib)) return keys;
+        try (var stream = Files.list(webInfLib)) {
+            stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
+                  .forEach(p -> keys.add(
+                          LibraryArtifactNames.libraryArtifactKey(p.getFileName().toString())));
+        } catch (IOException e) {
+            LOG.debug("Class sync: could not list WEB-INF/lib at " + webInfLib
+                    + ": " + e.getMessage());
+        }
+        return keys;
     }
 
     /**
@@ -526,7 +760,8 @@ public final class DeployedClassesSync {
     @NotNull
     static List<Path> resolveModuleOutputRoots(@NotNull Project project,
                                                @NotNull DeploymentArtifact artifact) {
-        return resolveModuleOutputRootsVerbose(project, artifact).sourceRoots();
+        return resolveModuleOutputRootsVerbose(project, artifact).sourceRoots()
+                .stream().map(SourceRoot::path).toList();
     }
 
     /**
@@ -547,10 +782,31 @@ public final class DeployedClassesSync {
     }
 
     /**
+     * Full-content mirror — copies every file (the web module's own output
+     * root). Convenience overload of {@link #mirrorTree(Path, Path, boolean)}
+     * with {@code classesOnly == false}.
+     */
+    // Package-visible so DeployedClassesSyncScenariosTest can drive end-to-end
+    // mirror behaviour without standing up a Project/ModuleManager fixture.
+    static MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst) {
+        return mirrorTree(src, dst, false);
+    }
+
+    /**
      * Walks {@code src} and copies every file that is missing in {@code dst}
      * or older than its {@code src} counterpart. Returns counts for files
      * copied and files skipped because they were detected as ECJ
      * "compile-with-errors" stubs (see {@link #isBrokenEcjClass}).
+     *
+     * <p>When {@code classesOnly} is {@code true}, only {@code .class} files
+     * are considered — every other file is skipped and, crucially, left OUT
+     * of {@code contributedPaths} so the caller's orphan pass removes any copy
+     * an earlier full-content sync left behind. This is the dependency-module
+     * policy: a dependency's non-class resources already ship inside its
+     * {@code WEB-INF/lib/} JAR, so duplicating them into {@code WEB-INF/classes/}
+     * would break classpath-enumeration frameworks (see
+     * {@link #collectProductionRoots}). The web module's own root passes
+     * {@code false} and mirrors full content.
      *
      * <p>The walker swallows per-file IOExceptions to avoid aborting a sync
      * mid-way when one file is briefly locked (Windows file-handles, IDE
@@ -558,9 +814,7 @@ public final class DeployedClassesSync {
      * issue is visible in {@code idea.log} without polluting the run
      * console.
      */
-    // Package-visible so DeployedClassesSyncScenariosTest can drive end-to-end
-    // mirror behaviour without standing up a Project/ModuleManager fixture.
-    static MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst) {
+    static MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst, boolean classesOnly) {
         if (!Files.isDirectory(src)) return MirrorResult.EMPTY;
 
         // Pre-flight nesting guard: refuse to recurse when src and dst nest
@@ -619,6 +873,21 @@ public final class DeployedClassesSync {
                             return FileVisitResult.CONTINUE;
                         }
 
+                        // Dependency-module roots mirror .class files ONLY.
+                        // A dependency's non-class resources already live in
+                        // its WEB-INF/lib/<lib>.jar; copying them into
+                        // WEB-INF/classes/ would put the same resource on the
+                        // classpath twice and break frameworks that enumerate
+                        // classpath resources by name. Skip BEFORE recording
+                        // the path so the skipped file is absent from
+                        // contributedPaths and the caller's orphan pass deletes
+                        // any copy an earlier full-content sync left behind
+                        // (self-healing a deployment broken by the old policy).
+                        if (classesOnly
+                                && !file.getFileName().toString().endsWith(EXT_CLASS)) {
+                            return FileVisitResult.CONTINUE;
+                        }
+
                         Path rel = src.relativize(file);
                         // Record the relative path BEFORE any gate. The
                         // orphan-reconcile contract is "anything in dst that
@@ -665,9 +934,25 @@ public final class DeployedClassesSync {
                             Files.createDirectories(parent);
                         }
                         try {
-                            Files.copy(file, target,
-                                    StandardCopyOption.REPLACE_EXISTING,
-                                    StandardCopyOption.COPY_ATTRIBUTES);
+                            // Copy WITHOUT COPY_ATTRIBUTES on every platform (Windows,
+                            // Linux, macOS) — the deployed copy needs none of the
+                            // source's permissions/ACLs anywhere. The speedup is
+                            // largest on Windows, where COPY_ATTRIBUTES additionally
+                            // re-applies NTFS security attributes (ACLs) per file — the
+                            // dominant cost on large multi-module syncs (the
+                            // copySecurityAttributes frames in the EDT-freeze report);
+                            // on Linux/macOS it just avoids a cheaper permission copy.
+                            // We still mirror just the source mtime onto the copy so
+                            // shouldCopy's gate stays exact (dst mtime == src mtime),
+                            // keeping an unchanged file a no-op on the next sync — same
+                            // behaviour on every OS.
+                            Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                            try {
+                                Files.setLastModifiedTime(target, attrs.lastModifiedTime());
+                            } catch (IOException ignoreMtime) {
+                                // mtime is a gate optimization, not correctness — worst
+                                // case the next sync re-copies this one file.
+                            }
                             copied[0]++;
                         } catch (java.nio.file.NoSuchFileException vanished) {
                             // The source file disappeared between visitFile and
@@ -894,25 +1179,28 @@ public final class DeployedClassesSync {
     static boolean shouldCopy(@NotNull Path source,
                               @NotNull BasicFileAttributes sourceAttrs,
                               @NotNull Path target) {
-        if (!Files.exists(target)) return true;
+        // Single stat for the destination (mirrors WebResourcesSync.shouldCopy):
+        // one readAttributes fetches mtime + size together instead of a separate
+        // exists + getLastModifiedTime + size. This runs once per source file, so
+        // on a large multi-module sync the saved syscalls add up.
+        BasicFileAttributes dstAttrs;
         try {
-            FileTime srcTime = sourceAttrs.lastModifiedTime();
-            FileTime dstTime = Files.getLastModifiedTime(target);
-            if (srcTime.toMillis() > dstTime.toMillis()) return true;
-            // Size-tiebreaker for the equal-or-older mtime case. We don't
-            // care about a "src is older than dst" scenario — that would
-            // mean the user reverted a file, and overwriting with the older
-            // version is the right behaviour anyway. So: if mtimes match
-            // exactly and sizes differ, copy. Sizes also differing while
-            // dst is strictly newer is unusual (manual edit of the deployed
-            // file?) and overwriting from source still matches user intent
-            // (sync source-of-truth back to deploy dir).
-            return sourceAttrs.size() != Files.size(target);
+            dstAttrs = Files.readAttributes(target, BasicFileAttributes.class);
+        } catch (java.nio.file.NoSuchFileException missing) {
+            return true;
         } catch (IOException e) {
-            // If we can't read the destination's mtime/size, prefer to
-            // copy — safer to overwrite than to leave stale code in place.
+            // Can't read the destination — prefer to copy (safer than leaving stale code).
             return true;
         }
+        if (sourceAttrs.lastModifiedTime().toMillis() > dstAttrs.lastModifiedTime().toMillis()) {
+            return true;
+        }
+        // Size-tiebreaker for the equal-or-older mtime case. We don't care about
+        // a "src is older than dst" scenario — that would mean the user reverted
+        // a file, and overwriting with the older version is fine. So: if mtimes
+        // match exactly and sizes differ, copy. This also catches a second edit
+        // landing within the filesystem's mtime resolution.
+        return sourceAttrs.size() != dstAttrs.size();
     }
 
 }

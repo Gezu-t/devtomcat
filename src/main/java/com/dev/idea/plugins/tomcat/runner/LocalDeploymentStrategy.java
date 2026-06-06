@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.update.DeploymentModuleResolver;
 import com.dev.idea.plugins.tomcat.update.WebResourcesSync;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
@@ -16,9 +17,6 @@ import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleOrderEntry;
-import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
@@ -30,11 +28,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipFile;
 
@@ -45,29 +41,41 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  *
  * <p>Exploded artifacts get a context XML descriptor in
  * {@code conf/Catalina/localhost/}; packaged WARs are copied to
- * {@code webapps/}. For exploded artifacts the context descriptor overlays the
- * module's runtime production classpath onto Tomcat's webapp classloader:
+ * {@code webapps/}. For exploded artifacts the context descriptor overlays two
+ * kinds of source onto Tomcat's webapp classloader:
  *
  * <ul>
- *   <li>Each class output directory the IDE knows about
- *       ({@code target/classes/}, {@code out/production/<module>/}, etc.) is
- *       mounted at {@code /WEB-INF/classes} via {@code <PreResources>}, so
- *       freshly compiled bytes shadow the (potentially stale) copy inside the
- *       deployed artifact.</li>
  *   <li>Each webapp source directory is mounted at the web-app root
  *       {@code /} via {@code <PreResources>}, so an edited JSP or static
  *       resource is served straight from source — the physical mirror into
  *       the deployed artifact stays in place as a fallback.</li>
- *   <li>Each runtime-scope library JAR not already in {@code WEB-INF/lib/} is
- *       mounted there via {@code <PostResources>}, so transitive dependencies
- *       the build didn't package are still visible.</li>
+ *   <li>Each compile- or runtime-scope library JAR not already in
+ *       {@code WEB-INF/lib/} is mounted there via {@code <PostResources>}, so
+ *       transitive dependencies the build didn't package are still visible.
+ *       Scope is restricted to exactly what the build packages into
+ *       {@code WEB-INF/lib/} (compile + runtime); test- and provided-scope
+ *       libraries are excluded so the overlay never adds a library the
+ *       deployed artifact does not itself contain.</li>
  * </ul>
  *
- * <p>Effect: when the user recompiles a class or edits a webapp resource in
- * the IDE, Tomcat picks up the change on the next resolution — no copy step,
- * no repackaging, no full redeploy. The Update action's "Update classes and
- * resources" path triggers a context reload (touch context.xml) so any
- * cached references are dropped and the next lookup hits the fresh source.
+ * <p><b>Class output directories are deliberately NOT overlaid.</b> Mounting a
+ * module's {@code target/classes/} (or {@code out/production/<module>/}) at
+ * {@code /WEB-INF/classes} via {@code <PreResources>} would make every resource
+ * it contains reachable at two classpath URIs — once through the overlay and
+ * once through the copy in the deployed {@code WEB-INF/classes/}. A library
+ * that enumerates a resource by name and expects a single hit then fails
+ * ("found N files with the same path"). The deployed {@code WEB-INF/classes/}
+ * is the single source of truth for compiled output: {@code DeployedClassesSync}
+ * keeps it fresh on every launch and Update, copying the web module's own
+ * output in full and dependency modules' {@code .class} files only — a
+ * dependency's resources already ship inside its {@code WEB-INF/lib/} JAR, so
+ * copying them would duplicate them onto the classpath.
+ *
+ * <p>Effect: when the user edits a webapp resource Tomcat serves it from source
+ * on the next request; when the user recompiles, {@code DeployedClassesSync}
+ * refreshes the deployed {@code WEB-INF/classes/}. The Update action's "Update
+ * classes and resources" path triggers a context reload (touch context.xml) so
+ * any cached references are dropped and the next lookup hits the fresh bytes.
  */
 final class LocalDeploymentStrategy implements DeploymentStrategy {
 
@@ -76,16 +84,16 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     // --- Tomcat extra resources (context.xml overlay) ---
     private static final String RESOURCE_CLASS_DIR = "org.apache.catalina.webresources.DirResourceSet";
     private static final String RESOURCE_CLASS_FILE = "org.apache.catalina.webresources.FileResourceSet";
-    private static final String WEBAPP_MOUNT_CLASSES = "/WEB-INF/classes";
     private static final String WEBAPP_MOUNT_LIB = "/WEB-INF/lib/";
     // Webapp source directories mount at the web-app root so static files,
     // JSPs, and descriptors are served straight from source.
     private static final String WEBAPP_MOUNT_ROOT = "/";
 
-    // Class output directories mount at /WEB-INF/classes via PreResources so
-    // the classloader resolves freshly compiled bytes from the IDE's compile
-    // output ahead of whatever copy lives inside the deployed artifact.
-    // PostResources would reverse the precedence and let stale bytes win.
+    // Webapp source directories mount at the web-app root via PreResources so
+    // an edited JSP or static file is served from source ahead of the deployed
+    // copy. Class output directories are intentionally never mounted via this
+    // template — the deployed WEB-INF/classes/ is their single source of truth
+    // (see the class javadoc), so there is no /WEB-INF/classes overlay.
     private static final String PRE_RESOURCE_TEMPLATE =
             "\n    <PreResources className=\"%s\"\n                   base=\"%s\" webAppMount=\"%s\" />";
 
@@ -816,13 +824,6 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * Builds extra resource entries for an exploded artifact's context XML:
      *
      * <ul>
-     *   <li>Class output directories from the module's runtime production
-     *       classpath are mounted at {@code /WEB-INF/classes} via
-     *       {@code <PreResources>}. Tomcat's classloader searches PreResources
-     *       before the artifact's own docBase, so freshly compiled bytes
-     *       shadow the (potentially stale) copy inside {@code WEB-INF/classes/}.
-     *       Result: zero-copy hot reload of class changes — the user
-     *       recompiles in the IDE, the next request hits the fresh bytes.</li>
      *   <li>Webapp source directories (WebFacet roots, convention dirs,
      *       declared build-time web-resource dirs) are mounted at the web-app
      *       root {@code /} via {@code <PreResources>}. Because PreResources are
@@ -830,11 +831,19 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      *       from source on the next request — zero-copy hot reload of webapp
      *       resources, layered on top of the physical mirror that still keeps
      *       the deployed artifact self-contained.</li>
-     *   <li>Library JARs from the runtime classpath that are not already
-     *       packaged in {@code WEB-INF/lib/} are mounted there via
-     *       {@code <PostResources>}. Lets the deployed app see transitive
-     *       deps the build didn't include.</li>
+     *   <li>Library JARs from the production-runtime classpath (compile +
+     *       runtime scope) that are not already packaged in
+     *       {@code WEB-INF/lib/} are mounted there via {@code <PostResources>}.
+     *       Lets the deployed app see transitive deps the build didn't include,
+     *       while test- and provided-scope libraries — which the build never
+     *       packages — stay off the webapp classloader.</li>
      * </ul>
+     *
+     * <p>Class output directories are intentionally excluded: the deployed
+     * {@code WEB-INF/classes/} (kept fresh by {@code DeployedClassesSync}) is
+     * their single source of truth. Overlaying them here too would expose every
+     * resource at two classpath URIs and break strict-classpath libraries — see
+     * the class javadoc.
      *
      * <p>Container-provided JARs (Tomcat internals, Servlet/JSP/EL APIs) are
      * filtered out of the JAR list so they don't fight Tomcat's own loaders
@@ -880,14 +889,23 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             return "";
         }
 
-        // Phase 2 — File I/O: scan WEB-INF/lib once so we don't re-mount JARs
-        // already packaged into the artifact.
-        Set<String> existingLibJars = new HashSet<>();
+        // Phase 2 — File I/O: scan WEB-INF/lib once so we don't re-mount a JAR
+        // already packaged into the artifact. WEB-INF/lib is authoritative for
+        // libraries: we key by artifactId stem (version stripped), NOT exact
+        // filename, so a *different version* of an already-deployed library is
+        // never injected too. Tomcat searches <PostResources> after docBase, so
+        // the deployed JAR wins for class loading — but resource ENUMERATION
+        // (getResources) returns every copy regardless of search order, so a
+        // second version on the classpath duplicates every resource path it
+        // shares with the deployed one. That is exactly the failure strict-
+        // classpath libraries reject ("found N files with the same path").
+        Set<String> deployedLibArtifacts = new HashSet<>();
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (Files.isDirectory(webInfLib)) {
             try (var stream = Files.list(webInfLib)) {
                 stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
-                      .forEach(p -> existingLibJars.add(p.getFileName().toString()));
+                      .forEach(p -> deployedLibArtifacts.add(
+                              LibraryArtifactNames.libraryArtifactKey(p.getFileName().toString())));
             } catch (IOException e) {
                 LOG.debug("Could not list WEB-INF/lib: " + e.getMessage());
             }
@@ -900,26 +918,28 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // and re-mounting them would be redundant).
         String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
 
-        List<String> extraDirs = new ArrayList<>();
         List<String> extraJars = new ArrayList<>();
 
         for (String rootPath : snapshot.rootPaths) {
             if (rootPath.startsWith(artifactAbsPath)) {
                 continue;
             }
-
+            // Class output directories are NOT overlaid here. The deployed
+            // WEB-INF/classes/ is their single source of truth, kept fresh by
+            // DeployedClassesSync. Mounting them again via <PreResources> would
+            // expose every resource at two classpath URIs and break strict-
+            // classpath libraries (see the class javadoc). Only library JARs
+            // extend the classpath, via <PostResources> at /WEB-INF/lib.
+            if (!rootPath.endsWith(EXT_JAR)) {
+                continue;
+            }
             String nativePath = rootPath.replace('/', File.separatorChar);
             File file = new File(nativePath);
-            if (!file.exists()) continue;
-
-            if (file.isDirectory()) {
-                extraDirs.add(nativePath);
-            } else if (rootPath.endsWith(EXT_JAR)) {
-                String jarName = file.getName();
-                if (isContainerProvidedJar(jarName)) continue;
-                if (existingLibJars.contains(jarName)) continue;
-                extraJars.add(nativePath);
-            }
+            if (!file.isFile()) continue;
+            String jarName = file.getName();
+            if (isContainerProvidedJar(jarName)) continue;
+            if (deployedLibArtifacts.contains(LibraryArtifactNames.libraryArtifactKey(jarName))) continue;
+            extraJars.add(nativePath);
         }
 
         // Webapp source directories overlay the deployed docBase at the web-app
@@ -940,15 +960,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
 
-        if (extraDirs.isEmpty() && extraJars.isEmpty() && webappDirs.isEmpty()) {
+        if (extraJars.isEmpty() && webappDirs.isEmpty()) {
             return "";
         }
 
-        LOG.info("Mounted " + extraDirs.size() + " class dir(s), "
-                + webappDirs.size() + " webapp source dir(s), and "
+        LOG.info("Mounted " + webappDirs.size() + " webapp source dir(s) and "
                 + extraJars.size() + " JAR(s) for '" + deployment.getDisplayName() + "'");
 
-        return renderExtraResourcesXml(extraDirs, webappDirs, extraJars);
+        return renderExtraResourcesXml(webappDirs, extraJars);
     }
 
     /**
@@ -959,27 +978,22 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      *
      * <p>Emission order is deliberate:
      * <ol>
-     *   <li>Class output dirs → {@code <PreResources>} at
-     *       {@code /WEB-INF/classes}.</li>
      *   <li>Webapp source dirs → {@code <PreResources>} at the web-app root
-     *       {@code /}. Emitted <em>after</em> the class dirs so that, for the
-     *       {@code /WEB-INF/classes} path, the earlier class-dir entry wins and
-     *       freshly compiled bytes are never shadowed by a stale tree that
-     *       might live under a webapp source root.</li>
+     *       {@code /} (searched before docBase, so an edited JSP or static
+     *       file is served from source rather than the deployed copy).</li>
      *   <li>Library JARs → {@code <PostResources>} at
      *       {@code /WEB-INF/lib/<name>} (searched after docBase, so they only
      *       extend — never shadow — the packaged libraries).</li>
      * </ol>
+     *
+     * <p>Class output directories are never emitted: the deployed
+     * {@code WEB-INF/classes/} is their single source of truth (see the class
+     * javadoc), so this emitter produces no {@code /WEB-INF/classes} mount.
      */
     @NotNull
-    static String renderExtraResourcesXml(@NotNull List<String> classDirs,
-                                          @NotNull List<String> webappDirs,
+    static String renderExtraResourcesXml(@NotNull List<String> webappDirs,
                                           @NotNull List<String> libJars) {
         StringBuilder sb = new StringBuilder();
-        for (String dir : classDirs) {
-            sb.append(String.format(PRE_RESOURCE_TEMPLATE,
-                    RESOURCE_CLASS_DIR, escapeXmlAttribute(dir), WEBAPP_MOUNT_CLASSES));
-        }
         for (String webappDir : webappDirs) {
             sb.append(String.format(PRE_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_DIR, escapeXmlAttribute(webappDir), WEBAPP_MOUNT_ROOT));
@@ -1011,17 +1025,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * accessed subsequently, so there are no threading constraints on their use.
      */
     private static final class ArtifactModelSnapshot {
-        /** The IntelliJ module that owns the deployed artifact. */
-        final Module module;
         /**
-         * Maps each dependency module's production output path to its artifact name
-         * (Maven artifactId when available, otherwise stripped IntelliJ module name).
-         * Keys are plain path strings — no trailing {@code !/} on JAR roots.
-         */
-        final Map<String, String> outputToArtifactName;
-        /**
-         * Full recursive classpath of the module (module outputs + library JARs).
-         * Paths are plain strings with any trailing {@code !/} already stripped.
+         * Recursive production-runtime classpath of the module (compile +
+         * runtime scope): class output directories and library JARs. Test- and
+         * provided-scope entries are excluded so the set matches exactly what
+         * the build packages into {@code WEB-INF/lib/}. Paths are plain strings
+         * with any trailing {@code !/} on JAR roots already stripped.
          */
         final List<String> rootPaths;
         /**
@@ -1033,12 +1042,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
          */
         final List<String> webappSourceRoots;
 
-        ArtifactModelSnapshot(@NotNull Module module,
-                              @NotNull Map<String, String> outputToArtifactName,
-                              @NotNull List<String> rootPaths,
+        ArtifactModelSnapshot(@NotNull List<String> rootPaths,
                               @NotNull List<String> webappSourceRoots) {
-            this.module = module;
-            this.outputToArtifactName = outputToArtifactName;
             this.rootPaths = rootPaths;
             this.webappSourceRoots = webappSourceRoots;
         }
@@ -1060,25 +1065,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         Module module = resolveModuleForDeployment(deployment, project);
         if (module == null) return null;
 
-        // Build dependency module output path → artifact name map
-        Map<String, String> outputToArtifactName = new HashMap<>();
-        collectModuleDependencyNames(module, project, outputToArtifactName, new HashSet<>());
-
-        // Collect full classpath root paths, converting VirtualFile to String while the
-        // read action is still held. Trailing !/ on JAR content roots is stripped here
-        // so callers always work with clean filesystem-style paths.
-        List<String> rootPaths = new ArrayList<>();
-        for (VirtualFile root : OrderEnumerator.orderEntries(module)
-                .recursively()
-                .withoutSdk()
-                .classes()
-                .getRoots()) {
-            String path = root.getPath();
-            if (path.endsWith(JAR_URL_SUFFIX)) {
-                path = path.substring(0, path.length() - JAR_URL_SUFFIX.length());
-            }
-            rootPaths.add(path);
-        }
+        // Production-runtime classpath roots (compile + runtime scope),
+        // converted to plain path strings while the read action is held. This
+        // is exactly the set the build packages into WEB-INF/lib/: test-scope
+        // and provided-scope libraries are excluded so the context.xml overlay
+        // never mounts a library the deployed artifact does not itself contain.
+        List<String> rootPaths = collectRuntimeClasspathRoots(module);
 
         // Webapp source roots, resolved through the same dispatch the mirror
         // pipeline uses so the overlay covers exactly what gets copied. Normalize
@@ -1089,68 +1081,51 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             webappSourceRoots.add(webappRoot.toAbsolutePath().toString().replace('\\', '/'));
         }
 
-        return new ArtifactModelSnapshot(module, outputToArtifactName, rootPaths, webappSourceRoots);
-    }
-
-    private static void collectModuleDependencyNames(
-            @NotNull Module module,
-            @NotNull Project project,
-            @NotNull Map<String, String> result,
-            @NotNull Set<String> visited) {
-        if (!visited.add(module.getName())) return;
-        for (OrderEntry entry : ModuleRootManager.getInstance(module).getOrderEntries()) {
-            if (!(entry instanceof ModuleOrderEntry)) continue;
-            Module dep = ((ModuleOrderEntry) entry).getModule();
-            if (dep == null) continue;
-
-            // Resolve the artifact name: Maven artifactId is authoritative; fall back to
-            // the IntelliJ module name stripped of any compound project prefix
-            // (e.g. "myapp.common" → "common") so it matches the JAR filename in WEB-INF/lib
-            // for both Gradle and Maven projects regardless of how IntelliJ names modules.
-            String artifactName = getMavenArtifactId(dep, project);
-            if (artifactName == null) {
-                String moduleName = dep.getName();
-                int dot = moduleName.lastIndexOf('.');
-                artifactName = dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
-            }
-
-            // Use OrderEnumerator (same API as classesRoots in the caller) to get the
-            // output paths for this single module — more reliable than CompilerModuleExtension
-            // because it returns the actual paths the IDE uses, covering Maven (target/classes),
-            // Gradle (build/classes/java/main), and IntelliJ default (out/production/...).
-            for (VirtualFile outputRoot : OrderEnumerator.orderEntries(dep)
-                    .productionOnly()
-                    .withoutSdk()
-                    .withoutLibraries()
-                    .classes()
-                    .getRoots()) {
-                result.put(outputRoot.getPath(), artifactName);
-            }
-
-            collectModuleDependencyNames(dep, project, result, visited);
-        }
+        return new ArtifactModelSnapshot(rootPaths, webappSourceRoots);
     }
 
     /**
-     * Returns the Maven artifactId for the given module, or {@code null} if the Maven
-     * plugin is unavailable or the module is not part of a Maven project.
+     * Collects the module's recursive <em>production-runtime</em> classpath
+     * roots — the class output directories and library JARs visible at runtime
+     * in a packaged build. Scope is restricted to compile + runtime via
+     * {@code productionOnly().runtimeOnly()} so the set matches exactly what
+     * the build tool packages into {@code WEB-INF/lib/}: test-scope and
+     * provided-scope dependencies are excluded.
      *
-     * <p>Uses reflection so there is no compile-time dependency on the Maven plugin —
-     * the method degrades gracefully to {@code null} on Community Edition or Gradle-only
-     * projects where {@code MavenProjectsManager} is absent.
+     * <p>This matters because the result feeds the {@code <PostResources>}
+     * overlay, which adds entries to Tomcat's webapp classloader. Mounting a
+     * test- or provided-scope JAR there would put a library on the running
+     * webapp's classpath that the real (Maven-built) artifact never contains —
+     * a phantom entry that can shadow or duplicate classes, break frameworks
+     * that audit the classpath for unique resources, and confuse type-based
+     * dependency resolution. Keeping the scope identical to the build's
+     * {@code WEB-INF/lib/} guarantees the in-IDE deployment classpath equals
+     * the packaged one.
+     *
+     * <p>Trailing {@code !/} on JAR content roots is stripped so callers always
+     * work with clean filesystem-style paths. Both directories and JARs are
+     * returned in classpath order; the caller selects JARs for
+     * {@code <PostResources>} and skips directory roots.
+     *
+     * <p><strong>Must be called under a read action.</strong>
      */
-    @Nullable
-    private static String getMavenArtifactId(@NotNull Module module, @NotNull Project project) {
-        Object mavenProject = com.dev.idea.plugins.tomcat.utils.MavenReflection
-                .findMavenProject(module, project);
-        if (mavenProject == null) return null;
-        try {
-            Object mavenId = mavenProject.getClass().getMethod("getMavenId").invoke(mavenProject);
-            if (mavenId == null) return null;
-            return (String) mavenId.getClass().getMethod("getArtifactId").invoke(mavenId);
-        } catch (NoClassDefFoundError | Exception e) {
-            return null;
+    @NotNull
+    static List<String> collectRuntimeClasspathRoots(@NotNull Module module) {
+        List<String> rootPaths = new ArrayList<>();
+        for (VirtualFile root : OrderEnumerator.orderEntries(module)
+                .recursively()
+                .productionOnly()
+                .runtimeOnly()
+                .withoutSdk()
+                .classes()
+                .getRoots()) {
+            String path = root.getPath();
+            if (path.endsWith(JAR_URL_SUFFIX)) {
+                path = path.substring(0, path.length() - JAR_URL_SUFFIX.length());
+            }
+            rootPaths.add(path);
         }
+        return rootPaths;
     }
 
     /**

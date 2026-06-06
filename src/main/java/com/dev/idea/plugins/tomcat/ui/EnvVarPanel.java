@@ -21,6 +21,7 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.table.JBTable;
+import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
@@ -414,7 +415,7 @@ public class EnvVarPanel extends JBPanel<EnvVarPanel> {
                 boolean isComputed = currentComputedKeys.contains(name);
                 if (isComputed && !isSelected) {
                     c.setForeground(NamedColorUtil.getInactiveTextColor());
-                    c.setFont(c.getFont().deriveFont(Font.ITALIC));
+                    c.setFont(JBFont.label().asItalic());
                 } else if (!isSelected) {
                     c.setForeground(table.getForeground());
                     c.setFont(table.getFont());

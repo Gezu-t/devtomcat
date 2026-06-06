@@ -266,54 +266,22 @@ class LocalDeploymentStrategyTest {
         }
     }
 
-
-    // -------------------------------------------------------------------------
-    // getMavenArtifactId — graceful degradation (no IntelliJ platform needed)
-    // -------------------------------------------------------------------------
-
-    @Nested
-    @DisplayName("getMavenArtifactId")
-    class GetMavenArtifactIdTests {
-
-        /**
-         * The Maven plugin (org.jetbrains.idea.maven) is absent in IntelliJ IDEA Community
-         * and in plain test classpaths. The method uses reflection and wraps all exceptions,
-         * so it must return {@code null} rather than propagating {@code ClassNotFoundException}.
-         * Class.forName throws before the Module/Project args are dereferenced — null is safe.
-         */
-        @Test
-        @DisplayName("returns null when Maven plugin classes are absent from classpath")
-        void returnsNullWhenMavenPluginAbsent() throws Exception {
-            java.lang.reflect.Method m = LocalDeploymentStrategy.class.getDeclaredMethod(
-                    "getMavenArtifactId",
-                    com.intellij.openapi.module.Module.class,
-                    com.intellij.openapi.project.Project.class);
-            m.setAccessible(true);
-
-            // Non-null stubs satisfy @NotNull instrumentation; ClassNotFoundException is
-            // thrown inside the method before the args are actually dereferenced.
-            com.intellij.openapi.module.Module module =
-                    org.mockito.Mockito.mock(com.intellij.openapi.module.Module.class);
-            com.intellij.openapi.project.Project project =
-                    org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
-
-            Object result = m.invoke(null, module, project);
-
-            assertNull(result, "Must return null when Maven plugin is absent");
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Module name derivation (compound-name stripping)
-    // Tests the string logic used in collectModuleDependencyNames when Maven
-    // plugin is absent and we fall back to the IntelliJ module name.
+    // Pins the string convention used by
+    // DeployedClassesSync#collectDependencyArtifactNames when the Maven plugin
+    // is absent and the artifact name falls back to the IntelliJ module name
+    // (MavenReflection.getArtifactId returns null). That stem is what a
+    // dependency root is matched against in the deployed WEB-INF/lib/.
+    // Graceful degradation of the Maven lookup itself is covered by
+    // MavenReflectionTest.
     // -------------------------------------------------------------------------
 
     @Nested
     @DisplayName("moduleArtifactNameFromModuleName")
     class ModuleArtifactNameTests {
 
-        /** Simulates the compound-name stripping in collectModuleDependencyNames. */
+        /** Simulates the compound-name stripping in DeployedClassesSync#collectDependencyArtifactNames. */
         private static String stripCompound(String moduleName) {
             int dot = moduleName.lastIndexOf('.');
             return dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
@@ -727,7 +695,7 @@ class LocalDeploymentStrategyTest {
     }
 
     // -------------------------------------------------------------------------
-    // renderExtraResourcesXml — class-dir / webapp-root / JAR overlay emission
+    // renderExtraResourcesXml — webapp-root / JAR overlay emission
     // -------------------------------------------------------------------------
 
     @Nested
@@ -751,7 +719,7 @@ class LocalDeploymentStrategyTest {
         void webappDirMountsAtRoot() {
             String webappDir = "/projects/X/src/main/webapp";
             String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
-                    List.of(), List.of(webappDir), List.of());
+                    List.of(webappDir), List.of());
 
             assertTrue(xml.contains(preResource(webappDir, "/")),
                     "webapp source must mount at '/' via DirResourceSet PreResources so source "
@@ -762,33 +730,32 @@ class LocalDeploymentStrategyTest {
         }
 
         @Test
-        @DisplayName("Class output dirs are emitted before webapp source dirs (precedence guarantee)")
-        void classDirsPrecedeWebappDirs() {
-            // PreResources are searched in declaration order: the class-output entry
-            // must come first so that for the /WEB-INF/classes path, freshly compiled
-            // bytes win over any stale tree that might live under a webapp source root.
-            String classDir = "/projects/X/target/classes";
-            String webappDir = "/projects/X/src/main/webapp";
+        @DisplayName("Regression guard: the overlay never mounts anything at /WEB-INF/classes")
+        void neverMountsAtClassesPath() {
+            // The deployed WEB-INF/classes/ is the single source of truth for compiled
+            // output (kept fresh by DeployedClassesSync). The overlay must never mount a
+            // directory there: doing so makes the same logical resource reachable at two
+            // classpath URIs (overlay + deployed copy), which strict-classpath libraries
+            // reject ("found N files with the same path"). The emitter only mounts webapp
+            // source dirs at "/" and library JARs at "/WEB-INF/lib"; it has no class-dir
+            // parameter, so a /WEB-INF/classes mount is structurally impossible — pin that.
             String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
-                    List.of(classDir), List.of(webappDir), List.of());
+                    List.of("/projects/X/src/main/webapp"),
+                    List.of("/projects/X/libs/dep-1.0.0.jar"));
 
-            int classIdx = xml.indexOf("base=\"" + classDir + "\" webAppMount=\"/WEB-INF/classes\"");
-            int webappIdx = xml.indexOf("base=\"" + webappDir + "\" webAppMount=\"/\"");
-            assertTrue(classIdx >= 0, "class-dir PreResource missing. XML:\n" + xml);
-            assertTrue(webappIdx >= 0, "webapp-dir PreResource missing. XML:\n" + xml);
-            assertTrue(classIdx < webappIdx,
-                    "class output dir must be declared before the webapp source dir so "
-                            + "/WEB-INF/classes resolves to fresh bytes. XML:\n" + xml);
+            assertFalse(xml.contains("/WEB-INF/classes"),
+                    "no overlay entry may mount at /WEB-INF/classes. XML:\n" + xml);
+            assertFalse(xml.contains("webAppMount=\"/WEB-INF/classes\""),
+                    "no PreResources entry may target the /WEB-INF/classes mount. XML:\n" + xml);
         }
 
         @Test
-        @DisplayName("PreResources (class + webapp) precede JAR PostResources")
+        @DisplayName("Webapp PreResources precede JAR PostResources")
         void preResourcesPrecedePostResources() {
-            String classDir = "/projects/X/target/classes";
             String webappDir = "/projects/X/src/main/webapp";
             String jar = "/projects/X/libs/dep-1.0.0.jar";
             String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
-                    List.of(classDir), List.of(webappDir), List.of(jar));
+                    List.of(webappDir), List.of(jar));
 
             int webappIdx = xml.indexOf("base=\"" + webappDir + "\" webAppMount=\"/\"");
             int jarIdx = xml.indexOf("base=\"" + jar + "\"");
@@ -806,7 +773,7 @@ class LocalDeploymentStrategyTest {
             String first = "/projects/X/src/main/webapp";
             String second = "/projects/X/src/main/extra-web";
             String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
-                    List.of(), List.of(first, second), List.of());
+                    List.of(first, second), List.of());
 
             int firstIdx = xml.indexOf("base=\"" + first + "\" webAppMount=\"/\"");
             int secondIdx = xml.indexOf("base=\"" + second + "\" webAppMount=\"/\"");
@@ -821,7 +788,7 @@ class LocalDeploymentStrategyTest {
         void webappBaseIsEscaped() {
             String webappDir = "/projects/a&b/src/main/webapp";
             String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
-                    List.of(), List.of(webappDir), List.of());
+                    List.of(webappDir), List.of());
 
             assertTrue(xml.contains("base=\"/projects/a&amp;b/src/main/webapp\" webAppMount=\"/\""),
                     "ampersand in the webapp path must be escaped so the descriptor stays "
@@ -834,7 +801,7 @@ class LocalDeploymentStrategyTest {
         @DisplayName("No resources of any kind yields the empty fragment")
         void emptyInputsYieldEmpty() {
             assertEquals("", LocalDeploymentStrategy.renderExtraResourcesXml(
-                    List.of(), List.of(), List.of()),
+                    List.of(), List.of()),
                     "with nothing to mount the fragment must be empty so the caller can "
                             + "still emit a bare <Resources allowLinking=\"true\"> block");
         }

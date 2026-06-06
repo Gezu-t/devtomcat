@@ -55,9 +55,29 @@ class StartupTimeTrackerTest {
         @Test
         @DisplayName("negative times are ignored")
         void negativeIgnored() {
-            tracker.recordStartupTime("MyApp", -100);
+            assertFalse(tracker.recordStartupTime("MyApp", -100));
             assertEquals(-1, tracker.getLastStartupTime("MyApp"));
             assertEquals(0, tracker.getRunCount("MyApp"));
+        }
+
+        @Test
+        @DisplayName("implausibly small times are rejected (cannot be a real complete startup)")
+        void implausibleIgnored() {
+            assertFalse(tracker.recordStartupTime("MyApp",
+                    StartupTimeTracker.MIN_PLAUSIBLE_STARTUP_MS - 1));
+            assertEquals(0, tracker.getRunCount("MyApp"));
+            assertEquals(-1, tracker.getFastestStartupTime("MyApp"),
+                    "a rejected sample must never become the 'best'");
+        }
+
+        @Test
+        @DisplayName("a time at the plausibility floor is recorded")
+        void floorBoundaryRecorded() {
+            assertTrue(tracker.recordStartupTime("MyApp",
+                    StartupTimeTracker.MIN_PLAUSIBLE_STARTUP_MS));
+            assertEquals(1, tracker.getRunCount("MyApp"));
+            assertEquals(StartupTimeTracker.MIN_PLAUSIBLE_STARTUP_MS,
+                    tracker.getLastStartupTime("MyApp"));
         }
 
         @Test

@@ -208,6 +208,11 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
             // confuse the Services panel and prevent the user from re-running the
             // config until they manually clicked Stop.
             notifyProcessTerminated(exitCode);
+            // Mirror TomcatProcessHandler.processTerminated: dispose the logger once
+            // the deploy task ends so its ConsoleView reference is released and any
+            // late relay call hits the disposed guard instead of a torn-down console.
+            // Idempotent, so a double dispose is harmless.
+            deploymentLogger.dispose();
         }
     }
 

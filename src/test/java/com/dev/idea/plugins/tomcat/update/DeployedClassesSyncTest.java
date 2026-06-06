@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -149,9 +150,9 @@ class DeployedClassesSyncTest {
         @DisplayName("equal mtime BUT different size → copy (size tie-breaker)")
         void equalMtimeDifferentSize(@TempDir Path dir) throws Exception {
             // The drift case the size-tiebreak guards against: a previous sync
-            // set dst.mtime = src.mtime via COPY_ATTRIBUTES, then the user
-            // edited src again within filesystem mtime resolution. Without
-            // the size check we'd silently skip and serve stale code.
+            // set dst.mtime = src.mtime, then the user edited src again within
+            // filesystem mtime resolution. Without the size check we'd silently
+            // skip and serve stale code.
             Path src = Files.writeString(dir.resolve("A.class"), "edited-larger-content");
             Path dst = Files.writeString(dir.resolve("dst.class"), "old");
             Files.setLastModifiedTime(src, FileTime.fromMillis(2_000L));
@@ -409,6 +410,103 @@ class DeployedClassesSyncTest {
             assertNull(r.moduleName());
             assertNotNull(r.diagnostic());
             assertTrue(r.diagnostic().contains("vanished-mod"));
+        }
+    }
+
+    @Nested
+    @DisplayName("shouldMirrorClassesOnly — per-root resource policy vs deployed WEB-INF/lib")
+    class ShouldMirrorClassesOnlyPolicy {
+
+        /** A dependency root: classesOnly candidate, tagged with an artifact identity. */
+        private static DeployedClassesSync.SourceRoot dependency(String artifactName) {
+            return new DeployedClassesSync.SourceRoot(Path.of("/out/dep"), true, artifactName);
+        }
+
+        @Test
+        @DisplayName("own root (classesOnly=false) always mirrors full content")
+        void ownRootAlwaysFullContent() {
+            DeployedClassesSync.SourceRoot own =
+                    new DeployedClassesSync.SourceRoot(Path.of("/out/web"), false, null);
+            // Never .class-only, regardless of what the deployed lib set holds.
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(own, Set.of("web")));
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(own, Set.of()));
+        }
+
+        @Test
+        @DisplayName("dependency packaged in WEB-INF/lib → .class-only (resources come from the JAR)")
+        void jarredDependencyClassesOnly() {
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(
+                    dependency("common"), Set.of("common", "shared")));
+        }
+
+        @Test
+        @DisplayName("dependency absent from WEB-INF/lib → full content (resources must still reach Tomcat)")
+        void unjarredDependencyFullContent() {
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(
+                    dependency("common"), Set.of("shared")));
+        }
+
+        @Test
+        @DisplayName("dependency with no resolved identity → .class-only (duplicate-safe default)")
+        void unresolvedIdentityClassesOnly() {
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(
+                    dependency(null), Set.of("shared")));
+            // Empty lib set must NOT flip the default to full content.
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(
+                    dependency(null), Set.of()));
+        }
+    }
+
+    @Nested
+    @DisplayName("scanDeployedLibraryKeys — version-independent keys from deployed WEB-INF/lib")
+    class ScanDeployedLibraryKeys {
+
+        /** Creates an empty file at {@code WEB-INF/lib/<jarName>} under {@code artifactRoot}. */
+        private static void writeLibFile(Path artifactRoot, String jarName) throws Exception {
+            Path lib = Files.createDirectories(artifactRoot.resolve("WEB-INF/lib"));
+            Files.createFile(lib.resolve(jarName));
+        }
+
+        @Test
+        @DisplayName("absent WEB-INF/lib → empty set")
+        void absentLibDir(@TempDir Path tmp) {
+            assertTrue(DeployedClassesSync.scanDeployedLibraryKeys(tmp).isEmpty());
+        }
+
+        @Test
+        @DisplayName("maps each JAR to its version-independent artifact key")
+        void mapsJarsToKeys(@TempDir Path tmp) throws Exception {
+            writeLibFile(tmp, "common-1.2.3.jar");
+            writeLibFile(tmp, "log4j-api-2.20.0.jar");
+            writeLibFile(tmp, "spring-boot-starter.jar"); // no version segment
+            assertEquals(Set.of("common", "log4j-api", "spring-boot-starter"),
+                    DeployedClassesSync.scanDeployedLibraryKeys(tmp));
+        }
+
+        @Test
+        @DisplayName("non-JAR files in WEB-INF/lib are ignored")
+        void ignoresNonJarFiles(@TempDir Path tmp) throws Exception {
+            writeLibFile(tmp, "common-1.0.0.jar");
+            writeLibFile(tmp, "notes.txt");
+            assertEquals(Set.of("common"),
+                    DeployedClassesSync.scanDeployedLibraryKeys(tmp));
+        }
+
+        @Test
+        @DisplayName("version drift: a packaged dependency is .class-only even when versions differ")
+        void versionDriftStillMatches(@TempDir Path tmp) throws Exception {
+            // The build packaged the dependency at one version; the IDE classpath
+            // exposes that module's compile output under its artifactId. The two
+            // must reconcile on identity alone — no version match required — so the
+            // dependency mirrors .class-only and its resources are not duplicated.
+            writeLibFile(tmp, "common-2.0.0.jar");
+            Set<String> deployed = DeployedClassesSync.scanDeployedLibraryKeys(tmp);
+
+            DeployedClassesSync.SourceRoot dep =
+                    new DeployedClassesSync.SourceRoot(Path.of("/out/common"), true, "common");
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dep, deployed),
+                    "a packaged dependency must mirror .class-only even when the deployed "
+                            + "JAR version differs from the classpath module");
         }
     }
 }

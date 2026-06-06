@@ -404,8 +404,10 @@ public class TomcatJavaParametersBuilder {
                     ". Verify that the configured Tomcat home directory is a valid Tomcat installation.");
         }
 
-        params.getClassPath().add(bootstrap.toFile());
-        params.getClassPath().add(tomcatJuli.toFile());
+        // add(String) — the add(File) overload is deprecated for removal; Path.toString()
+        // yields the same path string the deprecated overload derived via File.getPath().
+        params.getClassPath().add(bootstrap.toString());
+        params.getClassPath().add(tomcatJuli.toString());
     }
 
     private void setupEnvironment(@NotNull JavaParameters params) {

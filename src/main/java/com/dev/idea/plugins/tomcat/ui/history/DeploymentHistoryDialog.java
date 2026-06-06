@@ -9,6 +9,7 @@ import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
+import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -101,7 +102,7 @@ public class DeploymentHistoryDialog extends DialogWrapper {
         textPanel.setOpaque(false);
 
         JBLabel valueLabel = new JBLabel(value);
-        valueLabel.setFont(valueLabel.getFont().deriveFont(Font.BOLD, valueLabel.getFont().getSize() + 2f));
+        valueLabel.setFont(JBFont.label().asBold().biggerOn(2f));
         textPanel.add(valueLabel);
 
         JBLabel nameLabel = new JBLabel(label);

@@ -324,7 +324,7 @@ class DeployedClassesSyncScenariosTest {
 
         DeployedClassesSync.MirrorResult second = DeployedClassesSync.mirrorTree(src, dst);
         assertEquals(0, second.copied(),
-                "second sync over identical state must be a no-op (COPY_ATTRIBUTES kept mtimes aligned)");
+                "second sync over identical state must be a no-op (the sync aligns the deployed mtime to the source)");
         assertEquals(0, second.brokenSkipped());
     }
 
@@ -1022,6 +1022,105 @@ class DeployedClassesSyncScenariosTest {
         assertFalse(Files.exists(dst.resolve("com/a/Old1.class")));
         assertFalse(Files.exists(dst.resolve("com/a/b/c/Old2.class")));
         assertFalse(Files.exists(dst.resolve("com/a/b/c/d/e/Deep.class")));
+    }
+
+    // ===========================================================================
+    // Dependency-module policy: classesOnly mirror mechanism
+    //
+    // A dependency module's compile-output root (Maven target/classes/) holds
+    // both .class files and everything copied from src/main/resources/. When
+    // that dependency is packaged as a WEB-INF/lib/<lib>.jar, its resources
+    // already reach Tomcat through the JAR, so copying them into WEB-INF/classes/
+    // too would put the same path on the classpath twice — fatal for any
+    // framework that discovers resources by enumerating the classpath. The
+    // classesOnly=true mirror skips non-.class files for exactly that case.
+    //
+    // These tests pin the low-level mirrorTree mechanism for a GIVEN
+    // classesOnly value. Choosing that value per root — .class-only when the
+    // dependency is packaged in the deployed WEB-INF/lib/, full content when it
+    // is not — is the job of shouldMirrorClassesOnly, exercised separately.
+    // ===========================================================================
+
+    @Test
+    @DisplayName("classesOnly — dependency root contributes .class files only, resources skipped")
+    void classesOnly01_skipsNonClassResources(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path dst = Files.createDirectories(tmp.resolve("web/target/app/WEB-INF/classes"));
+
+        // Bytecode — must be mirrored (incl. inner classes).
+        writeClass(src, "com/example/dao/UserDao.class", "dao");
+        writeClass(src, "com/example/dao/UserDao$Row.class", "row");
+        // Non-class resources — already in the dep's lib JAR; must be skipped.
+        writeClass(src, "config/app.properties", "k=v");
+        writeClass(src, "META-INF/services/com.example.Spi", "com.example.Impl");
+        writeClass(src, "descriptors/registry.xml", "<registry/>");
+
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true);
+
+        assertEquals(2, mr.copied(), "only the two .class files may be mirrored");
+        assertTrue(Files.exists(dst.resolve("com/example/dao/UserDao.class")));
+        assertTrue(Files.exists(dst.resolve("com/example/dao/UserDao$Row.class")));
+        assertFalse(Files.exists(dst.resolve("config/app.properties")),
+                "dependency resource must NOT be copied into WEB-INF/classes");
+        assertFalse(Files.exists(dst.resolve("META-INF/services/com.example.Spi")),
+                "dependency service registration must NOT be duplicated onto the classpath");
+        assertFalse(Files.exists(dst.resolve("descriptors/registry.xml")),
+                "dependency descriptor must NOT be duplicated onto the classpath");
+
+        // Skipped resources must be ABSENT from contributedPaths so the
+        // caller's orphan pass treats any pre-existing copy as removable.
+        Set<String> contributed = mr.contributedPaths();
+        assertTrue(contributed.contains("com/example/dao/UserDao.class"));
+        assertTrue(contributed.contains("com/example/dao/UserDao$Row.class"));
+        assertFalse(contributed.contains("config/app.properties"));
+        assertFalse(contributed.contains("META-INF/services/com.example.Spi"));
+        assertFalse(contributed.contains("descriptors/registry.xml"));
+    }
+
+    @Test
+    @DisplayName("classesOnly — self-heal: orphan pass removes a resource an earlier full-content sync left in WEB-INF/classes")
+    void classesOnly02_orphanPassRemovesPreviouslyDuplicatedResource(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path dst = Files.createDirectories(tmp.resolve("web/target/app/WEB-INF/classes"));
+
+        writeClass(src, "com/example/dao/UserDao.class", "dao");
+        writeClass(src, "descriptors/registry.xml", "<registry/>");
+
+        // Simulate the broken state an earlier full-content sync produced:
+        // the dependency's descriptor was copied into WEB-INF/classes/ even
+        // though it also lives in the dependency's lib JAR.
+        writeClass(dst, "com/example/dao/UserDao.class", "stale-dao");
+        writeClass(dst, "descriptors/registry.xml", "<registry/>");
+
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true);
+        int removed = DeployedClassesSync.removeOrphans(dst, mr.contributedPaths());
+
+        assertEquals(1, removed, "the duplicated descriptor must be reconciled away");
+        assertTrue(Files.exists(dst.resolve("com/example/dao/UserDao.class")),
+                "the dependency .class must remain (it legitimately wins over the lib JAR copy)");
+        assertFalse(Files.exists(dst.resolve("descriptors/registry.xml")),
+                "the duplicate descriptor must be gone so the classpath holds one copy (in the lib JAR)");
+    }
+
+    @Test
+    @DisplayName("classesOnly=false — web module's own root mirrors full content (resources included)")
+    void classesOnly03_ownRootMirrorsEverything(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("web/target/classes"));
+        Path dst = Files.createDirectories(tmp.resolve("web/target/app/WEB-INF/classes"));
+
+        writeClass(src, "com/example/web/HomeController.class", "home");
+        writeClass(src, "config/app.properties", "k=v");
+        writeClass(src, "descriptors/registry.xml", "<registry/>");
+
+        // Full-content path (the web module's own output): the 2-arg overload
+        // and the explicit classesOnly=false must behave identically.
+        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, false);
+
+        assertEquals(3, mr.copied(), "own root mirrors .class AND resources");
+        assertTrue(Files.exists(dst.resolve("com/example/web/HomeController.class")));
+        assertTrue(Files.exists(dst.resolve("config/app.properties")),
+                "the web module's own resources belong in WEB-INF/classes (not duplicated in any lib JAR)");
+        assertTrue(Files.exists(dst.resolve("descriptors/registry.xml")));
     }
 
     // ===========================================================================

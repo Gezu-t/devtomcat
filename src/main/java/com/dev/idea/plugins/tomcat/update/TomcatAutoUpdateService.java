@@ -8,7 +8,7 @@ import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
@@ -177,7 +177,7 @@ public final class TomcatAutoUpdateService {
     private boolean hasModuleBackedDeployment(@NotNull TomcatProcessHandler handler) {
         List<Deployment> deployments = handler.getConfiguration().getDeployments();
         try {
-            return ReadAction.compute(() -> {
+            return TomcatReadActions.compute(() -> {
                 for (Deployment d : deployments) {
                     if (d.isValid() && DeploymentModuleResolver.resolve(d, project) != null) {
                         return true;

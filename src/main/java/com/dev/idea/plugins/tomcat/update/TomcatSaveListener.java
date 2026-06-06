@@ -1,6 +1,6 @@
 package com.dev.idea.plugins.tomcat.update;
 
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener;
@@ -44,7 +44,7 @@ public final class TomcatSaveListener implements FileDocumentManagerListener {
             // source or scratch file should not trigger a deployment update.
             boolean inContent;
             try {
-                inContent = ReadAction.compute(() ->
+                inContent = TomcatReadActions.compute(() ->
                         ProjectFileIndex.getInstance(project).getContentRootForFile(file) != null);
             } catch (Throwable t) {
                 inContent = false;

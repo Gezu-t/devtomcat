@@ -7,6 +7,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
+import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -83,7 +84,7 @@ public class StartupTimeTrendDialog extends DialogWrapper {
         header.setOpaque(false);
 
         JBLabel nameLabel = new JBLabel(configName, AllIcons.RunConfigurations.Application, SwingConstants.LEFT);
-        nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
+        nameLabel.setFont(JBFont.label().asBold());
         header.add(nameLabel, BorderLayout.WEST);
 
         long avg = (long) times.stream().mapToLong(Long::longValue).average().orElse(0);

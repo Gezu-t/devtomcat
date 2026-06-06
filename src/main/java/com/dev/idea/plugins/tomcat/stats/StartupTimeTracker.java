@@ -39,6 +39,18 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     /** Maximum number of startup times to keep per configuration. */
     private static final int MAX_HISTORY_SIZE = 20;
 
+    /**
+     * Lower bound (ms) below which a reported startup time is rejected as
+     * implausible. A complete server start initialises its connector(s) and
+     * deploys at least one web application; on any real JVM that work cannot
+     * finish in a few milliseconds. A value below this floor therefore signals a
+     * mis-parsed number or a non-startup log line that slipped through — not a
+     * genuine cold boot — and recording it would corrupt the best/average/trend
+     * the user relies on. Kept deliberately low so it only ever rejects the
+     * physically impossible, never a merely-fast real startup.
+     */
+    static final long MIN_PLAUSIBLE_STARTUP_MS = 100;
+
     private volatile State myState = new State();
 
     /** Required by the IntelliJ service framework for project-level services. */
@@ -85,9 +97,21 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
      *
      * @param configName the run configuration name
      * @param startupTimeMs startup time in milliseconds
+     * @return {@code true} if the sample was recorded; {@code false} if it was
+     *         rejected as implausible (see {@link #MIN_PLAUSIBLE_STARTUP_MS})
      */
-    public synchronized void recordStartupTime(@NotNull String configName, long startupTimeMs) {
-        if (startupTimeMs < 0) return;
+    public synchronized boolean recordStartupTime(@NotNull String configName, long startupTimeMs) {
+        if (startupTimeMs < MIN_PLAUSIBLE_STARTUP_MS) {
+            // Negative is the established "no measurement" sentinel — drop it
+            // silently. A positive-but-too-small value is a genuine anomaly, so
+            // surface it so a recurring mis-parse is diagnosable from the log.
+            if (startupTimeMs >= 0) {
+                LOG.info("Ignoring implausible startup time for '" + configName + "': "
+                        + startupTimeMs + "ms is below the " + MIN_PLAUSIBLE_STARTUP_MS
+                        + "ms floor for a complete server startup.");
+            }
+            return false;
+        }
 
         List<Long> times = myState.startupTimes.computeIfAbsent(configName, k -> new ArrayList<>());
         times.add(startupTimeMs);
@@ -98,6 +122,7 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
         }
 
         LOG.info("Recorded startup time for '" + configName + "': " + startupTimeMs + "ms");
+        return true;
     }
 
     /**
@@ -168,7 +193,11 @@ public final class StartupTimeTracker implements PersistentStateComponent<Startu
     @NotNull
     public synchronized List<Long> getStartupHistory(@NotNull String configName) {
         List<Long> times = myState.startupTimes.get(configName);
-        return times != null ? Collections.unmodifiableList(times) : Collections.emptyList();
+        // Snapshot inside the lock: the stored list is mutated by recordStartupTime()
+        // (add + trim) on the output-reader thread, so returning an unmodifiable
+        // wrapper over the live list would let a UI reader hit a concurrent
+        // modification. Long elements are immutable, so a shallow copy suffices.
+        return times != null ? List.copyOf(times) : Collections.emptyList();
     }
 
     /**

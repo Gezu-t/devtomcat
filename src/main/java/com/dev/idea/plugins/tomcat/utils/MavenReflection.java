@@ -66,4 +66,29 @@ public final class MavenReflection {
             return null;
         }
     }
+
+    /**
+     * Returns the Maven {@code artifactId} for {@code module}, or {@code null}
+     * when the Maven plugin is absent, the module isn't a Maven project, or any
+     * reflective step fails. The artifactId is the stable identity a build uses
+     * for the library JAR it produces ({@code <artifactId>-<version>.jar}), so
+     * callers can match a dependency module against the JARs packaged into a
+     * deployed {@code WEB-INF/lib/}.
+     *
+     * <p>Degrades to {@code null} on Community Edition / Gradle-only projects —
+     * same contract as {@link #findMavenProject}.
+     */
+    @Nullable
+    public static String getArtifactId(@NotNull Module module, @NotNull Project project) {
+        Object mavenProject = findMavenProject(module, project);
+        if (mavenProject == null) return null;
+        try {
+            Object mavenId = mavenProject.getClass().getMethod("getMavenId").invoke(mavenProject);
+            if (mavenId == null) return null;
+            Object artifactId = mavenId.getClass().getMethod("getArtifactId").invoke(mavenId);
+            return artifactId instanceof String s ? s : null;
+        } catch (NoClassDefFoundError | Exception e) {
+            return null;
+        }
+    }
 }

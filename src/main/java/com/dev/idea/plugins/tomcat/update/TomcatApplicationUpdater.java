@@ -272,14 +272,13 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 warnings -> {
             logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", restarting Tomcat...");
 
-            // Mirror fresh classes into each exploded deployment BEFORE we stop
-            // the current process. The relaunch's Before Launch tasks re-run Make
-            // but never repackage a Maven target/<warname>/ exploded layout, so
-            // without this step the restarted Tomcat would serve the same stale
-            // bytes as before the restart — exactly the "I have to mvn clean
-            // install every time" pain. See DeployedClassesSync javadoc.
-            DeployedClassesSync.syncDeployments(project, deployments, logger);
-            WebResourcesSync.syncDeployments(project, deployments, logger);
+            // No pre-stop class/web sync here: the relaunch builds fresh
+            // JavaParameters through TomcatJavaParametersBuilder.setupDeploymentArtifacts,
+            // which mirrors the freshly-compiled classes and webapp resources into each
+            // exploded deployment before the new Tomcat starts. Mirroring here too —
+            // into the same exploded dirs, moments before stopping the old process —
+            // would just repeat that (potentially multi-second) work for nothing. See
+            // DeployedClassesSync javadoc for why the launch path performs the mirror.
 
             // Capture before destroy — see ProcessStopSupport javadoc for race rationale
             Executor resolvedExecutor = ExecutorRegistry.getInstance().getExecutorById(originalExecutorId);

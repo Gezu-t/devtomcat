@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -164,6 +165,18 @@ public final class TomcatOutputPipeline {
 
     private final List<Analyzer> analyzers;
 
+    /**
+     * Defensive upper bound on the line length fed to the analyzer regexes.
+     * Tomcat's detection signals (startup banner, deployment-finished, context,
+     * log level) all live in the first ~100 chars of a line, but a webapp can
+     * emit a single newline-free line of arbitrary length (a serialized dump, a
+     * base64 blob, a long SQL IN-clause). Running the analyzer patterns over such
+     * a line wastes CPU on the output-reader thread for no signal, so we cap the
+     * text used for ANALYSIS. The raw line is unaffected — the console is attached
+     * to the process independently of this pipeline.
+     */
+    static final int MAX_ANALYZED_LINE_LENGTH = 16_384;
+
     TomcatOutputPipeline(@NotNull List<Analyzer> analyzers) {
         this.analyzers = List.copyOf(analyzers);
     }
@@ -173,6 +186,9 @@ public final class TomcatOutputPipeline {
      */
     public void processLine(@NotNull String text, @NotNull Context context) {
         if (text.isEmpty()) return;
+        if (text.length() > MAX_ANALYZED_LINE_LENGTH) {
+            text = text.substring(0, MAX_ANALYZED_LINE_LENGTH);
+        }
         for (Analyzer analyzer : analyzers) {
             try {
                 analyzer.analyze(text, context);
@@ -214,9 +230,12 @@ public final class TomcatOutputPipeline {
      * Triggers startup time tracking and post-startup callbacks.
      */
     static final class StartupAnalyzer implements Analyzer {
-        // Tomcat may locale-format large numbers: [12,345] milliseconds
+        // Tomcat may locale-format large numbers: [12,345] milliseconds.
+        // No leading/trailing .* (find() already scans); possessive quantifiers
+        // so a long line that contains "server startup in" + digits but lacks the
+        // "ms"/"milliseconds" terminator cannot drive backtracking.
         private static final Pattern STARTUP_PATTERN = Pattern.compile(
-                "(?i).*server startup in \\[?([\\d,._]+)\\]?\\s*(?:ms|milliseconds).*");
+                "(?i)server startup in \\[?([\\d,._]++)\\]?\\s*+(?:ms|milliseconds)");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
@@ -247,6 +266,12 @@ public final class TomcatOutputPipeline {
                                 ctx.lifecycleListener.onArtifactFailed(ctx.configName, artifactName);
                             }
                         } else if (ctx.notifiedArtifacts.add(artifactName)) {
+                            // Keep deployedArtifactCount authoritative regardless of
+                            // which analyzer resolved the artifact — this fallback
+                            // resolves artifacts Tomcat never logged a per-artifact
+                            // "finished" line for, and isDeploymentCompleted() / the
+                            // session summary read this counter.
+                            ctx.deployedArtifactCount.incrementAndGet();
                             ctx.lifecycleListener.onArtifactDeployed(ctx.configName, artifactName);
                         }
                     }
@@ -268,10 +293,16 @@ public final class TomcatOutputPipeline {
      * Maps Tomcat context names back to artifact display names.
      */
     static final class DeploymentAnalyzer implements Analyzer {
-        // Tomcat uses locale-formatted numbers: [2,404] ms or [2.404] ms
+        // Tomcat uses locale-formatted numbers: [2,404] ms or [2.404] ms.
+        // The path inside [ ] is captured as a single possessive [^\]]++ run — it
+        // cannot backtrack into the artifact name on a long line that lacks the
+        // "] has finished" terminator. The last path segment and any .war/.xml
+        // suffix are stripped in Java (see extractDeployedName) rather than in the
+        // regex, which also lets the "web application directory" (exploded) form —
+        // which has no file extension — match the same pattern.
         private static final Pattern DESCRIPTOR_DEPLOYED_PATTERN = Pattern.compile(
-                "Deployment of (?:deployment descriptor|web application archive) " +
-                "\\[.*?([^/\\\\]+)\\.(?:xml|war)\\] has finished in \\[([\\d,._]+)\\] ms");
+                "Deployment of (?:deployment descriptor|web application (?:archive|directory)) " +
+                "\\[([^\\]]++)\\] has finished in \\[(\\d[\\d,._]*+)\\] ms");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
@@ -279,7 +310,7 @@ public final class TomcatOutputPipeline {
             Matcher m = DESCRIPTOR_DEPLOYED_PATTERN.matcher(text);
             if (m.find()) {
                 try {
-                    String contextName = m.group(1);
+                    String contextName = extractDeployedName(m.group(1));
                     // Strip locale separators (commas, periods, underscores) before parsing
                     long duration = Long.parseLong(m.group(2).replaceAll("[,._]", ""));
                     String artifactName = ctx.contextToArtifactName.getOrDefault(contextName, contextName);
@@ -298,14 +329,35 @@ public final class TomcatOutputPipeline {
                 }
             }
         }
+
+        /**
+         * Reduces the full path Tomcat logs inside {@code [ ]} (e.g.
+         * {@code /conf/Catalina/localhost/myapp.xml}, {@code /webapps/ROOT.war},
+         * or an exploded directory {@code /webapps/myapp}) to the context name:
+         * the last path segment with any {@code .war}/{@code .xml} suffix removed.
+         */
+        @NotNull
+        static String extractDeployedName(@NotNull String bracketContent) {
+            String base = bracketContent;
+            int sep = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+            if (sep >= 0 && sep < base.length() - 1) {
+                base = base.substring(sep + 1);
+            }
+            if (base.endsWith(".war") || base.endsWith(".xml")) {
+                base = base.substring(0, base.length() - 4);
+            }
+            return base;
+        }
     }
 
     /**
      * Detects context initialization/deployment log messages.
      */
     static final class ContextAnalyzer implements Analyzer {
+        // No leading/trailing .* (find() scans); the bracket capture is possessive
+        // so a long line with "context [" but no closing bracket can't backtrack.
         private static final Pattern CONTEXT_PATTERN = Pattern.compile(
-                "(?i).*context\\s+\\[([^\\]]+)\\].*(?:started|deployed|initialized).*");
+                "(?i)context\\s+\\[([^\\]]++)\\][^\\n]*?(?:started|deployed|initialized)");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
@@ -449,11 +501,15 @@ public final class TomcatOutputPipeline {
      * Detects JMX service activation messages.
      */
     static final class JmxAnalyzer implements Analyzer {
+        // No leading/trailing .* (find() scans); possessive trailing digits.
         private static final Pattern JMX_PATTERN = Pattern.compile(
-                "(?i).*jmx.*(?:started|enabled|listening).*port\\s*(\\d+).*");
+                "(?i)jmx[^\\n]*?(?:started|enabled|listening)[^\\n]*?port\\s*+(\\d++)");
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            // Cheap prefilter — this analyzer has no contains() gate and runs on
+            // every line when JMX is enabled, so skip non-JMX lines before the regex.
+            if (!StringUtil.containsIgnoreCase(text, "jmx")) return;
             Matcher m = JMX_PATTERN.matcher(text);
             if (m.find()) {
                 ctx.logger.logServerInfo("JMX active on port " + m.group(1));
@@ -631,33 +687,73 @@ public final class TomcatOutputPipeline {
         //   3. In-layout:     "... ERROR - msg", "... ERROR [thread] msg",
         //                     "... ERROR --- [thread] ..." (Spring Boot)
         //   4. Stack frame:   "Caused by: ...", "java.x.YException: ..."
+        //
+        // Bracketed levels (shape 2) are handled by leadingBracketLevel(), NOT by
+        // these patterns: only the FIRST bracketed level on the line is the line's
+        // own level, so a webapp DEBUG/INFO line whose message body happens to print
+        // a bracketed token like "... in [ERROR] state" is not misclassified.
         private static final Pattern ERROR_PATTERN = Pattern.compile(
                 "(?:^|\\s)(?:SEVERE|ERROR|FATAL):" +
-                "|\\[(?:SEVERE|ERROR|FATAL)\\]" +
                 "|\\s(?:SEVERE|ERROR|FATAL)\\s+(?:-|---|\\[)" +
                 "|^\\s*Caused by:\\s" +
                 "|^[a-zA-Z_$][a-zA-Z0-9_$.]*(?:Exception|Error)\\b");
         private static final Pattern WARNING_PATTERN = Pattern.compile(
                 "(?:^|\\s)(?:WARNING|WARN):" +
-                "|\\[(?:WARNING|WARN)\\]" +
                 "|\\s(?:WARNING|WARN)\\s+(?:-|---|\\[)");
+
+        // A bracketed log level anywhere on the line; find() returns the FIRST,
+        // which is the line's own level (a bracketed token later in the message
+        // body is then ignored). Case-insensitive so "[error]" is covered too.
+        private static final Pattern BRACKETED_LEVEL = Pattern.compile(
+                "\\[(SEVERE|ERROR|FATAL|WARNING|WARN|INFO|DEBUG|TRACE|FINE|FINER|FINEST|CONFIG|NOTICE)\\]",
+                Pattern.CASE_INSENSITIVE);
+
+        private enum Level { ERROR, WARNING, OTHER }
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            Level bracketed = leadingBracketLevel(text);
+            if (bracketed != null) {
+                // The line carries its own bracketed level — authoritative. A lower
+                // level (DEBUG/INFO/TRACE/...) means it is neither an error nor a
+                // warning, even if a bracketed [ERROR]/[WARN] appears later in the text.
+                if (bracketed == Level.ERROR) emitError(text, ctx);
+                else if (bracketed == Level.WARNING) emitWarning(text, ctx);
+                return;
+            }
             if (ERROR_PATTERN.matcher(text).find()) {
-                ctx.logger.logServerError(text);
-                // Only increment counter while running — shutdown cleanup
-                // errors (classloader, JDBC driver) are not actionable.
-                if (!ctx.shuttingDown.get()) {
-                    ctx.errorCount.incrementAndGet();
-                    ctx.lifecycleListener.onError(ctx.configName);
-                }
+                emitError(text, ctx);
             } else if (WARNING_PATTERN.matcher(text).find()) {
-                ctx.logger.logServerWarning(text);
-                if (!ctx.shuttingDown.get()) {
-                    ctx.warningCount.incrementAndGet();
-                    ctx.lifecycleListener.onWarning(ctx.configName);
-                }
+                emitWarning(text, ctx);
+            }
+        }
+
+        @Nullable
+        private static Level leadingBracketLevel(@NotNull String text) {
+            Matcher m = BRACKETED_LEVEL.matcher(text);
+            if (!m.find()) return null;
+            return switch (m.group(1).toUpperCase(java.util.Locale.ROOT)) {
+                case "SEVERE", "ERROR", "FATAL" -> Level.ERROR;
+                case "WARNING", "WARN" -> Level.WARNING;
+                default -> Level.OTHER;
+            };
+        }
+
+        private static void emitError(@NotNull String text, @NotNull Context ctx) {
+            ctx.logger.logServerError(text);
+            // Only increment counter while running — shutdown cleanup
+            // errors (classloader, JDBC driver) are not actionable.
+            if (!ctx.shuttingDown.get()) {
+                ctx.errorCount.incrementAndGet();
+                ctx.lifecycleListener.onError(ctx.configName);
+            }
+        }
+
+        private static void emitWarning(@NotNull String text, @NotNull Context ctx) {
+            ctx.logger.logServerWarning(text);
+            if (!ctx.shuttingDown.get()) {
+                ctx.warningCount.incrementAndGet();
+                ctx.lifecycleListener.onWarning(ctx.configName);
             }
         }
     }

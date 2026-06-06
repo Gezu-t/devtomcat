@@ -1,23 +1,32 @@
 # DevTomcat Changelog
 
-## [Unreleased]
+## [1.3.0]
 
 ### Added
-- Optional "Update on save" (off by default): saving a file while running triggers the configured Update action.
-- One-click "Reclaim Deployment" action surfaces in a balloon for WAR artifacts with a sibling exploded directory and for already-exploded external deployments living under a project module, enabling hot reload (Ctrl+F10) without rebuilding.
-- Pre-launch classpath-duplicate scan for exploded deployments: warns when the same logical resource is packaged in both `WEB-INF/classes/` and a `WEB-INF/lib/` JAR (or in two JARs), filtering universally-benign cases like `META-INF/MANIFEST.MF`, `META-INF/services/*`, `META-INF/maven/*`, multi-release JAR overrides, and license files.
+- Optional "Update on save" (off by default).
+- One-click "Reclaim Deployment" for hot reload.
+- Pre-launch classpath-duplicate scan.
 
 ### Changed
-- Exploded deployments overlay the module's runtime classpath onto Tomcat's webapp classloader: class output directories mount at `/WEB-INF/classes` via `<PreResources>` (zero-copy hot reload of freshly compiled bytes), and library JARs not already in `WEB-INF/lib/` mount via `<PostResources>`. Code changes become visible on the next request without rebuilding the WAR.
-- Exploded deployments also mount the module's webapp source directories at the web-app root via `<PreResources>`, so edited JSPs and static resources are served from source on the next request without re-copying into the artifact.
-- Class sync runs the broken-class byte scan only on files it is about to copy; unchanged files cost a stat, so a no-op sync no longer reads the entire deployed classpath off disk on each launch/update.
-- Under Debug, "Update classes and resources" redefines changed classes in the live JVM and preserves sessions and in-memory state, restarting the context automatically only when a change is structural and cannot be redefined.
-- Update actions compile only the deployment modules plus their upstream dependency closure instead of the whole project, falling back to a full build when no module-backed deployment resolves.
+- Migrated off deprecated platform APIs.
+- Mount unpackaged library JARs via `<PostResources>`.
+- Serve webapp source via `<PreResources>`.
+- Faster no-op class sync.
+- Live hot-swap under Debug.
+- Scoped compile to deployment modules.
 
 ### Fixed
-- Empty Deployment tab now blocks launch with a clear error, instead of warning post-launch when Tomcat has already started with nothing to serve.
-- Flicker when removing a deployment from the Deployment tab.
-- Class sync and web-resources sync now remove orphan files in the deployed artifact when the source no longer claims them, so deleted/renamed source files stop being loadable by Tomcat. Class sync respects the WAR module's source-root union; webapp sync skips `WEB-INF/classes/` and `WEB-INF/lib/` (owned by other pipelines).
+- No more EDT freeze during post-compile sync.
+- Faster class/resource sync.
+- Restart syncs deployments once, not twice.
+- App log lines classified by their own level.
+- No output-pipeline stall on very long log lines.
+- Exploded "directory" deploys detected and counted.
+- Correct dependency class mirroring.
+- Startup-time trend ignores failed starts.
+- Empty Deployment tab blocks launch.
+- Deployment-tab removal flicker.
+- Orphan files removed on sync.
 
 ## [1.2.0]
 

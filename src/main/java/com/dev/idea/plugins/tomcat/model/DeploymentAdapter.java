@@ -1,6 +1,6 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModulePointerManager;
@@ -85,7 +85,7 @@ public final class DeploymentAdapter {
                                                                       @NotNull Path outputPath,
                                                                       @NotNull String contextPath,
                                                                       boolean exploded) {
-        Module module = ReadAction.compute(() -> resolveOwningModule(project, storedName, outputPath));
+        Module module = TomcatReadActions.compute(() -> resolveOwningModule(project, storedName, outputPath));
         ModulePointerManager pm = ModulePointerManager.getInstance(project);
         if (module != null) {
             return new ModuleBackedDeployment(pm.create(module), outputPath, contextPath, exploded);

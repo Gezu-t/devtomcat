@@ -126,6 +126,19 @@ class TomcatOutputPipelineTest {
         }
 
         @Test
+        @DisplayName("clean-startup fallback increments deployedArtifactCount for unresolved artifacts")
+        void startupFallbackIncrementsDeployedCount() {
+            // No per-artifact "finished" line was processed, so DeploymentAnalyzer
+            // never ran; the clean-startup fallback must still make the count
+            // authoritative (consumed by isDeploymentCompleted / session summary).
+            contextToArtifact.put("webapp-deploy", "web-module");
+
+            analyzer.analyze("Server startup in 1234 ms", context);
+
+            assertEquals(1, deployedCount.get());
+        }
+
+        @Test
         @DisplayName("marks unresolved artifacts failed when Tomcat reported a summary-level deployment failure")
         void startupAfterSummaryFailureMarksUnresolvedArtifactsFailed() {
             contextToArtifact.put("webapp-deploy", "webapp-deploy:war exploded");
@@ -234,6 +247,19 @@ class TomcatOutputPipelineTest {
                     context);
 
             assertEquals(1, deployedCount.get());
+        }
+
+        @Test
+        @DisplayName("detects exploded 'web application directory' deployment (no file extension)")
+        void detectsDirectoryDeployment() {
+            contextToArtifact.put("myapp", "My Web App");
+
+            analyzer.analyze(
+                    "Deployment of web application directory [/usr/local/tomcat/webapps/myapp] has finished in [2,404] ms",
+                    context);
+
+            assertEquals(1, deployedCount.get());
+            assertEquals("myapp", readyContext.get());
         }
 
         @Test
@@ -393,6 +419,32 @@ class TomcatOutputPipelineTest {
         void recognisesBracketedLevel() {
             analyzer.analyze("[ERROR] Something broke", context);
             assertEquals(1, errorCount.get());
+        }
+
+        @Test
+        @DisplayName("a DEBUG line whose message body contains a bracketed [ERROR] token is not an error")
+        void leadingDebugLevelBeatsBracketInMessageBody() {
+            // The line's own level is DEBUG (leading bracket); the later [ERROR]
+            // is a value inside the message, not the line's level.
+            analyzer.analyze("[DEBUG] com.example.Loader | loading file in [ERROR] state", context);
+            assertEquals(0, errorCount.get(), "leading level is DEBUG, not ERROR");
+            assertEquals(0, warningCount.get());
+        }
+
+        @Test
+        @DisplayName("a [WARN] line stays a warning even when [ERROR] appears later in the text")
+        void leadingWarnBeatsLaterErrorToken() {
+            analyzer.analyze("[WARN] com.example.Retry | previous attempt returned [ERROR]", context);
+            assertEquals(0, errorCount.get());
+            assertEquals(1, warningCount.get(), "leading level is WARN");
+        }
+
+        @Test
+        @DisplayName("an INFO line with a bracketed [ERROR] token in the body counts as neither")
+        void leadingInfoLevelSuppressesBothCounters() {
+            analyzer.analyze("[INFO] com.example.Status | last run finished in [ERROR] state", context);
+            assertEquals(0, errorCount.get());
+            assertEquals(0, warningCount.get());
         }
 
         @Test
@@ -1085,6 +1137,80 @@ class TomcatOutputPipelineTest {
 
             // Because the buffer is empty (no real exception headers), nothing should fire.
             assertTrue(captured.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("JmxAnalyzer")
+    class JmxAnalyzerTests {
+
+        private final TomcatOutputPipeline.JmxAnalyzer analyzer = new TomcatOutputPipeline.JmxAnalyzer();
+
+        private TomcatOutputPipeline.Context capturingContext(List<String> infos) {
+            return new TomcatOutputPipeline.Context(
+                    new TomcatOutputPipeline.PipelineLogger() {
+                        @Override public void logServerStartup(long durationMs) {}
+                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
+                        @Override public void logServerInfo(@NotNull String msg) { infos.add(msg); }
+                        @Override public void logServerError(@NotNull String msg) {}
+                        @Override public void logServerWarning(@NotNull String msg) {}
+                    },
+                    new TomcatLifecycleListener() {}, "testConfig",
+                    contextToArtifact, startupDetected, deployedCount,
+                    errorCount, warningCount, true,
+                    duration -> {}, () -> {}, c -> {});
+        }
+
+        @Test
+        @DisplayName("detects JMX port (case-insensitive, mixed phrasing)")
+        void detectsJmxPort() {
+            List<String> infos = new ArrayList<>();
+            analyzer.analyze("JMX remote listener started, listening on port 1099", capturingContext(infos));
+            assertEquals(1, infos.size());
+            assertTrue(infos.get(0).contains("1099"), "got: " + infos);
+        }
+
+        @Test
+        @DisplayName("ignores lines without a JMX mention")
+        void ignoresNonJmxLines() {
+            List<String> infos = new ArrayList<>();
+            analyzer.analyze("INFO: started, listening on port 8080", capturingContext(infos));
+            assertTrue(infos.isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("pathological-line resilience")
+    class PathologicalLineTests {
+
+        @Test
+        @DisplayName("an oversized newline-free line is analyzed without stalling")
+        void oversizedLineDoesNotStall() {
+            TomcatOutputPipeline pipeline = TomcatOutputPipeline.create(context);
+            // Passes the cheap contains() prefilters but never reaches the pattern
+            // terminators — the historical trigger for O(n^2) regex backtracking.
+            // Far longer than MAX_ANALYZED_LINE_LENGTH so the truncation guard engages.
+            String huge = "Deployment of web application archive [Context jmx started "
+                    + "x".repeat(300_000);
+            long start = System.nanoTime();
+            pipeline.processLine(huge, context);
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertTrue(elapsedMs < 3000,
+                    "processLine must not stall on an oversized line; took " + elapsedMs + "ms");
+        }
+
+        @Test
+        @DisplayName("a detection signal pushed past the analysis cap is truncated off")
+        void capTruncatesAnalysis() {
+            TomcatOutputPipeline pipeline = TomcatOutputPipeline.create(context);
+            // The banner sits beyond MAX_ANALYZED_LINE_LENGTH, so processLine's cap
+            // truncates it away before the analyzer runs. A genuine Tomcat signal
+            // always appears at the start of the line, never past 16K of padding.
+            String padded = "x".repeat(TomcatOutputPipeline.MAX_ANALYZED_LINE_LENGTH)
+                    + " Server startup in 1234 ms";
+            pipeline.processLine(padded, context);
+            assertFalse(startupDetected.get(),
+                    "a startup banner beyond the analysis cap must be truncated off and not detected");
         }
     }
 }

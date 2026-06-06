@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
-import com.intellij.openapi.application.ReadAction;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -109,7 +109,7 @@ public final class WarToExplodedQuickFix {
     public static List<FixCandidate> findFixableArtifacts(@NotNull Project project,
                                                           @NotNull List<DeploymentArtifact> artifacts) {
         if (project.isDisposed()) return List.of();
-        return ReadAction.compute(() -> {
+        return TomcatReadActions.compute(() -> {
             ModuleOwnershipResolver resolver = buildResolverFor(project);
             return findFixableArtifacts(resolver, artifacts);
         });

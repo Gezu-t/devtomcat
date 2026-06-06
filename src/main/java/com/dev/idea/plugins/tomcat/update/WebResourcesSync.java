@@ -15,8 +15,6 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -423,9 +421,19 @@ public final class WebResourcesSync {
                                 Files.createDirectories(parent);
                             }
                             try {
-                                Files.copy(file, target,
-                                        StandardCopyOption.REPLACE_EXISTING,
-                                        StandardCopyOption.COPY_ATTRIBUTES);
+                                // Copy WITHOUT COPY_ATTRIBUTES on every platform;
+                                // mirror just the source mtime so shouldCopy's gate
+                                // stays exact. Behaviour is identical on Windows,
+                                // Linux, and macOS — the speedup is just largest on
+                                // Windows, where COPY_ATTRIBUTES also re-applies NTFS
+                                // ACLs per file. Same rationale as
+                                // DeployedClassesSync.mirrorTree.
+                                Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                                try {
+                                    Files.setLastModifiedTime(target, attrs.lastModifiedTime());
+                                } catch (IOException ignoreMtime) {
+                                    // mtime is a gate optimization, not correctness.
+                                }
                                 copied[0]++;
                             } catch (java.nio.file.NoSuchFileException vanished) {
                                 LOG.debug("Web resources sync: source vanished during copy: " + file);
