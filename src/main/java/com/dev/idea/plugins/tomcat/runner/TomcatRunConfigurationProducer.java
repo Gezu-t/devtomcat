@@ -166,18 +166,11 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             webRoots.addAll(TomcatModuleUtils.findUnconventionalWebRoots(module));
         }
 
-        // Convention fallbacks for layouts with no WEB-INF marker (Spring resource
-        // dirs, static/SPA roots) and for an existing-but-empty conventional webapp.
+        // Convention fallbacks for web layouts with no WEB-INF marker that the
+        // structural finders above therefore miss (Spring Boot resource dirs,
+        // static-site roots).
         if (webRoots.isEmpty()) {
-            webRoots.addAll(discoverSpringBootWebRoots(module));
-        }
-
-        if (webRoots.isEmpty()) {
-            webRoots.addAll(discoverMavenGradleWebRoots(module));
-        }
-
-        if (webRoots.isEmpty()) {
-            webRoots.addAll(discoverAlternativeWebRoots(module));
+            webRoots.addAll(discoverConventionFallbackRoots(module));
         }
 
         if (!webRoots.isEmpty()) {
@@ -323,48 +316,35 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return false;
     }
 
-    private List<VirtualFile> discoverSpringBootWebRoots(@NotNull Module module) {
+    /**
+     * Convention fallback for web layouts that carry web content but no
+     * {@code WEB-INF} marker — so the structural finders in
+     * {@link #discoverWebRootsForContext} (which require a valid web root or a
+     * {@code WEB-INF} holder) miss them: Spring Boot resource dirs (relative to
+     * source roots) and common static-site roots (relative to content roots).
+     *
+     * <p>Unlike {@code findWebRoots} these accept a directory on existence alone
+     * (no validation), which is exactly why they run only after every structural
+     * source came back empty. The former {@code src/main/webapp}/{@code WebContent}
+     * convention list is intentionally dropped here: those paths are already covered
+     * (with validation) by {@code TomcatModuleUtils.findWebRoots}, so the only thing
+     * re-listing them added was an unvalidated, empty {@code webapp/} as a docBase,
+     * which serves nothing.
+     */
+    private List<VirtualFile> discoverConventionFallbackRoots(@NotNull Module module) {
         List<VirtualFile> webRoots = new ArrayList<>();
-        VirtualFile[] sourceRoots = ModuleRootManager.getInstance(module).getSourceRoots();
+        ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
 
-        for (VirtualFile sourceRoot : sourceRoots) {
+        // Spring Boot resource roots (relative to source roots).
+        for (VirtualFile sourceRoot : rootManager.getSourceRoots()) {
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/static"));
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/public"));
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/templates"));
             addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/META-INF/resources"));
         }
 
-        if (!webRoots.isEmpty()) {
-            LOG.debug("Tomcat: Spring Boot web roots discovered");
-        }
-
-        return webRoots;
-    }
-
-    private List<VirtualFile> discoverMavenGradleWebRoots(@NotNull Module module) {
-        List<VirtualFile> webRoots = new ArrayList<>();
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-
-        for (VirtualFile contentRoot : contentRoots) {
-            addIfExists(webRoots, contentRoot.findFileByRelativePath("src/main/webapp"));
-            addIfExists(webRoots, contentRoot.findFileByRelativePath("src/main/web"));
-            addIfExists(webRoots, contentRoot.findFileByRelativePath("web"));
-            addIfExists(webRoots, contentRoot.findFileByRelativePath("webapp"));
-            addIfExists(webRoots, contentRoot.findFileByRelativePath("WebContent"));
-        }
-
-        if (!webRoots.isEmpty()) {
-            LOG.debug("Tomcat: Maven/Gradle web roots discovered");
-        }
-
-        return webRoots;
-    }
-
-    private List<VirtualFile> discoverAlternativeWebRoots(@NotNull Module module) {
-        List<VirtualFile> webRoots = new ArrayList<>();
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-
-        for (VirtualFile contentRoot : contentRoots) {
+        // Static-site / SPA roots (relative to content roots).
+        for (VirtualFile contentRoot : rootManager.getContentRoots()) {
             addIfExists(webRoots, contentRoot.findFileByRelativePath("public"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("static"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("www"));
