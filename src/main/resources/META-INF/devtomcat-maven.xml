@@ -1,0 +1,13 @@
+<!--
+  Loaded by the platform ONLY when org.jetbrains.idea.maven is present (see the
+  <depends optional config-file="devtomcat-maven.xml"> in plugin.xml). Registers
+  the typed Maven-backed MavenModelProvider; on installs without the Maven plugin
+  this file is never loaded, so the provider is absent and MavenModelProvider's
+  accessors degrade to null.
+-->
+<idea-plugin>
+    <extensions defaultExtensionNs="com.dev.idea.plugins.tomcat">
+        <mavenModelProvider
+                implementation="com.dev.idea.plugins.tomcat.utils.IdeaMavenModelProvider"/>
+    </extensions>
+</idea-plugin>

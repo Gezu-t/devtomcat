@@ -14,7 +14,6 @@ import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.services.ServiceViewContributor;
 import com.intellij.execution.services.ServiceViewDescriptor;
 import com.intellij.execution.services.ServiceViewProvidingContributor;
-import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.projectView.PresentationData;
@@ -38,7 +37,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Represents a Tomcat run configuration as a service row in the Services tool
@@ -126,11 +124,17 @@ public final class TomcatRunConfigContributor
 
     @NotNull
     private Endpoint resolveEndpoint(@NotNull Project project) {
+        // Convenience overload for callers that haven't already resolved the live
+        // handler (e.g. getServices). Remote mode never consults the handler.
+        return resolveEndpoint(tomcatConfig.isRemoteMode() ? null : findLiveHandler(project));
+    }
+
+    @NotNull
+    private Endpoint resolveEndpoint(@Nullable TomcatProcessHandler liveHandler) {
         if (tomcatConfig.isRemoteMode()) {
             return endpointFromManagerUrl(
                     tomcatConfig.getConfigData().getRemoteConfig().getManagerUrl());
         }
-        TomcatProcessHandler liveHandler = findLiveHandler(project);
         if (liveHandler != null) {
             PortConfig live = liveHandler.getResolvedPorts();
             if (live != null && live.isHttpsEnabled() && live.getHttps() > 0) {
@@ -233,20 +237,28 @@ public final class TomcatRunConfigContributor
 
         @Override
         public ItemPresentation getPresentation() {
+            // Resolve the live handler, status, and endpoint ONCE, then pass them to
+            // each builder. Previously resolveIcon / buildStatusLine / buildTooltip
+            // each re-scanned getRunningProcesses() and re-queried the status service
+            // independently — ~3 process scans + 2 status lookups per row per refresh.
+            TomcatProcessHandler liveHandler = findLiveHandler(project);
+            TomcatDeploymentStatusService.ConfigStatus liveStatus = safeLiveStatus();
+            Endpoint endpoint = resolveEndpoint(liveHandler);
+
             PresentationData data = new PresentationData();
-            data.setIcon(resolveIcon());
+            data.setIcon(resolveIcon(liveStatus, liveHandler));
             data.addText(tomcatConfig.getName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
 
-            String statusLine = buildStatusLine();
+            String statusLine = buildStatusLine(endpoint, liveStatus);
             if (!statusLine.isEmpty()) {
                 data.addText("  " + statusLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             }
-            data.setTooltip(buildTooltip());
+            data.setTooltip(buildTooltip(endpoint));
             return data;
         }
 
         @NotNull
-        private String buildTooltip() {
+        private String buildTooltip(@NotNull Endpoint endpoint) {
             StringBuilder sb = new StringBuilder();
             sb.append(tomcatConfig.getName());
             TomcatInfo info = tomcatConfig.getTomcatInfo();
@@ -259,7 +271,6 @@ public final class TomcatRunConfigContributor
                     sb.append("\nHome: ").append(info.getPath());
                 }
             }
-            Endpoint endpoint = resolveEndpoint(project);
             if (endpoint.port() > 0) {
                 sb.append("\n")
                   .append(endpoint.https() ? "https" : "http")
@@ -276,12 +287,15 @@ public final class TomcatRunConfigContributor
         }
 
         @NotNull
-        private Icon resolveIcon() {
-            TomcatDeploymentStatusService.ConfigStatus liveStatus = safeLiveStatus();
+        private Icon resolveIcon(@Nullable TomcatDeploymentStatusService.ConfigStatus liveStatus,
+                                 @Nullable TomcatProcessHandler liveHandler) {
             Icon configIcon = tomcatConfig.getIcon();
             if (configIcon == null) configIcon = AllIcons.RunConfigurations.Application;
             if (liveStatus == null) return configIcon;
-            boolean debugging = isDebuggingNow();
+            // Debug-themed icon when the live process was launched under the debugger,
+            // so a Debug session is distinguishable from a Run session at a glance.
+            boolean debugging = liveHandler != null
+                    && DefaultDebugExecutor.EXECUTOR_ID.equals(liveHandler.getExecutorId());
             return switch (liveStatus.getServerState()) {
                 // Pre-running and running states get a debug-themed icon when
                 // the live executor is the debugger, so users can tell at a
@@ -297,20 +311,9 @@ public final class TomcatRunConfigContributor
             };
         }
 
-        /**
-         * True when the live process handler for this configuration was
-         * launched under the Debug executor. Returns false when the config
-         * isn't running, when the executor is Run / Coverage / etc., or when
-         * the lookup fails defensively.
-         */
-        private boolean isDebuggingNow() {
-            TomcatProcessHandler handler = findLiveHandler(project);
-            return handler != null
-                    && DefaultDebugExecutor.EXECUTOR_ID.equals(handler.getExecutorId());
-        }
-
         @NotNull
-        private String buildStatusLine() {
+        private String buildStatusLine(@NotNull Endpoint endpoint,
+                                       @Nullable TomcatDeploymentStatusService.ConfigStatus liveStatus) {
             StringBuilder text = new StringBuilder();
 
             TomcatInfo tomcatInfo = tomcatConfig.getTomcatInfo();
@@ -318,13 +321,11 @@ public final class TomcatRunConfigContributor
                 text.append("Tomcat ").append(tomcatInfo.getVersion());
             }
 
-            Endpoint endpoint = resolveEndpoint(project);
             if (endpoint.port() > 0) {
                 if (text.length() > 0) text.append(" · ");
                 text.append(":").append(endpoint.port());
             }
 
-            TomcatDeploymentStatusService.ConfigStatus liveStatus = safeLiveStatus();
             if (liveStatus != null) {
                 if (text.length() > 0) text.append(" · ");
                 text.append(liveStatus.getServerState().getLabel());

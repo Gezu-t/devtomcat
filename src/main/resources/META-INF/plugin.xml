@@ -78,6 +78,18 @@
          flow. Declared non-optional because our Coverage executor path depends
          on the coverage engine being present. -->
     <depends>Coverage</depends>
+    <!-- Optional: typed access to the Maven model (MavenModelProvider). Loaded
+         only when the Maven plugin is present; without it the plugin still works
+         (Gradle-only / trimmed Community), the provider is just absent. -->
+    <depends optional="true" config-file="devtomcat-maven.xml">org.jetbrains.idea.maven</depends>
+
+    <extensionPoints>
+        <!-- Implemented by the typed Maven provider, registered only in
+             devtomcat-maven.xml (loaded with the optional Maven dependency above). -->
+        <extensionPoint name="mavenModelProvider"
+                        interface="com.dev.idea.plugins.tomcat.utils.MavenModelProvider"
+                        dynamic="true"/>
+    </extensionPoints>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Opts TomcatRunConfiguration into IntelliJ's Java coverage pipeline.

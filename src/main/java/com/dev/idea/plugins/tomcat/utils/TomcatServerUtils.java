@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.utils;
 import com.dev.idea.plugins.tomcat.model.ValidationResult;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.ui.Messages;

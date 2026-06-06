@@ -64,6 +64,30 @@ class TomcatDeploymentHistoryTest {
     }
 
     @Test
+    @DisplayName("getState returns a deep copy independent of later mutations")
+    void getStateReturnsDeepCopy() {
+        TomcatDeploymentHistory.HistoryEntry e1 = history.startEntry("Config1");
+        e1.artifactNames.add("app-1.0.0");
+        history.recordCompleted(e1);
+
+        TomcatDeploymentHistory.HistoryState snapshot = history.getState();
+        assertNotNull(snapshot);
+        assertEquals(1, snapshot.entries.size());
+
+        // The platform serializes the snapshot on a separate save thread; a
+        // concurrent recordCompleted must not mutate the list being serialized.
+        history.recordCompleted(history.startEntry("Config2"));
+        assertEquals(1, snapshot.entries.size(),
+                "snapshot must be independent of later recordCompleted");
+
+        // Per-entry lists are copied too, not shared with the live entry.
+        TomcatDeploymentHistory.HistoryEntry snapEntry = snapshot.entries.get(0);
+        assertNotSame(e1.artifactNames, snapEntry.artifactNames,
+                "artifactNames must be a defensive copy");
+        assertEquals(List.of("app-1.0.0"), snapEntry.artifactNames);
+    }
+
+    @Test
     @DisplayName("getEntriesForConfig filters by name")
     void getEntriesForConfig() {
         TomcatDeploymentHistory.HistoryEntry e1 = history.startEntry("A");

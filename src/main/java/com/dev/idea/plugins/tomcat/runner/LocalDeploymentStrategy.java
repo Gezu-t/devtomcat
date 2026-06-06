@@ -28,12 +28,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.zip.ZipFile;
-
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
 /**
@@ -576,13 +575,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (!Files.isDirectory(webInfLib)) return "";
 
+        Set<String> containerLibKeys = resolveContainerLibKeys(tomcatInfo);
         // LinkedHashSet for deterministic order in the generated XML.
         java.util.LinkedHashSet<String> skip = new java.util.LinkedHashSet<>();
         try (var stream = Files.list(webInfLib)) {
             stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
                   .forEach(p -> {
                       String jarName = p.getFileName().toString();
-                      if (isContainerProvidedJar(jarName)) {
+                      if (isContainerProvidedJar(jarName, containerLibKeys)) {
                           skip.add(jarName);
                       }
                   });
@@ -637,6 +637,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     private static List<String> collectContainerProvidedJarsAcrossDeployments(
             @NotNull TomcatRunConfiguration configuration) {
         java.util.TreeSet<String> all = new java.util.TreeSet<>();
+        Set<String> containerLibKeys = resolveContainerLibKeys(configuration.getTomcatInfo());
         for (Deployment deployment : configuration.getDeployments()) {
             if (!deployment.isValid() || !deployment.isExploded()) continue;
             Path artifactPath = deployment.getResolvedPath();
@@ -646,7 +647,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             try (var stream = Files.list(webInfLib)) {
                 stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
                         .map(p -> p.getFileName().toString())
-                        .filter(LocalDeploymentStrategy::isContainerProvidedJar)
+                        .filter(name -> isContainerProvidedJar(name, containerLibKeys))
                         .forEach(all::add);
             } catch (IOException e) {
                 LOG.debug("Could not scan " + webInfLib + " for container-provided jars: " + e.getMessage());
@@ -917,6 +918,8 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // and WEB-INF/lib show up here via the recursive classpath walk
         // and re-mounting them would be redundant).
         String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
+        // Authoritative container-provided set from the configured Tomcat's lib/.
+        Set<String> containerLibKeys = resolveContainerLibKeys(tomcatInfo);
 
         List<String> extraJars = new ArrayList<>();
 
@@ -937,7 +940,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             File file = new File(nativePath);
             if (!file.isFile()) continue;
             String jarName = file.getName();
-            if (isContainerProvidedJar(jarName)) continue;
+            if (isContainerProvidedJar(jarName, containerLibKeys)) continue;
             if (deployedLibArtifacts.contains(LibraryArtifactNames.libraryArtifactKey(jarName))) continue;
             extraJars.add(nativePath);
         }
@@ -1007,6 +1010,41 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         return sb.toString();
     }
 
+    /**
+     * Whether {@code jarName} is provided by the target container and must not be
+     * injected into the webapp classpath (it would duplicate classes / web
+     * fragments the container's own loader already provides).
+     *
+     * <p>Authoritative signal first: a match by version-independent artifact key
+     * against {@code containerLibKeys} — the JARs the configured Tomcat actually
+     * ships in {@code lib/} (and {@code bin/}). This tracks the real install and
+     * auto-covers JARs the static list below never anticipated (a renamed core
+     * JAR, a Tomcat fork, a future release).
+     *
+     * <p>Union'd with the static {@link #CONTAINER_PROVIDED_JAR_PREFIXES}, which
+     * is still required for the spec API JARs: a webapp pulls them under Maven
+     * coordinates ({@code jakarta.servlet-api}, {@code javax.servlet-api}) while
+     * Tomcat ships them under bare names ({@code servlet-api.jar}), so their
+     * artifact keys don't match and the lib-key signal alone would miss them. The
+     * prefix list is also the sole fallback when the Tomcat home is unknown or
+     * unreadable (empty {@code containerLibKeys}).
+     */
+    static boolean isContainerProvidedJar(@NotNull String jarName,
+                                          @NotNull Set<String> containerLibKeys) {
+        if (!containerLibKeys.isEmpty()
+                && containerLibKeys.contains(LibraryArtifactNames.libraryArtifactKey(jarName))) {
+            return true;
+        }
+        return isContainerProvidedJar(jarName);
+    }
+
+    /**
+     * Static-prefix fallback for {@link #isContainerProvidedJar(String, Set)} —
+     * used when the configured Tomcat's {@code lib/} set is unavailable, and
+     * (because of the Maven-vs-Tomcat naming variance noted there) always
+     * consulted for the spec API JARs. Package-private for direct unit testing of
+     * the prefix coverage.
+     */
     static boolean isContainerProvidedJar(@NotNull String jarName) {
         String normalized = jarName.toLowerCase(Locale.ROOT);
         for (String prefix : CONTAINER_PROVIDED_JAR_PREFIXES) {
@@ -1015,6 +1053,39 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
         return false;
+    }
+
+    /**
+     * Version-independent artifact keys for every JAR the configured Tomcat ships
+     * in {@code lib/} and {@code bin/} — the authoritative set of container-provided
+     * libraries for this install. Empty when the Tomcat home is unknown or
+     * unreadable, in which case {@link #isContainerProvidedJar(String, Set)} falls
+     * back to the static prefix heuristic alone.
+     */
+    @NotNull
+    static Set<String> resolveContainerLibKeys(@Nullable TomcatInfo tomcatInfo) {
+        if (tomcatInfo == null) return Collections.emptySet();
+        String home = tomcatInfo.getPath();
+        if (home == null || home.isEmpty()) return Collections.emptySet();
+        Path homeDir = Paths.get(home);
+        Set<String> keys = new HashSet<>();
+        addJarKeysFrom(homeDir.resolve("lib"), keys);
+        // bin/ carries bootstrap.jar, tomcat-juli.jar and (when installed)
+        // commons-daemon — also container-provided.
+        addJarKeysFrom(homeDir.resolve("bin"), keys);
+        return keys;
+    }
+
+    private static void addJarKeysFrom(@NotNull Path dir, @NotNull Set<String> keys) {
+        if (!Files.isDirectory(dir)) return;
+        try (var stream = Files.list(dir)) {
+            stream.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(EXT_JAR))
+                  .forEach(p -> keys.add(
+                          LibraryArtifactNames.libraryArtifactKey(p.getFileName().toString())));
+        } catch (IOException e) {
+            LOG.debug("Could not scan Tomcat dir for container-provided jars: "
+                    + dir + " (" + e.getMessage() + ")");
+        }
     }
 
     /**

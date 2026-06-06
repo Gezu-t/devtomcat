@@ -33,7 +33,6 @@ import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.RunManagerEx;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.packaging.artifacts.Artifact;
-import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.impl.run.BuildArtifactsBeforeRunTask;
 
 import java.nio.file.Path;

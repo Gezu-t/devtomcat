@@ -9,11 +9,19 @@
 
 ### Changed
 - Migrated off deprecated platform APIs.
+- Maven model accessed via a typed optional dependency instead of string reflection.
 - Mount unpackaged library JARs via `<PostResources>`.
 - Serve webapp source via `<PreResources>`.
 - Faster no-op class sync.
 - Live hot-swap under Debug.
 - Scoped compile to deployment modules.
+- Lighter Services panel refresh.
+- Detect container-provided JARs from the Tomcat install, not just name patterns.
+- Detect war modules from the resolved Maven model.
+- Detect web and aggregator modules from the resolved model and classpath.
+- Honor maven-war-plugin `warSourceDirectory` for resource sync.
+- Auto-Detect JDK seeds from the IDE's own JDK discovery.
+- Run-config build-tool labels use the resolved project model, not build-file probing.
 
 ### Fixed
 - No more EDT freeze during post-compile sync.
@@ -27,6 +35,11 @@
 - Empty Deployment tab blocks launch.
 - Deployment-tab removal flicker.
 - Orphan files removed on sync.
+- Reliable deployment-history persistence.
+- Ports released when a config is deleted.
+- Same-named artifacts show as distinct Services rows.
+- Server port no longer creeps up across stop/restart.
+- Gradle multi-module dependencies no longer duplicate classpath resources.
 
 ## [1.2.0]
 

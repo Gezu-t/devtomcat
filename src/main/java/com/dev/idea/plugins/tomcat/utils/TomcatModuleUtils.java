@@ -4,6 +4,7 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
@@ -91,7 +92,13 @@ public final class TomcatModuleUtils {
     private static final String GRADLE_TEST_SOURCE_SET = "test";
 
     // =====================================================================
-    // Build-script content markers (used by checkMavenWebConfig / checkGradleWebConfig)
+    // Cold-project fallback markers (used only by the build-file text scan in
+    // hasWebBuildFileTextFallback). Web detection is primarily structural — a
+    // discovered web root, the resolved Maven packaging, or a Spring web library
+    // on the resolved classpath. These raw-text markers exist solely for a project
+    // the IDE has not imported/resolved yet, where none of those signals are
+    // available. Kept during a deprecation window while structural detection
+    // becomes the norm.
     // =====================================================================
 
     /** POM content fragments indicating the module produces a war artifact or is Spring-Boot-web. */
@@ -111,6 +118,22 @@ public final class TomcatModuleUtils {
             "org.springframework.boot",
             "spring-boot-starter-web"
     );
+
+    /**
+     * Resolved-classpath name prefix that marks a module as a servlet web app.
+     * Matched against the jar names returned by {@link OrderEnumerator} (e.g.
+     * {@code spring-webmvc-6.x.jar}). Deliberately {@code spring-webmvc} and not the
+     * broader {@code spring-web}: {@code spring-webmvc} is where {@code DispatcherServlet}
+     * lives, so it denotes a classic Tomcat-deployable servlet app. The broader
+     * {@code spring-web} (the HTTP-client base behind {@code RestTemplate}/{@code WebClient}),
+     * {@code spring-webflux} (reactive, not a servlet), and {@code spring-websocket} are
+     * NOT web-deployment signals and would produce false positives. The
+     * {@code *-starter-web} aggregator carries no classes, so we match the actual
+     * library it resolves to — making the signal build-tool-agnostic (Maven or Gradle,
+     * any DSL) and immune to build-file spelling, property-driven versions, and
+     * BOM-managed dependencies.
+     */
+    private static final String SPRING_WEB_LIBRARY_PREFIX = "spring-webmvc";
 
     // =====================================================================
     // Web Facet reflection (provided by the platform's JavaEE plugin)
@@ -458,16 +481,88 @@ public final class TomcatModuleUtils {
         return lastDot >= 0 && name.substring(lastDot + 1).equals(GRADLE_TEST_SOURCE_SET);
     }
 
+    /**
+     * Whether the module's build configuration marks it as web, determined
+     * structurally first and only falling back to raw build-file text for a
+     * project the IDE has not imported/resolved yet.
+     *
+     * <p>Order:
+     * <ol>
+     *   <li><b>Resolved Maven packaging</b> — {@code "war"} is web by definition,
+     *       and the resolved model sees packaging inherited from a parent POM, set
+     *       via a {@code ${property}}, or activated in a profile. ({@code "war"} is
+     *       the bare resolved value, distinct from the XML fragment
+     *       {@link TomcatConstants#POM_PACKAGING_WAR}.)</li>
+     *   <li><b>Spring MVC on the resolved classpath</b> — a {@code spring-webmvc}
+     *       (servlet) library resolved onto the module's runtime classpath marks it
+     *       web. Build-tool-agnostic (Maven or Gradle, any DSL) and immune to
+     *       build-file spelling; it also catches plain Spring MVC apps (no war
+     *       packaging) that the build-file markers below do not name.</li>
+     *   <li><b>Build-file text fallback</b> — for an un-imported project, where
+     *       neither the Maven model nor the classpath is resolved yet. Scans both
+     *       the {@code pom.xml} and the Gradle script for the legacy war / Spring
+     *       markers, identical to the pre-rewrite behaviour, so detection for such
+     *       projects is unchanged; structural signals simply take precedence when
+     *       available.</li>
+     * </ol>
+     */
     private static boolean hasWebBuildConfiguration(@NotNull Module module) {
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
+        if ("war".equals(MavenModelProvider.packaging(module))) {
+            return true;
+        }
+        if (hasWebFrameworkOnClasspath(module)) {
+            return true;
+        }
+        return hasWebBuildFileTextFallback(module);
+    }
 
-        for (VirtualFile root : contentRoots) {
+    /**
+     * Structural Spring-web signal: a {@value #SPRING_WEB_LIBRARY_PREFIX}* library
+     * on the module's resolved runtime classpath. Uses the same
+     * {@code runtimeOnly().recursively()} enumeration the run-config producer uses
+     * for Spring Boot detection, so the two stay consistent.
+     */
+    private static boolean hasWebFrameworkOnClasspath(@NotNull Module module) {
+        for (VirtualFile root : OrderEnumerator.orderEntries(module)
+                .runtimeOnly().recursively().classes().getRoots()) {
+            if (isWebFrameworkLibrary(root.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Pure predicate: does a resolved classpath-root name denote a Spring web
+     * library? Matched case-insensitively ({@link Locale#ROOT}) against
+     * {@link #SPRING_WEB_LIBRARY_PREFIX}.
+     */
+    static boolean isWebFrameworkLibrary(@Nullable String rootName) {
+        if (rootName == null) return false;
+        return rootName.toLowerCase(Locale.ROOT).startsWith(SPRING_WEB_LIBRARY_PREFIX);
+    }
+
+    /**
+     * Last-resort web detection for a not-yet-imported project, kept during a
+     * deprecation window while the structural signals above become the norm. Reads
+     * the raw build-file text and matches the known war / Spring-web markers.
+     *
+     * <p>Scans both the {@code pom.xml} and the Gradle build script on every content
+     * root (and the project base dir, for single-module layouts whose module root
+     * differs). It does <em>not</em> route by the resolved external-system id: the
+     * scans are already self-selecting (each only fires when its build file is
+     * present), and gating by owner could hide a module whose only web signal lives
+     * in the other tool's file — a worse outcome than the rare cross-tool
+     * false positive gating would suppress. This mirrors the pre-rewrite behaviour
+     * exactly, so the fallback never loses a verdict the old code produced.
+     */
+    private static boolean hasWebBuildFileTextFallback(@NotNull Module module) {
+        for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
             if (checkMavenWebConfig(root) || checkGradleWebConfig(root)) {
                 return true;
             }
         }
 
-        // Also check the project base dir (for single-module projects where the module root differs)
         VirtualFile baseDir = ProjectUtil.guessProjectDir(module.getProject());
         if (baseDir != null) {
             if (checkMavenWebConfig(baseDir) || checkGradleWebConfig(baseDir)) {

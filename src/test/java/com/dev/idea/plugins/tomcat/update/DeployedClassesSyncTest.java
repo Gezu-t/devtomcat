@@ -509,4 +509,43 @@ class DeployedClassesSyncTest {
                             + "JAR version differs from the classpath module");
         }
     }
+
+    @Nested
+    @DisplayName("gradleArtifactNameFromLinkedId")
+    class GradleArtifactNameFromLinkedId {
+
+        @Test
+        @DisplayName("subproject path → leaf subproject name")
+        void subprojectLeaf() {
+            assertEquals("sub", DeployedClassesSync.gradleArtifactNameFromLinkedId(":app:sub"));
+            assertEquals("lib", DeployedClassesSync.gradleArtifactNameFromLinkedId(":lib"));
+        }
+
+        @Test
+        @DisplayName("trailing source-set segment is dropped (the real Gradle multi-module fix)")
+        void dropsSourceSetSegment() {
+            assertEquals("sub", DeployedClassesSync.gradleArtifactNameFromLinkedId(":app:sub:main"));
+            assertEquals("sub", DeployedClassesSync.gradleArtifactNameFromLinkedId(":app:sub:test"));
+        }
+
+        @Test
+        @DisplayName("filesystem-style path → leaf directory name")
+        void filesystemPathLeaf() {
+            assertEquals("sub", DeployedClassesSync.gradleArtifactNameFromLinkedId("/work/app/sub"));
+        }
+
+        @Test
+        @DisplayName("blank or null → null (caller falls back to the module-name stem)")
+        void blankIsNull() {
+            assertNull(DeployedClassesSync.gradleArtifactNameFromLinkedId(null));
+            assertNull(DeployedClassesSync.gradleArtifactNameFromLinkedId(""));
+            assertNull(DeployedClassesSync.gradleArtifactNameFromLinkedId("   "));
+        }
+
+        @Test
+        @DisplayName("root project (no path separators) is returned as-is")
+        void rootProject() {
+            assertEquals("my-app", DeployedClassesSync.gradleArtifactNameFromLinkedId("my-app"));
+        }
+    }
 }

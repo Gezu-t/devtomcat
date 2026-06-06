@@ -4,7 +4,7 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
-import com.dev.idea.plugins.tomcat.utils.MavenReflection;
+import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
@@ -15,6 +15,7 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -277,8 +278,16 @@ public final class WebResourcesSync {
         for (VirtualFile root : TomcatModuleUtils.findWebRoots(module)) {
             ordered.add(Path.of(root.getPath()));
         }
+        // 2b. maven-war-plugin <warSourceDirectory> — the build's authoritative
+        //     webapp source dir, read from the resolved Maven model. Covers a
+        //     custom warSourceDirectory the convention scan above (which looks
+        //     for the default src/main/webapp and friends) would otherwise miss.
+        Path warSourceDir = findMavenWarSourceDir(module);
+        if (warSourceDir != null) {
+            ordered.add(warSourceDir);
+        }
         // 3. Maven <webResources> extras (additive overlay; filtered skipped).
-        ordered.addAll(findMavenExtraWebResources(module, project));
+        ordered.addAll(findMavenExtraWebResources(module));
         // 4. Unconventional fallback ONLY if steps 1-3 found nothing — avoids
         //    scanning the project filesystem (slower) when a cheaper signal
         //    already gave us the answer, and prevents the scan from
@@ -297,65 +306,86 @@ public final class WebResourcesSync {
      * {@code <directory>} as an absolute {@link Path}. Skips entries with
      * {@code <filtering>true</filtering>} (see {@link #findWebappSourceRoots}).
      *
-     * <p>Reflective access so the plugin still loads on Community Edition
-     * and Gradle-only projects where {@code MavenProjectsManager} is
-     * absent — degrades to empty list.
+     * <p>The configuration is read through {@link MavenModelProvider} (typed,
+     * optional Maven dependency); it is absent on Community / Gradle-only IDEs,
+     * where this degrades to an empty list.
      */
-    // --- maven-war-plugin <webResources> reflection ---
-    private static final String MAVEN_WAR_PLUGIN_GROUP_ID = "org.apache.maven.plugins";
-    private static final String MAVEN_WAR_PLUGIN_ARTIFACT_ID = "maven-war-plugin";
     private static final String WAR_PLUGIN_WEB_RESOURCES_ELEMENT = "webResources";
     private static final String WAR_PLUGIN_RESOURCE_ELEMENT = "resource";
     private static final String WAR_PLUGIN_DIRECTORY_ELEMENT = "directory";
     private static final String WAR_PLUGIN_FILTERING_ELEMENT = "filtering";
+    private static final String WAR_PLUGIN_WAR_SOURCE_DIRECTORY_ELEMENT = "warSourceDirectory";
 
     @NotNull
-    private static List<Path> findMavenExtraWebResources(@NotNull Module module,
-                                                         @NotNull Project project) {
-        Object mavenProject = MavenReflection.findMavenProject(module, project);
-        if (mavenProject == null) return Collections.emptyList();
-        try {
-            // MavenProject.findPlugin(groupId, artifactId) → MavenPlugin
-            Object warPlugin = mavenProject.getClass()
-                    .getMethod("findPlugin", String.class, String.class)
-                    .invoke(mavenProject, MAVEN_WAR_PLUGIN_GROUP_ID, MAVEN_WAR_PLUGIN_ARTIFACT_ID);
-            if (warPlugin == null) return Collections.emptyList();
+    private static List<Path> findMavenExtraWebResources(@NotNull Module module) {
+        Element config = mavenWarPluginConfig(module);
+        if (config == null) return Collections.emptyList();
+        Element webResources = config.getChild(WAR_PLUGIN_WEB_RESOURCES_ELEMENT);
+        if (webResources == null) return Collections.emptyList();
 
-            // MavenPlugin.getConfigurationElement() → org.jdom.Element (or null)
-            Object configObj = warPlugin.getClass().getMethod("getConfigurationElement").invoke(warPlugin);
-            if (!(configObj instanceof Element config)) return Collections.emptyList();
-
-            Element webResources = config.getChild(WAR_PLUGIN_WEB_RESOURCES_ELEMENT);
-            if (webResources == null) return Collections.emptyList();
-
-            // Module root for resolving any relative <directory> values.
-            VirtualFile[] roots = ModuleRootManager.getInstance(module).getContentRoots();
-            Path moduleRoot = roots.length > 0 ? Path.of(roots[0].getPath()) : null;
-
-            List<Path> dirs = new ArrayList<>();
-            for (Element resource : webResources.getChildren(WAR_PLUGIN_RESOURCE_ELEMENT)) {
-                String filtering = resource.getChildText(WAR_PLUGIN_FILTERING_ELEMENT);
-                if ("true".equalsIgnoreCase(filtering)) {
-                    // Maven would token-substitute these. We can't safely mirror
-                    // raw templates over filtered deployed copies — skip.
-                    continue;
-                }
-                String dir = resource.getChildText(WAR_PLUGIN_DIRECTORY_ELEMENT);
-                if (dir == null || dir.isBlank()) continue;
-                Path resolved = Path.of(dir);
-                if (!resolved.isAbsolute() && moduleRoot != null) {
-                    resolved = moduleRoot.resolve(dir);
-                }
-                if (Files.isDirectory(resolved)) {
-                    dirs.add(resolved);
-                }
+        Path moduleRoot = moduleContentRoot(module);
+        List<Path> dirs = new ArrayList<>();
+        for (Element resource : webResources.getChildren(WAR_PLUGIN_RESOURCE_ELEMENT)) {
+            String filtering = resource.getChildText(WAR_PLUGIN_FILTERING_ELEMENT);
+            if ("true".equalsIgnoreCase(filtering)) {
+                // Maven would token-substitute these. We can't safely mirror
+                // raw templates over filtered deployed copies — skip.
+                continue;
             }
-            return dirs;
-        } catch (NoClassDefFoundError | Exception e) {
-            // Maven plugin not present (Community-edition / Gradle-only project),
-            // war-plugin not declared, or unexpected model shape — no extras.
-            return Collections.emptyList();
+            Path resolved = resolveAgainstModule(
+                    resource.getChildText(WAR_PLUGIN_DIRECTORY_ELEMENT), moduleRoot);
+            if (resolved != null && Files.isDirectory(resolved)) {
+                dirs.add(resolved);
+            }
         }
+        return dirs;
+    }
+
+    /**
+     * Reads the maven-war-plugin's {@code <warSourceDirectory>} — the build's
+     * authoritative webapp source directory, which overrides the default
+     * {@code src/main/webapp} the convention scan looks for. Returns {@code null}
+     * when the Maven model is unavailable, the element is absent, or the
+     * directory doesn't exist (the convention / fallback sources then apply).
+     * Same degrade-to-absent contract as {@link #findMavenExtraWebResources}.
+     */
+    @Nullable
+    private static Path findMavenWarSourceDir(@NotNull Module module) {
+        Element config = mavenWarPluginConfig(module);
+        if (config == null) return null;
+        Path resolved = resolveAgainstModule(
+                config.getChildText(WAR_PLUGIN_WAR_SOURCE_DIRECTORY_ELEMENT), moduleContentRoot(module));
+        return resolved != null && Files.isDirectory(resolved) ? resolved : null;
+    }
+
+    /**
+     * The maven-war-plugin's resolved {@code <configuration>} element via the
+     * typed {@link MavenModelProvider}, or {@code null} when the Maven plugin is
+     * absent (Community / Gradle-only IDE) or the war plugin isn't declared.
+     * Shared by the {@code <webResources>} and {@code <warSourceDirectory>} readers.
+     */
+    @Nullable
+    private static Element mavenWarPluginConfig(@NotNull Module module) {
+        return MavenModelProvider.warPluginConfiguration(module);
+    }
+
+    @Nullable
+    private static Path moduleContentRoot(@NotNull Module module) {
+        VirtualFile[] roots = ModuleRootManager.getInstance(module).getContentRoots();
+        return roots.length > 0 ? Path.of(roots[0].getPath()) : null;
+    }
+
+    /**
+     * Resolves a possibly-relative config {@code dir} against {@code moduleRoot};
+     * returns {@code null} when {@code dir} is blank or relative with no module
+     * root. Existence is checked by the caller.
+     */
+    @Nullable
+    private static Path resolveAgainstModule(@Nullable String dir, @Nullable Path moduleRoot) {
+        if (dir == null || dir.isBlank()) return null;
+        Path resolved = Path.of(dir);
+        if (resolved.isAbsolute()) return resolved;
+        return moduleRoot != null ? moduleRoot.resolve(dir) : null;
     }
 
     /**

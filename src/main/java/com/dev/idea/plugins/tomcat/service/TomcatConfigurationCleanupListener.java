@@ -129,6 +129,14 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
         // Clear startup time tracking data for the removed configuration
         StartupTimeTracker.getInstance(project).clearHistory(configName);
 
+        // Release any ports this config still holds in the app-level registry —
+        // symmetric with the rename migration above. Without it, a config whose
+        // registry key has diverged from the running handler's launch-time name
+        // (e.g. renamed, then deleted while still running) leaks its ports until
+        // the IDE restarts. Idempotent: a no-op when the name owns nothing.
+        com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
+                .releaseAllFor(configName);
+
         // Force the Services tool window to refresh so the stale node disappears
         if (!project.isDisposed()) {
             RunDashboardManager.getInstance(project).updateDashboard(true);

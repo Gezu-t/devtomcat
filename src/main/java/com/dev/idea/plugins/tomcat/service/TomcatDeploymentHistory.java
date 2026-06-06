@@ -66,6 +66,23 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
             this.timestampEpochMs = Instant.now().toEpochMilli();
         }
 
+        /** Deep copy used by {@link #getState()} to hand the serializer a private snapshot. */
+        @NotNull
+        HistoryEntry copy() {
+            HistoryEntry c = new HistoryEntry();
+            c.configName = configName;
+            c.timestampEpochMs = timestampEpochMs;
+            c.durationMs = durationMs;
+            c.startupTimeMs = startupTimeMs;
+            c.artifactNames = new ArrayList<>(artifactNames);
+            c.artifactFailure = artifactFailure;
+            c.success = success;
+            c.exitCode = exitCode;
+            c.errorCount = errorCount;
+            c.warningCount = warningCount;
+            return c;
+        }
+
         @NotNull
         public String getFormattedTimestamp() {
             return java.time.LocalDateTime.ofInstant(
@@ -102,7 +119,17 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
     @Override
     public @Nullable HistoryState getState() {
         synchronized (lock) {
-            return state;
+            // Defensive deep copy. The platform serializes the returned object on a
+            // separate save thread, OUTSIDE this lock, while recordCompleted() mutates
+            // state.entries from the process output-reader thread. Returning the live
+            // state would let that save race a deployment finishing —
+            // ConcurrentModificationException or a torn snapshot. Mirrors
+            // StartupTimeTracker.getState().
+            HistoryState copy = new HistoryState();
+            for (HistoryEntry e : state.entries) {
+                copy.entries.add(e.copy());
+            }
+            return copy;
         }
     }
 

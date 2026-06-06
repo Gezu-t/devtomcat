@@ -11,7 +11,6 @@ import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.debugger.impl.DebuggerSession;
-import com.intellij.openapi.compiler.CompileScope;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.Executor;

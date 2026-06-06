@@ -132,6 +132,66 @@ class LocalDeploymentStrategyTest {
         }
 
         @Test
+        @DisplayName("lib-key match catches a container jar the static prefix list misses")
+        void libKeyMatchCatchesNonPrefixedContainerJar() {
+            // A container core jar that matches no static prefix (renamed / fork).
+            java.util.Set<String> libKeys = java.util.Set.of("coyote", "myfork-core");
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("coyote-9.0.0.jar", libKeys));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("myfork-core-1.2.jar", libKeys));
+            // Without the authoritative lib set, the prefix-only fallback does NOT
+            // flag it — this is exactly the coverage the lib scan adds.
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("coyote-9.0.0.jar", java.util.Set.of()));
+        }
+
+        @Test
+        @DisplayName("union still flags spec-API jars by prefix when the lib-key set can't match them")
+        void unionKeepsPrefixCoverageForSpecApis() {
+            // Tomcat ships servlet-api.jar (key 'servlet-api') while the webapp
+            // pulls jakarta.servlet-api (key 'jakarta.servlet-api') — the keys
+            // differ, so the prefix arm of the union must still catch it.
+            java.util.Set<String> libKeys = java.util.Set.of("servlet-api", "jsp-api");
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    "jakarta.servlet-api-6.1.0.jar", libKeys));
+        }
+
+        @Test
+        @DisplayName("union does not flag application libraries or JSTL")
+        void unionAllowsAppLibraries() {
+            java.util.Set<String> libKeys = java.util.Set.of("catalina", "tomcat-coyote");
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar", libKeys));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    "jakarta.servlet.jsp.jstl-3.0.1.jar", libKeys));
+        }
+
+        @Test
+        @DisplayName("resolveContainerLibKeys reads the Tomcat lib/ and bin/ jars by artifact key")
+        void resolveContainerLibKeysScansTomcatHome(@TempDir Path home) throws IOException {
+            Files.createDirectories(home.resolve("lib"));
+            Files.createDirectories(home.resolve("bin"));
+            makeJar(home.resolve("lib").resolve("catalina.jar"), "org/apache/catalina/X.class");
+            makeJar(home.resolve("lib").resolve("coyote-renamed-9.0.0.jar"), "org/apache/coyote/Y.class");
+            makeJar(home.resolve("bin").resolve("tomcat-juli.jar"), "org/apache/juli/Z.class");
+
+            java.util.Set<String> keys = LocalDeploymentStrategy.resolveContainerLibKeys(
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo("T", "10.1.0", home.toString()));
+
+            assertTrue(keys.contains("catalina"));
+            assertTrue(keys.contains("coyote-renamed"));
+            assertTrue(keys.contains("tomcat-juli"), "bin/ jars are container-provided too");
+            // A webapp jar whose key is in this set is now container-provided even
+            // though "coyote-renamed" matches no static prefix.
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("coyote-renamed-9.0.0.jar", keys));
+        }
+
+        @Test
+        @DisplayName("resolveContainerLibKeys is empty when the Tomcat home is unknown")
+        void resolveContainerLibKeysEmptyWhenNoHome() {
+            assertTrue(LocalDeploymentStrategy.resolveContainerLibKeys(null).isEmpty());
+            assertTrue(LocalDeploymentStrategy.resolveContainerLibKeys(
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo("T", "10", "")).isEmpty());
+        }
+
+        @Test
         @DisplayName("does not flag regular application libraries")
         void allowsApplicationLibraries() {
             assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar"));
@@ -269,12 +329,11 @@ class LocalDeploymentStrategyTest {
     // -------------------------------------------------------------------------
     // Module name derivation (compound-name stripping)
     // Pins the string convention used by
-    // DeployedClassesSync#collectDependencyArtifactNames when the Maven plugin
-    // is absent and the artifact name falls back to the IntelliJ module name
-    // (MavenReflection.getArtifactId returns null). That stem is what a
-    // dependency root is matched against in the deployed WEB-INF/lib/.
-    // Graceful degradation of the Maven lookup itself is covered by
-    // MavenReflectionTest.
+    // DeployedClassesSync#collectDependencyArtifactNames when neither the Maven
+    // model nor a Gradle external-system id is available and the artifact name
+    // falls back to the IntelliJ module name. That stem is what a dependency root
+    // is matched against in the deployed WEB-INF/lib/. Graceful degradation of the
+    // Maven lookup itself is covered by MavenModelProviderTest.
     // -------------------------------------------------------------------------
 
     @Nested

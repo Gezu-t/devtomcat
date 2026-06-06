@@ -13,7 +13,9 @@ import com.intellij.execution.application.ApplicationConfigurationType;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -350,81 +352,44 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     }
 
     private boolean isSpringBootModule(@NotNull Module module) {
-        VirtualFile[] sourceRoots = ModuleRootManager.getInstance(module).getSourceRoots();
-
-        for (VirtualFile sourceRoot : sourceRoots) {
-            VirtualFile javaDir = sourceRoot.findFileByRelativePath("main/java");
-            if (javaDir != null && hasSpringBootIndicators(javaDir)) {
+        // Authoritative + build-agnostic: a spring-boot artifact on the module's
+        // runtime classpath. Immune to class-naming conventions and avoids the
+        // old depth-5 EDT recursion over main/java hunting for "*Application.java"
+        // filenames (which also false-matched any unrelated *Application class).
+        for (VirtualFile root : OrderEnumerator.orderEntries(module)
+                .runtimeOnly().recursively().classes().getRoots()) {
+            if (root.getName().startsWith("spring-boot")) {
                 return true;
             }
-
+        }
+        // Structural fallback for a not-yet-imported project with no resolved
+        // classpath: the conventional Spring Boot config files.
+        for (VirtualFile sourceRoot : ModuleRootManager.getInstance(module).getSourceRoots()) {
             VirtualFile resourcesDir = sourceRoot.findFileByRelativePath("main/resources");
             if (resourcesDir != null && hasSpringBootResources(resourcesDir)) {
                 return true;
             }
         }
-
         return false;
     }
 
+    // The owning build tool comes from the resolved external-system model, not
+    // from probing for a pom.xml / build.gradle file. This is build-agnostic
+    // (any external system), immune to the case-sensitive findFileByRelativePath
+    // fragility, and correctly attributes a module whose build file lives
+    // elsewhere. getExternalSystemId() returns "MAVEN" / "GRADLE" (uppercase;
+    // Maven is locale-folded) — so compare case-insensitively, never a literal.
     private boolean isMavenModule(@NotNull Module module) {
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-
-        for (VirtualFile contentRoot : contentRoots) {
-            VirtualFile pomXml = contentRoot.findFileByRelativePath(TomcatConstants.MAVEN_BUILD_FILE);
-            if (pomXml != null && pomXml.exists()) {
-                return true;
-            }
-        }
-
-        return false;
+        return isOwnedByExternalSystem(module, "MAVEN");
     }
 
     private boolean isGradleModule(@NotNull Module module) {
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-
-        for (VirtualFile contentRoot : contentRoots) {
-            VirtualFile buildGradle = contentRoot.findFileByRelativePath(TomcatConstants.GRADLE_BUILD_FILE_GROOVY);
-            VirtualFile buildGradleKts = contentRoot.findFileByRelativePath(TomcatConstants.GRADLE_BUILD_FILE_KOTLIN);
-
-            if ((buildGradle != null && buildGradle.exists()) ||
-                    (buildGradleKts != null && buildGradleKts.exists())) {
-                return true;
-            }
-        }
-
-        return false;
+        return isOwnedByExternalSystem(module, "GRADLE");
     }
 
-    /**
-     * Check for Spring Boot indicators in Java directory.
-     * Limits recursion depth to avoid scanning very deep source trees on the EDT.
-     */
-    private boolean hasSpringBootIndicators(@NotNull VirtualFile directory) {
-        return hasSpringBootIndicators(directory, 0);
-    }
-
-    private static final int MAX_SPRING_SCAN_DEPTH = 5;
-
-    private boolean hasSpringBootIndicators(@NotNull VirtualFile directory, int depth) {
-        if (depth > MAX_SPRING_SCAN_DEPTH) return false;
-        VirtualFile[] children = directory.getChildren();
-
-        for (VirtualFile child : children) {
-            if (child.isDirectory()) {
-                if (hasSpringBootIndicators(child, depth + 1)) {
-                    return true;
-                }
-            } else if (child.getName().endsWith(".java")) {
-                String fileName = child.getName();
-                if (fileName.contains("Application") ||
-                        fileName.contains("SpringBoot")) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    private static boolean isOwnedByExternalSystem(@NotNull Module module, @NotNull String systemId) {
+        String id = ExternalSystemModulePropertyManager.getInstance(module).getExternalSystemId();
+        return id != null && id.equalsIgnoreCase(systemId);
     }
 
     private boolean hasSpringBootResources(@NotNull VirtualFile resourcesDir) {

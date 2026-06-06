@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui.deployment;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
 import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.IntelliJArtifactSelectionDialog;
@@ -236,21 +237,8 @@ public class ArtifactSelectionHandler {
             return TomcatReadActions.compute(() -> {
                 Set<String> pomNames = new HashSet<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
-                    for (VirtualFile root :
-                            ModuleRootManager.getInstance(module).getContentRoots()) {
-                        VirtualFile pomFile = root.findChild(TomcatConstants.MAVEN_BUILD_FILE);
-                        if (pomFile != null && pomFile.exists()) {
-                            try {
-                                String content = VfsUtil.loadText(pomFile);
-                                if (content.contains(TomcatConstants.POM_PACKAGING_POM)) {
-                                    pomNames.add(module.getName().toLowerCase());
-                                    break;
-                                }
-                            } catch (IOException | RuntimeException e) {
-                                LOG.debug("Error reading pom.xml for module '" + module.getName() +
-                                        "' at " + pomFile.getPath(), e);
-                            }
-                        }
+                    if (isPomPackagedModule(module)) {
+                        pomNames.add(module.getName().toLowerCase());
                     }
                 }
                 return pomNames;
@@ -259,6 +247,38 @@ public class ArtifactSelectionHandler {
             LOG.debug("Error detecting POM modules", e);
             return new HashSet<>();
         }
+    }
+
+    /**
+     * Whether {@code module} is a Maven aggregator/parent (pom packaging) and so
+     * never itself deployable. Primary signal is the resolved effective Maven
+     * packaging (typed, build-agnostic, and sees packaging inherited from a parent
+     * POM or driven by a {@code ${property}} that a raw text scan misses); when the
+     * model resolves to any concrete packaging it is authoritative. Only for a
+     * project the IDE has not imported yet — where the resolved packaging is
+     * {@code null} — does it fall back to scanning the raw {@code pom.xml} text.
+     * ({@code "pom"} is the bare resolved value, distinct from the XML fragment
+     * {@link TomcatConstants#POM_PACKAGING_POM}.)
+     */
+    private boolean isPomPackagedModule(@NotNull Module module) {
+        String packaging = MavenModelProvider.packaging(module);
+        if (packaging != null) {
+            return "pom".equalsIgnoreCase(packaging);
+        }
+        for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
+            VirtualFile pomFile = root.findChild(TomcatConstants.MAVEN_BUILD_FILE);
+            if (pomFile != null && pomFile.exists()) {
+                try {
+                    if (VfsUtil.loadText(pomFile).contains(TomcatConstants.POM_PACKAGING_POM)) {
+                        return true;
+                    }
+                } catch (IOException | RuntimeException e) {
+                    LOG.debug("Error reading pom.xml for module '" + module.getName() +
+                            "' at " + pomFile.getPath(), e);
+                }
+            }
+        }
+        return false;
     }
 
     public void showExternalSourceDialog() {

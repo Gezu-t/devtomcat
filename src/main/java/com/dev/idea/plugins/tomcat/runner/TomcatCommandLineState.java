@@ -10,7 +10,6 @@ import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
-import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.GeneralCommandLine;
@@ -34,7 +33,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 

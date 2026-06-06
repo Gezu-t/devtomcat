@@ -8,9 +8,10 @@ import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
-import com.dev.idea.plugins.tomcat.utils.MavenReflection;
+import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleOrderEntry;
@@ -130,8 +131,8 @@ public final class DeployedClassesSync {
      *
      * <p>Reflection on purpose: {@code ModulePackagingElement} lives in
      * {@code com.intellij.packaging.impl.elements} — an {@code impl} package the
-     * plugin verifier flags. Same trick {@code MavenReflection} uses for the
-     * Maven plugin's APIs.
+     * plugin verifier flags — so it is reached reflectively rather than by a
+     * direct compile-time reference.
      */
     @Nullable
     private static final Class<?> MODULE_PACKAGING_ELEMENT_CLASS =
@@ -446,8 +447,7 @@ public final class DeployedClassesSync {
      * Reflection-based on purpose: {@code ModulePackagingElement} lives in
      * {@code com.intellij.packaging.impl.elements} — an {@code impl}
      * package that the plugin verifier may flag and that JetBrains does
-     * not guarantee binary compatibility for. Same trick {@code
-     * MavenReflection} uses for the Maven plugin's APIs.
+     * not guarantee binary compatibility for — hence reflective access.
      *
      * <p>{@code PackagingElement}-typed so tests can drive it with mocked
      * trees. Public so {@link com.dev.idea.plugins.tomcat.runner.LocalDeploymentStrategy}
@@ -665,7 +665,20 @@ public final class DeployedClassesSync {
             Module dep = moduleEntry.getModule();
             if (dep == null) continue;
 
-            String artifactName = MavenReflection.getArtifactId(dep, project);
+            // Build-agnostic dependency identity, in order of precision:
+            //   1. Maven artifactId — exact when the module is a Maven project.
+            //   2. External-system (Gradle) project name — the build's OWN name for
+            //      the module, which lines up with the JAR it packages far better
+            //      than the IntelliJ module name does. A Gradle subproject's module
+            //      is "app.sub.main", not "sub", so the old module-name-stem
+            //      fallback mis-keyed it and mirrored its resources full-content
+            //      even when they already shipped in sub.jar (duplicate classpath).
+            //   3. Module-name stem — final fallback for plain / JPS projects.
+            // All three are reduced to a version-independent key downstream.
+            String artifactName = MavenModelProvider.artifactId(dep);
+            if (artifactName == null) {
+                artifactName = externalSystemArtifactName(dep);
+            }
             if (artifactName == null) {
                 String moduleName = dep.getName();
                 int dot = moduleName.lastIndexOf('.');
@@ -683,6 +696,43 @@ public final class DeployedClassesSync {
 
             collectDependencyArtifactNames(project, dep, result, visited);
         }
+    }
+
+    /**
+     * Build-agnostic dependency name from the external-system model — gated to
+     * Gradle, where the linked project id is a {@code ':'}-separated project path
+     * whose leaf is the subproject (its archive baseName). Maven is intentionally
+     * excluded: its coordinate-shaped id would mis-leaf to the version, and its
+     * artifactId is read directly via {@link MavenModelProvider}. Returns
+     * {@code null} for any other / no build system so the caller falls back to
+     * the module-name stem. Uses only core platform API — no reflection.
+     */
+    @Nullable
+    private static String externalSystemArtifactName(@NotNull Module dep) {
+        ExternalSystemModulePropertyManager props = ExternalSystemModulePropertyManager.getInstance(dep);
+        String systemId = props.getExternalSystemId();
+        if (systemId == null || !systemId.equalsIgnoreCase("GRADLE")) return null;
+        return gradleArtifactNameFromLinkedId(props.getLinkedProjectId());
+    }
+
+    /**
+     * Extracts the subproject name from a Gradle linked-project id: the leaf
+     * segment of the {@code ':'}- (or {@code '/'}-) separated path, with a
+     * trailing source-set segment ({@code main}/{@code test}) dropped — so
+     * {@code :app:sub} and {@code :app:sub:main} both yield {@code "sub"}.
+     * Returns {@code null} when blank. Pure and package-visible for testing.
+     */
+    @Nullable
+    static String gradleArtifactNameFromLinkedId(@Nullable String linkedProjectId) {
+        if (linkedProjectId == null || linkedProjectId.isBlank()) return null;
+        String[] segments = linkedProjectId.split("[:/]");
+        int last = segments.length - 1;
+        while (last > 0 && segments[last].isBlank()) last--;
+        if (last > 0 && ("main".equals(segments[last]) || "test".equals(segments[last]))) {
+            last--;
+        }
+        String leaf = last >= 0 ? segments[last].trim() : "";
+        return leaf.isBlank() ? null : leaf;
     }
 
     /**

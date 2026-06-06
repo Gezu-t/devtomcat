@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.ColoredListCellRenderer;
@@ -16,8 +17,11 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Scans common system paths for JDK installations and lets the user
@@ -77,7 +81,30 @@ class AutoDetectJdkDialog extends DialogWrapper {
 
     private void scanForJdks() {
         detectedModel.clear();
+        // Canonical paths already added, so a JDK surfaced by both platform
+        // discovery and the curated fallback below appears only once.
+        Set<String> seen = new HashSet<>();
 
+        // 1. Authoritative: the platform's own OS-aware JDK discovery. JetBrains
+        //    maintains it and keeps it current (~/.jdks where the IDE downloads
+        //    JDKs, Homebrew, sdkman, the Windows registry, current vendor dirs),
+        //    so it finds installs the curated list below misses or names wrongly.
+        try {
+            // No-arg suggestHomePaths() on purpose: the suggestHomePaths(Project)
+            // overload only exists on 243+ and would throw NoSuchMethodError on our
+            // min platform (sinceBuild 242), where the no-arg is the only form and
+            // is not yet deprecated. The deprecation warning on 251+ is benign and
+            // unavoidable until the min platform is raised.
+            //noinspection deprecation
+            for (String home : JavaSdk.getInstance().suggestHomePaths()) {
+                addJdkCandidate(new File(home), seen);
+            }
+        } catch (Throwable ignored) {
+            // Discovery must never break the dialog — the curated scan still runs.
+        }
+
+        // 2. Fallback: curated well-known install roots, for setups platform
+        //    discovery misses. Kept as a union member, not the primary source.
         String[] commonPaths = {
                 "/usr/lib/jvm",
                 "/Library/Java/JavaVirtualMachines",
@@ -87,16 +114,12 @@ class AutoDetectJdkDialog extends DialogWrapper {
                 System.getProperty("user.home") + "/.sdkman/candidates/java"
         };
         for (String path : commonPaths) {
-            scanDirectory(path);
+            scanDirectory(path, seen);
         }
 
         String javaHome = System.getenv("JAVA_HOME");
         if (javaHome != null && !javaHome.isEmpty()) {
-            File javaHomeDir = new File(javaHome);
-            if (javaHomeDir.exists() && isValidJdk(javaHomeDir)) {
-                detectedModel.addElement(new JREConfigurationDialog.JdkInfo(
-                        "JAVA_HOME JDK", "From environment", javaHome, false));
-            }
+            addJdkCandidate(new File(javaHome), seen);
         }
 
         if (detectedModel.isEmpty()) {
@@ -105,18 +128,34 @@ class AutoDetectJdkDialog extends DialogWrapper {
         }
     }
 
-    private void scanDirectory(String parentPath) {
+    private void scanDirectory(String parentPath, @NotNull Set<String> seen) {
         File parentDir = new File(parentPath);
         if (!parentDir.exists() || !parentDir.isDirectory()) return;
         File[] children = parentDir.listFiles();
         if (children == null) return;
         for (File child : children) {
-            if (child.isDirectory() && isValidJdk(child)) {
-                String name = child.getName();
-                detectedModel.addElement(new JREConfigurationDialog.JdkInfo(
-                        name, extractVersion(name), child.getAbsolutePath(), false));
-            }
+            addJdkCandidate(child, seen);
         }
+    }
+
+    /**
+     * Adds {@code dir} as a detected JDK if it is a valid JDK home not already
+     * listed (deduped by canonical path). Shared by platform discovery, the
+     * curated directory scan, and the JAVA_HOME check so all three agree on
+     * validation and de-duplication.
+     */
+    private void addJdkCandidate(@NotNull File dir, @NotNull Set<String> seen) {
+        if (!dir.isDirectory() || !isValidJdk(dir)) return;
+        String canonical;
+        try {
+            canonical = dir.getCanonicalPath();
+        } catch (IOException e) {
+            canonical = dir.getAbsolutePath();
+        }
+        if (!seen.add(canonical)) return;
+        String name = dir.getName();
+        detectedModel.addElement(new JREConfigurationDialog.JdkInfo(
+                name, extractVersion(name), dir.getAbsolutePath(), false));
     }
 
     private static boolean isValidJdk(File dir) {

@@ -53,6 +53,10 @@ final class LaunchPortClaimer {
 
     private static final Logger LOG = Logger.getInstance(LaunchPortClaimer.class);
 
+    /** Seed-port settle poll: brief, bounded wait for a just-stopped JVM's socket to free. */
+    private static final int SEED_SETTLE_ATTEMPTS = 3;
+    private static final long SEED_SETTLE_INTERVAL_MS = 150L;
+
     /** Result of a {@link #claim()} call. */
     record Resolution(@NotNull PortConfig ports, int debugPort) {
         /** Returns {@code true} if a debug port was claimed (debug mode). */
@@ -86,6 +90,18 @@ final class LaunchPortClaimer {
         String configName = configuration.getName();
         TomcatPortRegistry registry = TomcatPortRegistry.getInstance();
         PortConfig originalPorts = configuration.getConfigData().getPortConfig();
+
+        // Single-instance only: drop any stale registry reservations left by THIS
+        // config's prior (stopped / stopping) launch before we re-claim. The old
+        // handler's processTerminated releases them too, but that can lag a fast
+        // Stop→Run — and without this the new launch sees its own old reservation,
+        // bumps the port, and the writeback persists the bump (the "port keeps
+        // increasing" symptom). Safe because a single-instance config never has two
+        // live instances at once. In parallel-run mode siblings legitimately hold
+        // same-config ports, so we must NOT release there.
+        if (!configuration.isParallelRunEffective()) {
+            registry.releaseAllFor(configName);
+        }
 
         // Carryover path: a prior process (stopped by stopAndRelaunch) handed
         // its resolved ports down via ExecutionEnvironment user data. Re-use
@@ -139,8 +155,12 @@ final class LaunchPortClaimer {
         DebugConfig debugConfig = configuration.getConfigData().getDebugConfig();
         int seedDebugPort = debugConfig != null ? debugConfig.getPort() : DebugConfig.DEFAULT_DEBUG_PORT;
 
+        // Seed from preferred intent (see claimForRun) and let a just-stopped JVM
+        // settle so a fast Stop→Run reclaims the same ports instead of bumping.
+        PortConfig seed = seedFromPreferred(originalPorts);
+        awaitSeedPortsSettle(seed);
         PortConflictDetector.DebugPortResolution resolution =
-                PortConflictDetector.resolveConflictsWithDebug(originalPorts, seedDebugPort);
+                PortConflictDetector.resolveConflictsWithDebug(seed, seedDebugPort);
 
         PortConfig rp = resolution.getResolvedConfig();
         claimAndTrack(rp, registry, configName, resolution.getChanges());
@@ -158,9 +178,10 @@ final class LaunchPortClaimer {
 
         logResolutionChanges(resolution.getChanges());
         // Strategy gate AFTER claimAndTrack and after the JDWP claim so a
-        // registry-mediated bump on HTTP/shutdown is caught. Debug-port bumps
-        // are accepted under STRICT (the user's "preferred" intent is HTTP/shutdown).
-        enforcePortStrategy(originalPorts, rp);
+        // registry-mediated bump on HTTP/shutdown is caught. Compare against the
+        // preferred seed (intent) so a heal back toward preferred isn't a "bump".
+        // Debug-port bumps are accepted under STRICT (intent is HTTP/shutdown).
+        enforcePortStrategy(seed, rp);
         writeBackResolvedPorts(configuration, rp);
         writeBackResolvedDebugPort(configuration, resolvedDebugPort);
         return new Resolution(rp, resolvedDebugPort);
@@ -171,17 +192,72 @@ final class LaunchPortClaimer {
                                    @NotNull String configName,
                                    @NotNull PortConfig originalPorts) {
         logActiveStrategy(originalPorts);
+        // Seed from the user's PREFERRED ports (intent), NOT the possibly-bumped
+        // current values. Otherwise an earlier auto-bump that writeback persisted
+        // (8080→8081) would seed the next launch from 8081 and climb again every
+        // launch; seeding from preferred lets the port heal back to 8080 once the
+        // conflict clears.
+        PortConfig seed = seedFromPreferred(originalPorts);
+        // Give this config's just-stopped JVM a brief moment to release its socket
+        // so a fast Stop→Run reclaims the same port instead of bumping it once.
+        awaitSeedPortsSettle(seed);
         PortConflictDetector.PortResolution resolution =
-                PortConflictDetector.resolveConflicts(originalPorts);
+                PortConflictDetector.resolveConflicts(seed);
 
         PortConfig rp = resolution.getResolvedConfig();
         claimAndTrack(rp, registry, configName, resolution.getChanges());
         logResolutionChanges(resolution.getChanges());
-        // Strategy gate AFTER claimAndTrack so a registry-mediated bump
-        // (another DevTomcat config holding the port in-process) is caught.
-        enforcePortStrategy(originalPorts, rp);
+        // Strategy gate AFTER claimAndTrack so a registry-mediated bump is caught.
+        // Compare against the preferred seed (intent): a heal back toward preferred
+        // is not a "bump", but a genuine move off the preferred port still is.
+        enforcePortStrategy(seed, rp);
         writeBackResolvedPorts(configuration, rp);
         return new Resolution(rp, -1);
+    }
+
+    /**
+     * Builds the resolution seed from the user's PREFERRED ports (their intent),
+     * not the possibly-bumped current values. {@link PortConfig} snapshots intent
+     * into {@code preferredHttp}/{@code preferredShutdown} the first time
+     * {@code setHttpResolved}/{@code setShutdownResolved} bumps a port, and
+     * {@code getPreferredHttp()}/{@code getPreferredShutdown()} fall back to the
+     * current value when there is no snapshot. Seeding from these lets a port that
+     * was bumped on a transient conflict heal back down once the conflict clears,
+     * instead of ratcheting upward on every launch.
+     */
+    @NotNull
+    static PortConfig seedFromPreferred(@NotNull PortConfig current) {
+        PortConfig seed = current.clone();
+        seed.setHttp(current.getPreferredHttp());
+        seed.setShutdown(current.getPreferredShutdown());
+        return seed;
+    }
+
+    /**
+     * Briefly waits for the primary seed ports (HTTP + shutdown) to become
+     * bindable before conflict detection runs, covering the Stop→fast-Run race
+     * where this config's just-stopped JVM hasn't fully released its listen socket
+     * yet. Without the wait, detection would see the port busy and bump it once
+     * (it would heal on the next launch via {@link #seedFromPreferred}, but the
+     * user would still see a transient port jump). Bounded
+     * ({@value #SEED_SETTLE_ATTEMPTS}×{@value #SEED_SETTLE_INTERVAL_MS}ms), pays
+     * only when a seed port actually probes busy, and never blocks the EDT.
+     */
+    private void awaitSeedPortsSettle(@NotNull PortConfig seed) {
+        // Never sleep on the EDT — the launch path is off-EDT, but guard anyway.
+        if (ApplicationManager.getApplication().isDispatchThread()) return;
+        for (int attempt = 0; attempt < SEED_SETTLE_ATTEMPTS; attempt++) {
+            if (PortConflictDetector.isPortAvailable(seed.getHttp())
+                    && PortConflictDetector.isPortAvailable(seed.getShutdown())) {
+                return;
+            }
+            try {
+                Thread.sleep(SEED_SETTLE_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private void logActiveStrategy(@NotNull PortConfig seed) {

@@ -15,8 +15,9 @@ import org.jetbrains.annotations.Nullable;
  * from {@code getServiceDescriptor(...)}). Keeping the data and the descriptor
  * apart lets the platform diff the tree on its own equality contract; that's
  * why this class implements {@link #equals(Object)} and {@link #hashCode()}
- * solely from the artifact identity + configuration name (state can change
- * underneath but the row stays the same row).
+ * from the configuration name plus the artifact's stable identity (display
+ * name, context path, type) — never its mutable state, so the row stays the
+ * same row while host/port/status change underneath.
  *
  * <p>The browser URL fields ({@code host}, {@code https}, {@code port}) are
  * captured at construction time from the live or configured endpoint of the
@@ -57,14 +58,20 @@ public final class TomcatArtifactItem {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof TomcatArtifactItem that)) return false;
-        // Identity = (configuration, artifact display name). State, host, port can
-        // change underneath but the row in the tree is the same row.
+        // Identity = (configuration, artifact display name, context path, type) —
+        // the artifact's stable identity, NOT its mutable state (host/port/state can
+        // change underneath while the row stays the same row). Context path + type
+        // are included so two same-named artifacts deployed at different contexts
+        // don't collapse into a single tree node.
         return configurationName.equals(that.configurationName)
-                && artifact.getDisplayName().equals(that.artifact.getDisplayName());
+                && artifact.getDisplayName().equals(that.artifact.getDisplayName())
+                && java.util.Objects.equals(artifact.getContextPath(), that.artifact.getContextPath())
+                && java.util.Objects.equals(artifact.getType(), that.artifact.getType());
     }
 
     @Override
     public int hashCode() {
-        return 31 * configurationName.hashCode() + artifact.getDisplayName().hashCode();
+        return java.util.Objects.hash(configurationName, artifact.getDisplayName(),
+                artifact.getContextPath(), artifact.getType());
     }
 }
