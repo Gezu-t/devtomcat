@@ -217,14 +217,24 @@ public final class TomcatModuleUtils {
      * file-type-agnostic: any file under a web root counts, whatever its extension
      * or the hosting directory's name — so it adapts to custom project layouts
      * instead of matching a fixed list of names/extensions.
+     *
+     * <p>Sources are evaluated cheapest-first and short-circuit: the recursive
+     * {@code WEB-INF} scan ({@link #findUnconventionalWebRoots}) runs only when the
+     * cheap conventional and facet lookups did not already match, so a hit on the
+     * common conventional layout costs no filesystem walk. Must be called under a
+     * read action (it reads the module model and the VFS).
      */
     public static boolean isUnderWebRoot(@NotNull VirtualFile file, @NotNull Module module) {
-        for (List<VirtualFile> roots : List.of(
-                findWebRoots(module), findWebFacetRoots(module), findUnconventionalWebRoots(module))) {
-            for (VirtualFile root : roots) {
-                if (VfsUtilCore.isAncestor(root, file, false)) {
-                    return true;
-                }
+        return containsAsAncestor(findWebRoots(module), file)
+                || containsAsAncestor(findWebFacetRoots(module), file)
+                || containsAsAncestor(findUnconventionalWebRoots(module), file);
+    }
+
+    private static boolean containsAsAncestor(@NotNull List<VirtualFile> roots, @NotNull VirtualFile file) {
+        for (VirtualFile root : roots) {
+            // strict=false: a file that IS the web-root node also counts as web context.
+            if (VfsUtilCore.isAncestor(root, file, false)) {
+                return true;
             }
         }
         return false;

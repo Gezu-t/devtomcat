@@ -17,6 +17,7 @@ import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -150,13 +151,15 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
         List<VirtualFile> webRoots = new ArrayList<>();
 
-        // Structure-agnostic first: conventional roots, then the user's explicitly
-        // configured Web Facet roots, then any directory that holds WEB-INF whatever
-        // its name — so a custom layout is discovered without a fixed name list.
-        webRoots.addAll(TomcatModuleUtils.findWebRoots(module));
+        // Structure-agnostic discovery, in the same authority order the deployment
+        // pipeline (WebResourcesSync) uses so the auto-created docBase matches where
+        // resources are mirrored: the user's explicitly configured Web Facet roots
+        // first, then conventional roots, then any directory that holds WEB-INF
+        // whatever its name — so a custom layout is discovered without a fixed list.
+        webRoots.addAll(TomcatModuleUtils.findWebFacetRoots(module));
 
         if (webRoots.isEmpty()) {
-            webRoots.addAll(TomcatModuleUtils.findWebFacetRoots(module));
+            webRoots.addAll(TomcatModuleUtils.findWebRoots(module));
         }
 
         if (webRoots.isEmpty()) {
@@ -271,17 +274,23 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
     /**
      * Whether {@code element}'s file is a web context — used only to rank DevTomcat
-     * as the preferred run configuration for a context. Structural first: any file
-     * that lives under a discovered web root (conventional, facet-configured, or any
-     * {@code WEB-INF} holder) is web context, whatever its extension and however the
-     * directory is named — so it adapts to custom layouts. As a secondary hint it
-     * accepts a known web view/descriptor file by extension or exact name.
+     * as the preferred run configuration for a context.
+     *
+     * <p>Cheap signals first: a known web view/descriptor file by exact name or
+     * extension ({@link Locale#ROOT}-folded {@code O(1)} set lookups), which also
+     * works for non-physical/light PsiFiles whose {@code getVirtualFile()} is null
+     * (scratch/injected files), where the file name is still available. Only if
+     * those miss does it fall back to the structural check — the file lives under a
+     * discovered web root (conventional, facet-configured, or any {@code WEB-INF}
+     * holder), whatever its extension and however the directory is named, so it
+     * adapts to custom layouts. The structural check runs last because it can walk
+     * the VFS, and is skipped for test sources (a test webapp must not make
+     * DevTomcat the preferred config), mirroring {@link #discoverWebRootsForContext}.
      *
      * <p>Deliberately does <em>not</em> substring-match the file name: the previous
      * {@code contains("servlet")}/{@code contains("controller")} fired on any file
      * whose name merely contained those words (e.g. {@code BaseControllerHelper},
-     * {@code ServletMockTest}). Extension/name comparison is {@link Locale#ROOT}-folded
-     * for consistency with the rest of the module-matching pipeline.
+     * {@code ServletMockTest}).
      */
     private boolean isWebModuleContext(@Nullable PsiElement element) {
         if (element == null) {
@@ -292,17 +301,22 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         if (containingFile == null) return false;
 
         VirtualFile file = containingFile.getVirtualFile();
+        // getName() is always available (even for light/scratch files where the
+        // VirtualFile is null); the structural branch below needs the VirtualFile.
+        String name = (file != null ? file.getName() : containingFile.getName()).toLowerCase(Locale.ROOT);
+        if (WEB_DESCRIPTOR_FILE_NAMES.contains(name)) {
+            return true;
+        }
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0 && WEB_CONTEXT_FILE_EXTENSIONS.contains(name.substring(dot + 1))) {
+            return true;
+        }
+
         if (file != null) {
             Module module = ModuleUtilCore.findModuleForPsiElement(element);
-            if (module != null && TomcatModuleUtils.isUnderWebRoot(file, module)) {
-                return true;
-            }
-            String name = file.getName().toLowerCase(Locale.ROOT);
-            if (WEB_DESCRIPTOR_FILE_NAMES.contains(name)) {
-                return true;
-            }
-            String extension = file.getExtension();
-            if (extension != null && WEB_CONTEXT_FILE_EXTENSIONS.contains(extension.toLowerCase(Locale.ROOT))) {
+            if (module != null
+                    && !ProjectFileIndex.getInstance(module.getProject()).isInTestSourceContent(file)
+                    && TomcatModuleUtils.isUnderWebRoot(file, module)) {
                 return true;
             }
         }

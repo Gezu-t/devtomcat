@@ -197,7 +197,7 @@ public final class DynamicTomcatEnvironment {
     @NotNull public static String getEnvironmentName()        { return getCurrentMode().getValue(); }
     @NotNull public static String getEnvironmentDisplayName() {
         String name = getCurrentMode().getValue();
-        return name.substring(0, 1).toUpperCase() + name.substring(1);
+        return name.substring(0, 1).toUpperCase(Locale.ROOT) + name.substring(1);
     }
 
     public static boolean isDevelopmentMode() { return getCurrentMode() == EnvironmentMode.DEVELOPMENT; }
