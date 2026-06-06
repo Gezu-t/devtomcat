@@ -8,6 +8,7 @@ import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
@@ -206,6 +207,27 @@ public final class TomcatModuleUtils {
         }
 
         return new ArrayList<>(webRoots);
+    }
+
+    /**
+     * Whether {@code file} lives inside any web root discovered for {@code module}
+     * — conventional ({@link #findWebRoots}), explicitly configured by the user
+     * ({@link #findWebFacetRoots}), or any directory that holds {@code WEB-INF}
+     * regardless of its name ({@link #findUnconventionalWebRoots}). Structure- and
+     * file-type-agnostic: any file under a web root counts, whatever its extension
+     * or the hosting directory's name — so it adapts to custom project layouts
+     * instead of matching a fixed list of names/extensions.
+     */
+    public static boolean isUnderWebRoot(@NotNull VirtualFile file, @NotNull Module module) {
+        for (List<VirtualFile> roots : List.of(
+                findWebRoots(module), findWebFacetRoots(module), findUnconventionalWebRoots(module))) {
+            for (VirtualFile root : roots) {
+                if (VfsUtilCore.isAncestor(root, file, false)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

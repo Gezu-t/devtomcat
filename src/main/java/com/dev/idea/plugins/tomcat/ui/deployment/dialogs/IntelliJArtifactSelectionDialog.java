@@ -7,6 +7,7 @@ import com.intellij.packaging.artifacts.Artifact;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
+import java.util.Locale;
 import com.intellij.openapi.diagnostic.Logger;
 import javax.swing.Icon;
 
@@ -41,14 +42,14 @@ public class IntelliJArtifactSelectionDialog extends ChooseElementsDialog<Artifa
 
     private static String resolveDisplayType(@NotNull Artifact item) {
         try {
-            String typeId = item.getArtifactType().getId().toLowerCase();
+            String typeId = item.getArtifactType().getId().toLowerCase(Locale.ROOT);
             if (typeId.contains("exploded")) return "exploded";
             if (typeId.contains("war")) return "war";
             if (typeId.contains("ear")) return "ear";
         } catch (Exception ignored) {}
 
         // Fallback: infer from artifact name (common in Community Edition)
-        String name = item.getName().toLowerCase();
+        String name = item.getName().toLowerCase(Locale.ROOT);
         if (name.contains("exploded")) return "exploded";
         if (name.endsWith(".war") || name.endsWith("_war") || name.endsWith(":war")) return "war";
 

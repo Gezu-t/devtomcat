@@ -19,11 +19,13 @@
 - Detect container-provided JARs from the Tomcat install, not just name patterns.
 - Detect war modules from the resolved Maven model.
 - Detect web and aggregator modules from the resolved model and classpath.
+- Web run-config discovery handles custom webapp layouts and facet roots.
 - Honor maven-war-plugin `warSourceDirectory` for resource sync.
 - Auto-Detect JDK seeds from the IDE's own JDK discovery.
 - Run-config build-tool labels use the resolved project model, not build-file probing.
 
 ### Fixed
+- Locale-safe artifact and module name matching.
 - No more EDT freeze during post-compile sync.
 - Faster class/resource sync.
 - Restart syncs deployments once, not twice.

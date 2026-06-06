@@ -11,6 +11,7 @@ import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
@@ -118,6 +119,33 @@ public class TomcatModuleUtilsWebDetectionPlatformTest extends BasePlatformTestC
 
         assertTrue("a war-packaged pom with no resolved model should be detected via the text fallback",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testIsUnderWebRootForConventionalWebapp() {
+        myFixture.addFileToProject("src/main/webapp/WEB-INF/web.xml", "<web-app/>");
+        VirtualFile jsp = myFixture.addFileToProject("src/main/webapp/index.jsp", "<html/>").getVirtualFile();
+
+        assertTrue("a file under src/main/webapp must be recognized as under a web root",
+                ReadAction.compute(() -> TomcatModuleUtils.isUnderWebRoot(jsp, getModule())));
+    }
+
+    public void testIsUnderWebRootForCustomNamedDirectory() {
+        // A webapp directory the convention lists do NOT name, identified purely by
+        // the WEB-INF it holds — the custom-layout case. Any file type under it
+        // counts (here a .html), regardless of the directory's name.
+        myFixture.addFileToProject("myCustomWebDir/WEB-INF/web.xml", "<web-app/>");
+        VirtualFile page = myFixture.addFileToProject("myCustomWebDir/page.html", "<html/>").getVirtualFile();
+
+        assertTrue("a file under a custom-named WEB-INF-holding directory must be recognized as under a web root",
+                ReadAction.compute(() -> TomcatModuleUtils.isUnderWebRoot(page, getModule())));
+    }
+
+    public void testFileOutsideAnyWebRootIsNotUnderWebRoot() {
+        VirtualFile src = myFixture.addFileToProject("src/main/java/com/example/App.java",
+                "package com.example; class App {}").getVirtualFile();
+
+        assertFalse("a plain source file outside any web root must not be considered under a web root",
+                ReadAction.compute(() -> TomcatModuleUtils.isUnderWebRoot(src, getModule())));
     }
 
     public void testPomPackagingPomIsNotWeb() {

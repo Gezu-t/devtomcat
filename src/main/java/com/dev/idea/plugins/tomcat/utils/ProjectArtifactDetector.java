@@ -188,7 +188,7 @@ public final class ProjectArtifactDetector {
 
             String typeId = type.getId();
             if (typeId != null) {
-                String lower = typeId.toLowerCase();
+                String lower = typeId.toLowerCase(Locale.ROOT);
                 if (lower.contains("war") || lower.contains("web-application")) {
                     return true;
                 }
@@ -196,7 +196,7 @@ public final class ProjectArtifactDetector {
 
             String typeName = type.getPresentableName();
             if (typeName != null) {
-                String lower = typeName.toLowerCase();
+                String lower = typeName.toLowerCase(Locale.ROOT);
                 if (lower.contains("web application") || lower.contains("war")) {
                     return true;
                 }
@@ -218,11 +218,11 @@ public final class ProjectArtifactDetector {
                                                   @NotNull Collection<String> existingNames) {
         Set<String> lowerNames = new HashSet<>();
         for (String name : existingNames) {
-            lowerNames.add(name.toLowerCase());
+            lowerNames.add(name.toLowerCase(Locale.ROOT));
         }
         List<Deployment> filtered = new ArrayList<>();
         for (Deployment candidate : candidates) {
-            if (!lowerNames.contains(candidate.getDisplayName().toLowerCase())) {
+            if (!lowerNames.contains(candidate.getDisplayName().toLowerCase(Locale.ROOT))) {
                 filtered.add(candidate);
             }
         }
@@ -238,7 +238,7 @@ public final class ProjectArtifactDetector {
         Set<String> names = new HashSet<>();
         try {
             for (Module module : ModuleManager.getInstance(project).getModules()) {
-                names.add(module.getName().toLowerCase());
+                names.add(module.getName().toLowerCase(Locale.ROOT));
             }
         } catch (Exception e) {
             LOG.debug("DevTomcat: Error getting active module names", e);
@@ -248,7 +248,7 @@ public final class ProjectArtifactDetector {
 
     private static boolean hasActiveSourceModule(@NotNull String artifactName,
                                                  @NotNull Set<String> activeModuleNames) {
-        String baseName = ContextPathUtils.extractBaseModuleName(artifactName).toLowerCase();
+        String baseName = ContextPathUtils.extractBaseModuleName(artifactName).toLowerCase(Locale.ROOT);
         return baseName.isEmpty() || activeModuleNames.contains(baseName);
     }
 
@@ -269,7 +269,7 @@ public final class ProjectArtifactDetector {
         if (entries == null) return;
 
         for (File entry : entries) {
-            if (entry.isFile() && entry.getName().toLowerCase().endsWith(".war")) {
+            if (entry.isFile() && entry.getName().toLowerCase(Locale.ROOT).endsWith(".war")) {
                 results.add(new ExternalFileDeployment(
                         Path.of(entry.getAbsolutePath()),
                         ContextPathUtils.generateContextPath(entry.getName()),
@@ -282,7 +282,7 @@ public final class ProjectArtifactDetector {
                             ContextPathUtils.generateContextPath(entry.getName()),
                             /* exploded */ true));
                 } else {
-                    File[] subWarFiles = entry.listFiles((d, name) -> name.toLowerCase().endsWith(".war"));
+                    File[] subWarFiles = entry.listFiles((d, name) -> name.toLowerCase(Locale.ROOT).endsWith(".war"));
                     if (subWarFiles != null) {
                         for (File war : subWarFiles) {
                             results.add(new ExternalFileDeployment(

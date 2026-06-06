@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.environment;
 
 import com.intellij.openapi.util.text.StringUtil;
+import java.util.Locale;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,7 +53,7 @@ public final class DynamicTomcatEnvironment {
         @NotNull
         public static EnvironmentMode fromString(@Nullable String mode) {
             if (StringUtil.isEmpty(mode)) return DEVELOPMENT;
-            String normalized = mode.toLowerCase().trim();
+            String normalized = mode.toLowerCase(Locale.ROOT).trim();
             if (normalized.contains("prod")) return PRODUCTION;
             if (normalized.contains("stag")) return STAGING;
             return DEVELOPMENT;

@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * One-click migration that flips a WAR-typed {@link DeploymentArtifact} to
@@ -269,7 +270,7 @@ public final class WarToExplodedQuickFix {
         Path filename = p.getFileName();
         if (filename == null) return null;
         String name = filename.toString();
-        if (!name.toLowerCase().endsWith(WAR_EXTENSION)) return null;
+        if (!name.toLowerCase(Locale.ROOT).endsWith(WAR_EXTENSION)) return null;
         String base = name.substring(0, name.length() - WAR_EXTENSION.length());
         if (base.isEmpty()) return null;
         Path parent = p.getParent();

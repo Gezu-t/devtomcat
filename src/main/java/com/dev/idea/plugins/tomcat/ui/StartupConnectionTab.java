@@ -592,7 +592,7 @@ public class StartupConnectionTab extends JBPanel<StartupConnectionTab> {
         d.setTitle("Select Script File");
         d.setDescription("Choose a startup or shutdown script file");
         d.withFileFilter(f -> {
-            String n = f.getName().toLowerCase();
+            String n = f.getName().toLowerCase(Locale.ROOT);
             return n.endsWith(".bat") || n.endsWith(".sh") || n.endsWith(".cmd");
         });
         return d;

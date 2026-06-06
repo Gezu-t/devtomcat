@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
@@ -222,7 +223,7 @@ public class ArtifactSelectionHandler {
 
     private static boolean isBuildOutputPath(String path) {
         if (path == null) return false;
-        String normalized = path.replace('\\', '/').toLowerCase();
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.ROOT);
         return normalized.contains("/out/artifacts/") ||
                 normalized.contains("/target/") ||
                 normalized.contains("/build/libs/");
@@ -238,7 +239,7 @@ public class ArtifactSelectionHandler {
                 Set<String> pomNames = new HashSet<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     if (isPomPackagedModule(module)) {
-                        pomNames.add(module.getName().toLowerCase());
+                        pomNames.add(module.getName().toLowerCase(Locale.ROOT));
                     }
                 }
                 return pomNames;
@@ -387,7 +388,7 @@ public class ArtifactSelectionHandler {
         }
         // Non-web artifact — check name patterns as a secondary signal
         // (CE users often name their artifacts with war/exploded suffixes)
-        String name = artifact.getName().toLowerCase();
+        String name = artifact.getName().toLowerCase(Locale.ROOT);
         if (name.contains("exploded")) return 0;
         if (name.contains("war")) return 1;
         return 2;
@@ -402,11 +403,11 @@ public class ArtifactSelectionHandler {
             ArtifactType type = artifact.getArtifactType();
             if (type != null) {
                 String typeId = type.getId();
-                if (typeId != null && typeId.toLowerCase().contains("exploded")) {
+                if (typeId != null && typeId.toLowerCase(Locale.ROOT).contains("exploded")) {
                     return true;
                 }
                 String typeName = type.getPresentableName();
-                if (typeName != null && typeName.toLowerCase().contains("exploded")) {
+                if (typeName != null && typeName.toLowerCase(Locale.ROOT).contains("exploded")) {
                     return true;
                 }
             }
@@ -415,7 +416,7 @@ public class ArtifactSelectionHandler {
         }
         // Fallback: check name pattern
         String name = artifact.getName();
-        return name != null && name.toLowerCase().contains("exploded");
+        return name != null && name.toLowerCase(Locale.ROOT).contains("exploded");
     }
 
     private String getUniqueContext(String baseContext) {
@@ -469,7 +470,7 @@ public class ArtifactSelectionHandler {
     static String resolveDeploymentType(@NotNull Artifact artifact) {
         // 1. Check IntelliJ artifact type ID (authoritative when web-typed)
         try {
-            String typeId = artifact.getArtifactType().getId().toLowerCase();
+            String typeId = artifact.getArtifactType().getId().toLowerCase(Locale.ROOT);
             if (typeId.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
             if (typeId.contains("war")) return DeploymentArtifact.TYPE_WAR;
         } catch (RuntimeException e) {
@@ -477,7 +478,7 @@ public class ArtifactSelectionHandler {
         }
 
         // 2. Check artifact name for type hints (CE users often follow naming conventions)
-        String name = artifact.getName().toLowerCase();
+        String name = artifact.getName().toLowerCase(Locale.ROOT);
         if (name.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
         if (name.endsWith("_war") || name.endsWith(".war") || name.endsWith(":war")) {
             return DeploymentArtifact.TYPE_WAR;
@@ -488,7 +489,7 @@ public class ArtifactSelectionHandler {
         if (outputPath != null) {
             File outputFile = new File(outputPath);
             if (outputFile.isDirectory()) return DeploymentArtifact.TYPE_EXPLODED;
-            if (outputPath.toLowerCase().endsWith(".war")) return DeploymentArtifact.TYPE_WAR;
+            if (outputPath.toLowerCase(Locale.ROOT).endsWith(".war")) return DeploymentArtifact.TYPE_WAR;
         }
 
         // Default: treat as exploded (better for local development — supports hot reload)
@@ -514,7 +515,7 @@ public class ArtifactSelectionHandler {
             return TomcatReadActions.compute(() -> {
                 Set<String> names = new HashSet<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
-                    names.add(module.getName().toLowerCase());
+                    names.add(module.getName().toLowerCase(Locale.ROOT));
                 }
                 return names;
             });
@@ -536,7 +537,7 @@ public class ArtifactSelectionHandler {
      */
     private static boolean hasActiveSourceModule(@NotNull String artifactName,
                                                  @NotNull Set<String> activeModuleNames) {
-        String baseName = extractBaseModuleName(artifactName).toLowerCase();
+        String baseName = extractBaseModuleName(artifactName).toLowerCase(Locale.ROOT);
         return baseName.isEmpty() || activeModuleNames.contains(baseName);
     }
 

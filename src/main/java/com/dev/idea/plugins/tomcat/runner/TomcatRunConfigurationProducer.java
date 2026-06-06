@@ -13,6 +13,7 @@ import com.intellij.execution.application.ApplicationConfigurationType;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderEnumerator;
@@ -27,7 +28,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.MissingResourceException;
+import java.util.Set;
 import com.intellij.openapi.diagnostic.Logger;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 
@@ -41,6 +44,14 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
     private static final String DEVTOMCAT_REGISTRY_KEY = "devTomcat.disableRunConfigurationProducer";
     private static final String CONFIGURATION_PREFIX = "DevTomcat: ";
+
+    /** Web view-template / JSP file extensions (lowercase) treated as a web-context hint for run-config ranking. */
+    private static final Set<String> WEB_CONTEXT_FILE_EXTENSIONS = Set.of(
+            "jsp", "jspx", "jspf", "tag", "tagx", "xhtml", "html", "htm", "ftl", "ftlh", "vm", "gsp", "mustache"
+    );
+
+    /** Exact web descriptor file names (lowercase) treated as a web-context hint. */
+    private static final Set<String> WEB_DESCRIPTOR_FILE_NAMES = Set.of("web.xml", "web-fragment.xml");
 
     @NotNull
     @Override
@@ -139,8 +150,21 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
         List<VirtualFile> webRoots = new ArrayList<>();
 
+        // Structure-agnostic first: conventional roots, then the user's explicitly
+        // configured Web Facet roots, then any directory that holds WEB-INF whatever
+        // its name — so a custom layout is discovered without a fixed name list.
         webRoots.addAll(TomcatModuleUtils.findWebRoots(module));
 
+        if (webRoots.isEmpty()) {
+            webRoots.addAll(TomcatModuleUtils.findWebFacetRoots(module));
+        }
+
+        if (webRoots.isEmpty()) {
+            webRoots.addAll(TomcatModuleUtils.findUnconventionalWebRoots(module));
+        }
+
+        // Convention fallbacks for layouts with no WEB-INF marker (Spring resource
+        // dirs, static/SPA roots) and for an existing-but-empty conventional webapp.
         if (webRoots.isEmpty()) {
             webRoots.addAll(discoverSpringBootWebRoots(module));
         }
@@ -245,6 +269,20 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
 
 
+    /**
+     * Whether {@code element}'s file is a web context — used only to rank DevTomcat
+     * as the preferred run configuration for a context. Structural first: any file
+     * that lives under a discovered web root (conventional, facet-configured, or any
+     * {@code WEB-INF} holder) is web context, whatever its extension and however the
+     * directory is named — so it adapts to custom layouts. As a secondary hint it
+     * accepts a known web view/descriptor file by extension or exact name.
+     *
+     * <p>Deliberately does <em>not</em> substring-match the file name: the previous
+     * {@code contains("servlet")}/{@code contains("controller")} fired on any file
+     * whose name merely contained those words (e.g. {@code BaseControllerHelper},
+     * {@code ServletMockTest}). Extension/name comparison is {@link Locale#ROOT}-folded
+     * for consistency with the rest of the module-matching pipeline.
+     */
     private boolean isWebModuleContext(@Nullable PsiElement element) {
         if (element == null) {
             return false;
@@ -252,16 +290,23 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
         com.intellij.psi.PsiFile containingFile = element.getContainingFile();
         if (containingFile == null) return false;
-        String fileName = containingFile.getName().toLowerCase();
-        return fileName.endsWith(".jsp") ||
-                fileName.endsWith(".jspx") ||
-                fileName.endsWith(".html") ||
-                fileName.endsWith(".xhtml") ||
-                fileName.endsWith(".ftl") ||
-                fileName.endsWith(".vm") ||
-                fileName.contains("web.xml") ||
-                fileName.contains("servlet") ||
-                fileName.contains("controller");
+
+        VirtualFile file = containingFile.getVirtualFile();
+        if (file != null) {
+            Module module = ModuleUtilCore.findModuleForPsiElement(element);
+            if (module != null && TomcatModuleUtils.isUnderWebRoot(file, module)) {
+                return true;
+            }
+            String name = file.getName().toLowerCase(Locale.ROOT);
+            if (WEB_DESCRIPTOR_FILE_NAMES.contains(name)) {
+                return true;
+            }
+            String extension = file.getExtension();
+            if (extension != null && WEB_CONTEXT_FILE_EXTENSIONS.contains(extension.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<VirtualFile> discoverSpringBootWebRoots(@NotNull Module module) {
