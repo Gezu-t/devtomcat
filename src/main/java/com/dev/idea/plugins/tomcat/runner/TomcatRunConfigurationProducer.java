@@ -317,41 +317,32 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
     }
 
     /**
-     * Convention fallback for web layouts that carry web content but no
-     * {@code WEB-INF} marker — so the structural finders in
-     * {@link #discoverWebRootsForContext} (which require a valid web root or a
-     * {@code WEB-INF} holder) miss them: Spring Boot resource dirs (relative to
-     * source roots) and common static-site roots (relative to content roots).
+     * Convention fallback for static-site / SPA layouts that carry web content but
+     * no {@code WEB-INF} marker — so the structural finders in
+     * {@link #discoverWebRootsForContext} (which need a valid web root or a
+     * {@code WEB-INF} holder) miss them. These accept a directory on existence alone
+     * (no validation), which is why they run only after every structural source came
+     * back empty.
      *
-     * <p>Unlike {@code findWebRoots} these accept a directory on existence alone
-     * (no validation), which is exactly why they run only after every structural
-     * source came back empty. The former {@code src/main/webapp}/{@code WebContent}
-     * convention list is intentionally dropped here: those paths are already covered
-     * (with validation) by {@code TomcatModuleUtils.findWebRoots}, so the only thing
-     * re-listing them added was an unvalidated, empty {@code webapp/} as a docBase,
-     * which serves nothing.
+     * <p>Spring Boot's {@code src/main/resources/static} is deliberately not probed
+     * here: when it holds servable content {@code TomcatModuleUtils.findWebRoots}
+     * already discovers it (it is in the validated convention-path list), and a
+     * Spring Boot app on an external Tomcat serves static content from the classpath
+     * ({@code classpath:/static}, {@code /public}, {@code /META-INF/resources}), not
+     * from a webapp docBase — so those are not meaningful docBase roots. (The former
+     * source-root probe for them was dead regardless: it called
+     * {@code findFileByRelativePath("main/resources/static")} on leaf source roots
+     * like {@code src/main/resources}, where that path can never resolve.)
      */
     private List<VirtualFile> discoverConventionFallbackRoots(@NotNull Module module) {
         List<VirtualFile> webRoots = new ArrayList<>();
-        ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
-
-        // Spring Boot resource roots (relative to source roots).
-        for (VirtualFile sourceRoot : rootManager.getSourceRoots()) {
-            addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/static"));
-            addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/public"));
-            addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/templates"));
-            addIfExists(webRoots, sourceRoot.findFileByRelativePath("main/resources/META-INF/resources"));
-        }
-
-        // Static-site / SPA roots (relative to content roots).
-        for (VirtualFile contentRoot : rootManager.getContentRoots()) {
+        for (VirtualFile contentRoot : ModuleRootManager.getInstance(module).getContentRoots()) {
             addIfExists(webRoots, contentRoot.findFileByRelativePath("public"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("static"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("www"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("htdocs"));
             addIfExists(webRoots, contentRoot.findFileByRelativePath("docroot"));
         }
-
         return webRoots;
     }
 
