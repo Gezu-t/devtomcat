@@ -373,9 +373,13 @@ class ContextPathUtilsTest {
         }
 
         @Test
-        @DisplayName("nested context path preserved")
+        @DisplayName("nested context path encoded with Tomcat's '#' separator")
         void nestedContextPath() {
-            assertEquals("api/v2", ContextPathUtils.resolveContextName("/api/v2"));
+            // Multi-level context paths map to Tomcat's flat '#'-encoded on-disk
+            // name (api#v2.xml / api#v2.war), which HostConfig decodes back to /api/v2.
+            assertEquals("api#v2", ContextPathUtils.resolveContextName("/api/v2"));
+            assertEquals("a#b#c", ContextPathUtils.resolveContextName("/a/b/c"));
+            assertEquals("api#v2", ContextPathUtils.resolveContextName("/api/v2/"));
         }
 
         @Test

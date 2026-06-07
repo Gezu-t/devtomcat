@@ -249,6 +249,23 @@ class ServerXmlMutatorTest {
         }
 
         @Test
+        @DisplayName("removes existing HTTPS connector from source when HTTPS is disabled (BindException repro, symmetric with AJP)")
+        void removesExistingHttpsWhenDisabled() {
+            // A user CATALINA_HOME server.xml with an active SSLEnabled connector and
+            // HTTPS disabled in the run config: the launcher must strip it. Otherwise
+            // it passes through on its original, unmanaged port and Tomcat binds a
+            // port the user believes is off — or BindExceptions startup if it's held.
+            var result = ServerXmlMutator.customize(SERVER_XML_WITH_HTTPS,
+                    8005, 8080, 0, false, 9009, false);
+
+            String xml = result.getXml();
+            assertFalse(xml.contains("SSLEnabled"),
+                    "Existing HTTPS connector must be removed when HTTPS is disabled");
+            assertTrue(xml.contains("port=\"8080\""),
+                    "The plain HTTP connector must remain when HTTPS is disabled");
+        }
+
+        @Test
         @DisplayName("removes AJP connector with variant Coyote protocol class names")
         void removesVariantAjpProtocols() {
             String serverXmlWithNioAjp = """

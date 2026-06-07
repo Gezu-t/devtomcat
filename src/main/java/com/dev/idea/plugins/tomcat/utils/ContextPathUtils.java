@@ -188,6 +188,9 @@ public final class ContextPathUtils {
      *   <li>Leading slash stripping</li>
      *   <li>Trailing slash stripping (prevents {@code "app/.xml"} on disk)</li>
      *   <li>Path traversal rejection ({@code ".."}, {@code "\"}, {@code ":"})</li>
+     *   <li>Internal {@code '/'} → {@code '#'} encoding for multi-level context
+     *       paths ({@code "/api/v2"} → {@code "api#v2"}), matching Tomcat's flat
+     *       on-disk descriptor/WAR naming convention</li>
      * </ul>
      *
      * @param contextPath the context path from a deployment artifact (may be null)
@@ -212,7 +215,13 @@ public final class ContextPathUtils {
                     "Invalid context path '" + contextPath + "': must not contain '..', '\\', or ':'");
         }
 
-        return contextName;
+        // Multi-level context paths (e.g. "/api/v2") map to Tomcat's '#'-encoded
+        // on-disk name ("api#v2.xml" / "api#v2.war") in the flat conf/Catalina/
+        // localhost and webapps/ directories the deploy step creates; HostConfig
+        // decodes '#' back to '/' for the live context. Without this the internal
+        // '/' targets a never-created subdirectory (launch fails with
+        // NoSuchFileException) and would not register as the intended context.
+        return contextName.replace('/', '#');
     }
 
     /**

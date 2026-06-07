@@ -117,6 +117,21 @@ public final class TomcatConfigPreparer {
                                        @NotNull Set<String> reservedContextStems) throws IOException {
         List<String> warnings = new ArrayList<>();
 
+        // Refuse base == home up front, before ANY destructive step. The conf-copy
+        // guard below only protects conf/, but cleanWorkDirectory and
+        // cleanStaleTempState run first and would wipe the registered Tomcat's
+        // work/ and temp/ (which can hold user files) before that guard fires. One
+        // early gate covers the whole base. This happens when a user pins
+        // CATALINA_BASE to their Tomcat home (a natural misconfiguration).
+        if (isSamePath(catalinaBase, catalinaHome)) {
+            throw new IOException(
+                    "CATALINA_BASE is the same path as CATALINA_HOME (" + catalinaBase + "). "
+                            + "DevTomcat regenerates the run directory on every launch and would "
+                            + "delete the registered Tomcat's work/ and temp/ (and conf/). Either "
+                            + "un-pin CATALINA_BASE so the IDE manages an isolated copy, or point "
+                            + "it at a different directory than the Tomcat home.");
+        }
+
         createDirectories(catalinaBase);
         createLogFiles(catalinaBase.resolve(DIR_LOGS));
         cleanWorkDirectory(catalinaBase);

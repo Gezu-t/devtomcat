@@ -585,9 +585,15 @@ public final class TomcatOutputPipeline {
         // ("Caused by: foo.BarException: message" / "Suppressed: foo.BarException").
         // Anchored to the start of the (trimmed) line so a passing mention
         // inside a regular message ("the Exception was ignored") never matches.
+        // The dotted-prefix segments are possessive ((?:seg\.)*+, each seg's own
+        // [\w$]*+) so a very long dotted-identifier-like line cannot trigger
+        // catastrophic backtracking / StackOverflowError. The FINAL segment stays
+        // ordinary ([\w$]*) so it can give back the trailing characters the
+        // Exception|Error|Throwable suffix needs. Equivalent to the prior pattern
+        // for every valid header; only the non-matching path is now linear.
         private static final Pattern EXCEPTION_HEADER = Pattern.compile(
                 "^(?:Caused by:\\s+|Suppressed:\\s+)?"
-                        + "([a-zA-Z_$][\\w$]*(?:\\.[a-zA-Z_$][\\w$]*)*"
+                        + "((?:[a-zA-Z_$][\\w$]*+\\.)*+[a-zA-Z_$][\\w$]*"
                         + "(?:Exception|Error|Throwable))"
                         + "(?::\\s*(.+))?$");
 

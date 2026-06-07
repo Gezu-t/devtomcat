@@ -369,6 +369,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
         List<Deployment> deployments = configuration.getDeployments();
         int deployedCount = 0;
+        Set<String> deployedContextNames = new HashSet<>();
         for (Deployment deployment : deployments) {
             if (!deployment.isValid()) continue;
 
@@ -377,6 +378,20 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 contextName = ContextPathUtils.resolveContextName(deployment.getContextPath());
             } catch (IllegalArgumentException e) {
                 throw new ExecutionException(e.getMessage());
+            }
+
+            // Two artifacts resolving to the same Tomcat context can't both deploy:
+            // exploded+exploded silently overwrites, exploded+WAR double-deploys.
+            // The validator only warns at edit time (non-blocking), so enforce
+            // first-wins here. Keep the first, skip the rest, and surface why.
+            if (!deployedContextNames.add(contextName)) {
+                String warn = "Skipping deployment '" + deployment.getDisplayName()
+                        + "' (context '" + deployment.getContextPath() + "'): another artifact is "
+                        + "already deployed at the same Tomcat context. Change one context path "
+                        + "in the Deployment tab to deploy both.";
+                LOG.warn(warn);
+                if (logger != null) logger.logServerWarning(warn);
+                continue;
             }
 
             Path artifactPath = deployment.getResolvedPath();
@@ -924,7 +939,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         List<String> extraJars = new ArrayList<>();
 
         for (String rootPath : snapshot.rootPaths) {
-            if (rootPath.startsWith(artifactAbsPath)) {
+            if (isUnderOrEquals(rootPath, artifactAbsPath)) {
                 continue;
             }
             // Class output directories are NOT overlaid here. The deployed
@@ -953,7 +968,7 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // would re-mount the deployed copy onto itself.
         List<String> webappDirs = new ArrayList<>();
         for (String rootPath : snapshot.webappSourceRoots) {
-            if (rootPath.startsWith(artifactAbsPath)) {
+            if (isUnderOrEquals(rootPath, artifactAbsPath)) {
                 continue;
             }
             String nativePath = rootPath.replace('/', File.separatorChar);
@@ -1029,6 +1044,17 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      * prefix list is also the sole fallback when the Tomcat home is unknown or
      * unreadable (empty {@code containerLibKeys}).
      */
+    /**
+     * Path-containment test on forward-slash-normalized absolute paths, with a
+     * separator boundary so a sibling that merely shares a name prefix is NOT
+     * treated as inside the base. Without the boundary, {@code rootPath.startsWith}
+     * would wrongly skip {@code .../out/artifacts/web-shared} when the docBase is
+     * {@code .../out/artifacts/web}, dropping that sibling's JARs from the overlay.
+     */
+    static boolean isUnderOrEquals(@NotNull String rootPath, @NotNull String basePath) {
+        return rootPath.equals(basePath) || rootPath.startsWith(basePath + "/");
+    }
+
     static boolean isContainerProvidedJar(@NotNull String jarName,
                                           @NotNull Set<String> containerLibKeys) {
         if (!containerLibKeys.isEmpty()

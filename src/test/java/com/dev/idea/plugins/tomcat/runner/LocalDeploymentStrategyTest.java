@@ -42,6 +42,32 @@ class LocalDeploymentStrategyTest {
     // -------------------------------------------------------------------------
 
     @Nested
+    @DisplayName("isUnderOrEquals")
+    class IsUnderOrEqualsTests {
+
+        @Test
+        @DisplayName("a path equal to the base is contained")
+        void equalIsContained() {
+            assertTrue(LocalDeploymentStrategy.isUnderOrEquals("/a/web", "/a/web"));
+        }
+
+        @Test
+        @DisplayName("a path strictly under the base (separator boundary) is contained")
+        void strictlyUnderIsContained() {
+            assertTrue(LocalDeploymentStrategy.isUnderOrEquals("/a/web/WEB-INF/lib/x.jar", "/a/web"));
+        }
+
+        @Test
+        @DisplayName("a sibling sharing only a name prefix is NOT contained")
+        void prefixSiblingNotContained() {
+            // The bug this guards: raw startsWith would wrongly treat web-shared as
+            // inside web, dropping its jars from the classpath overlay.
+            assertFalse(LocalDeploymentStrategy.isUnderOrEquals("/a/web-shared/x.jar", "/a/web"));
+            assertFalse(LocalDeploymentStrategy.isUnderOrEquals("/a/web2/x.jar", "/a/web"));
+        }
+    }
+
+    @Nested
     @DisplayName("escapeXmlAttribute")
     class EscapeXmlAttributeTests {
 

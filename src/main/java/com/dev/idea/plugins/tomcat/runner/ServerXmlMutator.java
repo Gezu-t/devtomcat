@@ -92,6 +92,14 @@ public final class ServerXmlMutator {
             // 4. Handle HTTPS connector
             if (httpsEnabled) {
                 setOrInjectHttpsConnector(doc, httpsPort, warnings);
+            } else {
+                // Symmetric with the AJP branch below: when HTTPS is disabled in the
+                // run config, strip any SSLEnabled connector the user's server.xml
+                // ships. Otherwise it passes through on its original port — which
+                // auto-port resolution skips when HTTPS is off — and Tomcat binds a
+                // port the user believes is disabled, or fails startup with
+                // BindException if that port is already held.
+                removeHttpsConnectors(doc);
             }
 
             // 5. Handle AJP connector
@@ -242,6 +250,30 @@ public final class ServerXmlMutator {
     private static boolean isHttpsConnector(@NotNull Element connector) {
         return "true".equalsIgnoreCase(connector.getAttribute("SSLEnabled"))
                 || "https".equalsIgnoreCase(connector.getAttribute("scheme"));
+    }
+
+    /**
+     * Removes every HTTPS connector from the document. Used when the run
+     * configuration has HTTPS disabled so the JVM does not try to bind an
+     * SSLEnabled connector the user's server.xml ships on an unmanaged port.
+     * Mirrors {@link #removeAjpConnectors}.
+     */
+    private static void removeHttpsConnectors(@NotNull Document doc) {
+        NodeList connectors = doc.getElementsByTagName("Connector");
+        // Snapshot first because removeChild mutates the live NodeList.
+        java.util.List<Element> toRemove = new java.util.ArrayList<>();
+        for (int i = 0; i < connectors.getLength(); i++) {
+            Element el = (Element) connectors.item(i);
+            if (isHttpsConnector(el)) {
+                toRemove.add(el);
+            }
+        }
+        for (Element el : toRemove) {
+            Node parent = el.getParentNode();
+            if (parent != null) {
+                parent.removeChild(el);
+            }
+        }
     }
 
     // --- AJP connector ---

@@ -26,6 +26,12 @@
 
 ### Fixed
 - Locale-safe artifact and module name matching.
+- Multi-level context paths deploy.
+- No wipe of the Tomcat install when base equals home.
+- HTTPS connector stripped when HTTPS is disabled.
+- Duplicate-context artifacts no longer clobber.
+- Prefix-sibling artifact JARs kept on the classpath.
+- No log spam on very long exception lines.
 - No more EDT freeze during post-compile sync.
 - Faster class/resource sync.
 - Restart syncs deployments once, not twice.

@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,6 +41,35 @@ class TomcatConfigPreparerTest {
 
             TomcatConfigPreparer.createDirectories(catalinaBase);
             assertDoesNotThrow(() -> TomcatConfigPreparer.createDirectories(catalinaBase));
+        }
+    }
+
+    @Nested
+    @DisplayName("prepare — base==home data-loss guard")
+    class BaseEqualsHomeGuard {
+
+        @Test
+        @DisplayName("refuses base==home before any destructive step, leaving work/ and temp/ intact")
+        void refusesBaseEqualsHomeWithoutWiping(@TempDir Path tempDir) throws IOException {
+            Path home = tempDir.resolve("tomcat");
+            Files.createDirectories(home.resolve("conf"));
+            Files.createDirectories(home.resolve("work"));
+            Files.createDirectories(home.resolve("temp"));
+            // Sentinels the (otherwise) destructive cleanup would remove: a work/
+            // file, and a temp/ entry matching the *lock* heuristic.
+            Path workSentinel = Files.writeString(home.resolve("work/keep.txt"), "x");
+            Path tempLock = Files.writeString(home.resolve("temp/app.lock"), "x");
+
+            IOException ex = assertThrows(IOException.class, () ->
+                    TomcatConfigPreparer.prepare(home, home, 8080, 8005, 0, false, 0, false,
+                            null, false, Set.of()));
+
+            assertTrue(ex.getMessage().contains("same path"),
+                    "error must explain base==home: " + ex.getMessage());
+            assertTrue(Files.exists(workSentinel),
+                    "work/ must be untouched when base==home is refused");
+            assertTrue(Files.exists(tempLock),
+                    "temp/ must be untouched when base==home is refused");
         }
     }
 
