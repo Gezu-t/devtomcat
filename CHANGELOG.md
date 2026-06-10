@@ -1,5 +1,10 @@
 # DevTomcat Changelog
 
+## [1.4.0]
+
+### Fixed
+- Cancel stops launch preparation promptly; progress names each artifact.
+
 ## [1.3.0]
 
 ### Added

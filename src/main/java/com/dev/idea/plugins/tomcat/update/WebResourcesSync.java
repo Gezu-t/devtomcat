@@ -6,6 +6,7 @@ import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -118,6 +119,7 @@ public final class WebResourcesSync {
 
         for (Deployment deployment : deployments) {
             String name = deployment.getDisplayName();
+            TomcatProgress.setDetail("Syncing web resources: " + name);
             Path artifactRoot = deployment.getResolvedPath();
 
             if (artifactRoot == null || !deployment.isValid()) {
@@ -436,6 +438,9 @@ public final class WebResourcesSync {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    // Cooperative cancellation: this walk runs under the
+                    // launch-prep modal and the update task's indicator.
+                    TomcatProgress.checkCanceled();
                     try {
                         if (attrs.isSymbolicLink()) {
                             LOG.debug("Web resources sync: skipping symlink " + file);
@@ -522,6 +527,7 @@ public final class WebResourcesSync {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    TomcatProgress.checkCanceled();
                     if (attrs.isSymbolicLink()) {
                         return FileVisitResult.CONTINUE;
                     }

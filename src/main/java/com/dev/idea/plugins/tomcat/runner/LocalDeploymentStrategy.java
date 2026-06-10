@@ -10,6 +10,7 @@ import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
@@ -372,6 +373,11 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         Set<String> deployedContextNames = new HashSet<>();
         for (Deployment deployment : deployments) {
             if (!deployment.isValid()) continue;
+            // Per-artifact cancellation boundary for the launch-prep progress;
+            // a WAR copy below is a single uninterruptible Files.copy, so the
+            // boundary before each artifact is the practical cancel point.
+            TomcatProgress.checkCanceled();
+            TomcatProgress.setDetail("Deploying: " + deployment.getDisplayName());
 
             String contextName;
             try {

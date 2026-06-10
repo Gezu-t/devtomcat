@@ -25,6 +25,7 @@ import com.intellij.execution.filters.ExceptionFilter;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
@@ -98,6 +99,16 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 builder.setResolvedDebugPort(resolvedDebugPort);
             }
             return builder.build();
+        } catch (ProcessCanceledException e) {
+            // The user pressed Cancel on the launch-preparation progress (the
+            // platform computes these parameters under its patch-parameters
+            // modal, and the sync/deploy loops poll the indicator). Release
+            // claimed ports and let the cancellation propagate unchanged —
+            // wrapping it below would turn a deliberate cancel into an error
+            // dialog.
+            TomcatPortRegistry.getInstance()
+                    .releaseAllFor(configuration.getName());
+            throw e;
         } catch (ExecutionException | RuntimeException e) {
             // Release ports claimed by ensurePreLaunchSetup() since the process
             // will never start and processTerminated() will never fire.
@@ -475,6 +486,11 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         );
         ProcessTerminatedListener.attach(handler);
         return handler;
+        } catch (ProcessCanceledException e) {
+            // Same cancel-passthrough rationale as createJavaParameters above.
+            TomcatPortRegistry.getInstance()
+                    .releaseAllFor(configuration.getName());
+            throw e;
         } catch (ExecutionException | RuntimeException e) {
             // Release any ports claimed during resolvePortConflicts() since
             // processTerminated() will never be called if we don't return a handler.

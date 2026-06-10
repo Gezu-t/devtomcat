@@ -9,6 +9,7 @@ import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
@@ -195,6 +196,7 @@ public final class DeployedClassesSync {
 
         for (Deployment deployment : deployments) {
             String name = deployment.getDisplayName();
+            TomcatProgress.setDetail("Syncing classes: " + name);
             Path artifactRoot = deployment.getResolvedPath();
 
             if (artifactRoot == null || !deployment.isValid()) {
@@ -913,6 +915,9 @@ public final class DeployedClassesSync {
 
                 @Override
                 public @NotNull FileVisitResult visitFile(Path file, @NotNull BasicFileAttributes attrs) {
+                    // Cooperative cancellation: this walk runs under the
+                    // launch-prep modal and the update task's indicator.
+                    TomcatProgress.checkCanceled();
                     try {
                         // Skip symlinks. The mirror's contract is "copy
                         // source-of-truth class files"; a symlink doesn't
@@ -1058,6 +1063,7 @@ public final class DeployedClassesSync {
             Files.walkFileTree(dst, new SimpleFileVisitor<>() {
                 @Override
                 public @NotNull FileVisitResult visitFile(Path file, @NotNull BasicFileAttributes attrs) {
+                    TomcatProgress.checkCanceled();
                     if (attrs.isSymbolicLink()) {
                         return FileVisitResult.CONTINUE;
                     }
