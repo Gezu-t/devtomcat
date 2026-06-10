@@ -10,44 +10,33 @@
 ### Changed
 - Migrated off deprecated platform APIs.
 - Maven model accessed via a typed optional dependency instead of string reflection.
-- Mount unpackaged library JARs via `<PostResources>`.
-- Serve webapp source via `<PreResources>`.
+- Mount unpackaged JARs via `<PostResources>`; serve webapp source via `<PreResources>`.
 - Faster no-op class sync.
 - Live hot-swap under Debug.
 - Scoped compile to deployment modules.
 - Lighter Services panel refresh.
-- Detect container-provided JARs from the Tomcat install, not just name patterns.
-- Detect war modules from the resolved Maven model.
-- Detect web and aggregator modules from the resolved model and classpath.
+- Container JARs, war/web/aggregator modules, and build-tool labels resolved from the project model, not name or build-file heuristics.
 - Web run-config discovery handles custom webapp layouts and facet roots.
 - Honor maven-war-plugin `warSourceDirectory` for resource sync.
-- Auto-Detect JDK seeds from the IDE's own JDK discovery.
-- Run-config build-tool labels use the resolved project model, not build-file probing.
+- Auto-detect JDK seeds from the IDE's own JDK discovery.
+- Internal comment/Javadoc accuracy.
 
 ### Fixed
 - Locale-safe artifact and module name matching.
 - Multi-level context paths deploy.
-- No wipe of the Tomcat install when base equals home.
+- No install wipe when base equals home.
 - HTTPS connector stripped when HTTPS is disabled.
-- Duplicate-context artifacts no longer clobber.
-- Prefix-sibling artifact JARs kept on the classpath.
-- No log spam on very long exception lines.
-- No more EDT freeze during post-compile sync.
-- Faster class/resource sync.
-- Restart syncs deployments once, not twice.
-- App log lines classified by their own level.
-- No output-pipeline stall on very long log lines.
+- Duplicate-context, prefix-sibling, and Gradle multi-module artifacts no longer duplicate classpath resources.
+- Log pipeline: per-level classification, no stall or spam on very long lines.
+- No EDT freeze during post-compile sync.
+- Class/resource sync: correct dependency mirroring, single restart pass, orphan cleanup.
 - Exploded "directory" deploys detected and counted.
-- Correct dependency class mirroring.
 - Startup-time trend ignores failed starts.
 - Empty Deployment tab blocks launch.
 - Deployment-tab removal flicker.
-- Orphan files removed on sync.
 - Reliable deployment-history persistence.
-- Ports released when a config is deleted.
+- Ports released on config delete; no creep across stop/restart.
 - Same-named artifacts show as distinct Services rows.
-- Server port no longer creeps up across stop/restart.
-- Gradle multi-module dependencies no longer duplicate classpath resources.
 
 ## [1.2.0]
 

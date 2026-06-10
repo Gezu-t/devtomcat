@@ -970,7 +970,7 @@ public final class DeployedClassesSync {
                         // at class init time would fail Tomcat's webapp startup
                         // with no obvious connection to the IDE's compile state.
                         // Leave the working copy in place and surface the count
-                        // via the per-artifact summary in syncIfNeeded so the
+                        // via the per-artifact summary in syncDeployments so the
                         // user knows what happened.
                         if (isBrokenEcjClass(file)) {
                             brokenSkipped[0]++;
@@ -1211,7 +1211,7 @@ public final class DeployedClassesSync {
      *       — the common edit-then-restart case.</li>
      *   <li><b>size mismatch (tie-breaker):</b> mtimes equal but file sizes
      *       differ. This catches the edge case where a previous sync set
-     *       {@code dst.mtime == src.mtime} via {@code COPY_ATTRIBUTES}, then
+     *       {@code dst.mtime == src.mtime} via {@code Files.setLastModifiedTime}, then
      *       the user edited the source again within the filesystem's mtime
      *       resolution (1-second on some FSes, lower on APFS/NTFS but not
      *       impossible on a fast SSD). Without this tie-breaker, the
@@ -1223,8 +1223,9 @@ public final class DeployedClassesSync {
      * <p>The mtime gate is still load-bearing for performance: a typical
      * web module has hundreds of class files, and unconditional copying
      * would add visible latency to every restart. The size tie-breaker
-     * costs one extra {@code Files.size()} stat per file but only when
-     * mtimes match, which is rare in practice.
+     * adds no extra syscall: the destination's mtime and size come from a
+     * single {@code Files.readAttributes} call, and the source's from the
+     * {@code BasicFileAttributes} the file-tree walk already supplied.
      */
     static boolean shouldCopy(@NotNull Path source,
                               @NotNull BasicFileAttributes sourceAttrs,

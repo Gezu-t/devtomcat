@@ -90,11 +90,17 @@ class AutoDetectJdkDialog extends DialogWrapper {
         //    JDKs, Homebrew, sdkman, the Windows registry, current vendor dirs),
         //    so it finds installs the curated list below misses or names wrongly.
         try {
-            // No-arg suggestHomePaths() on purpose: the suggestHomePaths(Project)
-            // overload only exists on 243+ and would throw NoSuchMethodError on our
-            // min platform (sinceBuild 242), where the no-arg is the only form and
-            // is not yet deprecated. The deprecation warning on 251+ is benign and
-            // unavoidable until the min platform is raised.
+            // Deliberate no-arg call. The non-deprecated suggestHomePaths(Project)
+            // overload landed in 251 — it does not exist on 242 or 243, so
+            // referencing it would fail verifier resolution and throw
+            // NoSuchMethodError on those builds. The no-arg form resolves on every
+            // supported build: not deprecated on 242/243, plain @Deprecated (no
+            // forRemoval) on 251+, where it delegates to the Project overload with
+            // null — the same discovery engine, identical results for local
+            // projects. We accept the single benign deprecation warning on 251+
+            // verifier targets rather than hide the call behind reflection. When
+            // the floor reaches 251, switch to suggestHomePaths(project) and
+            // delete this note.
             //noinspection deprecation
             for (String home : JavaSdk.getInstance().suggestHomePaths()) {
                 addJdkCandidate(new File(home), seen);
