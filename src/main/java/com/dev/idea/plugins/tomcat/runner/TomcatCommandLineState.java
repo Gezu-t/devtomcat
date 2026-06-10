@@ -86,6 +86,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             // calls getJavaParameters()/createJavaParameters() before startProcess().
             // Inside the try so a STRICT/RECLAIM refusal (IllegalStateException from
             // LaunchPortClaimer) releases ports that claimAndTrack already reserved.
+            long prepStart = System.nanoTime();
             ensurePreLaunchSetup();
 
             TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
@@ -98,7 +99,14 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             if (resolvedDebugPort > 0) {
                 builder.setResolvedDebugPort(resolvedDebugPort);
             }
-            return builder.build();
+            JavaParameters params = builder.build();
+            // One-line launch-prep total: this is the time spent under the
+            // runner's pre-launch modal (port claim, catalina.base prep,
+            // class/web sync, artifact deployment), so slow launches are
+            // diagnosable from the run console instead of guesswork.
+            deploymentLogger.logServerInfo("Launch preparation finished in "
+                    + (System.nanoTime() - prepStart) / 1_000_000 + " ms");
+            return params;
         } catch (ProcessCanceledException e) {
             // The user pressed Cancel on the launch-preparation progress (the
             // platform computes these parameters under its patch-parameters

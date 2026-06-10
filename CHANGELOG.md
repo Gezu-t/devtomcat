@@ -2,6 +2,9 @@
 
 ## [1.4.0]
 
+### Added
+- Launch-prep and per-artifact sync timings in the run console.
+
 ### Fixed
 - Cancel stops launch preparation promptly; progress names each artifact.
 

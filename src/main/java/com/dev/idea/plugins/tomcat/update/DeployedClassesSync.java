@@ -190,6 +190,7 @@ public final class DeployedClassesSync {
         // even happening?" failure mode the diagnostics here are designed for.
         logger.logServerInfo("Class sync: scanning " + deployments.size() + " deployment(s)...");
 
+        long passStart = System.nanoTime();
         int syncedArtifacts = 0;
         int totalCopied = 0;
         int skipped = 0;
@@ -197,6 +198,7 @@ public final class DeployedClassesSync {
         for (Deployment deployment : deployments) {
             String name = deployment.getDisplayName();
             TomcatProgress.setDetail("Syncing classes: " + name);
+            long artifactStart = System.nanoTime();
             Path artifactRoot = deployment.getResolvedPath();
 
             if (artifactRoot == null || !deployment.isValid()) {
@@ -328,20 +330,23 @@ public final class DeployedClassesSync {
                         + " compile: File > Invalidate Caches, or in the Maven tool window click"
                         + " Reload All Maven Projects, or run 'mvn install' on the command line.");
             }
+            long artifactMs = (System.nanoTime() - artifactStart) / 1_000_000;
             if (copiedForThisArtifact > 0) {
                 logger.logServerInfo("Class sync: " + copiedForThisArtifact +
-                        " file(s) refreshed in '" + name + "'");
+                        " file(s) refreshed in '" + name + "' (" + contributedPaths.size()
+                        + " source path(s) scanned, " + artifactMs + " ms)");
                 syncedArtifacts++;
                 totalCopied += copiedForThisArtifact;
             } else if (brokenForThisArtifact == 0) {
                 logger.logServerInfo("Class sync: '" + name
-                        + "' already up to date (source files match deployed WEB-INF/classes mtime/size)");
+                        + "' already up to date (source files match deployed WEB-INF/classes mtime/size; "
+                        + contributedPaths.size() + " source path(s) scanned, " + artifactMs + " ms)");
             }
         }
 
         logger.logServerInfo("Class sync: scan complete — " + totalCopied
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
-                + skipped + " skipped");
+                + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
         return new SyncReport(syncedArtifacts, totalCopied, skipped);
     }
 

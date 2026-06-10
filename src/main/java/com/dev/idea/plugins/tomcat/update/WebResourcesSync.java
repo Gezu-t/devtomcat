@@ -113,6 +113,7 @@ public final class WebResourcesSync {
 
         logger.logServerInfo("Web resources sync: scanning " + deployments.size() + " deployment(s)...");
 
+        long passStart = System.nanoTime();
         int syncedArtifacts = 0;
         int totalCopied = 0;
         int skipped = 0;
@@ -120,6 +121,7 @@ public final class WebResourcesSync {
         for (Deployment deployment : deployments) {
             String name = deployment.getDisplayName();
             TomcatProgress.setDetail("Syncing web resources: " + name);
+            long artifactStart = System.nanoTime();
             Path artifactRoot = deployment.getResolvedPath();
 
             if (artifactRoot == null || !deployment.isValid()) {
@@ -194,21 +196,24 @@ public final class WebResourcesSync {
                             + "' (no longer in source — would otherwise stay served by Tomcat)");
                 }
             }
+            long artifactMs = (System.nanoTime() - artifactStart) / 1_000_000;
             if (copiedForThisArtifact > 0 || orphansRemovedForThisArtifact > 0) {
                 logger.logServerInfo("Web resources sync: " + copiedForThisArtifact
                         + " file(s) refreshed and " + orphansRemovedForThisArtifact
-                        + " orphan(s) removed in '" + name + "'");
+                        + " orphan(s) removed in '" + name + "' (" + contributedPaths.size()
+                        + " source path(s) scanned, " + artifactMs + " ms)");
                 syncedArtifacts++;
                 totalCopied += copiedForThisArtifact;
             } else {
                 logger.logServerInfo("Web resources sync: '" + name
-                        + "' already up to date (source files match deployed copies' mtime/size)");
+                        + "' already up to date (source files match deployed copies' mtime/size; "
+                        + contributedPaths.size() + " source path(s) scanned, " + artifactMs + " ms)");
             }
         }
 
         logger.logServerInfo("Web resources sync: scan complete — " + totalCopied
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
-                + skipped + " skipped");
+                + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
         return new SyncReport(syncedArtifacts, totalCopied, skipped);
     }
 
