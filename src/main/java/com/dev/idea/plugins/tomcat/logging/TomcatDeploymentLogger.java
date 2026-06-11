@@ -303,8 +303,9 @@ public class TomcatDeploymentLogger {
         LOG.debug("Progress: " + operation + " " + clamped + "%");
     }
 
+    // Package-private + static for TomcatDeploymentLoggerTest; uses no instance state.
     @NotNull
-    private String createProgressBar(int progress) {
+    static String createProgressBar(int progress) {
         int filled = Math.max(0, Math.min(PROGRESS_BAR_LENGTH, progress / 10));
         StringBuilder bar = new StringBuilder("[");
 
@@ -330,8 +331,20 @@ public class TomcatDeploymentLogger {
      */
     private void logPrefixed(@NotNull String message, @NotNull String prefix,
                              @NotNull ConsoleViewContentType contentType) {
-        String formatted = message.startsWith(prefix) ? message : prefix + " " + message;
-        logWithType(formatted, contentType);
+        logWithType(applyCategoryPrefix(message, prefix), contentType);
+    }
+
+    /**
+     * Prepends {@code prefix} to {@code message} unless the message already
+     * starts with that exact prefix. Guards the double-prefix bug: a relayed
+     * Tomcat line that already carries our category bracket (e.g.
+     * {@code "[INFO] foo"}) must not become {@code "[INFO] [INFO] foo"}. A
+     * different leading bracket is not treated as a duplicate.
+     * Package-private + static for {@code TomcatDeploymentLoggerTest}.
+     */
+    @NotNull
+    static String applyCategoryPrefix(@NotNull String message, @NotNull String prefix) {
+        return message.startsWith(prefix) ? message : prefix + " " + message;
     }
 
     private void logWithType(@NotNull String message, @NotNull ConsoleViewContentType contentType) {
@@ -381,15 +394,16 @@ public class TomcatDeploymentLogger {
         return formatted.toString();
     }
 
+    // Package-private + static for TomcatDeploymentLoggerTest; uses no instance state.
     @NotNull
-    private String getStackTraceString(@NotNull Throwable throwable) {
+    static String getStackTraceString(@NotNull Throwable throwable) {
         StringBuilder sb = new StringBuilder();
         appendThrowable(sb, throwable);
         return sb.toString();
     }
 
     /** Cycle-safe: an exception whose {@code getCause()} chain revisits an earlier link in the chain stops at the second visit instead of looping forever. */
-    private void appendThrowable(@NotNull StringBuilder sb, @NotNull Throwable throwable) {
+    private static void appendThrowable(@NotNull StringBuilder sb, @NotNull Throwable throwable) {
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable current = throwable;
         while (current != null && seen.add(current)) {
