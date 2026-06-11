@@ -6,6 +6,7 @@
 - Launch-prep and per-artifact sync timings in the run console.
 
 ### Fixed
+- Debug launch no longer freezes the IDE while preparing deployments.
 - Cancel stops launch preparation promptly; progress names each artifact.
 
 ## [1.3.0]

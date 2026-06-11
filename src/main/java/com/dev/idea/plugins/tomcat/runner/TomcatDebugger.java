@@ -10,6 +10,7 @@ import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.execution.runners.JavaProgramPatcher;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -35,7 +36,8 @@ import org.jetbrains.annotations.Nullable;
  *       → stores resolvedDebugPort (e.g. 5006 if 5005 was busy)
  *
  *   TomcatDebugger.doExecute()
- *     → calls state.getJavaParameters() to ensure pre-launch setup completed
+ *     → computes state.getJavaParameters() under the platform's cancelable
+ *       progress (off the EDT) to run pre-launch setup + deployment sync
  *     → reads resolvedDebugPort from state (NOT from config)
  *     → creates RemoteConnection with that port
  *     → attachVirtualMachine(...)
@@ -92,7 +94,26 @@ public class TomcatDebugger extends GenericDebuggerRunner {
             debugHost = resolveDebugHostForAttach(true, rs);
             debugPort = resolveDebugPortForAttach(true, rs, -1, null);
         } else if (state instanceof TomcatCommandLineState tomcatState) {
-            tomcatState.getJavaParameters();
+            // Compute the launch parameters under the platform's cancelable
+            // progress modal rather than inline on the EDT. getJavaParameters()
+            // runs createJavaParameters(), which performs the deployment sync
+            // and — for packaged artifacts — a WAR copy: multi-second work on a
+            // large multi-module project. The Run path gets this wrapping for
+            // free from DefaultJavaProgramRunner, but this debug runner overrides
+            // doExecute without calling super, so the work used to run directly
+            // on the EDT and froze the IDE for the entire copy. Running it through
+            // the same helper the platform uses puts it on a pooled thread under
+            // the "Patch Java command line parameters" modal, whose indicator the
+            // sync/deploy loops poll so Cancel actually aborts.
+            boolean prepared = JavaProgramPatcher.patchJavaCommandLineParamsUnderProgress(
+                    env.getProject(), tomcatState::getJavaParameters);
+            if (!prepared) {
+                // User canceled preparation. Ports claimed during pre-launch
+                // setup are released by createJavaParameters' cancellation
+                // handler before the cancel reaches here — nothing to attach to.
+                LOG.info("Debug launch canceled during preparation: " + config.getName());
+                return null;
+            }
             debugHost = resolveDebugHostForAttach(false, null);
             debugPort = resolveDebugPortForAttach(
                     false, null, tomcatState.getResolvedDebugPort(), config.getConfigData().getDebugConfig());
