@@ -8,6 +8,7 @@
 ### Fixed
 - Debug launch no longer freezes the IDE while preparing deployments.
 - Cancel stops launch preparation promptly; progress names each artifact.
+- Library JARs sharing a filename no longer collide on the deployed classpath.
 
 ## [1.3.0]
 

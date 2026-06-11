@@ -8,7 +8,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -889,6 +891,76 @@ class LocalDeploymentStrategyTest {
                     List.of(), List.of()),
                     "with nothing to mount the fragment must be empty so the caller can "
                             + "still emit a bare <Resources allowLinking=\"true\"> block");
+        }
+
+        @Test
+        @DisplayName("Same-filename JARs from different paths mount at distinct lib paths (neither dropped)")
+        void sameFilenameJarsGetDistinctMounts() {
+            // Two genuinely different libraries that happen to share a filename
+            // (same artifactId+version, different groupId). Both must reach the
+            // classloader: dropping either would hide that library's classes.
+            String jarA = "/projects/X/lib-a/shared-1.0.0.jar";
+            String jarB = "/projects/X/lib-b/shared-1.0.0.jar";
+            String xml = LocalDeploymentStrategy.renderExtraResourcesXml(
+                    List.of(), List.of(jarA, jarB));
+
+            // Both physical JARs are mounted (base= points at the real path).
+            assertTrue(xml.contains(postResource(jarA, "/WEB-INF/lib/shared-1.0.0.jar")),
+                    "first JAR keeps its real lib mount. XML:\n" + xml);
+            assertTrue(xml.contains(postResource(jarB, "/WEB-INF/lib/shared-1.0.0__2.jar")),
+                    "the colliding JAR mounts at a distinct, still-scanned .jar path. XML:\n" + xml);
+            // The shared filename resolves to exactly one mount path; the collider
+            // is renamed, so Tomcat never sees two files at one web path.
+            assertEquals(1, countOccurrences(xml, "webAppMount=\"/WEB-INF/lib/shared-1.0.0.jar\""),
+                    "the shared filename must map to exactly one mount path. XML:\n" + xml);
+        }
+
+        private int countOccurrences(String haystack, String needle) {
+            int count = 0;
+            for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+                count++;
+            }
+            return count;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // uniqueMountName — collision-free /WEB-INF/lib mount names
+    // -------------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("uniqueMountName — collision-free lib mount names")
+    class UniqueMountName {
+
+        @Test
+        @DisplayName("first use returns the name unchanged")
+        void firstUseUnchanged() {
+            assertEquals("dep-1.0.0.jar",
+                    LocalDeploymentStrategy.uniqueMountName("dep-1.0.0.jar", new HashSet<>()));
+        }
+
+        @Test
+        @DisplayName("collisions get a counter before the extension, preserving .jar")
+        void collisionsGetCounter() {
+            Set<String> used = new HashSet<>();
+            assertEquals("dep.jar", LocalDeploymentStrategy.uniqueMountName("dep.jar", used));
+            assertEquals("dep__2.jar", LocalDeploymentStrategy.uniqueMountName("dep.jar", used));
+            assertEquals("dep__3.jar", LocalDeploymentStrategy.uniqueMountName("dep.jar", used));
+        }
+
+        @Test
+        @DisplayName("extensionless names still disambiguate")
+        void extensionlessNames() {
+            Set<String> used = new HashSet<>();
+            assertEquals("noext", LocalDeploymentStrategy.uniqueMountName("noext", used));
+            assertEquals("noext__2", LocalDeploymentStrategy.uniqueMountName("noext", used));
+        }
+
+        @Test
+        @DisplayName("a disambiguated candidate that already exists is skipped")
+        void skipsPreexistingDisambiguated() {
+            Set<String> used = new HashSet<>(Set.of("dep.jar", "dep__2.jar"));
+            assertEquals("dep__3.jar", LocalDeploymentStrategy.uniqueMountName("dep.jar", used));
         }
     }
 }

@@ -1022,13 +1022,45 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             sb.append(String.format(PRE_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_DIR, escapeXmlAttribute(webappDir), WEBAPP_MOUNT_ROOT));
         }
+        // Each JAR mounts at /WEB-INF/lib/<filename>. Two distinct classpath
+        // JARs can share a filename (e.g. same artifactId+version from different
+        // groupIds); mounting both at the same web path makes Tomcat resolve two
+        // files at one path ("found N files with the same path"). Disambiguate
+        // the mount name on collision rather than dropping a JAR — dropping one
+        // would remove a genuinely different library's classes from the webapp
+        // classloader. The base= still points at each JAR's real on-disk path,
+        // so both libraries stay loadable; only the virtual mount name differs.
+        Set<String> usedMounts = new HashSet<>();
         for (String jar : libJars) {
-            String jarName = new File(jar).getName();
+            String mountName = uniqueMountName(new File(jar).getName(), usedMounts);
             sb.append(String.format(POST_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_FILE, escapeXmlAttribute(jar),
-                    WEBAPP_MOUNT_LIB + escapeXmlAttribute(jarName)));
+                    WEBAPP_MOUNT_LIB + escapeXmlAttribute(mountName)));
         }
         return sb.toString();
+    }
+
+    /**
+     * Returns {@code jarName} if no JAR has yet mounted under it, otherwise a
+     * collision-free variant ({@code name__2.ext}, {@code name__3.ext}, …) with
+     * the {@code .jar} extension preserved so Tomcat's classloader still scans
+     * it. Records the chosen name in {@code used}. Deterministic for a given
+     * (stable) classpath order.
+     */
+    @NotNull
+    static String uniqueMountName(@NotNull String jarName, @NotNull Set<String> used) {
+        if (used.add(jarName)) {
+            return jarName;
+        }
+        int dot = jarName.lastIndexOf('.');
+        String base = dot > 0 ? jarName.substring(0, dot) : jarName;
+        String ext = dot > 0 ? jarName.substring(dot) : "";
+        for (int n = 2; ; n++) {
+            String candidate = base + "__" + n + ext;
+            if (used.add(candidate)) {
+                return candidate;
+            }
+        }
     }
 
     /**
