@@ -164,7 +164,8 @@ class AutoDetectJdkDialog extends DialogWrapper {
                 name, extractVersion(name), dir.getAbsolutePath(), false));
     }
 
-    private static boolean isValidJdk(File dir) {
+    // Package-private for AutoDetectJdkDialogTest.
+    static boolean isValidJdk(File dir) {
         // Use IntelliJ's SystemInfo rather than ad-hoc parsing of os.name. The
         // previous implementation called {@code os.name.toLowerCase()} without
         // a locale argument: under a Turkish locale, "Windows" lowercases to
@@ -175,7 +176,8 @@ class AutoDetectJdkDialog extends DialogWrapper {
         return new File(dir, "bin/" + exe).exists();
     }
 
-    private static String extractVersion(String dirName) {
+    // Package-private for AutoDetectJdkDialogTest.
+    static String extractVersion(String dirName) {
         if (dirName.contains("-")) {
             for (String part : dirName.split("-")) {
                 if (part.matches("\\d+.*")) return "JDK " + part;
