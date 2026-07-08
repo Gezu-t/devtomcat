@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.ValidationInfo;
@@ -21,8 +20,6 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
  * Update Actions Section
  */
 public class UpdateActionsSection implements ConfigurationSection {
-
-    private static final Logger LOG = Logger.getInstance(UpdateActionsSection.class);
 
     private ComboBox<String> updateActionCombo;
     private JBCheckBox showDialogCheckBox;
@@ -129,11 +126,11 @@ public class UpdateActionsSection implements ConfigurationSection {
         return Collections.emptyList();
     }
 
-    public String getSelectedAction() {
+    private String getSelectedAction() {
         return (String) updateActionCombo.getSelectedItem();
     }
 
-    public boolean isShowDialogEnabled() {
+    private boolean isShowDialogEnabled() {
         return showDialogCheckBox.isSelected();
     }
 

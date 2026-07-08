@@ -4,7 +4,6 @@ import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.dev.idea.plugins.tomcat.utils.SafeBrowseUtil;
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
@@ -36,8 +35,6 @@ import java.util.List;
 import java.util.Optional;
 
 public class TomcatServerConfigurationDialog extends DialogWrapper {
-
-    private static final Logger LOG = Logger.getInstance(TomcatServerConfigurationDialog.class);
 
     private final Project project;
     private final DefaultListModel<TomcatInfo> listModel = new DefaultListModel<>();
