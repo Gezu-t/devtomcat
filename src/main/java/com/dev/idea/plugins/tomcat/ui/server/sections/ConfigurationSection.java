@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.ui.components.JBLabel;
 import org.jetbrains.annotations.NotNull;
 
 import com.intellij.util.ui.JBUI;
@@ -35,7 +36,7 @@ public interface ConfigurationSection {
     static int getLabelColumnWidth() {
         int cached = LABEL_COLUMN_WIDTH.get();
         if (cached >= 0) return cached;
-        int width = new JLabel(LABEL_COLUMN_REFERENCE).getPreferredSize().width + JBUI.scale(12);
+        int width = new JBLabel(LABEL_COLUMN_REFERENCE).getPreferredSize().width + JBUI.scale(12);
         LABEL_COLUMN_WIDTH.set(width);
         return width;
     }
@@ -71,6 +72,11 @@ public interface ConfigurationSection {
         gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = JBUI.insets(2, 4, 2, 8);
         panel.add(field, gbc);
+        // Associate the label with its field so screen readers announce the field's
+        // name and Alt+mnemonic focus jumps land on the field, not the label.
+        if (label instanceof JLabel jLabel) {
+            jLabel.setLabelFor(field);
+        }
     }
 
     /**
@@ -115,10 +121,6 @@ public interface ConfigurationSection {
 
     default boolean isConfigurationValid() {
         return validateSettings().isEmpty();
-    }
-
-    default boolean shouldFillVertically() {
-        return false;
     }
 
     /** Releases listeners and other resources when the configuration editor is disposed. */

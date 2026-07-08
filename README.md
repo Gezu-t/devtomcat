@@ -32,7 +32,7 @@ Run, debug, and deploy web applications with categorized error analysis, live st
 
 | Requirement   | Minimum Version                            |
 |---------------|--------------------------------------------|
-| IntelliJ IDEA | 2024.2+                                    |
+| IntelliJ IDEA | 2025.1+                                    |
 | Apache Tomcat | 7+ (legacy installs covered by auto-shims) |
 | Java (JDK)    | 17+                                        |
 

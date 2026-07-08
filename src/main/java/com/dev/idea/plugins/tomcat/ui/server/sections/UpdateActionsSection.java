@@ -111,16 +111,6 @@ public class UpdateActionsSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean isConfigurationValid() {
-        return true;
-    }
-
-    @Override
-    public boolean shouldFillVertically() {
-        return false;
-    }
-
-    @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         UpdateConfig uc = config.getConfigData().getUpdateConfig();
         if (!Objects.equals(mapInternalToDisplay(uc.getOnUpdate()), getSelectedAction())) return true;

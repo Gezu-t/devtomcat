@@ -3,9 +3,9 @@ package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +20,7 @@ import java.util.Map;
  * <ul>
  *   <li>Resolve which library paths to display (custom vs. filtered defaults)</li>
  *   <li>Track the confirmed Tomcat Home and reset custom libraries on valid home changes</li>
- *   <li>Persist add/remove edits back to the TomcatInfo model</li>
+ *   <li>Persist the current library tree back to the TomcatInfo model</li>
  * </ul>
  */
 public class LibraryStateController {
@@ -81,35 +81,6 @@ public class LibraryStateController {
     }
 
     /**
-     * Persist added library paths to the server.
-     * Merges with the current display list (custom or resolved defaults).
-     *
-     * @param server     the server being edited
-     * @param tomcatHome current Tomcat home (for resolving defaults if needed)
-     * @param addedPaths paths to add
-     */
-    public void addLibraries(@NotNull TomcatInfo server, @Nullable String tomcatHome,
-                             @NotNull List<String> addedPaths) {
-        List<String> current = new ArrayList<>(resolveLibraries(server, tomcatHome));
-        current.addAll(addedPaths);
-        server.setLibraries(current);
-    }
-
-    /**
-     * Persist removal of a library path from the server.
-     *
-     * @param server     the server being edited
-     * @param tomcatHome current Tomcat home (for resolving defaults if needed)
-     * @param removePath path to remove
-     */
-    public void removeLibrary(@NotNull TomcatInfo server, @Nullable String tomcatHome,
-                              @NotNull String removePath) {
-        List<String> current = new ArrayList<>(resolveLibraries(server, tomcatHome));
-        current.remove(removePath);
-        server.setLibraries(current);
-    }
-
-    /**
      * Persist the full tree contents back to the server.
      * Called after any tree modification.
      */
@@ -117,6 +88,14 @@ public class LibraryStateController {
         server.setLibraries(treePaths);
     }
 
+    /**
+     * Test-observability accessor for the confirmed-home state machine that
+     * {@link #onServerLoaded} / {@link #onHomeChanged} drive. The production dialog
+     * never reads it — the confirmed home only affects behavior internally (deciding
+     * when to reset custom libraries) — but the tests need to observe those
+     * transitions directly.
+     */
+    @TestOnly
     @NotNull
     public String getConfirmedHome() {
         return confirmedHome;

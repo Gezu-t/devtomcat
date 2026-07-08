@@ -20,8 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Unlike model-level tests, these exercise the same production code paths
  * the dialog uses: {@code onServerLoaded}, {@code onHomeChanged},
- * {@code resolveLibraries}, {@code addLibraries}, {@code removeLibrary},
- * and {@code persistLibraries}.
+ * {@code resolveLibraries}, and {@code persistLibraries}.
  */
 @DisplayName("LibraryStateController")
 class LibraryStateControllerTest {
@@ -200,53 +199,12 @@ class LibraryStateControllerTest {
     }
 
     // =========================================================================
-    // addLibraries / removeLibrary / persistLibraries
+    // persistLibraries
     // =========================================================================
 
     @Nested
-    @DisplayName("add, remove, and persist")
-    class AddRemovePersist {
-
-        @Test
-        @DisplayName("addLibraries marks server as custom")
-        void addMarksCustom() {
-            assertFalse(server.hasCustomLibraries());
-            controller.addLibraries(server, "/opt/tomcat10", List.of("/extra.jar"));
-            assertTrue(server.hasCustomLibraries());
-        }
-
-        @Test
-        @DisplayName("addLibraries merges with current resolved list")
-        void addMerges(@TempDir Path tempDir) throws IOException {
-            Path libDir = Files.createDirectory(tempDir.resolve("lib"));
-            Files.createFile(libDir.resolve("servlet-api.jar"));
-
-            controller.addLibraries(server, tempDir.toString(), List.of("/extra.jar"));
-
-            List<String> libs = server.getLibraries();
-            assertEquals(2, libs.size());
-            assertTrue(libs.get(0).endsWith("servlet-api.jar"));
-            assertEquals("/extra.jar", libs.get(1));
-        }
-
-        @Test
-        @DisplayName("removeLibrary updates persisted list")
-        void removeUpdates() {
-            server.setLibraries(List.of("/a.jar", "/b.jar", "/c.jar"));
-            controller.removeLibrary(server, server.getPath(), "/b.jar");
-
-            assertEquals(List.of("/a.jar", "/c.jar"), server.getLibraries());
-        }
-
-        @Test
-        @DisplayName("removeLibrary on last jar leaves empty custom list")
-        void removeLastLeavesEmpty() {
-            server.setLibraries(List.of("/only.jar"));
-            controller.removeLibrary(server, server.getPath(), "/only.jar");
-
-            assertTrue(server.hasCustomLibraries());
-            assertTrue(server.getLibraries().isEmpty());
-        }
+    @DisplayName("persist")
+    class Persist {
 
         @Test
         @DisplayName("persistLibraries stores exact tree state")

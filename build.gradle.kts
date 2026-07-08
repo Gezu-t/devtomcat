@@ -107,9 +107,9 @@ intellijPlatform {
             // upper bound so we catch API drift before the Marketplace does.
             // If you're running in CI with plenty of disk, swap this for
             // `recommended()`.
-            // Lower bound — the floor declared in gradle.properties (sinceBuild=242).
-            // Catches API uses that don't exist in 2024.2 before the Marketplace does.
-            create(IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
+            // Lower bound — the floor declared in gradle.properties (sinceBuild=251).
+            // Catches API uses that don't exist in 2025.1 before the Marketplace does.
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1")
             create(IntelliJPlatformType.IntellijIdeaCommunity, prop("platformVersion"))
             // Upper bound stays on the latest 2026.1 release rather than an
             // EAP build, even though pluginUntilBuild claims 262.*.

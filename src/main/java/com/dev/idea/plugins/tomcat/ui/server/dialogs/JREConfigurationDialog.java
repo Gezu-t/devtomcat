@@ -43,7 +43,6 @@ public class JREConfigurationDialog extends DialogWrapper {
         super(project);
         this.project = project;
         setTitle("JRE Configuration");
-        setSize(600, 400);
         init();
         loadJdks();
     }

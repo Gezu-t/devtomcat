@@ -22,6 +22,7 @@ import com.intellij.ui.components.panels.VerticalLayout;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -201,19 +202,10 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
         String mode = config.getServerMode();
 
-        if (TomcatConstants.MODE_LOCAL.equals(mode)) {
-            for (ConfigurationSection section : sharedSections) {
-                List<ValidationInfo> errors = section.validateSettings();
-                if (!errors.isEmpty()) {
-                    String joined = errors.stream()
-                            .map(e -> e.message)
-                            .reduce((a, b) -> a + "\n" + b)
-                            .orElse("");
-                    throw new ConfigurationException(joined);
-                }
-            }
-
-        } else { // Remote
+        // Classify with the same case-insensitive predicate the rest of the class
+        // (resetFrom/applyTo/isModified) and TomcatRunConfiguration.isRemoteMode use, so
+        // the validated branch always matches the card shown and applied to the config.
+        if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
             RemoteConfig rc = config.getConfigData().getRemoteConfig();
             if (rc == null) {
                 throw new ConfigurationException("Remote configuration is not initialized.");
@@ -236,6 +228,18 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
                 List<ValidationInfo> errors = section.validateSettings();
                 if (!errors.isEmpty()) {
                     throw new ConfigurationException(errors.get(0).message);
+                }
+            }
+
+        } else { // Local
+            for (ConfigurationSection section : sharedSections) {
+                List<ValidationInfo> errors = section.validateSettings();
+                if (!errors.isEmpty()) {
+                    String joined = errors.stream()
+                            .map(e -> e.message)
+                            .reduce((a, b) -> a + "\n" + b)
+                            .orElse("");
+                    throw new ConfigurationException(joined);
                 }
             }
         }
@@ -293,7 +297,7 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
 
             int y = 0;
             gbc.gridx = 0; gbc.gridy = y++; gbc.gridwidth = 2;
-            panel.add(new JBLabel("Remote Connection Settings"), gbc);
+            panel.add(new TitledSeparator("Remote connection settings"), gbc);
             gbc.gridwidth = 1;
 
             gbc.gridx = 0; gbc.gridy = y;

@@ -65,7 +65,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
             panel = new JPanel(new VerticalLayout(0));
             panel.setBorder(JBUI.Borders.empty(0));
 
-            panel.add(new TitledSeparator("Tomcat Server Settings"));
+            panel.add(new TitledSeparator("Tomcat server settings"));
 
             JPanel formPanel = new JPanel(ConfigurationSection.createAlignedGridBagLayout());
             GridBagConstraints gbc = new GridBagConstraints();
@@ -123,7 +123,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
             // Row 2: HTTPS port + Preserve sessions checkbox
             row++;
             httpsPortField = new JBTextField(String.valueOf(DynamicTomcatEnvironment.getHttpsPort()), 8);
-            addPortRow(formPanel, gbc, row, new JBLabel("HTTPs port:"), httpsPortField);
+            addPortRow(formPanel, gbc, row, new JBLabel("HTTPS port:"), httpsPortField);
             preserveSessionsCheckBox = new JBCheckBox("Preserve sessions across restarts and redeploys");
             preserveSessionsCheckBox.setToolTipText("<html>When enabled, Tomcat serializes active HTTP sessions to " +
                     "<code>work/</code> on shutdown and reloads them on next start, so users stay logged in across an " +
@@ -344,11 +344,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean shouldFillVertically() {
-        return false;
-    }
-
-    @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         try {
             Integer configHttpPort = config.getHttpPort();
@@ -450,46 +445,6 @@ public class TomcatSettingsSection implements ConfigurationSection {
         }
 
         return errors;
-    }
-
-    public Integer getHttpPort() throws ConfigurationException {
-        return PortUtils.parsePort(httpPortField.getText(), "HTTP");
-    }
-
-    public Integer getShutdownPort() throws ConfigurationException {
-        return PortUtils.parsePort(shutdownPortField.getText(), "Shutdown");
-    }
-
-    public boolean isHttpsEnabled() {
-        try {
-            return PortUtils.parsePort(httpsPortField.getText(), "HTTPS") != null;
-        } catch (ConfigurationException e) {
-            return false;
-        }
-    }
-
-    public Integer getHttpsPort() throws ConfigurationException {
-        return PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
-    }
-
-    public boolean isJmxEnabled() {
-        try {
-            return PortUtils.parsePort(jmxPortField.getText(), "JMX") != null;
-        } catch (ConfigurationException e) {
-            return false;
-        }
-    }
-
-    public Integer getJmxPort() throws ConfigurationException {
-        return PortUtils.parsePort(jmxPortField.getText(), "JMX");
-    }
-
-    public boolean isDeployAppsEnabled() {
-        return deployAppsCheckBox.isSelected();
-    }
-
-    public boolean isPreserveSessionsEnabled() {
-        return preserveSessionsCheckBox.isSelected();
     }
 
     @Override

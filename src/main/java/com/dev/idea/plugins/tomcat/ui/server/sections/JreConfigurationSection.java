@@ -240,11 +240,6 @@ public class JreConfigurationSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean isConfigurationValid() {
-        return true;
-    }
-
-    @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         JreEntry selected = (JreEntry) jreComboBox.getSelectedItem();
         if (selected == null) return false;

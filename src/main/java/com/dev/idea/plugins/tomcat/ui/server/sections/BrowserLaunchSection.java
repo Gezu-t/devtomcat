@@ -279,11 +279,6 @@ public class BrowserLaunchSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean isConfigurationValid() {
-        return true;
-    }
-
-    @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         if (!isInitialized) {
             return false;
@@ -356,10 +351,6 @@ public class BrowserLaunchSection implements ConfigurationSection {
         loadConfiguration();
     }
 
-    public boolean isAfterLaunchEnabled() {
-        return isInitialized && afterLaunchCheckBox != null && afterLaunchCheckBox.isSelected();
-    }
-
     public String getUrl() {
         return isInitialized && urlField != null ? urlField.getText().trim() : "";
     }
@@ -369,11 +360,6 @@ public class BrowserLaunchSection implements ConfigurationSection {
             return browserComboBox.getSelectedItem().toString();
         }
         return TomcatConstants.BROWSER_SYSTEM_DEFAULT;
-    }
-
-    public boolean isJavaScriptDebuggerEnabled() {
-        return isInitialized && withJavaScriptDebuggerCheckBox != null &&
-                withJavaScriptDebuggerCheckBox.isSelected();
     }
 
     /**

@@ -114,7 +114,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         gbc.gridy++;
         gbc.weightx = 0;
         gbc.fill = GridBagConstraints.NONE;
-        form.add(new JBLabel("Tomcat Home:"), gbc);
+        form.add(new JBLabel("Tomcat home:"), gbc);
 
         SafeBrowseUtil.addBrowseFolderListener(
                 homeField, "Tomcat Home", "Select Tomcat installation directory",
@@ -129,7 +129,7 @@ public class TomcatServerConfigurationDialog extends DialogWrapper {
         gbc.gridy++;
         gbc.weightx = 0;
         gbc.fill = GridBagConstraints.NONE;
-        form.add(new JBLabel("Tomcat Version:"), gbc);
+        form.add(new JBLabel("Tomcat version:"), gbc);
 
         gbc.gridx = 1;
         gbc.weightx = 1.0;

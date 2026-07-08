@@ -1,5 +1,15 @@
 # DevTomcat Changelog
 
+## [1.4.1]
+
+### Changed
+- Minimum IntelliJ raised to 2025.1.
+- Screen-reader labels on server-tab fields.
+
+### Fixed
+- Auto-Detect JDKs no longer freezes the dialog.
+- Add JDK shows the real detected version.
+
 ## [1.4.0]
 
 ### Added

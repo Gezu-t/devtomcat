@@ -31,15 +31,9 @@ public class VmOptionsSection implements ConfigurationSection {
             panel.setBorder(JBUI.Borders.empty(0));
 
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = JBUI.insets(2, 0, 2, 4);
-            gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.WEST;
-            panel.add(new JBLabel("VM options:"), gbc);
-
-            gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = JBUI.insets(2, 4, 2, 8);
             vmOptionsEditor = new ExpandableTextField();
             vmOptionsEditor.setTitle("VM Options");
-            panel.add(vmOptionsEditor, gbc);
+            ConfigurationSection.addLabelAndField(panel, gbc, 0, new JBLabel("VM options:"), vmOptionsEditor);
         }
         return panel;
     }
@@ -61,16 +55,6 @@ public class VmOptionsSection implements ConfigurationSection {
     }
 
     @Override
-    public boolean isConfigurationValid() {
-        return true;
-    }
-
-    @Override
-    public boolean shouldFillVertically() {
-        return false;
-    }
-
-    @Override
     public boolean isModified(@NotNull TomcatRunConfiguration config) {
         // applyTo() saves null when the field is empty, so treat null and "" as equivalent.
         String saved  = config.getVmOptions() != null ? config.getVmOptions() : "";
@@ -82,9 +66,5 @@ public class VmOptionsSection implements ConfigurationSection {
     @NotNull
     public List<ValidationInfo> validateSettings() {
         return Collections.emptyList();
-    }
-
-    public String getVmOptions() {
-        return vmOptionsEditor.getText().trim().replaceAll("\\s+", " ");
     }
 }

@@ -49,7 +49,7 @@ Apache Tomcat integration for IntelliJ IDEA, with built-in error diagnostics, li
 
 | Requirement | Minimum Version |
 |-------------|----------------|
-| IntelliJ IDEA | 2024.2+ |
+| IntelliJ IDEA | 2025.1+ |
 | Apache Tomcat | 7.x or later |
 | Java (JDK) | 17+ |
 

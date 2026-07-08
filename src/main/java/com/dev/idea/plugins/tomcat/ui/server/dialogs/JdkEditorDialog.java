@@ -15,6 +15,9 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /**
  * Unified dialog for adding or editing a JDK entry.
@@ -92,14 +95,44 @@ class JdkEditorDialog extends DialogWrapper {
 
     private void detectVersion(String path) {
         File releaseFile = new File(path, "release");
-        if (releaseFile.exists()) {
-            versionField.setText("JDK detected");
-            if ("JDK".equals(nameField.getText())) {
-                nameField.setText("JDK detected");
-            }
-        } else {
-            versionField.setText("Unknown - Check JDK installation");
+        if (!releaseFile.exists()) {
+            versionField.setText("Unknown - check JDK installation");
+            return;
         }
+        String version = readJavaVersion(releaseFile);
+        versionField.setText(version != null ? version : "");
+        // Seed the Name field from the install folder (a real name) while it still
+        // holds the "JDK" placeholder — never with a detection-status string, which
+        // would otherwise be persisted verbatim as the JDK's name.
+        if ("JDK".equals(nameField.getText())) {
+            String folder = new File(path).getName();
+            if (folder != null && !folder.isBlank()) {
+                nameField.setText(folder);
+            }
+        }
+    }
+
+    /**
+     * Reads the {@code JAVA_VERSION} value from a JDK's {@code release} file
+     * (e.g. {@code JAVA_VERSION="17.0.10"} yields {@code 17.0.10}). Best-effort:
+     * returns {@code null} if the file cannot be read or carries no version line.
+     */
+    @Nullable
+    static String readJavaVersion(@NotNull File releaseFile) {
+        try {
+            for (String line : Files.readAllLines(releaseFile.toPath(), StandardCharsets.UTF_8)) {
+                if (line.startsWith("JAVA_VERSION=")) {
+                    String value = line.substring("JAVA_VERSION=".length()).trim();
+                    if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+                        value = value.substring(1, value.length() - 1);
+                    }
+                    return value.isBlank() ? null : value;
+                }
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // Best-effort detection; fall through to null.
+        }
+        return null;
     }
 
     @Override
