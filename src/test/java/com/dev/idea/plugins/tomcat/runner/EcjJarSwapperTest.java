@@ -1050,4 +1050,41 @@ class EcjJarSwapperTest {
             assertEquals(EcjJarSwapper.DEFAULT_ECJ_VERSION, plan.targetVersion());
         }
     }
+
+    @Nested
+    @DisplayName("buildEcjUrl — download base / mirror override")
+    class BuildEcjUrl {
+
+        @Test
+        @DisplayName("Maven Central base builds the canonical artifact URL")
+        void mavenCentralBase() {
+            assertEquals(
+                    "https://repo1.maven.org/maven2/org/eclipse/jdt/ecj/3.36.0/ecj-3.36.0.jar",
+                    EcjJarSwapper.buildEcjUrl(EcjJarSwapper.MAVEN_CENTRAL_BASE, "3.36.0", "").toString());
+        }
+
+        @Test
+        @DisplayName("suffix is appended (.sha1 checksum URL)")
+        void sha1Suffix() {
+            assertEquals(
+                    "https://repo1.maven.org/maven2/org/eclipse/jdt/ecj/3.36.0/ecj-3.36.0.jar.sha1",
+                    EcjJarSwapper.buildEcjUrl(EcjJarSwapper.MAVEN_CENTRAL_BASE, "3.36.0", ".sha1").toString());
+        }
+
+        @Test
+        @DisplayName("a mirror base (e.g. Aliyun) is honored with the same Maven layout")
+        void mirrorBase() {
+            String mirror = "https://maven.aliyun.com/repository/public/org/eclipse/jdt/ecj";
+            assertEquals(mirror + "/3.35.0/ecj-3.35.0.jar",
+                    EcjJarSwapper.buildEcjUrl(mirror, "3.35.0", "").toString());
+        }
+
+        @Test
+        @DisplayName("a trailing slash on the base does not produce a double slash")
+        void trailingSlashTrimmed() {
+            assertEquals(
+                    "https://example.test/ecj/3.36.0/ecj-3.36.0.jar",
+                    EcjJarSwapper.buildEcjUrl("https://example.test/ecj/", "3.36.0", "").toString());
+        }
+    }
 }

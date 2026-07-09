@@ -129,9 +129,17 @@ final class EcjJarSwapper {
             new EcjTier("3.24.0", "3.21.0", JavaSdkVersion.JDK_1_8, 59 /* Java 15 */)
     };
 
-    /** Maven Central root for ECJ artifacts. */
+    /** Maven Central root for ECJ artifacts — the default download base. */
     static final String MAVEN_CENTRAL_BASE =
             "https://repo1.maven.org/maven2/org/eclipse/jdt/ecj";
+
+    /**
+     * Registry key overriding the ECJ download base URL. Lets users behind a
+     * firewall — or where Maven Central is slow/blocked, e.g. mainland China —
+     * point the swap at a mirror such as Aliyun or Huawei. Standard Maven layout
+     * is assumed: the plugin appends {@code /<version>/ecj-<version>.jar}.
+     */
+    static final String REG_ECJ_MIRROR_BASE_URL = "devtomcat.ecj.mirror.base.url";
 
     /** Suffix appended to the existing JAR file name when moving it aside. */
     static final String BACKUP_SUFFIX = ".devtomcat-bak";
@@ -538,22 +546,50 @@ final class EcjJarSwapper {
         String targetFileName = "ecj-" + targetVersion + ".jar";
         Path targetEcjJar = lib.resolve(targetFileName);
         Path backupPath = currentEcjJar.resolveSibling(currentEcjJar.getFileName() + BACKUP_SUFFIX);
-        URL downloadUrl = mavenCentralUrl(targetVersion, "");
-        URL sha1Url = mavenCentralUrl(targetVersion, ".sha1");
+        URL downloadUrl = ecjArtifactUrl(targetVersion, "");
+        URL sha1Url = ecjArtifactUrl(targetVersion, ".sha1");
         return new SwapPlan(currentEcjJar, targetEcjJar, backupPath,
                 downloadUrl, sha1Url, targetVersion);
     }
 
     @NotNull
-    private static URL mavenCentralUrl(@NotNull String version, @NotNull String suffix) {
+    private static URL ecjArtifactUrl(@NotNull String version, @NotNull String suffix) {
+        return buildEcjUrl(ecjBaseUrl(), version, suffix);
+    }
+
+    /**
+     * Resolves the ECJ download base URL: the {@link #REG_ECJ_MIRROR_BASE_URL}
+     * registry override when set, else {@link #MAVEN_CENTRAL_BASE}. Registry access
+     * is guarded so a headless/early context with no Registry still falls back cleanly.
+     */
+    @NotNull
+    static String ecjBaseUrl() {
         try {
-            return URI.create(MAVEN_CENTRAL_BASE + "/" + version
-                    + "/ecj-" + version + ".jar" + suffix).toURL();
+            String override = Registry.stringValue(REG_ECJ_MIRROR_BASE_URL);
+            if (override != null && !override.isBlank()) {
+                return override;
+            }
+        } catch (Exception ignored) {
+            // No Registry available (or key absent) — use the default below.
+        }
+        return MAVEN_CENTRAL_BASE;
+    }
+
+    /**
+     * Builds the ECJ artifact URL from a Maven-layout {@code base}, tolerating a
+     * trailing slash. Pure (no Registry) so mirror handling is unit-testable.
+     */
+    @NotNull
+    static URL buildEcjUrl(@NotNull String base, @NotNull String version, @NotNull String suffix) {
+        String root = base.strip();
+        while (root.endsWith("/")) {
+            root = root.substring(0, root.length() - 1);
+        }
+        try {
+            return URI.create(root + "/" + version + "/ecj-" + version + ".jar" + suffix).toURL();
         } catch (Exception e) {
-            // Should never happen for the constants above, but keep the
-            // error path well-typed so callers get a clean exception.
             throw new IllegalStateException(
-                    "Failed to construct Maven Central URL for ECJ " + version, e);
+                    "Failed to construct ECJ download URL for version " + version + " from base " + root, e);
         }
     }
 

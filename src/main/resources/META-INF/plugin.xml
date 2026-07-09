@@ -212,6 +212,10 @@
                      defaultValue=""
                      description="Pin a specific ECJ Maven version for the swap action (e.g. 3.30.0). Empty = JVM-aware picker chooses automatically."
                      restartRequired="false"/>
+        <registryKey key="devtomcat.ecj.mirror.base.url"
+                     defaultValue="https://repo1.maven.org/maven2/org/eclipse/jdt/ecj"
+                     description="Base URL for the ECJ auto-swap download (standard Maven layout). Point at a mirror if Maven Central is slow or blocked (e.g. https://maven.aliyun.com/repository/public/org/eclipse/jdt/ecj). The plugin appends /&lt;version&gt;/ecj-&lt;version&gt;.jar."
+                     restartRequired="false"/>
     </extensions>
 
     <actions>
