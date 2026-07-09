@@ -221,9 +221,9 @@ class DeployedClassesSyncScenariosTest {
         Path src = Files.createDirectories(tmp.resolve("src"));
         Path dst = Files.createDirectories(tmp.resolve("dst"));
 
-        writeClass(src, "com/example/app/local/web/config/AppConfig.class", "app-config");
-        writeClass(src, "com/example/app/local/web/controller/HomeController.class", "home");
-        writeClass(src, "com/example/app/local/web/dao/UserDao.class", "dao");
+        writeClass(src, "com/example/app/web/config/AppConfig.class", "app-config");
+        writeClass(src, "com/example/app/web/controller/HomeController.class", "home");
+        writeClass(src, "com/example/app/web/dao/UserDao.class", "dao");
         writeClass(src, "com/example/app/shared/util/Strings.class", "strings");
 
         DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
@@ -231,9 +231,9 @@ class DeployedClassesSyncScenariosTest {
         assertEquals(4, r.copied());
         assertEquals(0, r.brokenSkipped());
         // Every package path mirrored exactly.
-        assertFileContent(dst.resolve("com/example/app/local/web/config/AppConfig.class"), "app-config");
-        assertFileContent(dst.resolve("com/example/app/local/web/controller/HomeController.class"), "home");
-        assertFileContent(dst.resolve("com/example/app/local/web/dao/UserDao.class"), "dao");
+        assertFileContent(dst.resolve("com/example/app/web/config/AppConfig.class"), "app-config");
+        assertFileContent(dst.resolve("com/example/app/web/controller/HomeController.class"), "home");
+        assertFileContent(dst.resolve("com/example/app/web/dao/UserDao.class"), "dao");
         assertFileContent(dst.resolve("com/example/app/shared/util/Strings.class"), "strings");
     }
 
@@ -875,7 +875,8 @@ class DeployedClassesSyncScenariosTest {
         Files.delete(src.resolve("com/foo/Gone.class"));
 
         DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
-        // mirrorTree itself only copies; the orphan pass is invoked by callers.
+        // mirrorTree itself only copies; removeOrphans is the retained low-level
+        // primitive (production uses SyncManifest.reconcile instead).
         int removed = DeployedClassesSync.removeOrphans(dst, mr.contributedPaths());
 
         assertEquals(1, removed, "the deleted source file must be reflected in dst");
@@ -934,12 +935,12 @@ class DeployedClassesSyncScenariosTest {
     @DisplayName("Orphan reconcile — empty retain set deletes everything (caller MUST gate this)")
     void orphan04_emptyRetainSetDeletesEverything(@TempDir Path tmp) throws Exception {
         // This pins the contract: removeOrphans is destructive when the
-        // retain set is empty. The CALLER must guard against the
-        // "every source root was unreadable" case before calling — which
-        // syncDeployments does via `if (!contributedPaths.isEmpty())`. This
-        // test exists to make sure that gate is never accidentally removed,
-        // because the failure mode (empty retain set → wipe WEB-INF/classes)
-        // would silently destroy a working deployment.
+        // retain set is empty — which is exactly why it is no longer the
+        // production path (syncDeployments reconciles via SyncManifest and
+        // gates on `!contributedPaths.isEmpty()`). Any future caller of this
+        // primitive must apply the same guard, because the failure mode
+        // (empty retain set → wipe the destination tree) would silently
+        // destroy a working deployment.
         Path dst = Files.createDirectories(tmp.resolve("dst"));
         writeClass(dst, "A.class", "a");
         writeClass(dst, "com/b/B.class", "b");
@@ -1025,10 +1026,11 @@ class DeployedClassesSyncScenariosTest {
     }
 
     // ===========================================================================
-    // reconcileStaleClasses — the class-sync PRODUCTION reconcile (manifest-based).
-    // Deletes ONLY classes we synced before and no longer do (removed from source);
-    // never a class the artifact build placed that the mirror doesn't cover — that
-    // over-deletion was the ClassNotFoundException data-loss bug.
+    // SyncManifest.reconcile — the class-sync PRODUCTION reconcile (manifest-based,
+    // shared with WebResourcesSync). Deletes ONLY classes we synced before and no
+    // longer do (removed from source); never a class the artifact build placed that
+    // the mirror doesn't cover — that over-deletion was the ClassNotFoundException
+    // data-loss bug.
     // ===========================================================================
 
     @Test
@@ -1038,10 +1040,13 @@ class DeployedClassesSyncScenariosTest {
         Path manifest = tmp.resolve("m.manifest");
         writeClass(dst, "com/foo/Keep.class", "keep");
         writeClass(dst, "com/foo/Gone.class", "gone");
-        DeployedClassesSync.writeSyncManifest(manifest, Set.of("com/foo/Keep.class", "com/foo/Gone.class"));
+        // Run 1 (production sequence): both classes synced — reconcile records
+        // them with their deployed stamps.
+        assertEquals(0, SyncManifest.reconcile(dst, manifest,
+                Set.of("com/foo/Keep.class", "com/foo/Gone.class")));
 
-        // This run only syncs Keep (Gone deleted from source).
-        int removed = DeployedClassesSync.reconcileStaleClasses(dst, manifest, Set.of("com/foo/Keep.class"));
+        // Run 2 only syncs Keep (Gone deleted from source).
+        int removed = SyncManifest.reconcile(dst, manifest, Set.of("com/foo/Keep.class"));
 
         assertEquals(1, removed);
         assertTrue(Files.exists(dst.resolve("com/foo/Keep.class")), "live class stays");
@@ -1056,18 +1061,18 @@ class DeployedClassesSyncScenariosTest {
         // be treated as an orphan and deleted (no ClassNotFoundException).
         Path dst = Files.createDirectories(tmp.resolve("dst"));
         Path manifest = tmp.resolve("m.manifest");
-        writeClass(dst, "local/web/config/SecurityConfig.class", "synced-bytes");
-        writeClass(dst, "local/web/authentication/webauthn/Handler.class", "artifact-bytes");
-        // Prior manifest records only what the SYNC wrote — not the artifact class.
-        DeployedClassesSync.writeSyncManifest(manifest, Set.of("local/web/config/SecurityConfig.class"));
+        writeClass(dst, "com/app/config/MainConfig.class", "synced-bytes");
+        writeClass(dst, "com/app/handler/extra/ExtraHandler.class", "artifact-bytes");
+        // Run 1 records only what the SYNC wrote — not the artifact class.
+        SyncManifest.reconcile(dst, manifest, Set.of("com/app/config/MainConfig.class"));
 
-        int removed = DeployedClassesSync.reconcileStaleClasses(
-                dst, manifest, Set.of("local/web/config/SecurityConfig.class"));
+        int removed = SyncManifest.reconcile(
+                dst, manifest, Set.of("com/app/config/MainConfig.class"));
 
         assertEquals(0, removed, "a class the sync never wrote must never be deleted");
-        assertTrue(Files.exists(dst.resolve("local/web/authentication/webauthn/Handler.class")),
+        assertTrue(Files.exists(dst.resolve("com/app/handler/extra/ExtraHandler.class")),
                 "artifact-deployed class the mirror doesn't cover must survive");
-        assertTrue(Files.exists(dst.resolve("local/web/config/SecurityConfig.class")));
+        assertTrue(Files.exists(dst.resolve("com/app/config/MainConfig.class")));
     }
 
     @Test
@@ -1077,11 +1082,11 @@ class DeployedClassesSyncScenariosTest {
         Path manifest = tmp.resolve("m.manifest");
         writeClass(dst, "com/foo/Pre.class", "pre-existing-from-artifact");
 
-        int removed = DeployedClassesSync.reconcileStaleClasses(dst, manifest, Set.of("com/foo/Pre.class"));
+        int removed = SyncManifest.reconcile(dst, manifest, Set.of("com/foo/Pre.class"));
 
         assertEquals(0, removed, "no prior manifest -> nothing is a proven orphan");
         assertTrue(Files.exists(dst.resolve("com/foo/Pre.class")));
-        assertEquals(Set.of("com/foo/Pre.class"), DeployedClassesSync.readSyncManifest(manifest),
+        assertEquals(Set.of("com/foo/Pre.class"), SyncManifest.read(manifest),
                 "the synced set is recorded for the next run");
     }
 
@@ -1093,8 +1098,8 @@ class DeployedClassesSyncScenariosTest {
         writeClass(dst, "X.class", "x");
         Set<String> synced = Set.of("X.class");
 
-        assertEquals(0, DeployedClassesSync.reconcileStaleClasses(dst, manifest, synced));
-        assertEquals(0, DeployedClassesSync.reconcileStaleClasses(dst, manifest, synced));
+        assertEquals(0, SyncManifest.reconcile(dst, manifest, synced));
+        assertEquals(0, SyncManifest.reconcile(dst, manifest, synced));
         assertTrue(Files.exists(dst.resolve("X.class")));
     }
 
@@ -1104,9 +1109,9 @@ class DeployedClassesSyncScenariosTest {
         Path manifest = tmp.resolve("sub/dir/m.manifest"); // parent created on write
         Set<String> paths = Set.of("a/B.class", "c/D.class", "E.class");
 
-        DeployedClassesSync.writeSyncManifest(manifest, paths);
-        assertEquals(paths, DeployedClassesSync.readSyncManifest(manifest));
-        assertTrue(DeployedClassesSync.readSyncManifest(tmp.resolve("nope.manifest")).isEmpty(),
+        SyncManifest.write(manifest, paths);
+        assertEquals(paths, SyncManifest.read(manifest));
+        assertTrue(SyncManifest.read(tmp.resolve("nope.manifest")).isEmpty(),
                 "an absent manifest reads as an empty set (safe: nothing deleted)");
     }
 
@@ -1122,8 +1127,8 @@ class DeployedClassesSyncScenariosTest {
         // ---- Launch 1: sync writes A and B; an artifact-only class C is also deployed. ----
         writeClass(webInfClasses, "com/app/A.class", "a");
         writeClass(webInfClasses, "com/app/B.class", "b");
-        writeClass(webInfClasses, "vendor/webauthn/C.class", "artifact-c"); // the sync never produces this
-        int removed1 = DeployedClassesSync.reconcileStaleClasses(
+        writeClass(webInfClasses, "vendor/extra/C.class", "artifact-c"); // the sync never produces this
+        int removed1 = SyncManifest.reconcile(
                 webInfClasses, manifest, Set.of("com/app/A.class", "com/app/B.class"));
 
         assertEquals(0, removed1, "first launch establishes the baseline and deletes nothing");
@@ -1132,13 +1137,13 @@ class DeployedClassesSyncScenariosTest {
                 "manifest lives directly in WEB-INF/ (protected, off-classpath), NOT in WEB-INF/classes");
 
         // ---- Launch 2: user removed B from source; the sync now only produces A. ----
-        int removed2 = DeployedClassesSync.reconcileStaleClasses(
+        int removed2 = SyncManifest.reconcile(
                 webInfClasses, manifest, Set.of("com/app/A.class"));
 
         assertEquals(1, removed2, "only the class removed from source is cleaned across launches");
         assertTrue(Files.exists(webInfClasses.resolve("com/app/A.class")), "live class stays");
         assertFalse(Files.exists(webInfClasses.resolve("com/app/B.class")), "class removed from source is cleaned");
-        assertTrue(Files.exists(webInfClasses.resolve("vendor/webauthn/C.class")),
+        assertTrue(Files.exists(webInfClasses.resolve("vendor/extra/C.class")),
                 "an artifact-only class the sync never wrote survives every launch");
     }
 
@@ -1242,11 +1247,11 @@ class DeployedClassesSyncScenariosTest {
     }
 
     // ===========================================================================
-    // walkFailed contract — deletion-safety guard for the caller's orphan pass.
+    // walkFailed contract — deletion-safety guard for the caller's reconcile.
     // A root whose walk could not be trusted to fully enumerate its tree must
-    // report walkFailed=true so syncDeployments defers removeOrphans rather than
-    // deleting deployed files the failed root legitimately owns but never
-    // visited (partial-failure deletion regression).
+    // report walkFailed=true so syncDeployments defers SyncManifest.reconcile
+    // (refreshing stamps only) rather than deleting deployed files the failed
+    // root legitimately owns but never visited (partial-failure deletion).
     // ===========================================================================
 
     @Test
@@ -1297,6 +1302,39 @@ class DeployedClassesSyncScenariosTest {
 
         assertTrue(r.walkFailed(),
                 "the nesting-guard refusal is an untrusted walk and must defer orphan removal");
+    }
+
+    @Test
+    @DisplayName("walkFailed — an unvisitable entry (no-execute source subdir) reports walkFailed=true")
+    void walkFailed05_unvisitableEntry(@TempDir Path tmp) throws Exception {
+        // Files.isDirectory is USELESS inside visitFileFailed — the stat
+        // itself failed, so it reports false for a real directory. ANY
+        // unvisitable entry must mark the walk failed, or the subtree's
+        // previously-synced deployed classes would be reconciled away while
+        // their source still exists (mirrors WebResourcesSyncTest's pin).
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+                "POSIX permissions required to simulate an unreadable subtree");
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        writeClass(src, "com/foo/Visible.class", "bytes");
+        Path locked = src.resolve("com/locked");
+        writeClass(src, "com/locked/Hidden.class", "unreachable");
+        java.util.Set<java.nio.file.attribute.PosixFilePermission> readOnlyNoExec =
+                java.nio.file.attribute.PosixFilePermissions.fromString("r--r--r--");
+        java.util.Set<java.nio.file.attribute.PosixFilePermission> restore =
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x");
+        Files.setPosixFilePermissions(locked, readOnlyNoExec);
+        try {
+            DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+
+            assertTrue(r.walkFailed(),
+                    "an unvisitable source entry must defer the caller's reconcile");
+            assertTrue(r.contributedPaths().contains("com/foo/Visible.class"),
+                    "the mirror still covers the readable part of the tree");
+        } finally {
+            Files.setPosixFilePermissions(locked, restore); // let @TempDir clean up
+        }
     }
 
     // ===========================================================================

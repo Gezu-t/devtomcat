@@ -111,7 +111,7 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
  *   <li>Mtime gate: a file is copied only when the source is strictly newer
  *       than the destination (or the destination is absent). This keeps
  *       repeated restarts cheap and avoids touching files that match.</li>
- *   <li>Stale reconcile ({@link #reconcileStaleClasses}): a class removed from
+ *   <li>Stale reconcile ({@link SyncManifest#reconcile}): a class removed from
  *       source leaves a {@code .class} that would otherwise stay loadable, so it
  *       is cleaned — but ONLY files this sync itself wrote on a prior run (tracked
  *       in a per-deployment manifest). A class the artifact build legitimately
@@ -293,13 +293,14 @@ public final class DeployedClassesSync {
             // dependency NOT packaged here → full content (so its resources
             // still reach Tomcat). Scanned once per artifact off the model.
             Set<String> deployedLibraryKeys = scanDeployedLibraryKeys(artifactRoot);
-            // Union of every source root's contributed paths. Anything in the
-            // deployed WEB-INF/classes/ NOT in this set is an orphan that
-            // source no longer claims. With PreResources gone, the deployed
-            // copy is the sole authority for what Tomcat loads, so stale
-            // orphans aren't shadowed by anything — they keep getting
-            // resolved by the classloader and the user sees "I deleted that
-            // class, why is it still here" behaviour.
+            // Union of every source root's contributed paths — what this run's
+            // sync claims to have covered. The stale-file reconcile below
+            // records it as the new manifest and deletes ONLY classes a prior
+            // manifest recorded (stamp-verified) that are no longer contributed
+            // (removed from source). With PreResources gone, the deployed copy
+            // is the sole authority for what Tomcat loads, so a stale class
+            // would keep getting resolved by the classloader and the user sees
+            // "I deleted that class, why is it still here" behaviour.
             java.util.Set<String> contributedPaths = new java.util.HashSet<>();
             // Tracks whether EVERY source root's walk fully enumerated its
             // contribution. If any root's walk failed (vanished source, nesting
@@ -326,7 +327,7 @@ public final class DeployedClassesSync {
                 }
             }
             // Orphan-reconcile only when at least one source root actually
-            // contributed (the EMPTY MirrorResult from a non-existent src
+            // contributed (the FAILED MirrorResult from a non-existent src
             // returns no paths) AND every root's walk completed cleanly. Two
             // failure modes are guarded here:
             //   - Empty contributedPaths could mean "every source root was
@@ -348,12 +349,20 @@ public final class DeployedClassesSync {
                 // legitimately-deployed class and cause ClassNotFoundException.
                 Path syncManifest = classSyncManifestFor(webInfClasses);
                 orphansRemovedForThisArtifact =
-                        reconcileStaleClasses(webInfClasses, syncManifest, contributedPaths);
+                        SyncManifest.reconcile(webInfClasses, syncManifest, contributedPaths);
                 if (orphansRemovedForThisArtifact > 0) {
                     logger.logServerInfo("Class sync: removed " + orphansRemovedForThisArtifact
                             + " stale class file(s) from '" + name
                             + "' (previously synced, now removed from source)");
                 }
+            } else if (!contributedPaths.isEmpty()) {
+                // Deferred run: not safe to delete, but the mirror may have just
+                // overwritten deployed files — refresh their recorded stamps or
+                // a class edited during a deferred run could never be cleaned
+                // once removed from source (stale stamp = a permanently
+                // loadable stale class, the exact bug this manifest fixes).
+                SyncManifest.refresh(
+                        webInfClasses, classSyncManifestFor(webInfClasses), contributedPaths);
             }
             if (brokenForThisArtifact > 0) {
                 // CRITICAL warning — this is the symptom that caused the user-
@@ -874,27 +883,22 @@ public final class DeployedClassesSync {
      *
      * <p>{@code contributedPaths} is the set of forward-slash-normalized
      * relative paths the source walk visited (regardless of whether each was
-     * actually copied). These are the paths the source root claims authority
-     * over — anything in the destination tree NOT in the union of every
-     * source root's {@code contributedPaths} is an orphan that the caller
-     * may safely delete.
+     * actually copied). The union across every source root is what the
+     * stale-file reconcile ({@link SyncManifest#reconcile}) records as this
+     * run's synced set.
+     *
+     * <p>{@code walkFailed} marks a root whose walk could not be trusted to
+     * have enumerated its full contribution — a vanished/non-directory
+     * source, a nesting-guard refusal, any unvisitable entry, or an outer
+     * walk failure. The caller must NOT reconcile when any source root
+     * reports this, or a partial walk would make the caller delete deployed
+     * files the failed root legitimately owns but did not get to visit.
      */
     record MirrorResult(int copied,
                         int brokenSkipped,
                         @NotNull java.util.Set<String> contributedPaths,
                         boolean walkFailed) {
-        /**
-         * A root whose walk could not be trusted to have enumerated its full
-         * contribution — a vanished/non-directory source, a nesting-guard
-         * refusal, an unreadable directory subtree, or an outer walk failure.
-         * The caller must NOT run orphan removal when any source root reports
-         * this, or a partial walk would make the caller delete deployed files
-         * the failed root legitimately owns but did not get to visit.
-         */
-        static final MirrorResult EMPTY = new MirrorResult(
-                0, 0, java.util.Collections.emptySet(), false);
-
-        /** {@link #EMPTY} but marked as a failed walk (nothing contributed, and the walk cannot be trusted). */
+        /** Nothing contributed and the walk cannot be trusted — the caller must defer the reconcile. */
         static final MirrorResult FAILED = new MirrorResult(
                 0, 0, java.util.Collections.emptySet(), true);
     }
@@ -1019,12 +1023,12 @@ public final class DeployedClassesSync {
 
                         Path rel = src.relativize(file);
                         // Record the relative path BEFORE any gate. The
-                        // orphan-reconcile contract is "anything in dst that
-                        // isn't in src is an orphan" — every source file the
-                        // user authored (even one we skip because it is already
-                        // up to date, or refuse because it is a broken stub)
-                        // must be in contributedPaths, or the orphan pass would
-                        // delete the matching deployed copy.
+                        // reconcile treats "in the manifest but no longer
+                        // contributed" as removed-from-source — so every source
+                        // file the user authored (even one we skip because it
+                        // is already up to date, or refuse because it is a
+                        // broken stub) must be in contributedPaths, or its
+                        // deployed copy would be cleaned as stale.
                         contributedPaths.add(rel.toString().replace('\\', '/'));
                         Path target = dst.resolve(rel.toString());
 
@@ -1099,15 +1103,16 @@ public final class DeployedClassesSync {
 
                 @Override
                 public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    // Walk continues past unreadable entries. One bad regular
-                    // file shouldn't abort the whole mirror. But an unreadable
-                    // DIRECTORY means its entire subtree is silently dropped
-                    // from contributedPaths — mark the walk failed so the
-                    // caller defers orphan removal rather than deleting the
-                    // deployed copies of files we never got to enumerate.
-                    if (Files.isDirectory(file)) {
-                        walkFailed[0] = true;
-                    }
+                    // Walk continues (the mirror still copies everything else),
+                    // but ANY unvisitable entry marks the walk failed: the
+                    // entry is absent from contributedPaths even though its
+                    // source exists, so reconciling would delete its deployed
+                    // copy. No isDirectory probe here — visitFileFailed fires
+                    // because the stat itself failed, and Files.isDirectory
+                    // returns false when the type "cannot be determined"
+                    // (no-execute parent dir, vanished entry), which is exactly
+                    // when an entire subtree may be silently missing.
+                    walkFailed[0] = true;
                     LOG.debug("Class sync: cannot visit " + file + " (" + exc.getMessage() + ")");
                     return FileVisitResult.CONTINUE;
                 }
@@ -1140,87 +1145,11 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * Reconciles stale synced classes using a persisted manifest of what this sync
-     * wrote on its previous run. Deletes only files that were in the prior manifest
-     * but are NOT in {@code currentlySynced} — i.e. classes we mirrored before and no
-     * longer do because they were removed from source. Files never recorded by the
-     * sync (e.g. classes the artifact build placed from a root the module resolver
-     * doesn't enumerate) are never touched, so a legitimately-deployed class can never
-     * be deleted — the failure mode of a blunt "delete everything not in the current
-     * mirror" pass ({@code ClassNotFoundException} for a class that was present).
-     * Then records {@code currentlySynced} as the new manifest.
-     *
-     * <p>Manifest read/write failures degrade safely: an absent/unreadable manifest
-     * yields an empty prior set (nothing deleted); a failed write only means the next
-     * run cannot clean up — it never over-deletes. A fresh/cleaned deployment has no
-     * manifest, so the first sync deletes nothing (and a clean rebuild has no stale
-     * classes to clean anyway).
-     *
-     * <p>Visible for testing.
-     *
-     * @return the number of stale files deleted
-     */
-    static int reconcileStaleClasses(@NotNull Path webInfClasses,
-                                     @NotNull Path manifest,
-                                     @NotNull java.util.Set<String> currentlySynced) {
-        int removed = 0;
-        for (String rel : readSyncManifest(manifest)) {
-            if (currentlySynced.contains(rel)) {
-                continue;
-            }
-            Path stale = webInfClasses.resolve(rel);
-            try {
-                if (Files.isRegularFile(stale) && !Files.isSymbolicLink(stale)) {
-                    Files.delete(stale);
-                    removed++;
-                    LOG.debug("Class sync: removed stale " + stale);
-                }
-            } catch (IOException e) {
-                LOG.debug("Class sync: could not delete stale " + stale + " (" + e.getMessage() + ")");
-            }
-        }
-        writeSyncManifest(manifest, currentlySynced);
-        return removed;
-    }
-
-    /** Reads the forward-slash-relative paths recorded by a prior sync, or an empty set. */
-    @NotNull
-    static java.util.Set<String> readSyncManifest(@NotNull Path manifest) {
-        if (!Files.isRegularFile(manifest)) {
-            return java.util.Set.of();
-        }
-        try {
-            java.util.Set<String> out = new java.util.HashSet<>();
-            for (String line : Files.readAllLines(manifest, java.nio.charset.StandardCharsets.UTF_8)) {
-                String trimmed = line.trim();
-                if (!trimmed.isEmpty()) out.add(trimmed);
-            }
-            return out;
-        } catch (IOException e) {
-            LOG.debug("Class sync: could not read manifest " + manifest + " (" + e.getMessage() + ")");
-            return java.util.Set.of();
-        }
-    }
-
-    /** Records the current synced path set (sorted for determinism). Failures are debug-logged and non-fatal. */
-    static void writeSyncManifest(@NotNull Path manifest, @NotNull java.util.Set<String> synced) {
-        try {
-            Path parent = manifest.getParent();
-            if (parent != null) Files.createDirectories(parent);
-            java.util.List<String> lines = new java.util.ArrayList<>(synced);
-            java.util.Collections.sort(lines);
-            Files.write(manifest, lines, java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            LOG.debug("Class sync: could not write manifest " + manifest + " (" + e.getMessage() + ")");
-        }
-    }
-
-    /**
      * Low-level primitive: walks {@code dst} and deletes regular files whose
      * forward-slash-normalized relative path is NOT in {@code retain}.
      *
      * <p><b>Not the class-sync production path any more.</b> Class sync reconciles via
-     * {@link #reconcileStaleClasses}, which deletes only files WE previously synced —
+     * {@link SyncManifest#reconcile}, which deletes only files WE previously synced —
      * because {@code retain} (the mirror's contributed paths) is NOT a complete
      * authority for {@code WEB-INF/classes}: an artifact build legitimately deploys
      * classes from roots the module resolver doesn't enumerate, and deleting them

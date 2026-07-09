@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
 
@@ -54,6 +55,18 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
  * build tool's dependency resolver). Symlinks and the destination
  * subtree are skipped. mtime + size gate avoids re-copying unchanged
  * files (the same gate {@link DeployedClassesSync#shouldCopy} uses).
+ *
+ * <p>Stale cleanup ({@link SyncManifest#reconcile}): a file removed from a
+ * webapp source would otherwise stay served by Tomcat, so it is cleaned —
+ * but ONLY files this sync itself wrote on a prior run (tracked in a
+ * per-deployment manifest). The build legitimately places files in the
+ * exploded webapp that no webapp source enumerates — filtered
+ * {@code <webResources>}, WAR overlays, frontend build output, generated
+ * descriptors — and none of those are ever in the manifest, so they are
+ * never deleted (the failure mode of a blunt "delete everything the source
+ * walk didn't visit" pass: silent 404s and missing assets). Deferred
+ * entirely for an artifact when no source contributed or any source's walk
+ * was incomplete.
  *
  * <p>WAR-packaged artifacts are skipped — repackaging is a build-tool
  * concern; the user should switch to exploded deployment or run
@@ -82,20 +95,48 @@ public final class WebResourcesSync {
      *
      * <p>{@code contributedPaths} is the set of forward-slash-normalized
      * relative paths the source walk visited (regardless of copy outcome).
-     * These are the paths the source claims authority over — anything in
-     * the destination's webapp tree NOT in the union of every webapp
-     * source's {@code contributedPaths} (and outside the
-     * {@link #SKIP_SUBTREES} regions, which are owned by other pipelines)
-     * is an orphan that the caller may safely delete.
+     * The union across every webapp source root is what the stale-file
+     * reconcile ({@link SyncManifest#reconcile}) records as this run's
+     * synced set — a file previously in the manifest but no longer
+     * contributed was removed from source and is cleaned.
+     *
+     * <p>{@code walkFailed} marks a root whose walk could not be trusted to
+     * have enumerated its full contribution — a vanished/non-directory
+     * source, a nesting-guard refusal, an unreadable directory subtree, or
+     * an outer walk failure. The caller must NOT reconcile when any source
+     * root reports this: a partial {@code contributedPaths} union would make
+     * previously-synced files from the failed root look stale and get
+     * deleted even though their source still exists.
      */
     public record MirrorResult(int copied,
-                               @NotNull java.util.Set<String> contributedPaths) {
-        public static final MirrorResult EMPTY = new MirrorResult(
-                0, java.util.Collections.emptySet());
+                               @NotNull java.util.Set<String> contributedPaths,
+                               boolean walkFailed) {
+        /** Nothing contributed and the walk cannot be trusted — the caller must defer stale cleanup. */
+        public static final MirrorResult FAILED = new MirrorResult(
+                0, java.util.Collections.emptySet(), true);
     }
 
     /** Aggregate result across all artifacts in a single call. */
     public record SyncReport(int artifactsSynced, int totalCopied, int skipped) {}
+
+    /**
+     * File name of the per-deployment web-resources manifest. Lives directly under
+     * the deployed {@code WEB-INF/} (protected from HTTP, off the classpath),
+     * beside — but distinct from — the class-sync manifest
+     * ({@link DeployedClassesSync#CLASS_SYNC_MANIFEST}); each pipeline reconciles
+     * exclusively against its own record. Co-located with the tree it tracks so it
+     * resets naturally when a clean rebuild recreates the exploded artifact.
+     */
+    static final String WEB_RESOURCES_MANIFEST = ".devtomcat-webresources.manifest";
+
+    /**
+     * Location of the per-deployment web-resources manifest for a given exploded
+     * artifact root: {@code <artifactRoot>/WEB-INF/.devtomcat-webresources.manifest}.
+     */
+    @NotNull
+    static Path webResourcesManifestFor(@NotNull Path artifactRoot) {
+        return artifactRoot.resolve(WEB_INF).resolve(WEB_RESOURCES_MANIFEST);
+    }
 
     /**
      * Mirrors {@code src/main/webapp/} into the exploded artifact directory
@@ -176,31 +217,55 @@ public final class WebResourcesSync {
             }
 
             int copiedForThisArtifact = 0;
-            // Union of every webapp source root's contributed paths. Anything
-            // in the deployed artifact's webapp tree NOT in this set (and
-            // outside the SKIP_SUBTREES regions, which are owned by other
-            // pipelines) is an orphan that source no longer claims.
+            // Union of every webapp source root's contributed paths — what this
+            // run's sync claims to have covered. The stale-file reconcile below
+            // records it as the new manifest and deletes ONLY files a prior
+            // manifest recorded that are no longer contributed (removed from
+            // source). Files the build placed that no webapp source enumerates
+            // (filtered <webResources>, WAR overlays, frontend build output,
+            // generated descriptors) are never in any manifest and never deleted.
             java.util.Set<String> contributedPaths = new java.util.HashSet<>();
+            // Same partial-walk guard as DeployedClassesSync: if ANY source
+            // root's walk was incomplete, contributedPaths is a partial union
+            // and reconciling against it would delete previously-synced files
+            // the failed root still owns. Defer the reconcile instead.
+            boolean allRootsWalkedCleanly = true;
             for (Path src : webappSources) {
                 logger.logServerInfo("Web resources sync: '" + name + "' -> " + src + " -> " + artifactRoot);
                 MirrorResult mr = mirrorTree(src, artifactRoot);
                 copiedForThisArtifact += mr.copied();
                 contributedPaths.addAll(mr.contributedPaths());
+                if (mr.walkFailed()) {
+                    allRootsWalkedCleanly = false;
+                    logger.logServerWarning("Web resources sync: source root " + src
+                            + " for '" + name + "' could not be fully read;"
+                            + " stale-file cleanup deferred to avoid deleting deployed files.");
+                }
                 if (mr.copied() > 0) {
                     logger.logServerInfo("Web resources sync:     " + mr.copied() + " file(s) from " + src);
                 }
             }
             int orphansRemovedForThisArtifact = 0;
-            // Same empty-set safety as DeployedClassesSync: if every webapp
-            // source root returned empty (unreadable, missing, etc.) don't
-            // wipe the deployed webapp tree.
-            if (!contributedPaths.isEmpty()) {
-                orphansRemovedForThisArtifact = removeOrphans(artifactRoot, contributedPaths);
+            // Reconcile against the manifest of what WE synced last run: delete
+            // only files we previously wrote and no longer do. Requires every
+            // root's walk to have completed cleanly AND at least one contributed
+            // path (all-empty means every source was unreadable — reconciling on
+            // that would mark everything we ever synced as stale).
+            if (!contributedPaths.isEmpty() && allRootsWalkedCleanly) {
+                orphansRemovedForThisArtifact = SyncManifest.reconcile(
+                        artifactRoot, webResourcesManifestFor(artifactRoot), contributedPaths);
                 if (orphansRemovedForThisArtifact > 0) {
                     logger.logServerInfo("Web resources sync: removed " + orphansRemovedForThisArtifact
-                            + " orphan file(s) from '" + name
-                            + "' (no longer in source — would otherwise stay served by Tomcat)");
+                            + " stale file(s) from '" + name
+                            + "' (previously synced, now removed from source)");
                 }
+            } else if (!contributedPaths.isEmpty()) {
+                // Deferred run: not safe to delete, but the mirror may have just
+                // overwritten deployed files — refresh their recorded stamps or
+                // a file edited during a deferred run could never be cleaned
+                // once removed from source (stale stamp = permanent leak).
+                SyncManifest.refresh(
+                        artifactRoot, webResourcesManifestFor(artifactRoot), contributedPaths);
             }
             long artifactMs = (System.nanoTime() - artifactStart) / 1_000_000;
             if (copiedForThisArtifact > 0 || orphansRemovedForThisArtifact > 0) {
@@ -413,7 +478,10 @@ public final class WebResourcesSync {
      */
     @NotNull
     static MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst) {
-        if (!Files.isDirectory(src)) return MirrorResult.EMPTY;
+        // Source vanished / not a directory: treat as a failed walk so the
+        // caller defers the stale-file reconcile rather than marking every
+        // file this root previously synced as stale.
+        if (!Files.isDirectory(src)) return MirrorResult.FAILED;
 
         // Nesting guard: same hazard as DeployedClassesSync — if dst is
         // inside src (or vice versa), the walker would either loop or
@@ -423,10 +491,15 @@ public final class WebResourcesSync {
         Path dstNorm = dst.toAbsolutePath().normalize();
         if (dstNorm.startsWith(srcNorm) || srcNorm.startsWith(dstNorm)) {
             LOG.warn("Web resources sync: refusing nested src/dst paths: src=" + srcNorm + " dst=" + dstNorm);
-            return MirrorResult.EMPTY;
+            return MirrorResult.FAILED;
         }
 
         final int[] copied = {0};
+        // Flipped true when a whole subtree is silently dropped from the walk
+        // (an unreadable directory) or the outer walk aborts — either way the
+        // contributedPaths set is incomplete and the caller must not reconcile
+        // against it.
+        final boolean[] walkFailed = {false};
         final java.util.Set<String> contributedPaths = new java.util.HashSet<>();
         try {
             Files.walkFileTree(src, new SimpleFileVisitor<>() {
@@ -493,80 +566,27 @@ public final class WebResourcesSync {
 
                 @Override
                 public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    // Walk continues (the mirror still copies everything else),
+                    // but ANY unvisitable entry marks the walk failed: the
+                    // entry is absent from contributedPaths even though its
+                    // source exists, so reconciling would delete its deployed
+                    // copy. No isDirectory probe here — visitFileFailed fires
+                    // because the stat itself failed, and Files.isDirectory
+                    // returns false when the type "cannot be determined"
+                    // (no-execute parent dir, vanished entry), which is exactly
+                    // when an entire subtree may be silently missing.
+                    walkFailed[0] = true;
                     LOG.debug("Web resources sync: cannot visit " + file + " (" + exc.getMessage() + ")");
                     return FileVisitResult.CONTINUE;
                 }
             });
         } catch (IOException e) {
+            // Outer walk aborted: contributedPaths holds only a partial union,
+            // so mark the walk failed to keep the caller's reconcile off it.
+            walkFailed[0] = true;
             LOG.debug("Web resources sync: walk failed for " + src + " (" + e.getMessage() + ")");
         }
-        return new MirrorResult(copied[0], contributedPaths);
-    }
-
-    /**
-     * Walks {@code dst} (the exploded artifact's webapp root) and deletes
-     * regular files whose forward-slash-normalized relative paths are NOT
-     * in {@code retain}. The {@link #SKIP_SUBTREES} regions (WEB-INF/classes/
-     * and WEB-INF/lib/) are skipped entirely — those are owned by other
-     * pipelines (class sync and the build's WAR packaging respectively),
-     * not by the webapp resource sources, and deleting from them here would
-     * step on the wrong toes.
-     *
-     * <p>Empty directories left behind are not pruned. Per-file IOExceptions
-     * are debug-logged and skipped — same defensive posture as the copy pass.
-     *
-     * <p>Visible for testing.
-     */
-    static int removeOrphans(@NotNull Path dst,
-                             @NotNull java.util.Set<String> retain) {
-        if (!Files.isDirectory(dst)) return 0;
-        final int[] removed = {0};
-        try {
-            Files.walkFileTree(dst, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    // Don't traverse into subtrees owned by other pipelines.
-                    Path rel = dst.relativize(dir);
-                    String relPath = rel.toString().replace('\\', '/');
-                    for (String skip : SKIP_SUBTREES) {
-                        if (relPath.equals(skip) || relPath.startsWith(skip + "/")) {
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    TomcatProgress.checkCanceled();
-                    if (attrs.isSymbolicLink()) {
-                        return FileVisitResult.CONTINUE;
-                    }
-                    String rel = dst.relativize(file).toString().replace('\\', '/');
-                    if (!retain.contains(rel)) {
-                        try {
-                            Files.delete(file);
-                            removed[0]++;
-                            LOG.debug("Web resources sync: removed orphan " + file);
-                        } catch (IOException e) {
-                            LOG.debug("Web resources sync: could not delete orphan "
-                                    + file + " (" + e.getMessage() + ")");
-                        }
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    LOG.debug("Web resources sync: orphan walk could not visit "
-                            + file + " (" + exc.getMessage() + ")");
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException e) {
-            LOG.debug("Web resources sync: orphan walk failed for " + dst + " (" + e.getMessage() + ")");
-        }
-        return removed[0];
+        return new MirrorResult(copied[0], contributedPaths, walkFailed[0]);
     }
 
     /**
