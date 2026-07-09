@@ -1,12 +1,19 @@
 # DevTomcat Changelog
 
+## [1.4.2]
+
+### Changed
+- Configurable ECJ download mirror for restricted networks.
+
+### Fixed
+- Webapp source overlay no longer shadows deployed build output.
+
 ## [1.4.1]
 
 ### Changed
 - Minimum IntelliJ raised to 2025.1.
 - Screen-reader labels on server-tab and deployment fields.
 - Warn when remote Manager credentials use plain HTTP.
-- Configurable ECJ download mirror for restricted networks.
 
 ### Fixed
 - Auto-Detect JDKs no longer freezes the dialog.
@@ -19,7 +26,6 @@
 - Remote deploy console no longer prints each line twice.
 - Hot-swap resource sync corrected across module dependencies.
 - Cancelling class sync during launch prep is honored again.
-- Webapp source overlay no longer shadows deployed build output.
 
 ## [1.4.0]
 
