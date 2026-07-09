@@ -7,6 +7,7 @@
 
 ### Fixed
 - Webapp source overlay no longer shadows deployed build output.
+- Class sync no longer deletes deployed classes it didn't produce.
 
 ## [1.4.1]
 

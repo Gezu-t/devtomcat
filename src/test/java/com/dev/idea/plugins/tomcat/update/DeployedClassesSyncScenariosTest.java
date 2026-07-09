@@ -1025,6 +1025,92 @@ class DeployedClassesSyncScenariosTest {
     }
 
     // ===========================================================================
+    // reconcileStaleClasses — the class-sync PRODUCTION reconcile (manifest-based).
+    // Deletes ONLY classes we synced before and no longer do (removed from source);
+    // never a class the artifact build placed that the mirror doesn't cover — that
+    // over-deletion was the ClassNotFoundException data-loss bug.
+    // ===========================================================================
+
+    @Test
+    @DisplayName("reconcile — a class removed from source (was synced) is deleted")
+    void reconcile01_removedFromSourceDeleted(@TempDir Path tmp) throws Exception {
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        Path manifest = tmp.resolve("m.manifest");
+        writeClass(dst, "com/foo/Keep.class", "keep");
+        writeClass(dst, "com/foo/Gone.class", "gone");
+        DeployedClassesSync.writeSyncManifest(manifest, Set.of("com/foo/Keep.class", "com/foo/Gone.class"));
+
+        // This run only syncs Keep (Gone deleted from source).
+        int removed = DeployedClassesSync.reconcileStaleClasses(dst, manifest, Set.of("com/foo/Keep.class"));
+
+        assertEquals(1, removed);
+        assertTrue(Files.exists(dst.resolve("com/foo/Keep.class")), "live class stays");
+        assertFalse(Files.exists(dst.resolve("com/foo/Gone.class")), "class removed from source is cleaned");
+    }
+
+    @Test
+    @DisplayName("reconcile — a class the sync NEVER wrote (artifact-provided) is PRESERVED")
+    void reconcile02_neverSyncedArtifactClassPreserved(@TempDir Path tmp) throws Exception {
+        // The reported bug: the artifact deploys a class from a root the module
+        // resolver doesn't enumerate, so the mirror never covers it. It must never
+        // be treated as an orphan and deleted (no ClassNotFoundException).
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        Path manifest = tmp.resolve("m.manifest");
+        writeClass(dst, "local/web/config/SecurityConfig.class", "synced-bytes");
+        writeClass(dst, "local/web/authentication/webauthn/Handler.class", "artifact-bytes");
+        // Prior manifest records only what the SYNC wrote — not the artifact class.
+        DeployedClassesSync.writeSyncManifest(manifest, Set.of("local/web/config/SecurityConfig.class"));
+
+        int removed = DeployedClassesSync.reconcileStaleClasses(
+                dst, manifest, Set.of("local/web/config/SecurityConfig.class"));
+
+        assertEquals(0, removed, "a class the sync never wrote must never be deleted");
+        assertTrue(Files.exists(dst.resolve("local/web/authentication/webauthn/Handler.class")),
+                "artifact-deployed class the mirror doesn't cover must survive");
+        assertTrue(Files.exists(dst.resolve("local/web/config/SecurityConfig.class")));
+    }
+
+    @Test
+    @DisplayName("reconcile — first run with no prior manifest deletes nothing, records the synced set")
+    void reconcile03_firstRunNoManifest(@TempDir Path tmp) throws Exception {
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        Path manifest = tmp.resolve("m.manifest");
+        writeClass(dst, "com/foo/Pre.class", "pre-existing-from-artifact");
+
+        int removed = DeployedClassesSync.reconcileStaleClasses(dst, manifest, Set.of("com/foo/Pre.class"));
+
+        assertEquals(0, removed, "no prior manifest -> nothing is a proven orphan");
+        assertTrue(Files.exists(dst.resolve("com/foo/Pre.class")));
+        assertEquals(Set.of("com/foo/Pre.class"), DeployedClassesSync.readSyncManifest(manifest),
+                "the synced set is recorded for the next run");
+    }
+
+    @Test
+    @DisplayName("reconcile — idempotent: re-running with the same synced set deletes nothing")
+    void reconcile04_idempotent(@TempDir Path tmp) throws Exception {
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        Path manifest = tmp.resolve("m.manifest");
+        writeClass(dst, "X.class", "x");
+        Set<String> synced = Set.of("X.class");
+
+        assertEquals(0, DeployedClassesSync.reconcileStaleClasses(dst, manifest, synced));
+        assertEquals(0, DeployedClassesSync.reconcileStaleClasses(dst, manifest, synced));
+        assertTrue(Files.exists(dst.resolve("X.class")));
+    }
+
+    @Test
+    @DisplayName("reconcile — manifest round-trips; an absent manifest reads empty")
+    void reconcile05_manifestRoundTrip(@TempDir Path tmp) throws Exception {
+        Path manifest = tmp.resolve("sub/dir/m.manifest"); // parent created on write
+        Set<String> paths = Set.of("a/B.class", "c/D.class", "E.class");
+
+        DeployedClassesSync.writeSyncManifest(manifest, paths);
+        assertEquals(paths, DeployedClassesSync.readSyncManifest(manifest));
+        assertTrue(DeployedClassesSync.readSyncManifest(tmp.resolve("nope.manifest")).isEmpty(),
+                "an absent manifest reads as an empty set (safe: nothing deleted)");
+    }
+
+    // ===========================================================================
     // Dependency-module policy: classesOnly mirror mechanism
     //
     // A dependency module's compile-output root (Maven target/classes/) holds
