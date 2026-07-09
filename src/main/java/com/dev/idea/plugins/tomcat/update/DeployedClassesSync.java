@@ -346,8 +346,7 @@ public final class DeployedClassesSync {
                 // build assembles from a root the module resolver doesn't enumerate
                 // — is NOT in the manifest and is never deleted, so we can't strip a
                 // legitimately-deployed class and cause ClassNotFoundException.
-                // Sibling of WEB-INF/classes → lives directly in WEB-INF/ (protected, off-classpath).
-                Path syncManifest = webInfClasses.resolveSibling(CLASS_SYNC_MANIFEST);
+                Path syncManifest = classSyncManifestFor(webInfClasses);
                 orphansRemovedForThisArtifact =
                         reconcileStaleClasses(webInfClasses, syncManifest, contributedPaths);
                 if (orphansRemovedForThisArtifact > 0) {
@@ -1129,6 +1128,16 @@ public final class DeployedClassesSync {
      * resets naturally when a clean rebuild recreates the exploded artifact.
      */
     static final String CLASS_SYNC_MANIFEST = ".devtomcat-classsync.manifest";
+
+    /**
+     * Location of the per-deployment class-sync manifest for a given
+     * {@code WEB-INF/classes} directory: its sibling, i.e. directly in
+     * {@code WEB-INF/} (protected from HTTP, off the classpath).
+     */
+    @NotNull
+    static Path classSyncManifestFor(@NotNull Path webInfClasses) {
+        return webInfClasses.resolveSibling(CLASS_SYNC_MANIFEST);
+    }
 
     /**
      * Reconciles stale synced classes using a persisted manifest of what this sync

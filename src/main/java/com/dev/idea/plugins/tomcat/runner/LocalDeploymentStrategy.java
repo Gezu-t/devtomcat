@@ -1038,28 +1038,10 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // layout (no committed build output under source) is unaffected.
         List<String> wholesaleDirs = new ArrayList<>();
         List<PreMount> splitMounts = new ArrayList<>();
-        for (String rootPath : snapshot.webappSourceRoots) {
-            if (isUnderOrEquals(rootPath, artifactAbsPath)) {
-                continue;
-            }
-            String nativePath = rootPath.replace('/', File.separatorChar);
-            File file = new File(nativePath);
-            if (!file.isDirectory()) {
-                continue;
-            }
-            File webInf = new File(file, WEB_INF);
-            if (new File(webInf, WEB_INF_LIB).isDirectory()
-                    || new File(webInf, WEB_INF_CLASSES).isDirectory()) {
-                int before = splitMounts.size();
-                expandSourceRootMounts(file, splitMounts);
-                if (logger != null && splitMounts.size() > before) {
-                    logger.logServerInfo("Webapp source '" + file.getName()
-                            + "' carries a committed WEB-INF/lib or WEB-INF/classes; overlaying it"
-                            + " per-entry so the deployed build output is not shadowed.");
-                }
-            } else {
-                wholesaleDirs.add(nativePath);
-            }
+        classifyWebappSourceRoots(snapshot.webappSourceRoots, artifactAbsPath, wholesaleDirs, splitMounts);
+        if (logger != null && !splitMounts.isEmpty()) {
+            logger.logServerInfo("A webapp source folder carries a committed WEB-INF/lib or"
+                    + " WEB-INF/classes; overlaying it per-entry so the deployed build output is not shadowed.");
         }
 
         if (extraJars.isEmpty() && wholesaleDirs.isEmpty() && splitMounts.isEmpty()) {
@@ -1124,6 +1106,39 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     /** A single {@code <PreResources>} overlay: a source path exposed at a web-app path. */
     record PreMount(@NotNull String base, @NotNull String webAppMount, boolean isDirectory) {}
+
+    /**
+     * Classifies webapp source roots for the {@code <PreResources>} overlay. A root
+     * with no committed build output mounts wholesale at {@code /} (appended to
+     * {@code wholesaleOut}); a root that physically carries a committed
+     * {@code WEB-INF/lib} or {@code WEB-INF/classes} (legacy / Eclipse "WebContent"
+     * layouts) is expanded per-entry into {@code splitOut}, excluding those subtrees
+     * so a stale in-source copy can't shadow the freshly-deployed docBase build
+     * output. Roots that are missing, not directories, or already under docBase are
+     * skipped. Pure — no project model or logging — so the classification is testable.
+     */
+    static void classifyWebappSourceRoots(@NotNull List<String> webappSourceRoots,
+                                          @NotNull String artifactAbsPath,
+                                          @NotNull List<String> wholesaleOut,
+                                          @NotNull List<PreMount> splitOut) {
+        for (String rootPath : webappSourceRoots) {
+            if (isUnderOrEquals(rootPath, artifactAbsPath)) {
+                continue;
+            }
+            String nativePath = rootPath.replace('/', File.separatorChar);
+            File file = new File(nativePath);
+            if (!file.isDirectory()) {
+                continue;
+            }
+            File webInf = new File(file, WEB_INF);
+            if (new File(webInf, WEB_INF_LIB).isDirectory()
+                    || new File(webInf, WEB_INF_CLASSES).isDirectory()) {
+                expandSourceRootMounts(file, splitOut);
+            } else {
+                wholesaleOut.add(nativePath);
+            }
+        }
+    }
 
     /**
      * Expands a webapp source root that physically carries a committed

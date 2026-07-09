@@ -1023,4 +1023,61 @@ class LocalDeploymentStrategyTest {
             assertFalse(xml.contains("/WEB-INF/classes"));
         }
     }
+
+    @Nested
+    @DisplayName("classifyWebappSourceRoots — common layout wholesale, WebContent layout split")
+    class ClassifyWebappSourceRoots {
+
+        @Test
+        @DisplayName("a common source root (no committed WEB-INF/lib|classes) mounts wholesale at /")
+        void plainRootWholesale(@TempDir Path tmp) throws IOException {
+            Path root = Files.createDirectories(tmp.resolve("src/main/webapp"));
+            Files.writeString(Files.createDirectories(root.resolve("WEB-INF")).resolve("web.xml"), "<web-app/>");
+
+            List<String> wholesale = new ArrayList<>();
+            List<LocalDeploymentStrategy.PreMount> split = new ArrayList<>();
+            LocalDeploymentStrategy.classifyWebappSourceRoots(
+                    List.of(root.toString()), "/nonexistent/docbase", wholesale, split);
+
+            assertEquals(List.of(root.toString().replace('/', File.separatorChar)), wholesale,
+                    "a common layout mounts wholesale at /");
+            assertTrue(split.isEmpty(), "no split mounts for a common layout");
+        }
+
+        @Test
+        @DisplayName("a WebContent root with committed WEB-INF/lib is split, excluding WEB-INF/lib")
+        void webContentRootSplitExcludesLib(@TempDir Path tmp) throws IOException {
+            Path root = Files.createDirectories(tmp.resolve("WebContent"));
+            Files.writeString(root.resolve("index.jsp"), "x");
+            Path webInf = Files.createDirectories(root.resolve("WEB-INF"));
+            Files.writeString(webInf.resolve("web.xml"), "<web-app/>");
+            Files.createDirectory(webInf.resolve("lib"));   // committed jars — the shadow risk
+
+            List<String> wholesale = new ArrayList<>();
+            List<LocalDeploymentStrategy.PreMount> split = new ArrayList<>();
+            LocalDeploymentStrategy.classifyWebappSourceRoots(
+                    List.of(root.toString()), "/nonexistent/docbase", wholesale, split);
+
+            assertTrue(wholesale.isEmpty(), "a WebContent root with committed WEB-INF/lib is NOT mounted wholesale");
+            Set<String> mounts = new HashSet<>();
+            for (LocalDeploymentStrategy.PreMount m : split) mounts.add(m.webAppMount());
+            assertTrue(mounts.contains("/index.jsp"), "top-level content still overlaid");
+            assertTrue(mounts.contains("/WEB-INF/web.xml"), "WEB-INF descriptor still overlaid");
+            assertFalse(mounts.contains("/WEB-INF/lib"), "committed WEB-INF/lib must NOT be overlaid (shadow prevented)");
+        }
+
+        @Test
+        @DisplayName("a root already under docBase is skipped (no self-remount)")
+        void rootUnderDocBaseSkipped(@TempDir Path tmp) throws IOException {
+            Path docBase = Files.createDirectories(tmp.resolve("out/app"));
+            Path rootUnder = Files.createDirectories(docBase.resolve("WEB-INF"));
+
+            List<String> wholesale = new ArrayList<>();
+            List<LocalDeploymentStrategy.PreMount> split = new ArrayList<>();
+            LocalDeploymentStrategy.classifyWebappSourceRoots(
+                    List.of(rootUnder.toString()), docBase.toString(), wholesale, split);
+
+            assertTrue(wholesale.isEmpty() && split.isEmpty(), "roots under docBase are skipped");
+        }
+    }
 }

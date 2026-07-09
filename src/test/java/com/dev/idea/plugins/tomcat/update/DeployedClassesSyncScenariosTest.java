@@ -1110,6 +1110,38 @@ class DeployedClassesSyncScenariosTest {
                 "an absent manifest reads as an empty set (safe: nothing deleted)");
     }
 
+    @Test
+    @DisplayName("reconcile integration — across two launches over a real WEB-INF/classes: manifest in WEB-INF/, stale removed, artifact preserved")
+    void reconcile06_acrossLaunchesRealLayout(@TempDir Path tmp) throws Exception {
+        // Real deployed layout: <docBase>/WEB-INF/classes. The manifest must land at
+        // the production location (sibling → WEB-INF/), persist between launches, and
+        // reconcile correctly through the same path computation syncDeployments uses.
+        Path webInfClasses = Files.createDirectories(tmp.resolve("app/WEB-INF/classes"));
+        Path manifest = DeployedClassesSync.classSyncManifestFor(webInfClasses);
+
+        // ---- Launch 1: sync writes A and B; an artifact-only class C is also deployed. ----
+        writeClass(webInfClasses, "com/app/A.class", "a");
+        writeClass(webInfClasses, "com/app/B.class", "b");
+        writeClass(webInfClasses, "vendor/webauthn/C.class", "artifact-c"); // the sync never produces this
+        int removed1 = DeployedClassesSync.reconcileStaleClasses(
+                webInfClasses, manifest, Set.of("com/app/A.class", "com/app/B.class"));
+
+        assertEquals(0, removed1, "first launch establishes the baseline and deletes nothing");
+        assertTrue(Files.isRegularFile(manifest), "manifest is written");
+        assertEquals("WEB-INF", manifest.getParent().getFileName().toString(),
+                "manifest lives directly in WEB-INF/ (protected, off-classpath), NOT in WEB-INF/classes");
+
+        // ---- Launch 2: user removed B from source; the sync now only produces A. ----
+        int removed2 = DeployedClassesSync.reconcileStaleClasses(
+                webInfClasses, manifest, Set.of("com/app/A.class"));
+
+        assertEquals(1, removed2, "only the class removed from source is cleaned across launches");
+        assertTrue(Files.exists(webInfClasses.resolve("com/app/A.class")), "live class stays");
+        assertFalse(Files.exists(webInfClasses.resolve("com/app/B.class")), "class removed from source is cleaned");
+        assertTrue(Files.exists(webInfClasses.resolve("vendor/webauthn/C.class")),
+                "an artifact-only class the sync never wrote survives every launch");
+    }
+
     // ===========================================================================
     // Dependency-module policy: classesOnly mirror mechanism
     //
