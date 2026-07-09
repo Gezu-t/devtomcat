@@ -241,8 +241,14 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                         // validator at Apply time; skipping here is safe.
                     }
                 }
+                // Preserve entries CatalinaHomeMirror wrote earlier in this same
+                // launch (bundled-app WARs + context descriptors). Without this the
+                // unconditional .war/.xml sweeps below delete the mirror's output
+                // before Tomcat starts, nullifying "Deploy applications configured
+                // in Tomcat instance". Empty when the mirror is disabled.
+                java.util.Set<Path> mirrorOutput = CatalinaHomeMirror.mirroredPaths(catalinaBase);
                 List<Path> staleFailures = cleanStaleDeployments(
-                        webappsDir, confCatalinaLocalhost, activeContextNames);
+                        webappsDir, confCatalinaLocalhost, activeContextNames, mirrorOutput);
                 if (!staleFailures.isEmpty()) {
                     // Surface to the user before the imminent atomicWriteString fails with
                     // AccessDeniedException. Naming the files lets them grep for a stale
@@ -701,16 +707,31 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     /**
      * True when {@code catalinaBase} is inside the IDE's managed system directory
      * (the standard fallback path), so destructive cleanup of {@code webapps/} and
-     * {@code conf/Catalina/localhost/} is safe. False when the user has pinned an
-     * explicit {@code CATALINA_BASE} — those files are user-managed and must not
-     * be wiped between launches.
+     * {@code conf/Catalina/localhost/} is safe. False only when the user has pinned an
+     * explicit {@code CATALINA_BASE} that actually took effect — those files are
+     * user-managed and must not be wiped between launches.
+     *
+     * <p>The gate must agree with {@link TomcatProjectUtils#getCatalinaBase}, which
+     * honours a pinned value only when it points at an existing directory and
+     * otherwise silently falls back to the IDE system base. So a pin that is blank,
+     * or that does not resolve to the actual {@code catalinaBase} the launch ran in
+     * (typo, deleted dir, path from another machine), leaves the base IDE-managed —
+     * cleanup must still run there to prevent stale {@code .war}/descriptor conflicts.
      */
     static boolean isIdeManagedCatalinaBase(@NotNull Path catalinaBase,
                                             @NotNull TomcatRunConfiguration configuration) {
         String pinned = configuration.getConfigData() != null
                 ? configuration.getConfigData().getCatalinaBase()
                 : null;
-        return pinned == null || pinned.isBlank();
+        if (pinned == null || pinned.isBlank()) {
+            return true;
+        }
+        Path pinnedPath = Paths.get(pinned);
+        // User-pinned (not IDE-managed) only when the pin resolves to a real
+        // directory AND that is where the launch actually ran.
+        return !(Files.isDirectory(pinnedPath)
+                && catalinaBase.toAbsolutePath().normalize()
+                        .equals(pinnedPath.toAbsolutePath().normalize()));
     }
 
     /**
@@ -772,12 +793,40 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
     static List<Path> cleanStaleDeployments(@NotNull Path webappsDir,
                                             @NotNull Path confDir,
                                             @NotNull java.util.Set<String> activeContextNames) {
+        return cleanStaleDeployments(webappsDir, confDir, activeContextNames, java.util.Set.of());
+    }
+
+    /**
+     * Same as {@link #cleanStaleDeployments(Path, Path, java.util.Set)}, plus a
+     * {@code preserve} set of absolute paths the descriptor/WAR passes must NOT
+     * delete.
+     *
+     * <p><b>Why.</b> {@link CatalinaHomeMirror} runs earlier in the same launch
+     * (during catalina.base preparation) and writes bundled-app WAR hardlinks into
+     * {@code webapps/} and synthesized/author context descriptors into
+     * {@code conf/Catalina/localhost/}. The unconditional {@code .war}/{@code .xml}
+     * sweeps below would otherwise delete that just-written mirror output before
+     * Tomcat starts, silently nullifying the "Deploy applications configured in
+     * Tomcat instance" feature. Passing the mirror's manifest paths
+     * ({@link CatalinaHomeMirror#mirroredPaths}) keeps them while still removing
+     * genuinely stale files from previous runs. The directory-removal pass already
+     * respected the mirror; this extends the same intent to the file passes.
+     */
+    @NotNull
+    static List<Path> cleanStaleDeployments(@NotNull Path webappsDir,
+                                            @NotNull Path confDir,
+                                            @NotNull java.util.Set<String> activeContextNames,
+                                            @NotNull java.util.Set<Path> preserve) {
         List<Path> failures = new ArrayList<>();
-        deleteEndingWith(confDir, EXT_XML, failures);
-        deleteEndingWith(webappsDir, EXT_WAR, failures);
+        deleteEndingWith(confDir, EXT_XML, failures, preserve);
+        deleteEndingWith(webappsDir, EXT_WAR, failures, preserve);
         for (String contextName : activeContextNames) {
             if (contextName == null || contextName.isBlank()) continue;
             Path leftover = TomcatDeploymentPaths.extractedDirectory(webappsDir, contextName);
+            // Defense-in-depth: never recurse into the webapps directory itself. A
+            // "." context name (were one ever to slip past resolveContextName) would
+            // resolve here to webapps/ and delete every deployed context, not one.
+            if (leftover.normalize().equals(webappsDir.normalize())) continue;
             if (Files.isDirectory(leftover)) {
                 try {
                     deleteRecursively(leftover);
@@ -819,8 +868,15 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
 
     static void deleteEndingWith(@NotNull Path dir, @NotNull String suffix,
                                  @NotNull List<Path> failures) {
+        deleteEndingWith(dir, suffix, failures, java.util.Set.of());
+    }
+
+    static void deleteEndingWith(@NotNull Path dir, @NotNull String suffix,
+                                 @NotNull List<Path> failures,
+                                 @NotNull java.util.Set<Path> preserve) {
         try (var stream = Files.list(dir)) {
             stream.filter(p -> p.getFileName().toString().endsWith(suffix))
+                  .filter(p -> !preserve.contains(p.normalize()))
                   .forEach(p -> {
                       try {
                           Files.deleteIfExists(p);

@@ -29,9 +29,10 @@ import org.jetbrains.annotations.NotNull;
  * <h2>Contract</h2>
  * <ul>
  *   <li>{@link #execute} validates the {@link RemoteConfig} and the configured
- *       artifact list, resolves credentials synchronously, then returns an
- *       {@link ExecutionResult} whose handler is a
- *       {@link RemoteDeploymentProcessHandler}.</li>
+ *       artifact list, then returns an {@link ExecutionResult} whose handler is
+ *       a {@link RemoteDeploymentProcessHandler}. Credential resolution and the
+ *       missing-password gate are deferred to the handler's background task so
+ *       the blocking PasswordSafe lookup never runs on the launch (EDT) path.</li>
  *   <li>The handler runs the actual Manager-API deploy on a background pooled
  *       thread (see that class's javadoc for the deploy lifecycle).</li>
  *   <li>Validation failures throw {@link ExecutionException} so the IDE
@@ -71,7 +72,13 @@ public class RemoteDeploymentRunProfileState implements RunProfileState {
                                             @NotNull ProgramRunner<?> runner) throws ExecutionException {
         validateRemoteConfig();
         validateArtifacts();
-        resolveCredentialsOrThrow();
+        // NOTE: credential resolution (blocking PasswordSafe I/O) is intentionally
+        // NOT done here. execute() runs on the EDT for a remote profile (the
+        // DefaultJavaProgramRunner off-EDT patching only wraps JavaCommandLine
+        // states), and PasswordSafe access on the EDT can stall the UI / trip the
+        // slow-operations assertion. The pooled deploy task
+        // (RemoteDeploymentProcessHandler.runDeployTask) resolves credentials and
+        // enforces the missing-password gate off the EDT instead.
 
         TomcatDeploymentLogger logger = new TomcatDeploymentLogger(environment.getProject());
         RemoteDeploymentProcessHandler handler = new RemoteDeploymentProcessHandler(
@@ -123,10 +130,15 @@ public class RemoteDeploymentRunProfileState implements RunProfileState {
     }
 
     /**
-     * Visible for tests. Resolves credentials synchronously from
-     * PasswordSafe and gates the launch when {@code useCredentials} is on
-     * but no password was found — failing here is far less confusing than
-     * a {@code 401 Unauthorized} mid-deploy.
+     * Visible for tests. Encodes the missing-password gate: with
+     * {@code useCredentials} on but no password found, failing fast is far
+     * less confusing than a {@code 401 Unauthorized} mid-deploy.
+     *
+     * <p>This is <em>not</em> called from {@link #execute} — the equivalent
+     * gate runs off the EDT in
+     * {@link RemoteDeploymentProcessHandler#runDeployTask()} to keep the
+     * blocking PasswordSafe lookup off the launch thread. It is retained as
+     * the directly-testable statement of that gate's contract.
      */
     void resolveCredentialsOrThrow() throws ExecutionException {
         RemoteConfig remoteConfig = configuration.getConfigData().getRemoteConfig();

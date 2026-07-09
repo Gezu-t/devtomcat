@@ -161,7 +161,6 @@ public class TomcatJavaParametersBuilder {
         return runId;
     }
 
-    @NotNull
     /**
      * True when this builder is assembling parameters for the Coverage
      * executor. Read from the execution environment instead of a setter so
@@ -173,6 +172,7 @@ public class TomcatJavaParametersBuilder {
         return TomcatConstants.COVERAGE_MODE.equals(environment.getExecutor().getId());
     }
 
+    @NotNull
     public JavaParameters build() throws ExecutionException {
         try {
             Path catalinaBase = getCatalinaBase();
@@ -274,6 +274,11 @@ public class TomcatJavaParametersBuilder {
         boolean hotDeployEnabled = configuration.isHotDeploymentEnabled();
         Set<String> reservedContextStems = collectIdeContextStems();
 
+        // A user-pinned CATALINA_BASE is theirs to manage — prepare() must preserve
+        // its conf/ rather than regenerate (wipe) it every launch. Same gate the
+        // deployment strategy uses for webapps/descriptor cleanup.
+        boolean ideManagedBase = LocalDeploymentStrategy.isIdeManagedCatalinaBase(catalinaBase, configuration);
+
         List<String> warnings = TomcatConfigPreparer.prepare(
                 catalinaBase, catalinaHome,
                 ports.getHttp(), ports.getShutdown(),
@@ -281,7 +286,8 @@ public class TomcatJavaParametersBuilder {
                 ports.getAjp(),  configuration.isAjpEnabled(),
                 overlayActive ? confOverlay : null,
                 hotDeployEnabled,
-                reservedContextStems);
+                reservedContextStems,
+                ideManagedBase);
 
         if (deploymentLogger != null) {
             if (overlayActive) {
@@ -325,6 +331,11 @@ public class TomcatJavaParametersBuilder {
         }
         Set<String> stems = new HashSet<>();
         for (com.dev.idea.plugins.tomcat.model.Deployment d : deployments) {
+            // Reserve stems only for deployments the launch will actually deploy.
+            // The deploy loop and configureDeployment's active-context filter both
+            // skip invalid deployments; mirroring that here keeps CatalinaHomeMirror
+            // from suppressing a shared app at a stem nothing ends up deployed to.
+            if (!d.isValid()) continue;
             try {
                 stems.add(ContextPathUtils.resolveContextName(d.getContextPath()));
             } catch (IllegalArgumentException e) {

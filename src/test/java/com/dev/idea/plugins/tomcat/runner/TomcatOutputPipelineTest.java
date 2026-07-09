@@ -293,6 +293,62 @@ class TomcatOutputPipelineTest {
     }
 
     @Nested
+    @DisplayName("multi-level context name normalization")
+    class MultiLevelContextNormalization {
+
+        private final List<String> reloading = new ArrayList<>();
+        private final List<String> deployed = new ArrayList<>();
+        private final List<String> failed = new ArrayList<>();
+
+        private TomcatOutputPipeline.Context contextWithMap() {
+            return new TomcatOutputPipeline.Context(
+                    logger,
+                    new TomcatLifecycleListener() {
+                        @Override public void onArtifactReloading(@NotNull String c, @NotNull String a) { reloading.add(a); }
+                        @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { deployed.add(a); }
+                        @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { failed.add(a); }
+                    },
+                    "testConfig", contextToArtifact, startupDetected, deployedCount,
+                    errorCount, warningCount, true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+        }
+
+        @Test
+        @DisplayName("ReloadAnalyzer resolves a multi-level context to the artifact display name")
+        void reloadResolvesMultiLevelContext() {
+            // The map is keyed with Tomcat's '#'-encoded on-disk name, exactly
+            // as TomcatProcessHandler registers it for a "/api/v2" context path.
+            contextToArtifact.put("api#v2", "My API");
+            TomcatOutputPipeline.Context ctx = contextWithMap();
+
+            new TomcatOutputPipeline.ReloadAnalyzer().analyze(
+                    "Reloading Context with name [/api/v2] has started", ctx);
+            new TomcatOutputPipeline.ReloadAnalyzer().analyze(
+                    "Reloading Context with name [/api/v2] is completed", ctx);
+
+            assertEquals(List.of("My API"), reloading,
+                    "The runtime '/api/v2' log context must map to the artifact name, not fall back to the raw path");
+            assertEquals(List.of("My API"), deployed);
+        }
+
+        @Test
+        @DisplayName("ArtifactFailureAnalyzer resolves a multi-level context to the artifact display name")
+        void failureResolvesMultiLevelContext() {
+            contextToArtifact.put("api#v2", "My API");
+            TomcatOutputPipeline.Context ctx = contextWithMap();
+
+            new TomcatOutputPipeline.ArtifactFailureAnalyzer().analyze(
+                    "Context [/api/v2] startup failed due to previous errors", ctx);
+
+            assertEquals(List.of("My API"), failed,
+                    "A failing '/api/v2' context must mark the configured artifact, not a phantom raw-path row");
+        }
+    }
+
+    @Nested
     @DisplayName("ContextAnalyzer")
     class ContextAnalyzerTests {
 

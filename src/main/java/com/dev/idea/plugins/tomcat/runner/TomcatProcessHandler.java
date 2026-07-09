@@ -374,16 +374,33 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         }
 
         List<Deployment> deployments = configuration.getDeployments();
-        expectedArtifactCount.set(deployments.size());
         if (deployments.isEmpty()) {
+            expectedArtifactCount.set(0);
             deploymentLogger.logDeploymentStart(configurationName);
         } else {
+            // Register only the subset LocalDeploymentStrategy.configureDeployment
+            // actually deploys: it skips !isValid() deployments and enforces
+            // first-wins on duplicate context names. Mirroring that filter keeps
+            // contextToArtifactName aligned with reality — otherwise a skipped
+            // duplicate would overwrite the deployed artifact's map entry, leaving
+            // the real artifact stuck at Deploying and the whole config pinned
+            // there, and an invalid deployment would be reported as Deployed.
+            int registered = 0;
             for (Deployment deployment : deployments) {
+                if (!deployment.isValid()) continue;
                 String name = deployment.getDisplayName();
+                String contextName = resolveContextName(deployment.getContextPath());
+                // First-wins: a later artifact resolving to an already-claimed
+                // context is exactly the one the strategy skips, so don't
+                // register it (no log line, no onArtifactDeploying).
+                if (contextToArtifactName.putIfAbsent(contextName, name) != null) {
+                    continue;
+                }
                 deploymentLogger.logDeploymentStart(name);
-                contextToArtifactName.put(resolveContextName(deployment.getContextPath()), name);
                 lifecycleListener.onArtifactDeploying(configurationName, name);
+                registered++;
             }
+            expectedArtifactCount.set(registered);
         }
         browserTargetContextName = resolveBrowserTargetContext(deployments);
     }

@@ -37,7 +37,8 @@ public final class DeploymentAdapter {
 
         return switch (legacy.getSource()) {
             case INTELLIJ_ARTIFACT ->
-                    ArtifactBackedDeployment.ofName(project, legacy.getName(), context);
+                    ArtifactBackedDeployment.ofName(project, legacy.getName(), context,
+                            legacy.getPath(), exploded);
 
             case AUTO_DETECTED -> {
                 Path outputPath = Path.of(legacy.getPath());
@@ -87,12 +88,15 @@ public final class DeploymentAdapter {
                                                                       boolean exploded) {
         Module module = TomcatReadActions.compute(() -> resolveOwningModule(project, storedName, outputPath));
         ModulePointerManager pm = ModulePointerManager.getInstance(project);
+        // Carry storedName as the legacy name so the round trip echoes back the
+        // persisted display name (which may differ from the resolved module name
+        // when strategy 2/3 mapped an artifact filename to a differently-named module).
         if (module != null) {
-            return new ModuleBackedDeployment(pm.create(module), outputPath, contextPath, exploded);
+            return new ModuleBackedDeployment(pm.create(module), outputPath, contextPath, exploded, storedName);
         }
         // Worst case — keep the deployment object alive so the run-config table
         // still shows it; isValid() will return false and the user can re-add it.
-        return new ModuleBackedDeployment(pm.create(storedName), outputPath, contextPath, exploded);
+        return new ModuleBackedDeployment(pm.create(storedName), outputPath, contextPath, exploded, storedName);
     }
 
     @Nullable
@@ -171,7 +175,7 @@ public final class DeploymentAdapter {
             out.setPath(resolved == null ? "" : resolved.toString());
             out.setSource(DeploymentArtifact.Source.INTELLIJ_ARTIFACT);
         } else if (typed instanceof ModuleBackedDeployment m) {
-            out.setName(m.getModuleName());
+            out.setName(m.getLegacyName());
             out.setPath(m.getOutputPath().toString());
             out.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
         } else if (typed instanceof ExternalFileDeployment e) {

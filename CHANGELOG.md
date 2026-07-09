@@ -4,11 +4,20 @@
 
 ### Changed
 - Minimum IntelliJ raised to 2025.1.
-- Screen-reader labels on server-tab fields.
+- Screen-reader labels on server-tab and deployment fields.
+- Warn when remote Manager credentials use plain HTTP.
 
 ### Fixed
 - Auto-Detect JDKs no longer freezes the dialog.
 - Add JDK shows the real detected version.
+- Configured Tomcat-instance apps survive launch cleanup.
+- Pinned CATALINA_BASE keeps its own conf/ files.
+- Stale cleanup can no longer target the webapps root.
+- Parallel runs no longer show a live server as stopped.
+- Cancelling a remote deploy no longer reports failure.
+- Remote deploy console no longer prints each line twice.
+- Hot-swap resource sync corrected across module dependencies.
+- Cancelling class sync during launch prep is honored again.
 
 ## [1.4.0]
 

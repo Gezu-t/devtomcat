@@ -55,18 +55,6 @@ public final class TomcatManagerDeployer {
     }
 
     /**
-     * Deploys a single artifact to the remote Tomcat via Manager API.
-     *
-     * <p>For WAR files, uses HTTP PUT to upload the file content.
-     * For exploded directories, uses the {@code war=file:} parameter (requires filesystem access on the server).
-     *
-     * @return true if deployment succeeded
-     */
-    public boolean deploy(@NotNull DeploymentArtifact artifact, @Nullable TomcatDeploymentLogger logger) {
-        return deployWithProgress(artifact, logger, null) == DeployResult.SUCCESS;
-    }
-
-    /**
      * Deploys with optional progress reporting for WAR uploads.
      * Returns a tri-state result so callers can distinguish cancellation from failure.
      *
@@ -112,8 +100,12 @@ public final class TomcatManagerDeployer {
         log(logger, "Deploying '" + artifact.getDisplayName() + "' to " + contextPath + " ...");
 
         try {
-            undeploy(contextPath, null);
-
+            // No client-side pre-undeploy: both deploy paths pass update=true,
+            // which makes Tomcat replace any existing app server-side (and only
+            // after the full WAR body is received for the PUT variant). A
+            // client-side undeploy here would tear down the running app up front,
+            // leaving the context serving nothing if the upload then fails or is
+            // cancelled.
             if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
                 return deployWarViaPut(artifact, contextPath, logger, indicator, abortCheck);
             } else {
@@ -121,6 +113,15 @@ public final class TomcatManagerDeployer {
                         ? DeployResult.SUCCESS : DeployResult.FAILED;
             }
         } catch (Exception e) {
+            // A mid-flight abort (user Stop / local process terminating) can
+            // surface as an IOException here — e.g. the fixed-length stream's
+            // close throwing "insufficient data written", or an interrupted
+            // socket write. Classify those as CANCELLED, not FAILED, so a
+            // deliberate stop is not reported as a deployment error.
+            if ((indicator != null && indicator.isCanceled()) || abortCheck.getAsBoolean()) {
+                log(logger, "Deployment cancelled: " + artifact.getDisplayName());
+                return DeployResult.CANCELLED;
+            }
             LOG.warn("Remote deployment failed: " + artifact.getDisplayName(), e);
             logError(logger, "Deployment failed: " + e.getMessage());
             return DeployResult.FAILED;
@@ -146,22 +147,6 @@ public final class TomcatManagerDeployer {
         } catch (Exception e) {
             LOG.debug("Undeploy failed (may not exist): " + normalized, e);
             return false;
-        }
-    }
-
-    /**
-     * Lists deployed applications on the remote Tomcat.
-     *
-     * @return the list response, or null on failure
-     */
-    @Nullable
-    public String listDeployments() {
-        try {
-            String url = getManagerUrl() + TEXT_ENDPOINT + "/list";
-            return executeGet(url);
-        } catch (Exception e) {
-            LOG.warn("Failed to list remote deployments", e);
-            return null;
         }
     }
 
@@ -248,6 +233,13 @@ public final class TomcatManagerDeployer {
             conn.setRequestProperty("Content-Type", "application/octet-stream");
             conn.setFixedLengthStreamingMode(fileSize);
 
+            // Do NOT early-return from inside the try-with-resources: with
+            // fixed-length streaming, closing the OutputStream after a partial
+            // write throws IOException("insufficient data written"), which would
+            // replace the CANCELLED return value and get reported as a failure.
+            // Instead flag the abort, stop writing, and let the catch below
+            // swallow the expected close exception and return CANCELLED.
+            boolean aborted = false;
             try (OutputStream out = conn.getOutputStream();
                  InputStream in = Files.newInputStream(warFile)) {
                 byte[] buffer = new byte[8192];
@@ -256,14 +248,16 @@ public final class TomcatManagerDeployer {
                 while ((read = in.read(buffer)) != -1) {
                     if (indicator != null && indicator.isCanceled()) {
                         log(logger, "Upload cancelled by user");
-                        return DeployResult.CANCELLED;
+                        aborted = true;
+                        break;
                     }
                     if (abortCheck.getAsBoolean()) {
                         // Local Tomcat process entered terminating/terminated state
                         // while the upload was in flight. Stop sending chunks so the
                         // task is not left holding a half-pushed WAR.
                         log(logger, "Upload aborted (local Tomcat process terminating)");
-                        return DeployResult.CANCELLED;
+                        aborted = true;
+                        break;
                     }
                     out.write(buffer, 0, read);
                     uploaded += read;
@@ -272,7 +266,23 @@ public final class TomcatManagerDeployer {
                         indicator.setText2(formatSize(uploaded) + " / " + formatSize(fileSize));
                     }
                 }
-                out.flush();
+                if (!aborted) {
+                    out.flush();
+                }
+            } catch (IOException ioe) {
+                // The stream's close() (run by try-with-resources) throws
+                // "insufficient data written" when we aborted mid-upload under
+                // fixed-length streaming. That is the expected consequence of a
+                // deliberate stop — report CANCELLED. Any other IOException (a
+                // genuine write/connect failure) is rethrown as a real error.
+                if (aborted) {
+                    return DeployResult.CANCELLED;
+                }
+                throw ioe;
+            }
+
+            if (aborted) {
+                return DeployResult.CANCELLED;
             }
 
             if (indicator != null) {

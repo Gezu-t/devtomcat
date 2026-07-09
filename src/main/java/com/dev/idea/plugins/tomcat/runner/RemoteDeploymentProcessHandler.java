@@ -43,8 +43,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       between artifacts.</li>
  *   <li>When the deploy finishes (success, failure, or cancellation), the
  *       handler calls {@code notifyProcessTerminated} with an exit code that
- *       reflects the outcome (0 = all artifacts deployed, non-zero = at
- *       least one failure).</li>
+ *       reflects the outcome (0 = all artifacts deployed; non-zero = at
+ *       least one failure, or the run was cancelled/stopped).</li>
  * </ul>
  *
  * <h2>Why this is a {@link ProcessHandler} and not an
@@ -73,6 +73,9 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
 
     /** Flips to {@code true} on the first Stop / abort signal; the upload loop polls this. */
     private final AtomicBoolean abortRequested = new AtomicBoolean(false);
+
+    /** Flips to {@code true} the moment the deploy task body starts running. */
+    private final AtomicBoolean taskEntered = new AtomicBoolean(false);
 
     /** Future for the deploy task — cancelled on destroyProcessImpl(). */
     private volatile Future<?> deployFuture;
@@ -103,6 +106,7 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
 
     /** The main deploy work; runs on a pooled background thread. */
     private void runDeployTask() {
+        taskEntered.set(true);
         int exitCode = 0;
         try {
             RemoteConfig remoteConfig = configuration.getConfigData().getRemoteConfig();
@@ -116,11 +120,25 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
             }
             // Credentials must be resolved before the first HTTP call — the
             // PasswordSafe lookup is async otherwise and would race the deploy.
-            // No-op if already resolved by RemoteDeploymentRunProfileState.execute.
+            // This runs on the pooled thread (not the EDT); a no-op if the
+            // config was already resolved by the deserializer's async task.
             CredentialResolver.ensureResolved(remoteConfig);
+
+            // Fail-fast missing-password gate. Moved off the launch (EDT) path
+            // — see RemoteDeploymentRunProfileState.execute — so the blocking
+            // PasswordSafe lookup runs here on the pooled thread. Do this before
+            // any HTTP call so we don't push a WAR only to get a 401.
+            if (remoteConfig.isUseCredentials() && remoteConfig.getPassword().isEmpty()) {
+                writeError("Remote deployment requires credentials but no password was found."
+                        + " Configure credentials in the run configuration's Server tab"
+                        + " (or store them in PasswordSafe).");
+                exitCode = 1;
+                return;
+            }
 
             String managerUrl = remoteConfig.getManagerUrl();
             writeInfo("Target: " + managerUrl);
+            warnIfCredentialsOverPlainHttp(remoteConfig, managerUrl);
 
             TomcatManagerDeployer deployer = new TomcatManagerDeployer(remoteConfig);
 
@@ -130,6 +148,7 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
             String error = deployer.testConnection();
             if (abortRequested.get()) {
                 writeInfo("Deployment cancelled before any artifact was sent.");
+                exitCode = 1;
                 return;
             }
             if (error != null) {
@@ -158,6 +177,7 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
             for (int i = 0; i < total; i++) {
                 if (abortRequested.get()) {
                     writeWarning("Deployment cancelled. " + success + "/" + total + " artifact(s) succeeded before stop.");
+                    exitCode = 1;
                     return;
                 }
                 Deployment deployment = deployments.get(i);
@@ -190,6 +210,7 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
                     case CANCELLED -> {
                         lifecycleListener.onArtifactCancelled(configurationName, artifactName);
                         writeWarning("Deployment cancelled mid-artifact: " + artifactName);
+                        exitCode = 1;
                         return;
                     }
                 }
@@ -223,10 +244,19 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
         if (f != null) {
             f.cancel(true);
         }
-        // Don't notifyProcessTerminated here — the runDeployTask's finally block
-        // owns termination so we don't double-emit. The deploy loop checks
-        // abortRequested at every artifact boundary and inside the chunk loop;
-        // it will see the flip on its next poll and exit cleanly.
+        // Normally the deploy loop sees the abortRequested flip on its next poll
+        // and runDeployTask's finally block owns termination — so we don't
+        // double-emit here. The one exception: if the pooled task was cancelled
+        // before its body ever started (f.cancel on a not-yet-run task), the
+        // finally block never runs and the handler would hang in TERMINATING
+        // forever. Self-terminate in that case. If the task is entering
+        // concurrently, notifyProcessTerminated coalesces via its
+        // TERMINATING->TERMINATED CAS and deploymentLogger.dispose() is
+        // idempotent, so the racing double call is harmless.
+        if (!taskEntered.get()) {
+            notifyProcessTerminated(1);
+            deploymentLogger.dispose();
+        }
     }
 
     @Override
@@ -256,19 +286,61 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
     // Helpers
     // -------------------------------------------------------------------
 
+    // These helpers emit only through the process stream (notifyTextAvailable),
+    // which the attached ConsoleView prints. They deliberately do NOT also route
+    // through deploymentLogger: the same ConsoleView is set on the logger
+    // (RemoteDeploymentRunProfileState.execute), so a logServerX call would print
+    // every line a second time with a timestamp/[INFO] prefix. idea.log
+    // diagnostics come from the direct LOG.* calls below.
     private void writeInfo(@NotNull String msg) {
         notifyTextAvailable(msg + "\n", ProcessOutputTypes.STDOUT);
-        deploymentLogger.logServerInfo(msg);
+        LOG.info(msg);
     }
 
     private void writeWarning(@NotNull String msg) {
         notifyTextAvailable(msg + "\n", ProcessOutputTypes.STDOUT);
-        deploymentLogger.logServerWarning(msg);
+        LOG.warn(msg);
     }
 
     private void writeError(@NotNull String msg) {
         notifyTextAvailable(msg + "\n", ProcessOutputTypes.STDERR);
-        deploymentLogger.logServerError(msg);
+        LOG.warn(msg);
+    }
+
+    /**
+     * Emits a one-time warning when Manager credentials will travel over an
+     * unencrypted {@code http://} connection to a non-loopback host. Base64
+     * Basic auth is not encryption, so on a remote host the credentials cross
+     * the network in cleartext. Loopback targets are exempt (nothing leaves the
+     * machine). This warns only — it never blocks the deploy.
+     */
+    private void warnIfCredentialsOverPlainHttp(@NotNull RemoteConfig remoteConfig, @NotNull String managerUrl) {
+        if (!remoteConfig.isUseCredentials()) {
+            return;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(managerUrl);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme)) {
+                return; // https (or unexpected scheme) — no cleartext exposure
+            }
+            String host = uri.getHost();
+            if (host == null) {
+                return;
+            }
+            boolean loopback = host.equalsIgnoreCase("localhost")
+                    || host.equals("127.0.0.1")
+                    || host.equals("::1")
+                    || host.equals("[::1]");
+            if (loopback) {
+                return; // never leaves the machine
+            }
+            writeWarning("Warning: sending Manager credentials over unencrypted HTTP to " + host
+                    + "; enable 'Use HTTPS' in the Server tab if the server supports it.");
+        } catch (IllegalArgumentException malformed) {
+            // Unparseable URL — the deploy itself will fail with a clearer error;
+            // nothing useful to warn about here.
+        }
     }
 
     /**

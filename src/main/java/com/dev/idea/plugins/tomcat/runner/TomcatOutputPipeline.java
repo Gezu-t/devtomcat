@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
@@ -384,7 +385,11 @@ public final class TomcatOutputPipeline {
             Matcher m = RELOAD_PATTERN.matcher(text);
             if (m.find()) {
                 String rawCtx = m.group(1);
-                String normalizedCtx = rawCtx.startsWith("/") ? rawCtx.substring(1) : rawCtx;
+                // Encode with the SAME '/'-to-'#' scheme the map keys use
+                // (ContextPathUtils.resolveContextName), so multi-level context
+                // paths like "/api/v2" resolve to "api#v2" and match
+                // contextToArtifactName instead of falling back to the raw path.
+                String normalizedCtx = ContextPathUtils.resolveContextNameSafe(rawCtx, LOG);
                 String artifactName = ctx.contextToArtifactName.getOrDefault(normalizedCtx, rawCtx);
                 ctx.logger.logServerInfo("Auto-reloaded: " + artifactName);
                 if (text.contains("has started")) {
@@ -453,7 +458,9 @@ public final class TomcatOutputPipeline {
             Matcher m = p.matcher(text);
             if (!m.find()) return null;
             String rawContext = m.group(1);
-            String normalized = rawContext.startsWith("/") ? rawContext.substring(1) : rawContext;
+            // Same encoding as the map keys (see ReloadAnalyzer): multi-level
+            // and ROOT context names must resolve to the artifact display name.
+            String normalized = ContextPathUtils.resolveContextNameSafe(rawContext, LOG);
             return ctx.contextToArtifactName.getOrDefault(normalized, rawContext);
         }
     }

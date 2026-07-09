@@ -105,15 +105,20 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
  * <h2>Safety</h2>
  * <ul>
  *   <li>Source-driven mirror: only files present in the module output are
- *       considered. Destination-only files (e.g. {@code WEB-INF/lib/*.jar},
- *       webapp resources outside {@code WEB-INF/classes/}) are left
- *       untouched.</li>
+ *       considered. Destination trees outside {@code WEB-INF/classes/}
+ *       (e.g. {@code WEB-INF/lib/*.jar}, webapp resources) are never
+ *       touched.</li>
  *   <li>Mtime gate: a file is copied only when the source is strictly newer
  *       than the destination (or the destination is absent). This keeps
  *       repeated restarts cheap and avoids touching files that match.</li>
- *   <li>Never deletes: even if the user removed a class from sources, the
- *       stale {@code .class} stays in the deployed dir until a clean
- *       build runs. Wiping is the build tool's job.</li>
+ *   <li>Orphan reconcile: files under {@code WEB-INF/classes/} that no source
+ *       root claims (removed classes, and resources a build placed there
+ *       directly) are deleted by {@link #removeOrphans}, so a stale
+ *       {@code .class} can no longer stay loadable by Tomcat. Symlinks are
+ *       skipped. The pass is deferred for an artifact whenever no source root
+ *       contributed anything, or any source root's walk failed to fully
+ *       enumerate its tree — so an all-unreadable-sources (or partial-failure)
+ *       run never wipes a working deployment.</li>
  *   <li>Read action: module / classpath traversal runs inside
  *       {@link TomcatReadActions#compute} — required by IntelliJ's
  *       PSI/index APIs.</li>
@@ -243,6 +248,13 @@ public final class DeployedClassesSync {
             try {
                 resolution = TomcatReadActions.compute(() ->
                         resolveTyped(project, deployment));
+            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                // User cancelled the launch-prep / update indicator: the read
+                // action's OrderEnumerator/ModuleRootManager traversal hit
+                // ProgressManager.checkCanceled(). Must propagate BEFORE the
+                // generic handler below, or Cancel is mislogged as a resolution
+                // failure and the loop continues as if nothing happened.
+                throw pce;
             } catch (Throwable t) {
                 LOG.debug("Could not resolve module output for '" + name + "': " + t.getMessage());
                 logger.logServerWarning("Class sync skipped '" + name
@@ -289,26 +301,45 @@ public final class DeployedClassesSync {
             // resolved by the classloader and the user sees "I deleted that
             // class, why is it still here" behaviour.
             java.util.Set<String> contributedPaths = new java.util.HashSet<>();
+            // Tracks whether EVERY source root's walk fully enumerated its
+            // contribution. If any root's walk failed (vanished source, nesting
+            // refusal, unreadable subtree, aborted walk), contributedPaths is an
+            // incomplete union and the orphan pass below is deferred — deleting
+            // a file the failed root legitimately owns but never visited would
+            // strip a working deployment (silent staleness or NoClassDefFound).
+            boolean allRootsWalkedCleanly = true;
             for (SourceRoot src : resolution.sourceRoots()) {
                 boolean classesOnly = shouldMirrorClassesOnly(src, deployedLibraryKeys);
                 MirrorResult mr = mirrorTree(src.path(), webInfClasses, classesOnly);
                 copiedForThisArtifact += mr.copied();
                 brokenForThisArtifact += mr.brokenSkipped();
                 contributedPaths.addAll(mr.contributedPaths());
+                if (mr.walkFailed()) {
+                    allRootsWalkedCleanly = false;
+                    logger.logServerWarning("Class sync: source root " + src.path()
+                            + " for '" + name + "' could not be fully read;"
+                            + " orphan cleanup deferred to avoid deleting deployed files.");
+                }
                 if (mr.copied() > 0) {
                     logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src.path()
                             + (classesOnly ? " (.class only)" : ""));
                 }
             }
             // Orphan-reconcile only when at least one source root actually
-            // contributed (the EMPTY MirrorResult from an unreadable / non-
-            // existent src returns no paths). Empty contributedPaths could
-            // also mean "every source root was unreadable today"; deleting
-            // everything in WEB-INF/classes/ on that failure mode would
-            // destroy a working deployment. The empty-set guard is the
-            // safety net.
+            // contributed (the EMPTY MirrorResult from a non-existent src
+            // returns no paths) AND every root's walk completed cleanly. Two
+            // failure modes are guarded here:
+            //   - Empty contributedPaths could mean "every source root was
+            //     unreadable today"; deleting everything in WEB-INF/classes/ on
+            //     that failure mode would destroy a working deployment.
+            //   - A PARTIAL failure — one root walks fine while another (e.g. a
+            //     dependency module) fails mid-walk — leaves contributedPaths
+            //     non-empty but missing the failed root's paths; running the
+            //     orphan pass then would delete every file that failed root
+            //     previously mirrored. allRootsWalkedCleanly defers the pass in
+            //     that case, leaving stale files rather than risking live ones.
             int orphansRemovedForThisArtifact = 0;
-            if (!contributedPaths.isEmpty()) {
+            if (!contributedPaths.isEmpty() && allRootsWalkedCleanly) {
                 orphansRemovedForThisArtifact = removeOrphans(webInfClasses, contributedPaths);
                 if (orphansRemovedForThisArtifact > 0) {
                     logger.logServerInfo("Class sync: removed " + orphansRemovedForThisArtifact
@@ -692,7 +723,16 @@ public final class DeployedClassesSync {
                 artifactName = dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
             }
 
+            // withoutDepModules(): map ONLY dep's own output under dep's
+            // artifact identity. Without it, orderEntries(dep) also returns
+            // dep's own module-dependencies' outputs, which would be put()
+            // under dep's name — in a diamond graph (M→{A,B}, A→B, B→S) the
+            // visited guard can block the corrective recursion, permanently
+            // mis-keying a transitive root (e.g. S's output to "B"). Each
+            // transitive root is already mapped by its true owner via the
+            // recursion below.
             for (VirtualFile outputRoot : OrderEnumerator.orderEntries(dep)
+                    .withoutDepModules()
                     .productionOnly()
                     .withoutSdk()
                     .withoutLibraries()
@@ -833,9 +873,22 @@ public final class DeployedClassesSync {
      */
     record MirrorResult(int copied,
                         int brokenSkipped,
-                        @NotNull java.util.Set<String> contributedPaths) {
+                        @NotNull java.util.Set<String> contributedPaths,
+                        boolean walkFailed) {
+        /**
+         * A root whose walk could not be trusted to have enumerated its full
+         * contribution — a vanished/non-directory source, a nesting-guard
+         * refusal, an unreadable directory subtree, or an outer walk failure.
+         * The caller must NOT run orphan removal when any source root reports
+         * this, or a partial walk would make the caller delete deployed files
+         * the failed root legitimately owns but did not get to visit.
+         */
         static final MirrorResult EMPTY = new MirrorResult(
-                0, 0, java.util.Collections.emptySet());
+                0, 0, java.util.Collections.emptySet(), false);
+
+        /** {@link #EMPTY} but marked as a failed walk (nothing contributed, and the walk cannot be trusted). */
+        static final MirrorResult FAILED = new MirrorResult(
+                0, 0, java.util.Collections.emptySet(), true);
     }
 
     /**
@@ -872,7 +925,10 @@ public final class DeployedClassesSync {
      * console.
      */
     static MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst, boolean classesOnly) {
-        if (!Files.isDirectory(src)) return MirrorResult.EMPTY;
+        // Source vanished / not a directory: treat as a failed walk so the
+        // caller defers orphan removal for the artifact rather than deleting
+        // files this root should have contributed.
+        if (!Files.isDirectory(src)) return MirrorResult.FAILED;
 
         // Pre-flight nesting guard: refuse to recurse when src and dst nest
         // inside each other. Two failure modes this catches:
@@ -889,11 +945,16 @@ public final class DeployedClassesSync {
         if (dstNorm.startsWith(srcNorm) || srcNorm.startsWith(dstNorm)) {
             LOG.warn("Class sync: refusing nested src/dst paths: src=" + srcNorm
                     + " dst=" + dstNorm);
-            return MirrorResult.EMPTY;
+            return MirrorResult.FAILED;
         }
 
         final int[] copied = {0};
         final int[] brokenSkipped = {0};
+        // Flipped true when a whole subtree is silently dropped from the walk
+        // (an unreadable directory) or the outer walk aborts — either way the
+        // contributedPaths set is incomplete and the caller must not treat a
+        // missing path as an orphan to delete.
+        final boolean[] walkFailed = {false};
         // Forward-slash-normalized relative paths the walker visited, regardless
         // of copy outcome. Used by the caller to compute orphan candidates in
         // the destination tree.
@@ -1030,17 +1091,26 @@ public final class DeployedClassesSync {
 
                 @Override
                 public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    // Walk continues past unreadable files (e.g. a directory
-                    // the user can't read). One bad file shouldn't abort
-                    // the whole mirror.
+                    // Walk continues past unreadable entries. One bad regular
+                    // file shouldn't abort the whole mirror. But an unreadable
+                    // DIRECTORY means its entire subtree is silently dropped
+                    // from contributedPaths — mark the walk failed so the
+                    // caller defers orphan removal rather than deleting the
+                    // deployed copies of files we never got to enumerate.
+                    if (Files.isDirectory(file)) {
+                        walkFailed[0] = true;
+                    }
                     LOG.debug("Class sync: cannot visit " + file + " (" + exc.getMessage() + ")");
                     return FileVisitResult.CONTINUE;
                 }
             });
         } catch (IOException e) {
+            // Outer walk aborted: contributedPaths holds only a partial union,
+            // so mark the walk failed to keep the caller's orphan pass off it.
+            walkFailed[0] = true;
             LOG.debug("Class sync: walk failed for " + src + " (" + e.getMessage() + ")");
         }
-        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths);
+        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths, walkFailed[0]);
     }
 
     /**

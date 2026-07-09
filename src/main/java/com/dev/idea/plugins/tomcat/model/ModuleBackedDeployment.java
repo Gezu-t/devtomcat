@@ -22,15 +22,35 @@ public final class ModuleBackedDeployment implements Deployment {
     private final @NotNull String contextPath;
     private final @NotNull Path outputPath;
     private final boolean exploded;
+    /**
+     * Original stored display name from the persisted legacy record (e.g.
+     * {@code webapp.war}), which may differ from the resolved module name when
+     * the artifact filename was mapped to a differently-named module by
+     * {@code DeploymentAdapter}. Preserved so the legacy round trip echoes back
+     * the persisted name instead of silently rewriting it to the module name.
+     * Null when the deployment was created directly from a module (name ==
+     * module name). Deliberately excluded from equals/hashCode — identity stays
+     * module name + output path + context + exploded, to keep typed dedupe stable.
+     */
+    private final @Nullable String legacyName;
 
     public ModuleBackedDeployment(@NotNull ModulePointer modulePointer,
                                   @NotNull Path outputPath,
                                   @NotNull String contextPath,
                                   boolean exploded) {
+        this(modulePointer, outputPath, contextPath, exploded, null);
+    }
+
+    public ModuleBackedDeployment(@NotNull ModulePointer modulePointer,
+                                  @NotNull Path outputPath,
+                                  @NotNull String contextPath,
+                                  boolean exploded,
+                                  @Nullable String legacyName) {
         this.modulePointer = modulePointer;
         this.outputPath = outputPath;
         this.contextPath = normaliseContextPath(contextPath);
         this.exploded = exploded;
+        this.legacyName = legacyName;
     }
 
     public static @NotNull ModuleBackedDeployment ofName(@NotNull Project project,
@@ -77,8 +97,12 @@ public final class ModuleBackedDeployment implements Deployment {
         return modulePointer.getModule() != null && Files.exists(outputPath);
     }
 
-    public @NotNull ModulePointer getModulePointer() {
-        return modulePointer;
+    /**
+     * The display name to persist back to the legacy record. Falls back to the
+     * resolved module name when no distinct stored name was captured.
+     */
+    public @NotNull String getLegacyName() {
+        return legacyName != null ? legacyName : modulePointer.getModuleName();
     }
 
     public @Nullable Module getModule() {

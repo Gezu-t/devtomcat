@@ -31,7 +31,6 @@ class TomcatDeploymentStatusServiceTest {
             var status = new TomcatDeploymentStatusService.ConfigStatus();
             assertEquals(0, status.getErrorCount());
             assertEquals(0, status.getWarningCount());
-            assertEquals(0, status.getStartupTimeMs());
         }
 
         @Test
@@ -70,7 +69,7 @@ class TomcatDeploymentStatusServiceTest {
         }
 
         @Test
-        @DisplayName("onServerStarted sets state to RUNNING with startup time")
+        @DisplayName("onServerStarted sets state to RUNNING")
         void serverStarted() {
             service.onServerStarting("cfg");
             service.onServerStarted("cfg", 1234);
@@ -78,7 +77,6 @@ class TomcatDeploymentStatusServiceTest {
             var status = service.getStatus("cfg");
             assertNotNull(status);
             assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState());
-            assertEquals(1234, status.getStartupTimeMs());
         }
 
         @Test
@@ -93,7 +91,6 @@ class TomcatDeploymentStatusServiceTest {
             var status = service.getStatus("cfg");
             assertNotNull(status);
             assertEquals(TomcatDeploymentStatusService.ServerState.FAILED, status.getServerState());
-            assertEquals(1234, status.getStartupTimeMs());
         }
 
         @Test
@@ -370,7 +367,6 @@ class TomcatDeploymentStatusServiceTest {
             var status = service.getStatus("newCfg");
             assertNotNull(status);
             assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState());
-            assertEquals(1200, status.getStartupTimeMs());
             assertEquals(1, status.getWarningCount());
         }
 
@@ -467,8 +463,9 @@ class TomcatDeploymentStatusServiceTest {
             // Tomcat emits the summary failure — the per-artifact analyzer
             // didn't identify which one. We still must surface FAILED.
             service.onDeploymentSummaryFailed("cfg");
-            // Simulate a benign onServerStarted that would otherwise flip the
-            // state back to RUNNING via restoreRunningStateIfIdle.
+            // Simulate a benign onServerStarted; recomputeServerState must keep
+            // returning FAILED because the sticky deploymentSummaryFailed flag
+            // is only cleared by the next onServerStarting.
             service.onServerStarted("cfg", 3200);
 
             var status = service.getStatus("cfg");
@@ -541,6 +538,9 @@ class TomcatDeploymentStatusServiceTest {
         void clearedOnNextLaunch() {
             service.onServerStarting("cfg");
             service.onDeploymentSummaryFailed("cfg");
+            // The prior launch ends before the next one begins (the platform
+            // always fires processTerminated before the next startNotify).
+            service.onServerStopped("cfg", 1);
             // New launch — ConfigStatus must be reset, not carry the sticky flag.
             service.onServerStarting("cfg");
             service.onServerStarted("cfg", 2500);
@@ -587,6 +587,92 @@ class TomcatDeploymentStatusServiceTest {
         @DisplayName("expected artifact states exist")
         void expectedStatesExist() {
             assertEquals(5, TomcatDeploymentStatusService.ArtifactState.values().length);
+        }
+    }
+
+    @Nested
+    @DisplayName("parallel runs (Allow parallel run)")
+    class ParallelRuns {
+
+        @Test
+        @DisplayName("a second launch does not wipe the first still-running instance's state")
+        void secondLaunchDoesNotWipeFirst() {
+            // Launch A comes up clean and is serving traffic.
+            service.onServerStarting("cfg");
+            service.onArtifactDeploying("cfg", "app");
+            service.onArtifactDeployed("cfg", "app");
+            service.onServerStarted("cfg", 100);
+
+            // Launch B of the SAME configuration starts while A is still live.
+            service.onServerStarting("cfg");
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState(),
+                    "B's onServerStarting must not regress the running instance");
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.DEPLOYED,
+                    status.getArtifactStates().get("app"),
+                    "B's onServerStarting must not clear A's artifact rows");
+        }
+
+        @Test
+        @DisplayName("first instance stopping keeps the surviving instance RUNNING")
+        void firstStopKeepsSurvivorRunning() {
+            service.onServerStarting("cfg");             // A: 0 -> 1
+            service.onArtifactDeploying("cfg", "app");
+            service.onArtifactDeployed("cfg", "app");
+            service.onServerStarted("cfg", 100);         // RUNNING
+            service.onServerStarting("cfg");             // B: 1 -> 2
+
+            service.onServerStopped("cfg", 0);           // A exits: 2 -> 1
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState(),
+                    "One instance exiting must not show a still-serving sibling as Stopped");
+            assertEquals(TomcatDeploymentStatusService.ArtifactState.DEPLOYED,
+                    status.getArtifactStates().get("app"),
+                    "Artifact rows must survive until the last instance exits");
+        }
+
+        @Test
+        @DisplayName("last instance stopping applies the terminal STOPPED state")
+        void lastStopAppliesTerminalState() {
+            service.onServerStarting("cfg");             // A: 0 -> 1
+            service.onServerStarting("cfg");             // B: 1 -> 2
+            service.onArtifactDeploying("cfg", "app");
+            service.onArtifactDeployed("cfg", "app");
+            service.onServerStarted("cfg", 100);
+
+            service.onServerStopped("cfg", 0);           // A: 2 -> 1 (survivor RUNNING)
+            service.onServerStopped("cfg", 0);           // B: 1 -> 0 (terminal)
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.STOPPED, status.getServerState());
+            assertTrue(status.getArtifactStates().isEmpty(),
+                    "Artifact rows are cleared once the last instance exits");
+        }
+
+        @Test
+        @DisplayName("a stray stop floors the launch count so the next launch still fully resets")
+        void strayStopDoesNotUnderflow() {
+            // A stop with no matching start (crash/rename edge) must not drive
+            // the counter negative — otherwise the next real launch's 0 -> 1
+            // reset would be skipped and a prior sticky failure would leak.
+            service.onServerStopped("cfg", 0);           // floored at 0
+
+            service.onServerStarting("cfg");             // 0 -> 1: full reset
+            service.onDeploymentSummaryFailed("cfg");
+            service.onServerStopped("cfg", 1);           // 1 -> 0: terminal FAILED
+
+            service.onServerStarting("cfg");             // 0 -> 1: reset clears sticky flag
+            service.onServerStarted("cfg", 100);
+
+            var status = service.getStatus("cfg");
+            assertNotNull(status);
+            assertEquals(TomcatDeploymentStatusService.ServerState.RUNNING, status.getServerState(),
+                    "Next launch must fully reset — proves the count was floored at 0, not negative");
         }
     }
 }

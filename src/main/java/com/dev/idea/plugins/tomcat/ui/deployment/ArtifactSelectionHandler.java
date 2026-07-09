@@ -11,6 +11,8 @@ import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ModuleDeploymentDialog;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.ui.Messages;
@@ -51,21 +53,47 @@ public class ArtifactSelectionHandler {
     }
 
     public void showArtifactSelectionDialog() {
+        // The artifact scan does blocking filesystem I/O (raw File.listFiles over
+        // build/target/out dirs for every module, plus per-module pom.xml reads),
+        // so it must not run on the EDT. Snapshot the existing deployment names on
+        // the EDT first — the table manager backs a Swing model and must not be
+        // read from a pooled thread — then run the detection off the EDT under a
+        // cancelable modal progress, and finally show the dialog back on the EDT.
+        Set<String> existingNames = tableManager.getDeployments().stream()
+                .map(DeploymentArtifact::getName)
+                .collect(Collectors.toSet());
+
+        DetectionResult result;
         try {
-            // 1. Try IntelliJ-configured artifacts first
-            List<Artifact> availableArtifacts = getSelectableArtifacts();
-            if (!availableArtifacts.isEmpty()) {
-                showIntelliJArtifactDialog(availableArtifacts);
-                return;
-            }
+            result = ProgressManager.getInstance().runProcessWithProgressSynchronously(
+                    (com.intellij.openapi.util.ThrowableComputable<DetectionResult, RuntimeException>) () -> {
+                        List<Artifact> artifacts = getSelectableArtifacts(existingNames);
+                        if (!artifacts.isEmpty()) {
+                            return new DetectionResult(artifacts, null);
+                        }
+                        return new DetectionResult(null, detectDeployables());
+                    },
+                    "Detecting Deployable Artifacts", true, project);
+        } catch (ProcessCanceledException pce) {
+            // User canceled the scan — nothing to show.
+            return;
+        } catch (Exception e) {
+            LOG.warn("Error showing artifact dialog", e);
+            Messages.showErrorDialog(project,
+                    "Error selecting artifacts: " + e.getMessage(),
+                    "Selection Error"
+            );
+            return;
+        }
 
-            // 2. Fall back to auto-detection of web modules and build outputs
-            List<DeploymentArtifact> detected = detectDeployables();
-            if (!detected.isEmpty()) {
-                showAutoDetectedDialog(detected);
-                return;
-            }
-
+        // Back on the EDT (runProcessWithProgressSynchronously returns here).
+        if (result.artifacts() != null && !result.artifacts().isEmpty()) {
+            // 1. IntelliJ-configured artifacts
+            showIntelliJArtifactDialog(result.artifacts());
+        } else if (result.detected() != null && !result.detected().isEmpty()) {
+            // 2. Auto-detected web modules and build outputs
+            showAutoDetectedDialog(result.detected());
+        } else {
             // 3. Nothing found — show helpful message
             Messages.showWarningDialog(project,
                     "No deployable artifacts found.\n\n" +
@@ -75,14 +103,15 @@ public class ArtifactSelectionHandler {
                             "  - Add a 'war' plugin to your build.gradle / pom.xml and rebuild",
                     "No Artifacts Available"
             );
-
-        } catch (Exception e) {
-            LOG.warn("Error showing artifact dialog", e);
-            Messages.showErrorDialog(project,
-                    "Error selecting artifacts: " + e.getMessage(),
-                    "Selection Error"
-            );
         }
+    }
+
+    /**
+     * Result of the off-EDT detection scan: either the IntelliJ-configured
+     * artifacts (preferred) or the auto-detected fallback deployments.
+     */
+    private record DetectionResult(@Nullable List<Artifact> artifacts,
+                                   @Nullable List<DeploymentArtifact> detected) {
     }
 
     private void showIntelliJArtifactDialog(@NotNull List<Artifact> artifacts) {
@@ -244,6 +273,8 @@ public class ArtifactSelectionHandler {
                 }
                 return pomNames;
             });
+        } catch (ProcessCanceledException pce) {
+            throw pce;
         } catch (Exception e) {
             LOG.debug("Error detecting POM modules", e);
             return new HashSet<>();
@@ -273,6 +304,8 @@ public class ArtifactSelectionHandler {
                     if (VfsUtil.loadText(pomFile).contains(TomcatConstants.POM_PACKAGING_POM)) {
                         return true;
                     }
+                } catch (ProcessCanceledException pce) {
+                    throw pce;
                 } catch (IOException | RuntimeException e) {
                     LOG.debug("Error reading pom.xml for module '" + module.getName() +
                             "' at " + pomFile.getPath(), e);
@@ -326,7 +359,12 @@ public class ArtifactSelectionHandler {
         LOG.debug("Added external source: " + name + " at " + localPath);
     }
 
-    private List<Artifact> getSelectableArtifacts() {
+    /**
+     * @param existingDeploymentNames names already present in the deployment
+     *        table, snapshotted on the EDT before this runs on a pooled thread
+     *        (the table manager backs a Swing model and must not be read off-EDT).
+     */
+    private List<Artifact> getSelectableArtifacts(@NotNull Set<String> existingDeploymentNames) {
         if (artifactManager == null) {
             return new ArrayList<>();
         }
@@ -344,11 +382,13 @@ public class ArtifactSelectionHandler {
             // neither passes isWebArtifact(). Users must be able to select any artifact.
             // Sort web artifacts first (exploded → WAR), then others alphabetically.
             List<Artifact> filtered = allPlatformArtifacts.stream()
-                    .filter(artifact -> !tableManager.hasDeployment(artifact.getName()))
+                    .filter(artifact -> !existingDeploymentNames.contains(artifact.getName()))
                     .filter(artifact -> hasActiveSourceModule(artifact.getName(), activeModules))
                     .collect(Collectors.toList());
 
             return sortByTypeCategory(filtered);
+        } catch (ProcessCanceledException pce) {
+            throw pce;
         } catch (Exception e) {
             LOG.warn("Error getting selectable artifacts", e);
             return new ArrayList<>();
@@ -496,12 +536,7 @@ public class ArtifactSelectionHandler {
         return DeploymentArtifact.TYPE_EXPLODED;
     }
 
-    public void addArtifact(@NotNull Artifact artifact) {
-        String contextPath = getUniqueContext(generateContextPath(artifact));
-        addArtifactWithContext(artifact, contextPath);
-    }
-
-    public String generateContextPath(@NotNull Artifact artifact) {
+    private String generateContextPath(@NotNull Artifact artifact) {
         return ContextPathUtils.generateContextPath(artifact.getName());
     }
 
@@ -519,6 +554,8 @@ public class ArtifactSelectionHandler {
                 }
                 return names;
             });
+        } catch (ProcessCanceledException pce) {
+            throw pce;
         } catch (Exception e) {
             LOG.debug("Error getting active module names", e);
             return new HashSet<>();
@@ -539,24 +576,6 @@ public class ArtifactSelectionHandler {
                                                  @NotNull Set<String> activeModuleNames) {
         String baseName = extractBaseModuleName(artifactName).toLowerCase(Locale.ROOT);
         return baseName.isEmpty() || activeModuleNames.contains(baseName);
-    }
-
-    @Nullable
-    public Artifact findArtifactByName(@NotNull String name) {
-        if (artifactManager == null) return null;
-
-        try {
-            Artifact[] allArtifacts = TomcatReadActions.compute(artifactManager::getArtifacts);
-            for (Artifact artifact : allArtifacts) {
-                if (artifact.getName().equals(name)) {
-                    return artifact;
-                }
-            }
-        } catch (Exception e) {
-            LOG.warn("Error finding artifact by name", e);
-        }
-
-        return null;
     }
 
 }

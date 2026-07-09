@@ -35,9 +35,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
     private boolean updateClassesAndResources = false;
     private boolean preserveSessions = false;
 
-    @NotNull
-    private String deploymentPath = "";
-
     public DeploymentConfig() {
     }
 
@@ -53,7 +50,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
             this.hotDeploymentEnabled = other.hotDeploymentEnabled;
             this.updateClassesAndResources = other.updateClassesAndResources;
             this.preserveSessions = other.preserveSessions;
-            this.deploymentPath = other.deploymentPath;
         } catch (Exception e) {
             LOG.error("Error copying DeploymentConfig", e);
             this.artifacts = new ArrayList<>();
@@ -138,11 +134,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
 
     public boolean isPreserveSessions() {
         return preserveSessions;
-    }
-
-    @NotNull
-    public String getDeploymentPath() {
-        return deploymentPath;
     }
 
     // =====================================================================
@@ -236,10 +227,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
         this.preserveSessions = preserve;
     }
 
-    public void setDeploymentPath(@Nullable String path) {
-        this.deploymentPath = path != null ? path : "";
-    }
-
     // =====================================================================
     // Validation
     // =====================================================================
@@ -250,14 +237,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
             if (a == null || !a.isValid()) return false;
         }
         return true;
-    }
-
-    public int getInvalidArtifactCount() {
-        int count = 0;
-        for (DeploymentArtifact a : artifacts) {
-            if (a == null || !a.isValid()) count++;
-        }
-        return count;
     }
 
     // =====================================================================
@@ -273,7 +252,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
             for (DeploymentArtifact a : this.artifacts) {
                 if (a != null) clone.artifacts.add(a.clone());
             }
-            clone.deploymentPath = this.deploymentPath;
             return clone;
         } catch (CloneNotSupportedException e) {
             throw new RuntimeException("DeploymentConfig cloning failed", e);
@@ -287,28 +265,19 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return hotDeploymentEnabled == that.hotDeploymentEnabled
                 && updateClassesAndResources == that.updateClassesAndResources
                 && preserveSessions == that.preserveSessions
-                && artifacts.equals(that.artifacts)
-                && deploymentPath.equals(that.deploymentPath);
+                && artifacts.equals(that.artifacts);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(artifacts, hotDeploymentEnabled,
-                updateClassesAndResources, preserveSessions, deploymentPath);
+                updateClassesAndResources, preserveSessions);
     }
 
     @NotNull
     public String getSummary() {
-        return String.format("DeploymentConfig{artifacts=%d, hotDeploy=%s, updateClasses=%s, path=%s}",
-                artifacts.size(), hotDeploymentEnabled, updateClassesAndResources, deploymentPath);
-    }
-
-    @NotNull
-    public String getArtifactListing() {
-        if (artifacts.isEmpty()) return "No artifacts configured";
-        return artifacts.stream()
-                .map(a -> "  - " + a.getName() + " (" + a.getType() + ")")
-                .collect(Collectors.joining("\n", "Artifacts:\n", ""));
+        return String.format("DeploymentConfig{artifacts=%d, hotDeploy=%s, updateClasses=%s}",
+                artifacts.size(), hotDeploymentEnabled, updateClassesAndResources);
     }
 
     @NotNull

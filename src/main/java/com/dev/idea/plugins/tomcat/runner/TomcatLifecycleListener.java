@@ -4,8 +4,12 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
 import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
+import com.intellij.execution.RunManager;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -97,10 +101,29 @@ public interface TomcatLifecycleListener {
     /** Adapts {@link TomcatDeploymentStatusService} as a lifecycle consumer. */
     @NotNull
     static TomcatLifecycleListener statusConsumer(@NotNull TomcatDeploymentStatusService service) {
+        return statusConsumer(service, null);
+    }
+
+    /**
+     * Adapts {@link TomcatDeploymentStatusService} as a lifecycle consumer.
+     * When {@code project} is non-null and the configuration was deleted while
+     * its server was still running, the stop event drops the live status
+     * instead of resurrecting a {@link TomcatDeploymentStatusService.ConfigStatus}
+     * for a name the cleanup listener already purged.
+     */
+    @NotNull
+    static TomcatLifecycleListener statusConsumer(@NotNull TomcatDeploymentStatusService service,
+                                                  @Nullable Project project) {
         return new TomcatLifecycleListener() {
             @Override public void onServerStarting(@NotNull String c) { service.onServerStarting(c); }
             @Override public void onServerStarted(@NotNull String c, long t) { service.onServerStarted(c, t); }
-            @Override public void onServerStopped(@NotNull String c, int ex, long d, int e, int w, long s) { service.onServerStopped(c, ex); }
+            @Override public void onServerStopped(@NotNull String c, int ex, long d, int e, int w, long s) {
+                if (project != null && !configurationStillExists(project, c)) {
+                    service.remove(c);
+                } else {
+                    service.onServerStopped(c, ex);
+                }
+            }
             @Override public void onArtifactDeploying(@NotNull String c, @NotNull String a) { service.onArtifactDeploying(c, a); }
             @Override public void onArtifactDeployed(@NotNull String c, @NotNull String a) { service.onArtifactDeployed(c, a); }
             @Override public void onArtifactFailed(@NotNull String c, @NotNull String a) { service.onArtifactFailed(c, a); }
@@ -115,6 +138,20 @@ public interface TomcatLifecycleListener {
     /** Adapts {@link TomcatDeploymentHistory} as a lifecycle consumer. */
     @NotNull
     static TomcatLifecycleListener historyConsumer(@NotNull TomcatDeploymentHistory service) {
+        return historyConsumer(service, null);
+    }
+
+    /**
+     * Adapts {@link TomcatDeploymentHistory} as a lifecycle consumer. When
+     * {@code project} is non-null and the configuration was deleted while its
+     * server was still running, the completed in-flight entry is dropped
+     * instead of being recorded — otherwise {@code recordCompleted} would
+     * resurrect a persisted history entry for a configuration that
+     * {@code removeEntriesFor} already purged.
+     */
+    @NotNull
+    static TomcatLifecycleListener historyConsumer(@NotNull TomcatDeploymentHistory service,
+                                                   @Nullable Project project) {
         return new TomcatLifecycleListener() {
             private volatile TomcatDeploymentHistory.HistoryEntry entry;
             private final Object entryLock = new Object();
@@ -172,7 +209,13 @@ public interface TomcatLifecycleListener {
                         e.errorCount = errorCount;
                         e.warningCount = warningCount;
                         e.startupTimeMs = startupTimeMs;
-                        service.recordCompleted(e);
+                        // Skip recording if the configuration was deleted while
+                        // this server was still running — removeEntriesFor
+                        // already purged its history and recording now would
+                        // resurrect a stale entry for a config that is gone.
+                        if (project == null || configurationStillExists(project, configName)) {
+                            service.recordCompleted(e);
+                        }
                         entry = null;
                     }
                 }
@@ -248,16 +291,18 @@ public interface TomcatLifecycleListener {
         List<TomcatLifecycleListener> consumers = new ArrayList<>();
 
         if (projectAvailable) {
+            Project project = configuration.getProject();
+
             TomcatDeploymentStatusService statusService =
-                    TomcatDeploymentStatusService.getInstance(configuration.getProject());
+                    TomcatDeploymentStatusService.getInstance(project);
             if (statusService != null) {
-                consumers.add(statusConsumer(statusService));
+                consumers.add(statusConsumer(statusService, project));
             }
 
             TomcatDeploymentHistory historyService =
-                    TomcatDeploymentHistory.getInstance(configuration.getProject());
+                    TomcatDeploymentHistory.getInstance(project);
             if (historyService != null) {
-                consumers.add(historyConsumer(historyService));
+                consumers.add(historyConsumer(historyService, project));
             }
 
             StartupTimeTracker tracker = StartupTimeTracker.getInstance(configuration.getProject());
@@ -267,5 +312,29 @@ public interface TomcatLifecycleListener {
         }
 
         return composite(consumers);
+    }
+
+    /**
+     * Whether a Tomcat run configuration with the given name still exists in the
+     * project. Used by the status/history consumers to avoid re-recording state
+     * for a configuration that was deleted while its server was still running.
+     * Errs toward {@code true} if RunManager cannot be queried, so a transient
+     * lookup failure never silently drops a legitimate record.
+     */
+    private static boolean configurationStillExists(@NotNull Project project, @NotNull String configName) {
+        if (project.isDisposed()) {
+            return false;
+        }
+        try {
+            for (RunnerAndConfigurationSettings settings : RunManager.getInstance(project).getAllSettings()) {
+                if (configName.equals(settings.getName())
+                        && settings.getConfiguration() instanceof TomcatRunConfiguration) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            return true;
+        }
+        return false;
     }
 }

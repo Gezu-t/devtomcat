@@ -117,10 +117,6 @@ public class DeploymentTableManager {
         DeploymentArtifact deployment = listModel.getElementAt(index);
         deployment.setApplicationContext(newContext);
 
-        if (deployment.isUsingDefaultContext()) {
-            deployment.setServerPath(newContext);
-        }
-
         fireDeploymentChanged();
         return true;
     }
@@ -138,7 +134,12 @@ public class DeploymentTableManager {
             if (isContextPathTaken(ctx, -1)) {
                 String base = ctx.endsWith("/") ? ctx.substring(0, ctx.length() - 1) : ctx;
                 for (int suffix = 2; suffix <= 99; suffix++) {
-                    String candidate = base + "-" + suffix;
+                    // Normalize the candidate before both checking and assigning.
+                    // Stored contexts are always slash-prefixed; for a root ("/")
+                    // collision base is "" and the raw candidate ("-2") would never
+                    // match a stored "/-2", so the taken-check would keep handing out
+                    // the same normalized value to every further root-defaulting row.
+                    String candidate = ContextPathUtils.normalizeContextPath(base + "-" + suffix);
                     if (!isContextPathTaken(candidate, -1)) {
                         deployment.setApplicationContext(candidate);
                         break;
@@ -266,20 +267,6 @@ public class DeploymentTableManager {
     }
 
     /**
-     * Replaces every row in the table with the legacy projection of the
-     * provided typed deployment list. The reverse direction of
-     * {@link #getTypedDeployments}.
-     */
-    public void setTypedDeployments(@NotNull List<com.dev.idea.plugins.tomcat.model.Deployment> deployments) {
-        listModel.removeAll();
-        for (com.dev.idea.plugins.tomcat.model.Deployment d : deployments) {
-            if (d != null) {
-                listModel.add(com.dev.idea.plugins.tomcat.model.DeploymentAdapter.toLegacy(d));
-            }
-        }
-    }
-
-    /**
      * Returns the actual {@link DeploymentArtifact} instances held by the list model.
      * Unlike {@link #getDeployments()}, these are not clones — field mutations
      * ({@code setName}, {@code setPath}) propagate directly to the UI.
@@ -381,20 +368,9 @@ public class DeploymentTableManager {
         }
     }
 
-    public int getSelectedRow() {
-        return deploymentList.getSelectedIndex();
-    }
-
-    public boolean hasSelection() {
-        return deploymentList.getSelectedIndex() >= 0;
-    }
-
     public void addAndSelectDeployment(DeploymentArtifact deployment) {
+        // addDeployment already selects and scrolls to the appended row.
         addDeployment(deployment);
-        int lastIndex = listModel.getSize() - 1;
-        if (lastIndex >= 0) {
-            deploymentList.setSelectedIndex(lastIndex);
-        }
     }
 
     public void setSelectedIndex(int index) {

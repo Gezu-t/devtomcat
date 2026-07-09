@@ -59,8 +59,7 @@ public final class ArtifactReferenceRefresher {
     }
 
     /**
-     * Aggregate of {@link RefreshAction}s. Same accessors the previous
-     * snapshot-based implementation exposed (callers compile unchanged).
+     * Aggregate of {@link RefreshAction}s.
      */
     public static final class RefreshResult {
         public static final RefreshResult EMPTY = new RefreshResult(List.of());
@@ -73,7 +72,6 @@ public final class ArtifactReferenceRefresher {
 
         public boolean hasUpdates()              { return !actions.isEmpty(); }
         public int getUpdateCount()              { return actions.size(); }
-        public int getUnresolvedCount()          { return 0; }
         public @NotNull List<RefreshAction> getUpdatedActions() { return actions; }
     }
 

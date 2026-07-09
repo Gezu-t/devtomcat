@@ -15,20 +15,51 @@ public final class ArtifactBackedDeployment implements Deployment {
 
     private final @NotNull ArtifactPointer artifactPointer;
     private final @NotNull String contextPath;
+    /**
+     * Last-known state captured from the persisted legacy record. Used only as a
+     * fallback when the {@link ArtifactPointer} no longer resolves (artifact
+     * removed, or project model not yet loaded): a live artifact always wins.
+     * Keeps the legacy round trip lossless instead of blanking the stored path
+     * and flipping the packaging type to war. Deliberately excluded from
+     * equals/hashCode — identity is the pointer name + context path.
+     */
+    private final @Nullable String lastKnownPath;
+    private final boolean lastKnownExploded;
 
     public ArtifactBackedDeployment(@NotNull ArtifactPointer artifactPointer,
                                     @NotNull String contextPath) {
+        this(artifactPointer, contextPath, null, false);
+    }
+
+    public ArtifactBackedDeployment(@NotNull ArtifactPointer artifactPointer,
+                                    @NotNull String contextPath,
+                                    @Nullable String lastKnownPath,
+                                    boolean lastKnownExploded) {
         this.artifactPointer = artifactPointer;
         this.contextPath = normaliseContextPath(contextPath);
+        this.lastKnownPath = lastKnownPath;
+        this.lastKnownExploded = lastKnownExploded;
     }
 
     /** Materialises a pointer from {@code artifactName} for deserialisation. */
     public static @NotNull ArtifactBackedDeployment ofName(@NotNull Project project,
                                                            @NotNull String artifactName,
                                                            @NotNull String contextPath) {
+        return ofName(project, artifactName, contextPath, null, false);
+    }
+
+    /**
+     * Materialises a pointer from {@code artifactName}, carrying the persisted
+     * path / packaging as last-known fallbacks for when the pointer is unresolved.
+     */
+    public static @NotNull ArtifactBackedDeployment ofName(@NotNull Project project,
+                                                           @NotNull String artifactName,
+                                                           @NotNull String contextPath,
+                                                           @Nullable String lastKnownPath,
+                                                           boolean lastKnownExploded) {
         return new ArtifactBackedDeployment(
                 ArtifactPointerManager.getInstance(project).createPointer(artifactName),
-                contextPath);
+                contextPath, lastKnownPath, lastKnownExploded);
     }
 
     @Override public @NotNull DeploymentKind getKind() { return DeploymentKind.ARTIFACT; }
@@ -40,7 +71,11 @@ public final class ArtifactBackedDeployment implements Deployment {
     @Override
     public @Nullable Path getResolvedPath() {
         Artifact artifact = artifactPointer.getArtifact();
-        if (artifact == null) return null;
+        if (artifact == null) {
+            // Pointer unresolved: fall back to the last-known persisted path so
+            // display / round-trip keep the stored value instead of blanking it.
+            return lastKnownPath == null || lastKnownPath.isEmpty() ? null : Path.of(lastKnownPath);
+        }
         String filePath = artifact.getOutputFilePath();
         return filePath == null || filePath.isEmpty() ? null : Path.of(filePath);
     }
@@ -48,7 +83,9 @@ public final class ArtifactBackedDeployment implements Deployment {
     @Override
     public boolean isExploded() {
         Artifact artifact = artifactPointer.getArtifact();
-        if (artifact == null) return false;
+        // Pointer unresolved: fall back to the last-known packaging so the round
+        // trip does not silently flip an exploded deployment to war.
+        if (artifact == null) return lastKnownExploded;
         // Exploded artifact types in IntelliJ all carry "exploded" in their type id
         // (e.g. "exploded-war", "exploded-jar").
         return artifact.getArtifactType().getId().contains("exploded");

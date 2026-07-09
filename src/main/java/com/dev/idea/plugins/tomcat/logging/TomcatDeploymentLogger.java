@@ -119,19 +119,9 @@ public class TomcatDeploymentLogger {
         }
     }
 
-    @Nullable
-    public ConsoleView getConsoleView() {
-        return consoleView;
-    }
-
     // =====================================================================
     // DEPLOYMENT LIFECYCLE LOGGING
     // =====================================================================
-
-    public void logDeploymentStarted() {
-        logWithType("Starting deployment process...", ConsoleViewContentType.SYSTEM_OUTPUT);
-        LOG.info("Deployment process started");
-    }
 
     public void logDeploymentStart(@NotNull String artifactName) {
         String message = String.format("%s Deploying artifact '%s'...", DEPLOYMENT_PREFIX, artifactName);
@@ -153,51 +143,9 @@ public class TomcatDeploymentLogger {
         LOG.info("Deployment successful for artifact: " + artifactName + " (" + safeDuration + "ms)");
     }
 
-    public void logDeploymentError(@NotNull String artifactName, @NotNull String errorMessage) {
-        String message = String.format(
-                "%s Failed to deploy artifact '%s': %s",
-                ERROR_PREFIX, artifactName, errorMessage
-        );
-        logWithType(message, ConsoleViewContentType.ERROR_OUTPUT);
-        LOG.warn("Deployment failed for artifact: " + artifactName + " - " + errorMessage);
-    }
-
-    /**
-     * Clamps all numeric inputs rather than throwing — a logging method that takes
-     * down the caller's flow over a counter bug is a worse outcome than a slightly
-     * misleading summary line.
-     */
-    public void logDeploymentComplete(int totalArtifacts, int successCount, long totalDurationMs) {
-        int safeTotal = Math.max(0, totalArtifacts);
-        int safeSuccess = Math.max(0, Math.min(safeTotal, successCount));
-        long safeDuration = Math.max(0, totalDurationMs);
-
-        boolean allSuccessful = safeSuccess == safeTotal;
-        String status = allSuccessful ? "SUCCESS" : "PARTIAL";
-
-        String message = String.format(
-                "%s Deployment complete: %s (%d/%d artifacts deployed in %d ms)",
-                DEPLOYMENT_PREFIX, status, safeSuccess, safeTotal, safeDuration
-        );
-
-        ConsoleViewContentType contentType = allSuccessful
-                ? ConsoleViewContentType.NORMAL_OUTPUT
-                : ConsoleViewContentType.LOG_WARNING_OUTPUT;
-
-        logWithType(message, contentType);
-
-        int successRate = safeTotal > 0 ? (safeSuccess * 100 / safeTotal) : 0;
-        LOG.info("Deployment completed - Status: " + status + ", Success rate: " + successRate + "%");
-    }
-
     // =====================================================================
     // SERVER LIFECYCLE LOGGING
     // =====================================================================
-
-    public void logServerConnection() {
-        logWithType("Connected to Tomcat server", ConsoleViewContentType.SYSTEM_OUTPUT);
-        LOG.info("Server connection established");
-    }
 
     /**
      * @param startupTimeMs server startup duration in milliseconds; negative values clamped to 0
@@ -289,19 +237,6 @@ public class TomcatDeploymentLogger {
     // =====================================================================
     // PROGRESS LOGGING
     // =====================================================================
-
-    /**
-     * Prints a new line per call — IntelliJ's run console does not support
-     * in-place updates, so this is a discrete log entry, not a live-updating bar.
-     */
-    public void logProgress(@NotNull String operation, int progress) {
-        int clamped = Math.max(0, Math.min(100, progress));
-        String progressBar = createProgressBar(clamped);
-        String message = String.format("%s %s %s %d%%", INFO_PREFIX, operation, progressBar, clamped);
-
-        logWithType(message, ConsoleViewContentType.NORMAL_OUTPUT);
-        LOG.debug("Progress: " + operation + " " + clamped + "%");
-    }
 
     // Package-private + static for TomcatDeploymentLoggerTest; uses no instance state.
     @NotNull
@@ -424,14 +359,6 @@ public class TomcatDeploymentLogger {
 
     public long getElapsedTime() {
         return System.currentTimeMillis() - startTime;
-    }
-
-    public boolean isDebugMode() {
-        return debugMode;
-    }
-
-    public boolean isShowTimestamps() {
-        return showTimestamps;
     }
 
     @NotNull

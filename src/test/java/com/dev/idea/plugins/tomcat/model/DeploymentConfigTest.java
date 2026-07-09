@@ -20,7 +20,6 @@ class DeploymentConfigTest {
         assertFalse(dc.isHotDeploymentEnabled());
         assertFalse(dc.isUpdateClassesAndResources());
         assertFalse(dc.isPreserveSessions());
-        assertEquals("", dc.getDeploymentPath());
     }
 
     @Test
@@ -105,7 +104,6 @@ class DeploymentConfigTest {
         DeploymentConfig original = new DeploymentConfig();
         original.addArtifact(new DeploymentArtifact("app", "/path", "war"));
         original.setHotDeploymentEnabled(true);
-        original.setDeploymentPath("/deploy");
 
         DeploymentConfig cloned = original.clone();
         assertEquals(original, cloned);

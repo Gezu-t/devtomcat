@@ -206,13 +206,10 @@ public class DeploymentArtifact implements Serializable, Cloneable {
         try {
             return (DeploymentArtifact) super.clone();
         } catch (CloneNotSupportedException e) {
-            DeploymentArtifact copy = new DeploymentArtifact();
-            copy.name = this.name;
-            copy.path = this.path;
-            copy.type = this.type;
-            copy.contextPath = this.contextPath;
-            copy.source = this.source;
-            return copy;
+            // Unreachable: this class implements Cloneable. Throw rather than
+            // hand-copy fields (which would silently drift if a field is added),
+            // matching DeploymentConfig.clone.
+            throw new RuntimeException("DeploymentArtifact cloning failed", e);
         }
     }
 

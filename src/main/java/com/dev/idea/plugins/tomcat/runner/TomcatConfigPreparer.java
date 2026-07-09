@@ -115,6 +115,24 @@ public final class TomcatConfigPreparer {
                                        @Nullable Path confOverlay,
                                        boolean hotDeploymentEnabled,
                                        @NotNull Set<String> reservedContextStems) throws IOException {
+        return prepare(catalinaBase, catalinaHome, httpPort, shutdownPort, httpsPort, httpsEnabled,
+                ajpPort, ajpEnabled, confOverlay, hotDeploymentEnabled, reservedContextStems, true);
+    }
+
+    /**
+     * As {@link #prepare}, gated on base ownership. {@code ideManagedBase=false}
+     * marks a user-pinned CATALINA_BASE, whose conf/ is preserved rather than
+     * regenerated (see {@link #copyConfDirectory(Path, Path, boolean)}).
+     */
+    @NotNull
+    public static List<String> prepare(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
+                                       int httpPort, int shutdownPort,
+                                       int httpsPort, boolean httpsEnabled,
+                                       int ajpPort, boolean ajpEnabled,
+                                       @Nullable Path confOverlay,
+                                       boolean hotDeploymentEnabled,
+                                       @NotNull Set<String> reservedContextStems,
+                                       boolean ideManagedBase) throws IOException {
         List<String> warnings = new ArrayList<>();
 
         // Refuse base == home up front, before ANY destructive step. The conf-copy
@@ -138,7 +156,8 @@ public final class TomcatConfigPreparer {
         cleanStaleTempState(catalinaBase);
 
         // copyConfDirectory skips Catalina/localhost so the mirror owns that subtree.
-        copyConfDirectory(catalinaHome, catalinaBase);
+        // For a pinned base it preserves the user's conf/ instead of regenerating it.
+        copyConfDirectory(catalinaHome, catalinaBase, ideManagedBase);
 
         if (confOverlay != null) {
             applyConfOverlay(confOverlay, catalinaBase);
@@ -306,6 +325,25 @@ public final class TomcatConfigPreparer {
      * gates it on the user's "Deploy applications configured in Tomcat instance" choice.
      */
     static void copyConfDirectory(@NotNull Path catalinaHome, @NotNull Path catalinaBase) throws IOException {
+        copyConfDirectory(catalinaHome, catalinaBase, true);
+    }
+
+    /**
+     * As {@link #copyConfDirectory(Path, Path)}, gated on base ownership.
+     *
+     * <p>When {@code ideManaged} is {@code true} (the default isolated base the IDE
+     * regenerates each launch) conf/ is wiped and re-copied fresh from CATALINA_HOME.
+     *
+     * <p>When {@code false} the base is a user-pinned CATALINA_BASE — its conf/ is
+     * theirs to manage, so it is <b>never wiped</b>. This method only fills in files
+     * CATALINA_HOME provides that are <i>absent</i>, preserving the user's own
+     * {@code tomcat-users.xml}, keystores, custom policy, and any hand-authored
+     * files. This mirrors the pinned-base protection {@code LocalDeploymentStrategy}
+     * already applies to webapps/ and descriptor cleanup ({@code server.xml} is still
+     * mutated in place afterwards for ports).
+     */
+    static void copyConfDirectory(@NotNull Path catalinaHome, @NotNull Path catalinaBase,
+                                  boolean ideManaged) throws IOException {
         Path sourceConf = catalinaHome.resolve(DIR_CONF);
         Path targetConf = catalinaBase.resolve(DIR_CONF);
 
@@ -330,7 +368,14 @@ public final class TomcatConfigPreparer {
                             + "different directory than the registered Tomcat home.");
         }
 
-        recreateDirectory(targetConf);
+        if (ideManaged) {
+            // IDE owns this base — regenerate conf/ fresh each launch.
+            recreateDirectory(targetConf);
+        } else {
+            // User-pinned base — never wipe; only ensure conf/ exists so absent
+            // defaults can be filled in below without destroying user files.
+            Files.createDirectories(targetConf);
+        }
         Path catalinaLocalhost = sourceConf.resolve("Catalina").resolve("localhost");
 
         Files.walkFileTree(sourceConf, new SimpleFileVisitor<>() {
@@ -357,13 +402,18 @@ public final class TomcatConfigPreparer {
                 }
                 Path relative = sourceConf.relativize(file);
                 Path target = targetConf.resolve(relative);
-                Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                // Pinned base: never overwrite a file the user already has — only
+                // fill absent defaults. IDE-managed base: always refresh.
+                if (ideManaged || !Files.exists(target)) {
+                    Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                }
                 return FileVisitResult.CONTINUE;
             }
         });
 
-        LOG.info("Copied conf directory from " + sourceConf + " to " + targetConf +
-                " (excluding Catalina/localhost, owned by CatalinaHomeMirror)");
+        LOG.info("Copied conf directory from " + sourceConf + " to " + targetConf
+                + " (excluding Catalina/localhost, owned by CatalinaHomeMirror; "
+                + (ideManaged ? "regenerated" : "fill-missing for pinned base") + ")");
     }
 
     /**

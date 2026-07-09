@@ -17,7 +17,7 @@ import java.util.List;
 public class ModuleDeploymentDialog extends ChooseElementsDialog<DeploymentArtifact> {
 
     public ModuleDeploymentDialog(@NotNull Project project, @NotNull List<DeploymentArtifact> items) {
-        super(project, items, "Select Deployable Module",
+        super(project, items, "Select Modules and Files to Deploy",
                 "Auto-detected web modules and build outputs. Select items to deploy at server startup.");
     }
 

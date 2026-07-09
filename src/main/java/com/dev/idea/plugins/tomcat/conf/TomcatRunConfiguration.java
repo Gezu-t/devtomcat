@@ -526,7 +526,19 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                                                @NotNull List<String> artifactNames) {
         for (BeforeRunTask task : tasks) {
             if (task instanceof TomcatBuildArtifactsTask buildTask) {
-                buildTask.setArtifactNames(artifactNames);
+                List<String> existing = buildTask.getArtifactNames();
+                if (existing.isEmpty()) {
+                    // No curated selection yet — default to verifying all deployments.
+                    buildTask.setArtifactNames(artifactNames);
+                } else {
+                    // Preserve the user's per-artifact selection from the "Select
+                    // Artifacts" dialog; only drop names of deployments that no longer
+                    // exist. Overwriting with the full list here would silently clobber
+                    // the selection on every Deployment-tab save.
+                    List<String> preserved = new ArrayList<>(existing);
+                    preserved.retainAll(artifactNames);
+                    buildTask.setArtifactNames(preserved);
+                }
                 buildTask.setEnabled(true);
                 return;
             }

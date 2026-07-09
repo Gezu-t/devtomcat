@@ -2,12 +2,17 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -45,32 +50,6 @@ class TomcatManagerDeployerTest {
     }
 
     @Test
-    void testListDeploymentsReturnsNullForUnreachableHost() {
-        RemoteConfig config = new RemoteConfig(
-                "http://invalid-host-that-does-not-exist:9999/manager",
-                "admin", "admin", true);
-        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
-
-        String result = deployer.listDeployments();
-        assertNull(result);
-    }
-
-    @Test
-    void testDeployFailsWithMissingWarFile() {
-        RemoteConfig config = new RemoteConfig(
-                "http://invalid-host-that-does-not-exist:9999/manager",
-                "admin", "admin", true);
-        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
-
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", "/nonexistent/path/app.war", DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/test");
-
-        boolean result = deployer.deploy(artifact, null);
-        assertFalse(result, "Deploy should fail when WAR file doesn't exist");
-    }
-
-    @Test
     void testDeployFailsForExplodedWithUnreachableHost(@TempDir Path tempDir) throws IOException {
         // Create a fake exploded directory
         Path webInf = tempDir.resolve("WEB-INF");
@@ -85,8 +64,10 @@ class TomcatManagerDeployerTest {
                 "test-app", tempDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
         artifact.setContextPath("/test");
 
-        boolean result = deployer.deploy(artifact, null);
-        assertFalse(result, "Deploy should fail for unreachable host");
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null);
+        assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
+                "Deploy should fail for unreachable host");
     }
 
     @Test
@@ -101,8 +82,9 @@ class TomcatManagerDeployerTest {
         artifact.setContextPath("/");
 
         // Should not throw — handles "/" context path correctly
-        boolean result = deployer.deploy(artifact, null);
-        assertFalse(result); // Will fail because file doesn't exist
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null);
+        assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result); // fails: file doesn't exist
     }
 
     @Test
@@ -116,8 +98,9 @@ class TomcatManagerDeployerTest {
                 "app", "/nonexistent/path/app.war", DeploymentArtifact.TYPE_WAR);
         artifact.setContextPath("");
 
-        boolean result = deployer.deploy(artifact, null);
-        assertFalse(result);
+        TomcatManagerDeployer.DeployResult result =
+                deployer.deployWithProgress(artifact, null, null);
+        assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result);
     }
 
     @Test
@@ -129,19 +112,6 @@ class TomcatManagerDeployerTest {
 
         String error = deployer.testConnection();
         assertNotNull(error, "Should return error for unreachable host even without credentials");
-    }
-
-    @Test
-    void testDeployerHandlesValidManagerUrl() {
-        // Valid Manager URL without trailing slash
-        RemoteConfig config = new RemoteConfig(
-                "http://invalid-host-that-does-not-exist:9999/manager",
-                "admin", "admin", true);
-        TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
-
-        // Should not throw — URL construction works fine
-        String result = deployer.listDeployments();
-        assertNull(result); // unreachable, but no exception from URL construction
     }
 
     @Test
@@ -262,5 +232,61 @@ class TomcatManagerDeployerTest {
                 deployer.deployWithProgress(artifact, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
                 "Three-arg overload must still produce FAILED on unreachable host (not CANCELLED)");
+    }
+
+    @Test
+    void testDeployWithProgressReturnsCancelledWhenAbortFlipsMidUpload(@TempDir Path tempDir) throws IOException {
+        // Regression: aborting the WAR upload AFTER the first chunk has been
+        // written must report CANCELLED, not FAILED. Under fixed-length
+        // streaming, closing the half-written stream throws
+        // "insufficient data written"; that expected close exception must not
+        // be reclassified as a deployment failure. The existing () -> true test
+        // only covers the pre-upload abort, never this in-flight close path.
+        Path warFile = tempDir.resolve("big.war");
+        Files.write(warFile, new byte[64 * 1024]); // several 8 KB chunks
+
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            // Drain whatever the client sends before it aborts, then reply.
+            try (InputStream body = exchange.getRequestBody()) {
+                byte[] sink = new byte[8192];
+                while (body.read(sink) != -1) { /* consume until the client stops */ }
+            } catch (IOException ignored) {
+                // Client aborted mid-stream — expected.
+            }
+            try {
+                byte[] ok = "OK - deployed".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, ok.length);
+                exchange.getResponseBody().write(ok);
+            } catch (IOException ignored) {
+                // Connection may already be gone after the client abort.
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            RemoteConfig config = new RemoteConfig(
+                    "http://127.0.0.1:" + port + "/manager", "admin", "admin", true);
+            TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
+
+            DeploymentArtifact artifact = new DeploymentArtifact(
+                    "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+            artifact.setContextPath("/test");
+
+            // Abort predicate polls: index 0 is the pre-upload check in
+            // deployWithProgress, index 1 is the first in-loop poll (lets the
+            // first chunk go out), index >= 2 aborts the in-flight upload.
+            AtomicInteger polls = new AtomicInteger();
+            TomcatManagerDeployer.DeployResult result =
+                    deployer.deployWithProgress(artifact, null, null,
+                            () -> polls.getAndIncrement() >= 2);
+
+            assertEquals(TomcatManagerDeployer.DeployResult.CANCELLED, result,
+                    "Aborting mid-upload must yield CANCELLED, not FAILED");
+        } finally {
+            server.stop(0);
+        }
     }
 }

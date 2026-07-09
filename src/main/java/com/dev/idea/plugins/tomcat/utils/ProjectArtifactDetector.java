@@ -73,7 +73,13 @@ public final class ProjectArtifactDetector {
 
     /**
      * Detects IntelliJ-configured web artifacts as {@link ArtifactBackedDeployment}s.
-     * Filters out artifacts whose source module no longer exists.
+     *
+     * <p>{@code artifactManager.getArtifacts()} only returns live, registered
+     * artifacts, and {@link ArtifactBackedDeployment} holds an {@code ArtifactPointer}
+     * the platform keeps valid across rename/delete, so orphan concerns are handled
+     * structurally downstream. We deliberately do <em>not</em> filter by a
+     * name-string-to-module-name heuristic here: that silently dropped valid
+     * user-renamed artifacts whose name no longer encodes the module name.
      */
     @NotNull
     public static List<Deployment> detectIntelliJWebArtifacts(@NotNull Project project) {
@@ -81,12 +87,9 @@ public final class ProjectArtifactDetector {
             ArtifactManager artifactManager = getArtifactManager(project);
             if (artifactManager == null) return Collections.<Deployment>emptyList();
 
-            Set<String> activeModules = getActiveModuleNames(project);
-
             List<Deployment> results = new ArrayList<>();
             for (Artifact artifact : artifactManager.getArtifacts()) {
                 if (!isWebArtifact(artifact)) continue;
-                if (!hasActiveSourceModule(artifact.getName(), activeModules)) continue;
 
                 results.add(ArtifactBackedDeployment.ofName(
                         project,
@@ -177,7 +180,33 @@ public final class ProjectArtifactDetector {
             LOG.warn("DevTomcat: Error scanning module build outputs", e);
         }
 
-        return deduplicate(results);
+        return collapseByContextPath(deduplicate(results));
+    }
+
+    /**
+     * Collapses scanned candidates that resolve to the same Tomcat context path,
+     * keeping one deterministically. A standard {@code mvn package} war build leaves
+     * both {@code target/myapp.war} and the exploded {@code target/myapp/} sibling —
+     * both generate context {@code /myapp}, and {@link Deployment#equals} does not
+     * merge them because their paths differ. Emitting both yields two deployments
+     * fighting over one context, which fails at deploy time. When both forms are
+     * present for a context we prefer the packaged {@code .war} (the canonical build
+     * artifact); otherwise we keep the first candidate seen.
+     */
+    @NotNull
+    private static List<Deployment> collapseByContextPath(@NotNull List<Deployment> deployments) {
+        LinkedHashMap<String, Deployment> byContext = new LinkedHashMap<>();
+        for (Deployment d : deployments) {
+            String context = d.getContextPath();
+            Deployment existing = byContext.get(context);
+            if (existing == null) {
+                byContext.put(context, d);
+            } else if (existing.isExploded() && !d.isExploded()) {
+                // Prefer the packaged .war over its exploded sibling.
+                byContext.put(context, d);
+            }
+        }
+        return new ArrayList<>(byContext.values());
     }
 
     /** Same web-artifact-type detection as before, on the platform {@link Artifact}. */
@@ -209,48 +238,9 @@ public final class ProjectArtifactDetector {
         }
     }
 
-    /**
-     * Filters a list of typed deployments to exclude those whose display name
-     * (case-insensitive) matches an existing entry.
-     */
-    @NotNull
-    public static List<Deployment> filterExisting(@NotNull List<Deployment> candidates,
-                                                  @NotNull Collection<String> existingNames) {
-        Set<String> lowerNames = new HashSet<>();
-        for (String name : existingNames) {
-            lowerNames.add(name.toLowerCase(Locale.ROOT));
-        }
-        List<Deployment> filtered = new ArrayList<>();
-        for (Deployment candidate : candidates) {
-            if (!lowerNames.contains(candidate.getDisplayName().toLowerCase(Locale.ROOT))) {
-                filtered.add(candidate);
-            }
-        }
-        return filtered;
-    }
-
     // =====================================================================
     // Private helpers
     // =====================================================================
-
-    @NotNull
-    private static Set<String> getActiveModuleNames(@NotNull Project project) {
-        Set<String> names = new HashSet<>();
-        try {
-            for (Module module : ModuleManager.getInstance(project).getModules()) {
-                names.add(module.getName().toLowerCase(Locale.ROOT));
-            }
-        } catch (Exception e) {
-            LOG.debug("DevTomcat: Error getting active module names", e);
-        }
-        return names;
-    }
-
-    private static boolean hasActiveSourceModule(@NotNull String artifactName,
-                                                 @NotNull Set<String> activeModuleNames) {
-        String baseName = ContextPathUtils.extractBaseModuleName(artifactName).toLowerCase(Locale.ROOT);
-        return baseName.isEmpty() || activeModuleNames.contains(baseName);
-    }
 
     @Nullable
     private static ArtifactManager getArtifactManager(@NotNull Project project) {

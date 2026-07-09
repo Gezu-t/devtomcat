@@ -139,6 +139,47 @@ class LocalDeploymentStrategyCleanupTest {
         }
 
         @Test
+        @DisplayName("preserve set keeps mirror-written .war/.xml while stale files are still removed")
+        void preserveKeepsMirrorOutput(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            // Written by CatalinaHomeMirror earlier in the same launch — must survive.
+            Path mirroredWar = Files.writeString(webapps.resolve("shared.war"), "war");
+            Path mirroredXml = Files.writeString(conf.resolve("ROOT.xml"), "<Context/>");
+            // Genuine leftovers from a previous run — must be removed.
+            Files.writeString(webapps.resolve("stale.war"), "old");
+            Files.writeString(conf.resolve("stale.xml"), "old");
+
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, Set.of(),
+                    Set.of(mirroredWar.normalize(), mirroredXml.normalize()));
+
+            assertTrue(failures.isEmpty());
+            assertTrue(Files.exists(webapps.resolve("shared.war")), "mirror WAR must survive cleanup");
+            assertTrue(Files.exists(conf.resolve("ROOT.xml")), "mirror descriptor must survive cleanup");
+            assertFalse(Files.exists(webapps.resolve("stale.war")), "stale WAR must be removed");
+            assertFalse(Files.exists(conf.resolve("stale.xml")), "stale descriptor must be removed");
+        }
+
+        @Test
+        @DisplayName("a '.' context name never deletes the webapps directory itself")
+        void dotContextDoesNotWipeWebapps(@TempDir Path tempDir) throws IOException {
+            Path conf = Files.createDirectory(tempDir.resolve("conf"));
+            Path webapps = Files.createDirectory(tempDir.resolve("webapps"));
+            Files.createDirectories(webapps.resolve("existingApp"));
+
+            // "." would resolve to webapps/. == webapps; the guard must skip it so the
+            // whole tree is not deleted (belt-and-suspenders behind resolveContextName).
+            List<Path> failures = LocalDeploymentStrategy.cleanStaleDeployments(
+                    webapps, conf, Set.of("."));
+
+            assertTrue(failures.isEmpty());
+            assertTrue(Files.isDirectory(webapps), "webapps directory must survive");
+            assertTrue(Files.isDirectory(webapps.resolve("existingApp")),
+                    "other deployed contexts must survive");
+        }
+
+        @Test
         @DisplayName("active-context overload tolerates missing dir (no failure entry)")
         void missingLeftoverDirIsSilent(@TempDir Path tempDir) throws IOException {
             Path conf = Files.createDirectory(tempDir.resolve("conf"));

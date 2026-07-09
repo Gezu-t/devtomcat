@@ -120,7 +120,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         setBorder(JBUI.Borders.empty(8, 12, 8, 12));
 
         // Title at top
-        TitledSeparator title = new TitledSeparator("Deploy at the server startup");
+        TitledSeparator title = new TitledSeparator("Deploy at server startup");
         add(title, BorderLayout.NORTH);
 
         // List with toolbar + context editor together in center
@@ -132,7 +132,11 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         // Context path editor directly below the list toolbar
         JPanel contextPanel = new JPanel(new BorderLayout(8, 0));
         contextPanel.setBorder(JBUI.Borders.emptyTop(4));
-        contextPanel.add(new JBLabel("Application context:"), BorderLayout.WEST);
+        JBLabel contextLabel = new JBLabel("Application context:");
+        // Associate the label with its field so screen readers announce the
+        // field's purpose and a label mnemonic can move focus to it.
+        contextLabel.setLabelFor(contextTextField);
+        contextPanel.add(contextLabel, BorderLayout.WEST);
         contextPanel.add(contextTextField, BorderLayout.CENTER);
         centerPanel.add(contextPanel, BorderLayout.SOUTH);
 

@@ -220,6 +220,46 @@ public final class CatalinaHomeMirror {
         return removed;
     }
 
+    /**
+     * Returns the absolute, normalized paths this run's mirror wrote into
+     * {@code catalinaBase} — WAR hardlinks under {@code webapps/} and synthesized
+     * or author context descriptors under {@code conf/Catalina/localhost/} — read
+     * from the manifest. Empty when the mirror is disabled or wrote nothing.
+     *
+     * <p>Callers that run their own destructive cleanup over the same directories
+     * (e.g. {@link LocalDeploymentStrategy#cleanStaleDeployments}) use this to
+     * preserve mirror output, which is written earlier in the same launch and must
+     * survive to Tomcat startup.
+     */
+    @NotNull
+    public static Set<Path> mirroredPaths(@NotNull Path catalinaBase) {
+        Path manifest = catalinaBase.resolve(MANIFEST_NAME);
+        if (!Files.isRegularFile(manifest)) {
+            return Set.of();
+        }
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(manifest);
+        } catch (IOException e) {
+            LOG.warn("Could not read mirror manifest at " + manifest + ": " + e.getMessage());
+            return Set.of();
+        }
+        Set<Path> paths = new HashSet<>();
+        for (String raw : lines) {
+            String trimmed = raw.trim();
+            // Header lines carry '='; entries are bare relative paths. Mirror the
+            // same defensive filtering cleanupPreviousMirror applies.
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.contains("=")) {
+                continue;
+            }
+            if (trimmed.contains("..") || trimmed.startsWith("/") || trimmed.contains(":")) {
+                continue;
+            }
+            paths.add(catalinaBase.resolve(trimmed).normalize());
+        }
+        return paths;
+    }
+
     // =========================================================================
     // Author-provided context descriptors (conf/Catalina/localhost/*.xml)
     // =========================================================================

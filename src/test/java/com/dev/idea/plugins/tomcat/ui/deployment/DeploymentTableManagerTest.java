@@ -144,4 +144,31 @@ class DeploymentTableManagerTest {
         assertFalse(manager.isContextPathTakenByOthers("/newcontext", a),
                 "identity-based exclusion must hold even when the artifact's stored context was mutated mid-dialog");
     }
+
+    // -------------------------------------------------------------------------
+    // addDeployment — collision-suffix candidates must be normalized
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("addDeployment: three root-context artifacts get distinct auto-bumped contexts (no duplicate /-2)")
+    void rootContextCollisionsProduceDistinctContexts() {
+        // All three default to the root context "/". The collision auto-bump
+        // strips the trailing slash to base "" and builds candidates like "-2".
+        // Stored contexts are always slash-prefixed ("/-2"), so unless the
+        // candidate is normalized before the taken-check, the raw "-2" never
+        // matches "/-2" and the third artifact is handed the same "/-2" — a
+        // duplicate that the launch validator then rejects.
+        DeploymentTableManager manager = new DeploymentTableManager();
+        manager.addDeployment(newArtifact("a", "/"));
+        manager.addDeployment(newArtifact("b", "/"));
+        manager.addDeployment(newArtifact("c", "/"));
+
+        java.util.Set<String> contexts = new java.util.HashSet<>();
+        for (DeploymentArtifact d : manager.getDeployments()) {
+            contexts.add(d.getApplicationContext());
+        }
+
+        assertEquals(3, contexts.size(),
+                "each root-defaulting artifact must receive a distinct, normalized context path");
+    }
 }

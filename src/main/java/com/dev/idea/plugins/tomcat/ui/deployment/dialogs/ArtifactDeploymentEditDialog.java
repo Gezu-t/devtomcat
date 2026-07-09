@@ -56,17 +56,25 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
-        JBLabel infoLabel = new JBLabel("<html>Edit <b>" + deployment.getDisplayName() + "</b>:</html>");
+        // Escape the display name — it can be an artifact/module name or a
+        // filename derived from an arbitrary path, so '<', '>' or '&' would
+        // otherwise garble or truncate this HTML label.
+        JBLabel infoLabel = new JBLabel("<html>Edit <b>"
+                + com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(deployment.getDisplayName())
+                + "</b>:</html>");
         panel.add(infoLabel, gbc);
 
         gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
-        panel.add(new JBLabel("Application context:"), gbc);
-
-        gbc.gridx = 1; gbc.weightx = 1.0;
+        JBLabel contextLabel = new JBLabel("Application context:");
         contextField = new JBTextField();
         contextField.setText(deployment.getApplicationContext());
         contextField.setPreferredSize(new Dimension(JBUI.scale(250), JBUI.scale(25)));
         contextField.selectAll();
+        // Associate the label with its field for screen readers / mnemonic focus.
+        contextLabel.setLabelFor(contextField);
+        panel.add(contextLabel, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
         panel.add(contextField, gbc);
 
         // Packaging type dropdown. Editable only for EXTERNAL sources — for
@@ -74,9 +82,7 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         // by the underlying artifact (LocalDeploymentStrategy branches on type),
         // so flipping WAR↔EXPLODED here would misdirect the deployment code path.
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1; gbc.weightx = 0;
-        panel.add(new JBLabel("Packaging:"), gbc);
-
-        gbc.gridx = 1; gbc.weightx = 1.0;
+        JBLabel packagingLabel = new JBLabel("Packaging:");
         typeCombo = new ComboBox<>(new String[]{
                 DeploymentArtifact.TYPE_EXPLODED,
                 DeploymentArtifact.TYPE_WAR
@@ -92,6 +98,11 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
                             + "Remove and re-add to switch packaging, or add the artifact via "
                             + "'+' → 'External Source...' to get an editable packaging field.");
         }
+        // Associate the label with its combo for screen readers / mnemonic focus.
+        packagingLabel.setLabelFor(typeCombo);
+        panel.add(packagingLabel, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
         panel.add(typeCombo, gbc);
 
         gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2; gbc.weightx = 0;

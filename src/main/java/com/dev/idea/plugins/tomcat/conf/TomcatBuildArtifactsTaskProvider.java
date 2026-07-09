@@ -119,6 +119,17 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
 
         List<Deployment> deployments = tomcatConfig.getDeployments();
 
+        // Honor the per-artifact selection persisted on the task by the
+        // "Select Artifacts" dialog (configureTask). An empty selection means
+        // "verify all", matching the dialog's pre-check-all default — an artifact
+        // the user explicitly unchecked must not block the launch.
+        Set<String> selected = new HashSet<>(task.getArtifactNames());
+        if (!selected.isEmpty()) {
+            deployments = deployments.stream()
+                    .filter(d -> selected.contains(d.getDisplayName()))
+                    .toList();
+        }
+
         boolean allValid = true;
         StringBuilder missing = new StringBuilder();
         for (Deployment d : deployments) {
@@ -133,11 +144,11 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
             }
         }
         if (!allValid) {
-            // Short balloon — the run-console writes the full path list; the
-            // balloon just needs to say "blocked, build first".
+            // Name the artifacts that are not ready so the balloon is actionable
+            // (the accumulated bullet list), then say what to do next.
             TomcatNotifier.error(tomcatConfig.getProject(),
                     "Artifacts not ready",
-                    "Build the project, then launch again.");
+                    missing + "\nBuild the project, then launch again.");
             return false;
         }
 

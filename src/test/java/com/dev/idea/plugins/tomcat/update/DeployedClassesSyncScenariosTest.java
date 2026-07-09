@@ -1124,6 +1124,64 @@ class DeployedClassesSyncScenariosTest {
     }
 
     // ===========================================================================
+    // walkFailed contract — deletion-safety guard for the caller's orphan pass.
+    // A root whose walk could not be trusted to fully enumerate its tree must
+    // report walkFailed=true so syncDeployments defers removeOrphans rather than
+    // deleting deployed files the failed root legitimately owns but never
+    // visited (partial-failure deletion regression).
+    // ===========================================================================
+
+    @Test
+    @DisplayName("walkFailed — clean full walk reports walkFailed=false")
+    void walkFailed01_cleanWalk(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        writeClass(src, "com/foo/Service.class", "bytes");
+
+        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+
+        assertFalse(r.walkFailed(),
+                "a fully-enumerated source root must not mark the walk failed");
+    }
+
+    @Test
+    @DisplayName("walkFailed — empty source dir still walks cleanly (walkFailed=false)")
+    void walkFailed02_emptySrcIsClean(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+
+        assertFalse(r.walkFailed(),
+                "an empty but readable source is a successful (empty) walk, not a failure");
+    }
+
+    @Test
+    @DisplayName("walkFailed — non-directory src reports walkFailed=true (vanished root)")
+    void walkFailed03_nonDirectorySrc(@TempDir Path tmp) throws Exception {
+        Path file = tmp.resolve("not-a-dir.txt");
+        Files.writeString(file, "oops");
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+
+        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(file, dst);
+
+        assertTrue(r.walkFailed(),
+                "a vanished / non-directory source root must defer the caller's orphan pass");
+    }
+
+    @Test
+    @DisplayName("walkFailed — nested src/dst refusal reports walkFailed=true")
+    void walkFailed04_nestedPathsRefused(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("root"));
+        Path dst = Files.createDirectories(src.resolve("WEB-INF/classes")); // dst nested under src
+
+        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+
+        assertTrue(r.walkFailed(),
+                "the nesting-guard refusal is an untrusted walk and must defer orphan removal");
+    }
+
+    // ===========================================================================
     // Test fixtures and helpers
     // ===========================================================================
 

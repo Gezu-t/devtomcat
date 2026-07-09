@@ -38,7 +38,9 @@ public final class DeploymentModuleResolver {
     /**
      * Returns the project module backing {@code deployment}, or {@code null} when
      * none can be resolved (external file deployment, missing artifact, or the
-     * packaging plugin is unavailable). Never throws.
+     * packaging plugin is unavailable). Never throws, except
+     * {@link com.intellij.openapi.progress.ProcessCanceledException} which is
+     * rethrown unchanged (the resolver runs on the cancelable launch path).
      */
     @Nullable
     public static Module resolve(@NotNull Deployment deployment, @NotNull Project project) {
@@ -49,6 +51,8 @@ public final class DeploymentModuleResolver {
                 ArtifactManager mgr;
                 try {
                     mgr = ArtifactManager.getInstance(project);
+                } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                    throw pce;
                 } catch (NoClassDefFoundError | Exception ignored) {
                     return null;
                 }
@@ -60,6 +64,11 @@ public final class DeploymentModuleResolver {
                 return m.getModule();
             }
             return null; // ExternalFileDeployment — no project module
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            // Cancellation must propagate before the generic handler — the
+            // packaging-tree walk / artifact resolution can hit
+            // ProgressManager.checkCanceled() under the launch-prep indicator.
+            throw pce;
         } catch (Exception e) {
             LOG.warn("Failed to resolve module for '" + deployment.getDisplayName()
                     + "': " + e.getMessage());

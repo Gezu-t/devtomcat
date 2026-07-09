@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory.HistoryEntry;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
@@ -38,12 +39,15 @@ public class DeploymentHistoryDialog extends DialogWrapper {
         super(project, false);
         this.project = project;
         this.configurationName = configurationName;
-        this.entries = scopeEntries(
-                TomcatDeploymentHistory.getInstance(project).getEntries(),
-                configurationName
-        );
+        TomcatDeploymentHistory history = TomcatDeploymentHistory.getInstance(project);
+        // Reuse the service's own name filter for the scoped case rather than
+        // duplicating it here — keeps one source of truth for "entries for a
+        // configuration".
+        this.entries = (configurationName == null || configurationName.isBlank())
+                ? history.getEntries()
+                : history.getEntriesForConfig(configurationName);
         setTitle(dialogTitle(configurationName));
-        setSize(800, 500);
+        setSize(JBUI.scale(800), JBUI.scale(500));
         init();
     }
 
@@ -192,12 +196,10 @@ public class DeploymentHistoryDialog extends DialogWrapper {
         return new DialogWrapperAction(clearActionLabel(configurationName)) {
             @Override
             protected void doAction(java.awt.event.ActionEvent e) {
-                int confirm = JOptionPane.showConfirmDialog(
-                        getContentPanel(),
+                if (Messages.showYesNoDialog(project,
                         clearConfirmationMessage(configurationName),
                         "Confirm",
-                        JOptionPane.YES_NO_OPTION);
-                if (confirm == JOptionPane.YES_OPTION) {
+                        Messages.getQuestionIcon()) == Messages.YES) {
                     TomcatDeploymentHistory history = TomcatDeploymentHistory.getInstance(project);
                     if (configurationName == null) {
                         history.clearHistory();
@@ -208,17 +210,6 @@ public class DeploymentHistoryDialog extends DialogWrapper {
                 }
             }
         };
-    }
-
-    @NotNull
-    static List<HistoryEntry> scopeEntries(@NotNull List<HistoryEntry> entries,
-                                           @Nullable String configurationName) {
-        if (configurationName == null || configurationName.isBlank()) {
-            return List.copyOf(entries);
-        }
-        return entries.stream()
-                .filter(entry -> configurationName.equals(entry.configName))
-                .toList();
     }
 
     @NotNull
@@ -284,7 +275,7 @@ public class DeploymentHistoryDialog extends DialogWrapper {
             return switch (col) {
                 case 0 -> e.getFormattedTimestamp();
                 case 1 -> e.configName;
-                case 2 -> e.success ? "OK" : "FAILED";
+                case 2 -> e.formatStatus();
                 case 3 -> formatDuration(e.durationMs);
                 case 4 -> e.startupTimeMs > 0 ? formatDuration(e.startupTimeMs) : "—";
                 case 5 -> e.errorCount;

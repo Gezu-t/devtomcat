@@ -105,6 +105,42 @@ class DeploymentAdapterTest {
         }
 
         @Test
+        @DisplayName("ArtifactBackedDeployment with unresolved pointer preserves last-known path and exploded type")
+        void artifactBackedUnresolvedFallsBackToLastKnown() {
+            ArtifactPointer ptr = mock(ArtifactPointer.class);
+            when(ptr.getArtifactName()).thenReturn("ghost");
+            when(ptr.getArtifact()).thenReturn(null);
+
+            // Pointer does not resolve, but the deployment carried the last-known
+            // persisted path + exploded flag: the round trip must not blank the
+            // path or flip the packaging to war.
+            ArtifactBackedDeployment typed = new ArtifactBackedDeployment(
+                    ptr, "/c", "/out/app", /* lastKnownExploded */ true);
+
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(typed);
+            assertEquals("ghost", legacy.getName());
+            assertEquals("/out/app", legacy.getPath());
+            assertEquals(DeploymentArtifact.TYPE_EXPLODED, legacy.getType());
+            assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, legacy.getSource());
+        }
+
+        @Test
+        @DisplayName("ModuleBackedDeployment round-trips the stored legacy name, not the resolved module name")
+        void moduleBackedPreservesLegacyName() {
+            ModulePointer ptr = mock(ModulePointer.class);
+            when(ptr.getModuleName()).thenReturn("web-mod");
+
+            // Stored display name (e.g. an artifact filename) differs from the
+            // resolved module name; toLegacy must echo back the stored name.
+            ModuleBackedDeployment typed = new ModuleBackedDeployment(
+                    ptr, Path.of("/target/web-mod"), "/ctx", true, "web-mod.war");
+
+            DeploymentArtifact legacy = DeploymentAdapter.toLegacy(typed);
+            assertEquals("web-mod.war", legacy.getName());
+            assertEquals(DeploymentArtifact.Source.AUTO_DETECTED, legacy.getSource());
+        }
+
+        @Test
         @DisplayName("ModuleBackedDeployment → AUTO_DETECTED source")
         void moduleBacked() {
             ModulePointer ptr = mock(ModulePointer.class);

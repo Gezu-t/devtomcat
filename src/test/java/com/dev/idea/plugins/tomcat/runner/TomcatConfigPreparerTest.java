@@ -204,6 +204,38 @@ class TomcatConfigPreparerTest {
         }
 
         @Test
+        @DisplayName("pinned base (ideManaged=false) preserves user files and never overwrites them")
+        void pinnedBasePreservesUserConf(@TempDir Path tempDir) throws IOException {
+            Path catalinaHome = tempDir.resolve("home");
+            Path catalinaBase = tempDir.resolve("base");
+            Files.createDirectories(catalinaHome.resolve("conf"));
+            Files.createDirectories(catalinaBase.resolve("conf"));
+
+            // CATALINA_HOME defaults.
+            Files.writeString(catalinaHome.resolve("conf/web.xml"), "<web-app>home</web-app>");
+            Files.writeString(catalinaHome.resolve("conf/catalina.properties"), "home=1");
+
+            // The user's pinned base already holds a customized web.xml and a file
+            // that exists only in their base (e.g. a keystore / hand-edited config).
+            Files.writeString(catalinaBase.resolve("conf/web.xml"), "<web-app>MINE</web-app>");
+            Files.writeString(catalinaBase.resolve("conf/keystore.jks"), "SECRET");
+
+            TomcatConfigPreparer.copyConfDirectory(catalinaHome, catalinaBase, false);
+
+            // User-only file survives untouched (the data-loss the wipe caused).
+            assertTrue(Files.exists(catalinaBase.resolve("conf/keystore.jks")),
+                    "user-only conf file must be preserved in a pinned base");
+            assertEquals("SECRET", Files.readString(catalinaBase.resolve("conf/keystore.jks")));
+            // Existing user file is NOT overwritten by the CATALINA_HOME default.
+            assertEquals("<web-app>MINE</web-app>",
+                    Files.readString(catalinaBase.resolve("conf/web.xml")),
+                    "pinned base must not overwrite the user's own conf files");
+            // An absent default is still filled in so Tomcat has what it needs.
+            assertEquals("home=1", Files.readString(catalinaBase.resolve("conf/catalina.properties")),
+                    "absent defaults should still be filled from CATALINA_HOME");
+        }
+
+        @Test
         @DisplayName("removes stale files and directories not present in home conf")
         void removesStaleFiles(@TempDir Path tempDir) throws IOException {
             Path catalinaHome = tempDir.resolve("home");

@@ -102,7 +102,7 @@ public final class TomcatDeploymentHistory implements PersistentStateComponent<T
         }
 
         @NotNull
-        String formatStatus() {
+        public String formatStatus() {
             if (success) {
                 return "OK";
             }

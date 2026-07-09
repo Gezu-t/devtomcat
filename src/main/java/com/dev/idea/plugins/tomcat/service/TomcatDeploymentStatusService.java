@@ -60,13 +60,22 @@ public final class TomcatDeploymentStatusService {
         private final AtomicInteger errorCount = new AtomicInteger();
         private final AtomicInteger warningCount = new AtomicInteger();
         private volatile boolean startupComplete;
-        private volatile long startupTimeMs;
+        /**
+         * Number of concurrently-live launches of this configuration
+         * (IntelliJ's "Allow parallel run"). All instances share one status
+         * keyed by configuration name, so the shared status is fully reset
+         * only on the first launch (0 -> 1) and torn down to a terminal state
+         * only when the last instance exits (-> 0); a stopping instance must
+         * not clear a still-running sibling's state.
+         */
+        private final AtomicInteger activeLaunches = new AtomicInteger();
         /**
          * Sticky flag for server-level deployment failures — Tomcat emitted
          * "One or more Contexts did not start successfully" or an equivalent
          * summary, but the per-artifact analyzer couldn't pin down which one.
-         * Blocks {@link #restoreRunningStateIfIdle} from clearing FAILED back
-         * to RUNNING even when every known artifact state is non-FAILED,
+         * Forces {@link #recomputeServerState} to keep returning
+         * {@link ServerState#FAILED} even when every known artifact state is
+         * non-FAILED, until {@link #onServerStarting} resets the launch,
          * because we know something actually failed.
          */
         private volatile boolean deploymentSummaryFailed;
@@ -75,7 +84,6 @@ public final class TomcatDeploymentStatusService {
         public Map<String, ArtifactState> getArtifactStates() { return artifactStates; }
         public int getErrorCount() { return errorCount.get(); }
         public int getWarningCount() { return warningCount.get(); }
-        public long getStartupTimeMs() { return startupTimeMs; }
     }
 
     /** Debounce interval for error/warning counter refreshes (milliseconds). */
@@ -136,12 +144,17 @@ public final class TomcatDeploymentStatusService {
     public void onServerStarting(@NotNull String configName) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            s.errorCount.set(0);
-            s.warningCount.set(0);
-            s.startupComplete = false;
-            s.startupTimeMs = 0;
-            s.artifactStates.clear();
-            s.deploymentSummaryFailed = false;
+            // Reference-count concurrent launches (Allow parallel run). Only the
+            // first launch (0 -> 1) resets the shared status; a second instance
+            // starting while the first is still live must not wipe the running
+            // instance's artifact states and counters.
+            if (s.activeLaunches.incrementAndGet() == 1) {
+                s.errorCount.set(0);
+                s.warningCount.set(0);
+                s.startupComplete = false;
+                s.artifactStates.clear();
+                s.deploymentSummaryFailed = false;
+            }
             s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
@@ -220,11 +233,13 @@ public final class TomcatDeploymentStatusService {
         refreshDashboard();
     }
 
+    // startupTimeMs is part of the lifecycle contract and is persisted to
+    // deployment history via TomcatLifecycleListener; the live status view
+    // itself does not surface it, so it is intentionally not stored here.
     public void onServerStarted(@NotNull String configName, long startupTimeMs) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
             s.startupComplete = true;
-            s.startupTimeMs = startupTimeMs;
             s.serverState = recomputeServerState(s);
         }
         refreshDashboard();
@@ -260,12 +275,23 @@ public final class TomcatDeploymentStatusService {
     public void onServerStopped(@NotNull String configName, int exitCode) {
         ConfigStatus s = getOrCreate(configName);
         synchronized (s.lock) {
-            s.startupComplete = false;
-            s.serverState = exitCode == 0 ? ServerState.STOPPED : ServerState.FAILED;
-            if (exitCode == 0) {
-                s.artifactStates.clear();
+            // Only the LAST concurrent instance to exit applies the terminal
+            // state and clears artifact rows. Floor the decrement at 0 so a
+            // stop observed without a matching start (crash/rename edge) can't
+            // drive the count negative.
+            int remaining = s.activeLaunches.updateAndGet(v -> Math.max(0, v - 1));
+            if (remaining == 0) {
+                s.startupComplete = false;
+                s.serverState = exitCode == 0 ? ServerState.STOPPED : ServerState.FAILED;
+                if (exitCode == 0) {
+                    s.artifactStates.clear();
+                } else {
+                    s.artifactStates.entrySet().removeIf(entry -> entry.getValue() != ArtifactState.FAILED);
+                }
             } else {
-                s.artifactStates.entrySet().removeIf(entry -> entry.getValue() != ArtifactState.FAILED);
+                // A sibling instance is still serving traffic — keep its facts
+                // and recompute rather than writing a terminal state over it.
+                s.serverState = recomputeServerState(s);
             }
         }
         refreshDashboard();
@@ -328,9 +354,10 @@ public final class TomcatDeploymentStatusService {
     /**
      * Single authority for deriving the {@link ServerState} from a
      * {@link ConfigStatus}'s current facts. Every mutating handler (except
-     * {@link #onServerStopped}, which writes terminal states directly)
-     * updates the per-artifact state and then calls this method to set
-     * {@code serverState}, so the derivation logic lives in one place.
+     * {@link #onServerStopped}'s last-instance terminal path, which writes
+     * terminal states directly) updates the per-artifact state and then calls
+     * this method to set {@code serverState}, so the derivation logic lives in
+     * one place.
      *
      * <p>Priority order (highest first):
      * <ol>

@@ -215,6 +215,17 @@ public final class ContextPathUtils {
                     "Invalid context path '" + contextPath + "': must not contain '..', '\\', or ':'");
         }
 
+        // Reject a current-directory segment. A bare "." resolves on disk to the
+        // parent directory itself, so a context path of "/." would make the context
+        // name "." and stale-deployment cleanup would target the whole webapps/ tree
+        // (extractedDirectory(webapps, ".") == webapps) instead of one context.
+        for (String segment : contextName.split("/")) {
+            if (segment.equals(".")) {
+                throw new IllegalArgumentException(
+                        "Invalid context path '" + contextPath + "': must not contain '.' path segments");
+            }
+        }
+
         // Multi-level context paths (e.g. "/api/v2") map to Tomcat's '#'-encoded
         // on-disk name ("api#v2.xml" / "api#v2.war") in the flat conf/Catalina/
         // localhost and webapps/ directories the deploy step creates; HostConfig

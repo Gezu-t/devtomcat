@@ -408,6 +408,20 @@ class ContextPathUtilsTest {
         void onlyTrailingSlashes() {
             assertEquals("ROOT", ContextPathUtils.resolveContextName("///"));
         }
+
+        @Test
+        @DisplayName("bare current-directory segment '/.' throws (would target the webapps root)")
+        void dotSegmentThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> ContextPathUtils.resolveContextName("/."));
+        }
+
+        @Test
+        @DisplayName("interior current-directory segment throws")
+        void interiorDotSegmentThrows() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> ContextPathUtils.resolveContextName("/app/./x"));
+        }
     }
 
     @Nested
