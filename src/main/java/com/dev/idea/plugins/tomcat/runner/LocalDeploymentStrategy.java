@@ -1028,26 +1028,52 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         // re-copying into the exploded artifact. Same docBase-containment skip
         // as the classpath roots: a source dir that already lives under docBase
         // would re-mount the deployed copy onto itself.
-        List<String> webappDirs = new ArrayList<>();
+        // A source root is normally mounted wholesale at "/" (PreResources). But a
+        // root that physically carries a committed WEB-INF/lib or WEB-INF/classes
+        // (legacy / Eclipse "WebContent" layouts) must NOT overlay those build-output
+        // subtrees: PreResources are searched ahead of docBase, so a stale in-source
+        // copy would shadow the freshly-deployed one and can hide a class present
+        // only in the deployed jar (ClassNotFoundException). Such roots are expanded
+        // per-entry, excluding WEB-INF/lib and WEB-INF/classes. The common Maven
+        // layout (no committed build output under source) is unaffected.
+        List<String> wholesaleDirs = new ArrayList<>();
+        List<PreMount> splitMounts = new ArrayList<>();
         for (String rootPath : snapshot.webappSourceRoots) {
             if (isUnderOrEquals(rootPath, artifactAbsPath)) {
                 continue;
             }
             String nativePath = rootPath.replace('/', File.separatorChar);
             File file = new File(nativePath);
-            if (file.isDirectory()) {
-                webappDirs.add(nativePath);
+            if (!file.isDirectory()) {
+                continue;
+            }
+            File webInf = new File(file, WEB_INF);
+            if (new File(webInf, WEB_INF_LIB).isDirectory()
+                    || new File(webInf, WEB_INF_CLASSES).isDirectory()) {
+                int before = splitMounts.size();
+                expandSourceRootMounts(file, splitMounts);
+                if (logger != null && splitMounts.size() > before) {
+                    logger.logServerInfo("Webapp source '" + file.getName()
+                            + "' carries a committed WEB-INF/lib or WEB-INF/classes; overlaying it"
+                            + " per-entry so the deployed build output is not shadowed.");
+                }
+            } else {
+                wholesaleDirs.add(nativePath);
             }
         }
 
-        if (extraJars.isEmpty() && webappDirs.isEmpty()) {
+        if (extraJars.isEmpty() && wholesaleDirs.isEmpty() && splitMounts.isEmpty()) {
             return "";
         }
 
-        LOG.info("Mounted " + webappDirs.size() + " webapp source dir(s) and "
-                + extraJars.size() + " JAR(s) for '" + deployment.getDisplayName() + "'");
+        LOG.info("Mounted " + (wholesaleDirs.size() + splitMounts.size())
+                + " webapp source mount(s) and " + extraJars.size()
+                + " JAR(s) for '" + deployment.getDisplayName() + "'");
 
-        return renderExtraResourcesXml(webappDirs, extraJars);
+        // PreResources and PostResources go into separate Tomcat lists by element
+        // type, so appending the split PreResources after the wholesale+JAR block is
+        // functionally correct (all PreResources still precede docBase; JARs remain PostResources).
+        return renderExtraResourcesXml(wholesaleDirs, extraJars) + renderPreMounts(splitMounts);
     }
 
     /**
@@ -1092,6 +1118,60 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             sb.append(String.format(POST_RESOURCE_TEMPLATE,
                     RESOURCE_CLASS_FILE, escapeXmlAttribute(jar),
                     WEBAPP_MOUNT_LIB + escapeXmlAttribute(mountName)));
+        }
+        return sb.toString();
+    }
+
+    /** A single {@code <PreResources>} overlay: a source path exposed at a web-app path. */
+    record PreMount(@NotNull String base, @NotNull String webAppMount, boolean isDirectory) {}
+
+    /**
+     * Expands a webapp source root that physically carries a committed
+     * {@code WEB-INF/lib} or {@code WEB-INF/classes} into per-entry
+     * {@link PreMount}s that overlay every top-level entry EXCEPT those two
+     * build-output subtrees. Mounting the root wholesale at {@code /} (searched
+     * ahead of docBase) would let a stale in-source {@code lib}/{@code classes}
+     * copy shadow the freshly-deployed one and hide a class present only in the
+     * deployed copy ({@code ClassNotFoundException}). Top-level files and the
+     * WEB-INF descriptors (web.xml, TLDs, JSPs) are still overlaid for live editing.
+     */
+    static void expandSourceRootMounts(@NotNull File root, @NotNull List<PreMount> out) {
+        File[] entries = root.listFiles();
+        if (entries == null) {
+            out.add(new PreMount(root.getPath(), WEBAPP_MOUNT_ROOT, true));
+            return;
+        }
+        for (File entry : entries) {
+            if (entry.isDirectory() && entry.getName().equalsIgnoreCase(WEB_INF)) {
+                File[] webInfEntries = entry.listFiles();
+                if (webInfEntries == null) continue;
+                for (File w : webInfEntries) {
+                    String name = w.getName();
+                    if (name.equalsIgnoreCase(WEB_INF_LIB) || name.equalsIgnoreCase(WEB_INF_CLASSES)) {
+                        continue; // deployed docBase copy is authoritative — never overlay
+                    }
+                    out.add(new PreMount(w.getPath(), "/" + WEB_INF + "/" + name, w.isDirectory()));
+                }
+            } else {
+                out.add(new PreMount(entry.getPath(), "/" + entry.getName(), entry.isDirectory()));
+            }
+        }
+    }
+
+    /**
+     * Emits {@code <PreResources>} for split source-root mounts (see
+     * {@link #expandSourceRootMounts}): a {@code DirResourceSet} for a directory
+     * mount, a {@code FileResourceSet} for an individual file, each at its own
+     * {@code webAppMount} so {@code WEB-INF/lib} and {@code WEB-INF/classes} are
+     * never overlaid. Pure emission — split out for isolated testing.
+     */
+    @NotNull
+    static String renderPreMounts(@NotNull List<PreMount> mounts) {
+        StringBuilder sb = new StringBuilder();
+        for (PreMount m : mounts) {
+            String className = m.isDirectory() ? RESOURCE_CLASS_DIR : RESOURCE_CLASS_FILE;
+            sb.append(String.format(PRE_RESOURCE_TEMPLATE,
+                    className, escapeXmlAttribute(m.base()), escapeXmlAttribute(m.webAppMount())));
         }
         return sb.toString();
     }

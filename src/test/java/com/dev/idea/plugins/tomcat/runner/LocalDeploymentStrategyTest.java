@@ -5,11 +5,15 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -961,6 +965,62 @@ class LocalDeploymentStrategyTest {
         void skipsPreexistingDisambiguated() {
             Set<String> used = new HashSet<>(Set.of("dep.jar", "dep__2.jar"));
             assertEquals("dep__3.jar", LocalDeploymentStrategy.uniqueMountName("dep.jar", used));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // expandSourceRootMounts / renderPreMounts — a committed WEB-INF/lib or
+    // WEB-INF/classes under source must never overlay (shadow) docBase.
+    // ---------------------------------------------------------------------
+    @Nested
+    @DisplayName("expandSourceRootMounts — build-output subtrees excluded")
+    class ExpandSourceRootMounts {
+
+        @Test
+        @DisplayName("overlays every entry except WEB-INF/lib and WEB-INF/classes")
+        void excludesBuildOutput(@TempDir Path dir) throws IOException {
+            Files.writeString(dir.resolve("index.jsp"), "x");
+            Files.createDirectory(dir.resolve("css"));
+            Path webInf = Files.createDirectory(dir.resolve("WEB-INF"));
+            Files.writeString(webInf.resolve("web.xml"), "<web-app/>");
+            Files.createDirectory(webInf.resolve("jsp"));
+            Files.createDirectory(webInf.resolve("lib"));      // must be excluded
+            Files.createDirectory(webInf.resolve("classes"));  // must be excluded
+
+            List<LocalDeploymentStrategy.PreMount> mounts = new ArrayList<>();
+            LocalDeploymentStrategy.expandSourceRootMounts(new File(dir.toString()), mounts);
+
+            Map<String, Boolean> byMount = new HashMap<>();
+            for (LocalDeploymentStrategy.PreMount m : mounts) byMount.put(m.webAppMount(), m.isDirectory());
+
+            assertEquals(Boolean.FALSE, byMount.get("/index.jsp"), "top-level file overlaid as a file");
+            assertEquals(Boolean.TRUE, byMount.get("/css"), "top-level dir overlaid as a directory");
+            assertTrue(byMount.containsKey("/WEB-INF/web.xml"), "WEB-INF descriptor still overlaid");
+            assertTrue(byMount.containsKey("/WEB-INF/jsp"), "WEB-INF jsp dir still overlaid");
+            assertFalse(byMount.containsKey("/WEB-INF/lib"), "WEB-INF/lib must NOT be overlaid (shadows docBase)");
+            assertFalse(byMount.containsKey("/WEB-INF/classes"), "WEB-INF/classes must NOT be overlaid");
+            // The whole-root "/" mount is never emitted for a split root.
+            assertFalse(byMount.containsKey("/"), "split root must not also mount wholesale at /");
+        }
+    }
+
+    @Nested
+    @DisplayName("renderPreMounts — Dir vs File resource sets")
+    class RenderPreMounts {
+
+        @Test
+        @DisplayName("directories emit DirResourceSet, files emit FileResourceSet, at their own mount")
+        void emitsCorrectResourceSets() {
+            String xml = LocalDeploymentStrategy.renderPreMounts(List.of(
+                    new LocalDeploymentStrategy.PreMount("/src/css", "/css", true),
+                    new LocalDeploymentStrategy.PreMount("/src/index.jsp", "/index.jsp", false)));
+
+            assertTrue(xml.contains("DirResourceSet"), "directory mount uses DirResourceSet");
+            assertTrue(xml.contains("FileResourceSet"), "file mount uses FileResourceSet");
+            assertTrue(xml.contains("webAppMount=\"/css\""));
+            assertTrue(xml.contains("webAppMount=\"/index.jsp\""));
+            assertFalse(xml.contains("/WEB-INF/lib"));
+            assertFalse(xml.contains("/WEB-INF/classes"));
         }
     }
 }

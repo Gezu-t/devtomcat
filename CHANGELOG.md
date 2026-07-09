@@ -19,6 +19,7 @@
 - Remote deploy console no longer prints each line twice.
 - Hot-swap resource sync corrected across module dependencies.
 - Cancelling class sync during launch prep is honored again.
+- Webapp source overlay no longer shadows deployed build output.
 
 ## [1.4.0]
 
