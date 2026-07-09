@@ -321,7 +321,7 @@ public interface TomcatLifecycleListener {
      * Errs toward {@code true} if RunManager cannot be queried, so a transient
      * lookup failure never silently drops a legitimate record.
      */
-    private static boolean configurationStillExists(@NotNull Project project, @NotNull String configName) {
+    static boolean configurationStillExists(@NotNull Project project, @NotNull String configName) {
         if (project.isDisposed()) {
             return false;
         }

@@ -110,6 +110,23 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
      * Returns {@code false} (cancels launch) if any artifact is missing,
      * so the user sees a clear failure rather than a confusing mid-launch error.
      */
+    /**
+     * Applies the task's per-artifact selection (keyed on {@link Deployment#getDisplayName()},
+     * the same name domain the "Select Artifacts" dialog persists). An empty selection means
+     * "verify all"; otherwise only the selected deployments are returned, so an artifact the
+     * user explicitly unchecked cannot block the launch. Pure and package-visible for testing.
+     */
+    static @NotNull List<Deployment> applyArtifactSelection(@NotNull List<Deployment> deployments,
+                                                            @NotNull List<String> selectedNames) {
+        Set<String> selected = new HashSet<>(selectedNames);
+        if (selected.isEmpty()) {
+            return deployments;
+        }
+        return deployments.stream()
+                .filter(d -> selected.contains(d.getDisplayName()))
+                .toList();
+    }
+
     @Override
     public boolean executeTask(@NotNull DataContext context,
                                @NotNull RunConfiguration configuration,
@@ -117,18 +134,8 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
                                @NotNull TomcatBuildArtifactsTask task) {
         if (!(configuration instanceof TomcatRunConfiguration tomcatConfig)) return true;
 
-        List<Deployment> deployments = tomcatConfig.getDeployments();
-
-        // Honor the per-artifact selection persisted on the task by the
-        // "Select Artifacts" dialog (configureTask). An empty selection means
-        // "verify all", matching the dialog's pre-check-all default — an artifact
-        // the user explicitly unchecked must not block the launch.
-        Set<String> selected = new HashSet<>(task.getArtifactNames());
-        if (!selected.isEmpty()) {
-            deployments = deployments.stream()
-                    .filter(d -> selected.contains(d.getDisplayName()))
-                    .toList();
-        }
+        List<Deployment> deployments =
+                applyArtifactSelection(tomcatConfig.getDeployments(), task.getArtifactNames());
 
         boolean allValid = true;
         StringBuilder missing = new StringBuilder();
