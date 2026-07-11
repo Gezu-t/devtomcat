@@ -226,6 +226,118 @@ class LocalDeploymentStrategyCleanupTest {
     }
 
     @Nested
+    @DisplayName("sweepRemovedDeployments — manifest-scoped ghost-context cleanup")
+    class SweepRemovedDeployments {
+
+        private void seedManifest(Path base, String... stems) throws IOException {
+            LocalDeploymentStrategy.writeDeployedContexts(
+                    base.resolve(LocalDeploymentStrategy.DEPLOYED_CONTEXTS_MANIFEST),
+                    Set.of(stems));
+        }
+
+        @Test
+        @DisplayName("a context we deployed before but not now has its extracted dir + war + descriptor removed")
+        void removedDeploymentSwept(@TempDir Path base) throws IOException {
+            Path webapps = Files.createDirectories(base.resolve("webapps"));
+            Path conf = Files.createDirectories(base.resolve("conf"));
+            Files.createDirectories(webapps.resolve("gone").resolve("WEB-INF"));
+            Files.writeString(webapps.resolve("gone.war"), "war");
+            Files.writeString(conf.resolve("gone.xml"), "<Context/>");
+            seedManifest(base, "gone", "kept");
+            Files.createDirectories(webapps.resolve("kept")); // still deployed this launch
+
+            List<Path> failures = LocalDeploymentStrategy.sweepRemovedDeployments(
+                    base, webapps, conf, Set.of("kept"), Set.of());
+
+            assertTrue(failures.isEmpty());
+            assertFalse(Files.exists(webapps.resolve("gone")), "removed deployment's extraction must go");
+            assertFalse(Files.exists(webapps.resolve("gone.war")), "its leftover war must go");
+            assertFalse(Files.exists(conf.resolve("gone.xml")), "its leftover descriptor must go");
+            assertTrue(Files.isDirectory(webapps.resolve("kept")), "still-deployed context is untouched");
+        }
+
+        @Test
+        @DisplayName("a bundled app never in the manifest is NEVER swept, even absent from preserve")
+        void bundledAppNeverSwept(@TempDir Path base) throws IOException {
+            Path webapps = Files.createDirectories(base.resolve("webapps"));
+            Path conf = Files.createDirectories(base.resolve("conf"));
+            Files.createDirectories(webapps.resolve("ROOT"));
+            Files.createDirectories(webapps.resolve("manager"));
+            // Manifest records only our own prior deployment — NOT the bundled apps.
+            seedManifest(base, "myapp");
+
+            LocalDeploymentStrategy.sweepRemovedDeployments(
+                    base, webapps, conf, Set.of(), Set.of());
+
+            assertTrue(Files.isDirectory(webapps.resolve("ROOT")),
+                    "a mirror/bundled app we never recorded deploying must never be swept");
+            assertTrue(Files.isDirectory(webapps.resolve("manager")));
+        }
+
+        @Test
+        @DisplayName("no manifest (fresh base) sweeps nothing and records the current set")
+        void firstLaunchNoManifest(@TempDir Path base) throws IOException {
+            Path webapps = Files.createDirectories(base.resolve("webapps"));
+            Path conf = Files.createDirectories(base.resolve("conf"));
+            Files.createDirectories(webapps.resolve("preexisting")); // e.g. a hand-placed app
+
+            List<Path> failures = LocalDeploymentStrategy.sweepRemovedDeployments(
+                    base, webapps, conf, Set.of("app1"), Set.of());
+
+            assertTrue(failures.isEmpty());
+            assertTrue(Files.isDirectory(webapps.resolve("preexisting")),
+                    "with no prior manifest nothing is a proven orphan");
+            assertEquals(Set.of("app1"), LocalDeploymentStrategy.readDeployedContexts(
+                    base.resolve(LocalDeploymentStrategy.DEPLOYED_CONTEXTS_MANIFEST)),
+                    "current deployed set is recorded for next launch");
+        }
+
+        @Test
+        @DisplayName("preserve is a second guard: a removed context whose war the mirror now owns is kept")
+        void preserveGuardsMirrorReclaim(@TempDir Path base) throws IOException {
+            // We deployed our own app at context 'ROOT' before; this launch we removed
+            // it AND the mirror now provides ROOT.war. It must NOT be deleted.
+            Path webapps = Files.createDirectories(base.resolve("webapps"));
+            Path conf = Files.createDirectories(base.resolve("conf"));
+            Path mirrorWar = Files.writeString(webapps.resolve("ROOT.war"), "mirror");
+            Files.createDirectories(webapps.resolve("ROOT"));
+            seedManifest(base, "ROOT");
+
+            LocalDeploymentStrategy.sweepRemovedDeployments(
+                    base, webapps, conf, Set.of(), Set.of(mirrorWar.normalize()));
+
+            assertTrue(Files.exists(webapps.resolve("ROOT.war")), "mirror-owned war must survive");
+            assertTrue(Files.isDirectory(webapps.resolve("ROOT")),
+                    "its extraction must survive because the war is preserved");
+        }
+
+        @Test
+        @DisplayName("a context still deployed this launch is never swept even if in the manifest")
+        void stillActiveNotSwept(@TempDir Path base) throws IOException {
+            Path webapps = Files.createDirectories(base.resolve("webapps"));
+            Path conf = Files.createDirectories(base.resolve("conf"));
+            Files.createDirectories(webapps.resolve("app"));
+            seedManifest(base, "app");
+
+            LocalDeploymentStrategy.sweepRemovedDeployments(
+                    base, webapps, conf, Set.of("app"), Set.of());
+
+            assertTrue(Files.isDirectory(webapps.resolve("app")));
+        }
+
+        @Test
+        @DisplayName("manifest round-trips; absent manifest reads empty")
+        void manifestRoundTrip(@TempDir Path base) {
+            Path manifest = base.resolve(LocalDeploymentStrategy.DEPLOYED_CONTEXTS_MANIFEST);
+            LocalDeploymentStrategy.writeDeployedContexts(manifest, Set.of("a", "b#c", "ROOT"));
+            assertEquals(Set.of("a", "b#c", "ROOT"),
+                    LocalDeploymentStrategy.readDeployedContexts(manifest));
+            assertTrue(LocalDeploymentStrategy.readDeployedContexts(
+                    base.resolve("nope")).isEmpty());
+        }
+    }
+
+    @Nested
     @DisplayName("deleteEndingWith")
     class DeleteEndingWith {
 

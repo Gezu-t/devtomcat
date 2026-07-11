@@ -8,6 +8,7 @@
 ### Fixed
 - Web resources sync no longer deletes build-produced webapp files.
 - Class sync covers every module a multi-module artifact packages.
+- Removed WAR deployments no longer linger as ghost contexts.
 
 ## [1.4.2]
 

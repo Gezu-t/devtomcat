@@ -249,6 +249,12 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
                 java.util.Set<Path> mirrorOutput = CatalinaHomeMirror.mirroredPaths(catalinaBase);
                 List<Path> staleFailures = cleanStaleDeployments(
                         webappsDir, confCatalinaLocalhost, activeContextNames, mirrorOutput);
+                // Sweep leftovers for deployments removed since the previous launch
+                // (manifest-scoped: only contexts we recorded deploying before), so a
+                // deleted WAR deployment's extracted dir doesn't linger as a ghost
+                // context via Tomcat's deployOnStartup.
+                staleFailures.addAll(sweepRemovedDeployments(
+                        catalinaBase, webappsDir, confCatalinaLocalhost, activeContextNames, mirrorOutput));
                 if (!staleFailures.isEmpty()) {
                     // Surface to the user before the imminent atomicWriteString fails with
                     // AccessDeniedException. Naming the files lets them grep for a stale
@@ -839,6 +845,112 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
             }
         }
         return failures;
+    }
+
+    /** File in the IDE-managed base recording the context stems the previous launch deployed. */
+    static final String DEPLOYED_CONTEXTS_MANIFEST = ".devtomcat-deployed-contexts";
+
+    /**
+     * Removes the extracted {@code webapps/<stem>/} directory (and any leftover
+     * {@code .war} / descriptor) for every context a PREVIOUS launch deployed
+     * but this launch does not — i.e. a deployment the user removed from the run
+     * config. Without this, Tomcat's {@code deployOnStartup} (on by default)
+     * re-serves the stale extraction as a "ghost" context at the next startup,
+     * long after the artifact left the configuration.
+     *
+     * <p><b>Provably scoped by a manifest.</b> A context is swept only if it is
+     * in the previous launch's deployed-context manifest and is NOT in
+     * {@code activeContextNames} now. A bundled/mirror app is never in that
+     * manifest (we only record what WE deploy), so it can never be swept — the
+     * safety does not depend on the preserve set being exhaustive. The
+     * {@code preserve} set is still honoured as a second guard, and the webapps
+     * directory itself is never removed (a {@code "."} stem is skipped).
+     * The current deployed set is then written as the new manifest.
+     *
+     * <p>Runs only on an IDE-managed base (the caller's
+     * {@code isIdeManagedCatalinaBase} gate).
+     */
+    @NotNull
+    static List<Path> sweepRemovedDeployments(@NotNull Path catalinaBase,
+                                              @NotNull Path webappsDir,
+                                              @NotNull Path confDir,
+                                              @NotNull Set<String> activeContextNames,
+                                              @NotNull Set<Path> preserve) {
+        List<Path> failures = new ArrayList<>();
+        Path manifest = catalinaBase.resolve(DEPLOYED_CONTEXTS_MANIFEST);
+        Set<String> previous = readDeployedContexts(manifest);
+
+        Path webappsNorm = webappsDir.normalize();
+        for (String stem : previous) {
+            if (stem.isBlank() || activeContextNames.contains(stem)) continue;
+            Path dir = TomcatDeploymentPaths.extractedDirectory(webappsDir, stem);
+            if (dir.normalize().equals(webappsNorm)) continue; // never the webapps root ("." guard)
+            Path war = webappsDir.resolve(stem + EXT_WAR);
+            Path descriptor = confDir.resolve(stem + EXT_XML);
+            // Second guard: never delete anything the mirror wrote this launch.
+            if (preserve.contains(dir.normalize())
+                    || preserve.contains(war.normalize())
+                    || preserve.contains(descriptor.normalize())) continue;
+
+            sweepOne(dir, failures);
+            sweepOne(war, failures);
+            sweepOne(descriptor, failures);
+        }
+
+        writeDeployedContexts(manifest, activeContextNames);
+        return failures;
+    }
+
+    /** Deletes a file or directory if present; records a failure without throwing. */
+    private static void sweepOne(@NotNull Path path, @NotNull List<Path> failures) {
+        try {
+            if (Files.isSymbolicLink(path)) {
+                return; // never follow/delete a symlinked mount
+            }
+            if (Files.isDirectory(path)) {
+                deleteRecursively(path);
+                LOG.info("Stale-deployment cleanup removed removed-deployment leftover: " + path);
+            } else if (Files.exists(path)) {
+                Files.delete(path);
+                LOG.info("Stale-deployment cleanup removed removed-deployment leftover: " + path);
+            }
+        } catch (IOException e) {
+            LOG.warn("Stale-deployment cleanup could not delete " + path + ": " + e.getMessage());
+            failures.add(path);
+        }
+    }
+
+    /** Reads the previous launch's deployed context stems, or an empty set if absent/unreadable. */
+    @NotNull
+    static Set<String> readDeployedContexts(@NotNull Path manifest) {
+        if (!Files.isRegularFile(manifest)) {
+            return java.util.Set.of();
+        }
+        try {
+            Set<String> out = new java.util.HashSet<>();
+            for (String line : Files.readAllLines(manifest, java.nio.charset.StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty()) out.add(trimmed);
+            }
+            return out;
+        } catch (IOException e) {
+            LOG.debug("Could not read deployed-context manifest " + manifest + ": " + e.getMessage());
+            return java.util.Set.of();
+        }
+    }
+
+    /** Records the current deployed context stems (sorted); non-fatal on failure. */
+    static void writeDeployedContexts(@NotNull Path manifest, @NotNull Set<String> contexts) {
+        try {
+            List<String> lines = new ArrayList<>();
+            for (String c : contexts) {
+                if (c != null && !c.isBlank()) lines.add(c.trim());
+            }
+            java.util.Collections.sort(lines);
+            Files.write(manifest, lines, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            LOG.debug("Could not write deployed-context manifest " + manifest + ": " + e.getMessage());
+        }
     }
 
     /**
