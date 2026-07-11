@@ -1,16 +1,22 @@
 # DevTomcat Changelog
 
+## [1.4.3]
+
+### Changed
+- Warn when an artifact packages modules the class sync can't cover.
+
+### Fixed
+- Web resources sync no longer deletes build-produced webapp files.
+- Class sync covers every module a multi-module artifact packages.
+
 ## [1.4.2]
 
 ### Changed
 - Configurable ECJ download mirror for restricted networks.
-- Warn when an artifact packages modules the class sync can't cover.
 
 ### Fixed
 - Webapp source overlay no longer shadows deployed build output.
 - Class sync no longer deletes deployed classes it didn't produce.
-- Web resources sync no longer deletes build-produced webapp files.
-- Class sync covers every module a multi-module artifact packages.
 
 ## [1.4.1]
 
