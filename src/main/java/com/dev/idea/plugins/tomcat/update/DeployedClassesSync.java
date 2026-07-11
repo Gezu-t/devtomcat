@@ -38,9 +38,11 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -460,11 +462,75 @@ public final class DeployedClassesSync {
                     "IntelliJ Artifact '" + d.getArtifactName() + "' contains no module-output"
                     + " element (built from files / libraries only)");
         }
-        List<SourceRoot> roots = collectProductionRoots(project, module);
+        List<SourceRoot> roots = collectProductionRootsForArtifact(project, artifact, module, ctx);
         return new ResolutionReport(module.getName(),
                 "artifact-tree: '" + d.getArtifactName() + "'",
                 roots, null,
                 uncoveredPackagedModules(artifact, module, roots, ctx));
+    }
+
+    /**
+     * Production class-output roots the artifact should deploy into
+     * {@code WEB-INF/classes/}: the union of {@link #collectProductionRoots}
+     * across EVERY module the artifact packages, not just the first. A class
+     * in a module that the artifact composes directly into the webapp but that
+     * is not a production dependency of the primary module is then still
+     * mirrored — the incremental sync no longer under-covers a multi-module
+     * artifact relative to what a full artifact build assembles.
+     *
+     * <p>The whole-project Make that precedes launch has already compiled every
+     * module's output, so these roots exist on disk; broadening the mirror set
+     * simply reaches the ones the single-module walk skipped. For the common
+     * single-module artifact this is identical to {@link #collectProductionRoots}.
+     * Must run in a read action.
+     */
+    @NotNull
+    private static List<SourceRoot> collectProductionRootsForArtifact(
+            @NotNull Project project,
+            @NotNull Artifact artifact,
+            @NotNull Module primary,
+            @NotNull PackagingElementResolvingContext ctx) {
+        Set<Module> packaged = collectPackagedModules(artifact.getRootElement(), ctx);
+        if (packaged.size() <= 1) {
+            // Common case: nothing beyond the primary — no extra walks.
+            return collectProductionRoots(project, primary);
+        }
+        // Primary first so its closure defines the base policy; then the rest,
+        // name-ordered for deterministic output.
+        List<Module> ordered = new ArrayList<>();
+        ordered.add(primary);
+        packaged.stream()
+                .filter(m -> !m.equals(primary))
+                .sorted(Comparator.comparing(Module::getName))
+                .forEach(ordered::add);
+
+        List<List<SourceRoot>> perModule = new ArrayList<>();
+        for (Module m : ordered) {
+            perModule.add(collectProductionRoots(project, m));
+        }
+        return mergeProductionRoots(perModule);
+    }
+
+    /**
+     * Merges per-module production-root lists into one, de-duplicated by path.
+     * When a path appears as both a module's own output ({@code classesOnly ==
+     * false}, full-content) and another module's dependency view
+     * ({@code classesOnly == true}, {@code .class}-only), the own/full-content
+     * entry wins so that root's non-class resources are not dropped. First
+     * occurrence sets the order. Pure and package-visible for testing.
+     */
+    @NotNull
+    static List<SourceRoot> mergeProductionRoots(@NotNull List<List<SourceRoot>> perModule) {
+        Map<Path, SourceRoot> byPath = new LinkedHashMap<>();
+        for (List<SourceRoot> roots : perModule) {
+            for (SourceRoot r : roots) {
+                SourceRoot existing = byPath.get(r.path());
+                if (existing == null || (existing.classesOnly() && !r.classesOnly())) {
+                    byPath.put(r.path(), r);
+                }
+            }
+        }
+        return new ArrayList<>(byPath.values());
     }
 
     /**

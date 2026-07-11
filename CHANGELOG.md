@@ -10,6 +10,7 @@
 - Webapp source overlay no longer shadows deployed build output.
 - Class sync no longer deletes deployed classes it didn't produce.
 - Web resources sync no longer deletes build-produced webapp files.
+- Class sync covers every module a multi-module artifact packages.
 
 ## [1.4.1]
 

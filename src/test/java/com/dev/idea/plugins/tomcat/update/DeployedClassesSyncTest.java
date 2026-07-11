@@ -435,6 +435,64 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
+    @DisplayName("mergeProductionRoots — union multi-module roots, dedup, own-wins")
+    class MergeProductionRoots {
+
+        private DeployedClassesSync.SourceRoot own(String path) {
+            return new DeployedClassesSync.SourceRoot(java.nio.file.Path.of(path), false, null);
+        }
+
+        private DeployedClassesSync.SourceRoot dep(String path, String artifact) {
+            return new DeployedClassesSync.SourceRoot(java.nio.file.Path.of(path), true, artifact);
+        }
+
+        @Test
+        @DisplayName("disjoint roots from two modules are all kept, in order")
+        void unionsDisjoint() {
+            var a = own("/proj/a/out");
+            var b = own("/proj/b/out");
+            var merged = DeployedClassesSync.mergeProductionRoots(List.of(List.of(a), List.of(b)));
+            assertEquals(List.of(a, b), merged);
+        }
+
+        @Test
+        @DisplayName("a path shared across modules is de-duplicated to one entry")
+        void deduplicatesSharedPath() {
+            var shared = dep("/proj/lib/out", "lib");
+            var merged = DeployedClassesSync.mergeProductionRoots(
+                    List.of(List.of(shared), List.of(dep("/proj/lib/out", "lib"))));
+            assertEquals(1, merged.size());
+            assertEquals(java.nio.file.Path.of("/proj/lib/out"), merged.get(0).path());
+        }
+
+        @Test
+        @DisplayName("own (full-content) wins over a dependency (.class-only) view of the same path")
+        void ownWinsOverDependency() {
+            // Module A sees /proj/b/out as a .class-only dependency; module B owns
+            // it full-content. The merged root must be full-content so B's
+            // resources are not dropped — regardless of which came first.
+            var asDep = dep("/proj/b/out", "b");
+            var asOwn = own("/proj/b/out");
+
+            var depFirst = DeployedClassesSync.mergeProductionRoots(
+                    List.of(List.of(asDep), List.of(asOwn)));
+            assertEquals(1, depFirst.size());
+            assertFalse(depFirst.get(0).classesOnly(), "own must win even when the dependency view came first");
+
+            var ownFirst = DeployedClassesSync.mergeProductionRoots(
+                    List.of(List.of(asOwn), List.of(asDep)));
+            assertEquals(1, ownFirst.size());
+            assertFalse(ownFirst.get(0).classesOnly(), "own must stay when it came first");
+        }
+
+        @Test
+        @DisplayName("empty input yields empty output")
+        void emptyInput() {
+            assertTrue(DeployedClassesSync.mergeProductionRoots(List.of()).isEmpty());
+        }
+    }
+
+    @Nested
     @DisplayName("resolveTyped — type-dispatched resolution")
     class TypedDispatch {
 
