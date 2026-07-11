@@ -285,6 +285,20 @@ public final class DeployedClassesSync {
                     + "' (" + resolution.strategy() + "), "
                     + resolution.sourceRoots().size() + " source root(s) -> " + webInfClasses);
 
+            // The artifact packages module(s) the incremental sync does NOT cover
+            // (not a production dependency of the resolved module). Their classes
+            // reach the served WEB-INF/classes only via a full artifact build —
+            // so a missing class from one of them is a "Rebuild Project" case, not
+            // a sync bug. Surface it instead of leaving a silent ClassNotFound.
+            if (!resolution.uncoveredPackagedModules().isEmpty()) {
+                logger.logServerWarning("Class sync: '" + name + "' also packages module(s) "
+                        + String.join(", ", resolution.uncoveredPackagedModules())
+                        + " that are not a production dependency of '" + resolution.moduleName()
+                        + "'. The incremental sync does not mirror them — their classes are"
+                        + " deployed only by a full artifact build. If a class from them is"
+                        + " missing at startup, run Build > Rebuild Project.");
+            }
+
             int copiedForThisArtifact = 0;
             int brokenForThisArtifact = 0;
             // Library JARs actually packaged into this deployment's WEB-INF/lib/.
@@ -438,17 +452,92 @@ public final class DeployedClassesSync {
                     "IntelliJ Artifact '" + d.getArtifactName() + "' is no longer registered"
                     + " in Project Structure → Artifacts");
         }
-        Module module = walkPackagingTreeForModule(
-                artifact.getRootElement(),
-                ArtifactManager.getInstance(project).getResolvingContext());
+        PackagingElementResolvingContext ctx =
+                ArtifactManager.getInstance(project).getResolvingContext();
+        Module module = walkPackagingTreeForModule(artifact.getRootElement(), ctx);
         if (module == null) {
             return new ResolutionReport(null, "artifact-has-no-module", List.of(),
                     "IntelliJ Artifact '" + d.getArtifactName() + "' contains no module-output"
                     + " element (built from files / libraries only)");
         }
+        List<SourceRoot> roots = collectProductionRoots(project, module);
         return new ResolutionReport(module.getName(),
                 "artifact-tree: '" + d.getArtifactName() + "'",
-                collectProductionRoots(project, module), null);
+                roots, null,
+                uncoveredPackagedModules(artifact, module, roots, ctx));
+    }
+
+    /**
+     * Names the modules the artifact packages whose output the single-module
+     * re-derivation from {@code resolved} does not cover — i.e. packaged
+     * modules that are neither {@code resolved} nor one of its production
+     * dependencies (whose roots are already in {@code coveredRoots}). Only
+     * such a module's classes depend on a full artifact build to reach the
+     * served tree; the incremental sync never mirrors them.
+     *
+     * <p>Empty for the common single-module artifact — computed only when the
+     * tree actually packages more than one module. Must run in a read action.
+     */
+    @NotNull
+    private static List<String> uncoveredPackagedModules(@NotNull Artifact artifact,
+                                                         @NotNull Module resolved,
+                                                         @NotNull List<SourceRoot> coveredRoots,
+                                                         @NotNull PackagingElementResolvingContext ctx) {
+        Set<Module> packaged = collectPackagedModules(artifact.getRootElement(), ctx);
+        if (packaged.size() <= 1) return List.of();
+        Set<Path> covered = new HashSet<>();
+        for (SourceRoot r : coveredRoots) covered.add(r.path());
+        List<String> uncovered = new ArrayList<>();
+        for (Module pm : packaged) {
+            if (pm.equals(resolved)) continue;
+            boolean anyRootCovered = false;
+            for (Path own : moduleOwnOutputPaths(pm)) {
+                if (covered.contains(own)) { anyRootCovered = true; break; }
+            }
+            if (!anyRootCovered) uncovered.add(pm.getName());
+        }
+        Collections.sort(uncovered);
+        return uncovered;
+    }
+
+    /** The module's OWN production class-output paths (dependency modules excluded). */
+    @NotNull
+    private static Set<Path> moduleOwnOutputPaths(@NotNull Module module) {
+        return collectRootPaths(OrderEnumerator.orderEntries(module)
+                .withoutDepModules()
+                .productionOnly()
+                .withoutSdk()
+                .withoutLibraries()
+                .classes()
+                .getRoots());
+    }
+
+    /**
+     * Every module the artifact packages (all {@code ModulePackagingElement}s
+     * in the tree), not just the first — the diagnostic counterpart to
+     * {@link #walkPackagingTreeForModule}, which stops at the first hit.
+     */
+    @NotNull
+    static Set<Module> collectPackagedModules(@NotNull PackagingElement<?> element,
+                                              @NotNull PackagingElementResolvingContext ctx) {
+        Set<Module> out = new HashSet<>();
+        collectPackagedModules(element, ctx, out,
+                Collections.newSetFromMap(new IdentityHashMap<>()));
+        return out;
+    }
+
+    private static void collectPackagedModules(@NotNull PackagingElement<?> element,
+                                               @NotNull PackagingElementResolvingContext ctx,
+                                               @NotNull Set<Module> out,
+                                               @NotNull Set<PackagingElement<?>> visited) {
+        if (!visited.add(element)) return;
+        Module direct = tryFindModuleOnElement(element, ctx);
+        if (direct != null) out.add(direct);
+        if (element instanceof CompositePackagingElement<?> composite) {
+            for (PackagingElement<?> child : composite.getChildren()) {
+                collectPackagedModules(child, ctx, out, visited);
+            }
+        }
     }
 
     @NotNull
@@ -490,11 +579,27 @@ public final class DeployedClassesSync {
      * Verbose-resolution result. {@code moduleName} is {@code null} only when
      * no strategy matched; in that case {@code diagnostic} carries the
      * explanation for the user-facing log line.
+     *
+     * <p>{@code uncoveredPackagedModules} names modules the artifact packages
+     * whose output the single-module re-derivation does NOT cover (they are
+     * not the resolved module and not one of its production dependencies).
+     * Their classes reach the served tree only via a full artifact build, not
+     * the incremental sync — so a stale/absent class from one of them is a
+     * "run Rebuild" case. Empty for the common single-module artifact.
      */
     record ResolutionReport(@Nullable String moduleName,
                             @NotNull String strategy,
                             @NotNull List<SourceRoot> sourceRoots,
-                            @Nullable String diagnostic) {}
+                            @Nullable String diagnostic,
+                            @NotNull List<String> uncoveredPackagedModules) {
+        /** Convenience: no uncovered-module info (failures, module-backed, external). */
+        ResolutionReport(@Nullable String moduleName,
+                         @NotNull String strategy,
+                         @NotNull List<SourceRoot> sourceRoots,
+                         @Nullable String diagnostic) {
+            this(moduleName, strategy, sourceRoots, diagnostic, List.of());
+        }
+    }
 
     /**
      * Depth-first walk over a packaging-element subtree. Returns the first

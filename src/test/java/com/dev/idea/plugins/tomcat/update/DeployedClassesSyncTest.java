@@ -355,6 +355,86 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
+    @DisplayName("collectPackagedModules — all packaged modules, not just the first")
+    class CollectPackagedModules {
+
+        private final PackagingElementResolvingContext ctx =
+                mock(PackagingElementResolvingContext.class);
+
+        private PackagingElement<?> mockModuleElement(Module module) {
+            PackagingElement<?> element = mock(PackagingElement.class,
+                    withSettings().extraInterfaces(ModulePackagingElement.class));
+            when(((ModulePackagingElement) element).findModule(ctx)).thenReturn(module);
+            return element;
+        }
+
+        @Test
+        @DisplayName("single module → set of one")
+        void singleModule() {
+            Module m = mock(Module.class);
+            assertEquals(Set.of(m),
+                    DeployedClassesSync.collectPackagedModules(mockModuleElement(m), ctx));
+        }
+
+        @Test
+        @DisplayName("two sibling modules under a composite → both collected (walk does NOT stop at the first)")
+        void twoSiblingModules() {
+            Module a = mock(Module.class);
+            Module b = mock(Module.class);
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(mockModuleElement(a), mockModuleElement(b))).when(root).getChildren();
+
+            assertEquals(Set.of(a, b),
+                    DeployedClassesSync.collectPackagedModules(root, ctx));
+        }
+
+        @Test
+        @DisplayName("modules across nested composites are all collected")
+        void nestedComposites() {
+            Module a = mock(Module.class);
+            Module b = mock(Module.class);
+            CompositePackagingElement<?> inner = mock(CompositePackagingElement.class);
+            doReturn(List.of(mockModuleElement(b))).when(inner).getChildren();
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(mockModuleElement(a), inner)).when(root).getChildren();
+
+            assertEquals(Set.of(a, b),
+                    DeployedClassesSync.collectPackagedModules(root, ctx));
+        }
+
+        @Test
+        @DisplayName("the same module packaged twice is de-duplicated")
+        void deduplicatesSameModule() {
+            Module a = mock(Module.class);
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(mockModuleElement(a), mockModuleElement(a))).when(root).getChildren();
+
+            assertEquals(Set.of(a),
+                    DeployedClassesSync.collectPackagedModules(root, ctx));
+        }
+
+        @Test
+        @DisplayName("no module elements → empty set")
+        void noModules() {
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(mock(PackagingElement.class))).when(root).getChildren();
+
+            assertTrue(DeployedClassesSync.collectPackagedModules(root, ctx).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a stale element whose module is null is skipped, real siblings still collected")
+        void skipsNullModule() {
+            Module real = mock(Module.class);
+            CompositePackagingElement<?> root = mock(CompositePackagingElement.class);
+            doReturn(List.of(mockModuleElement(null), mockModuleElement(real))).when(root).getChildren();
+
+            assertEquals(Set.of(real),
+                    DeployedClassesSync.collectPackagedModules(root, ctx));
+        }
+    }
+
+    @Nested
     @DisplayName("resolveTyped — type-dispatched resolution")
     class TypedDispatch {
 
