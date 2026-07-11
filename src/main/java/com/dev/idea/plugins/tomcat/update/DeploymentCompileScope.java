@@ -86,8 +86,11 @@ public final class DeploymentCompileScope {
         Set<Module> seeds = new LinkedHashSet<>();
         for (Deployment d : deployments) {
             if (!d.isValid()) continue;
-            Module m = DeploymentModuleResolver.resolve(d, project);
-            if (m != null) seeds.add(m);
+            // resolveAll (not resolve): seed from EVERY module the artifact
+            // packages so a packaged sibling that is not a production dependency
+            // of the primary module still recompiles on hot-reload. The launch
+            // classpath keeps using the single-module resolve.
+            seeds.addAll(DeploymentModuleResolver.resolveAll(d, project));
         }
         if (seeds.isEmpty()) {
             logger.logServerInfo("Scoped compile: no module-backed deployment resolved — compiling whole project.");

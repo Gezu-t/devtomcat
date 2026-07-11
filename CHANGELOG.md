@@ -9,6 +9,7 @@
 - Web resources sync no longer deletes build-produced webapp files.
 - Class sync covers every module a multi-module artifact packages.
 - Removed WAR deployments no longer linger as ghost contexts.
+- Hot-reload recompiles every module a multi-module artifact packages.
 
 ## [1.4.2]
 

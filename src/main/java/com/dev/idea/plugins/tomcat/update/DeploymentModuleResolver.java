@@ -11,6 +11,8 @@ import com.intellij.packaging.artifacts.ArtifactManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Set;
+
 /**
  * Resolves the owning IntelliJ {@link Module} behind a {@link Deployment} via the
  * typed deployment hierarchy — no string matching anywhere.
@@ -73,6 +75,52 @@ public final class DeploymentModuleResolver {
             LOG.warn("Failed to resolve module for '" + deployment.getDisplayName()
                     + "': " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Returns EVERY project module a deployment packages — all
+     * {@code ModulePackagingElement}s in an artifact's packaging tree, not just
+     * the first {@link #resolve} returns. Used only to WIDEN the scoped
+     * hot-reload compile ({@link DeploymentCompileScope}) so a module the
+     * artifact packages but that is not a production dependency of the primary
+     * module still recompiles on "Update classes and resources". The launch
+     * classpath deliberately keeps using the single-module {@link #resolve}
+     * (unchanged). Empty for external deployments or when the artifact /
+     * packaging plugin is unavailable; never throws except
+     * {@link com.intellij.openapi.progress.ProcessCanceledException}.
+     *
+     * <p><strong>Must be called under a read action.</strong>
+     */
+    @NotNull
+    public static Set<Module> resolveAll(@NotNull Deployment deployment, @NotNull Project project) {
+        try {
+            if (deployment instanceof ArtifactBackedDeployment a) {
+                Artifact artifact = a.getArtifactPointer().getArtifact();
+                if (artifact == null) return Set.of();
+                ArtifactManager mgr;
+                try {
+                    mgr = ArtifactManager.getInstance(project);
+                } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                    throw pce;
+                } catch (NoClassDefFoundError | Exception ignored) {
+                    return Set.of();
+                }
+                if (mgr == null) return Set.of();
+                return DeployedClassesSync.collectPackagedModules(
+                        artifact.getRootElement(), mgr.getResolvingContext());
+            }
+            if (deployment instanceof ModuleBackedDeployment m) {
+                Module mod = m.getModule();
+                return mod != null ? Set.of(mod) : Set.of();
+            }
+            return Set.of(); // ExternalFileDeployment — no project module
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            throw pce;
+        } catch (Exception e) {
+            LOG.warn("Failed to resolve packaged modules for '" + deployment.getDisplayName()
+                    + "': " + e.getMessage());
+            return Set.of();
         }
     }
 }
