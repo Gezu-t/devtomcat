@@ -10,6 +10,7 @@ import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -88,7 +89,11 @@ public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
 
         try {
             RunManager runManager = RunManager.getInstance(project);
-            TomcatRunConfigurationType type = new TomcatRunConfigurationType();
+            // The REGISTERED type instance, never `new` — a foreign type/factory
+            // instance breaks identity comparisons against platform-loaded configs
+            // and instantiates a parallel factory/template pair for the session.
+            TomcatRunConfigurationType type =
+                    ConfigurationTypeUtil.findConfigurationType(TomcatRunConfigurationType.class);
             RunnerAndConfigurationSettings settings =
                     runManager.createConfiguration(name, type.getConfigurationFactories()[0]);
             TomcatRunConfiguration cfg = (TomcatRunConfiguration) settings.getConfiguration();
@@ -111,6 +116,13 @@ public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
                 // contextPath is the user-edited value from the table column.
                 DeploymentArtifact a = new DeploymentArtifact(
                         m.artifactId(), m.explodedPath(), DeploymentArtifact.TYPE_EXPLODED);
+                // These entries are scanner-derived Maven build outputs, not
+                // IntelliJ artifacts — AUTO_DETECTED provenance makes the typed
+                // adapter resolve them to their owning module (content-root
+                // containment) instead of dangling ArtifactPointers, which is
+                // what the class sync and the run-config producer's existing-
+                // config matching key off.
+                a.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
                 a.setContextPath(m.contextPath());
                 artifacts.add(a);
             }

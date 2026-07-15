@@ -10,6 +10,9 @@
 - Class sync covers every module a multi-module artifact packages.
 - Removed WAR deployments no longer linger as ghost contexts.
 - Hot-reload recompiles every module a multi-module artifact packages.
+- No duplicate run configs from run-from-context.
+- Context-created configs deploy real build outputs.
+- Child pom coordinates no longer shadowed by the parent's.
 
 ## [1.4.2]
 

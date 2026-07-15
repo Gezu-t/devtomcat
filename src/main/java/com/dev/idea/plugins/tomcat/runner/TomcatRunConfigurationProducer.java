@@ -2,9 +2,16 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
+import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.PortStrategy;
+import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
+import com.dev.idea.plugins.tomcat.update.DeploymentModuleResolver;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.execution.Location;
 import com.intellij.execution.actions.ConfigurationContext;
 import com.intellij.execution.actions.ConfigurationFromContext;
@@ -14,9 +21,8 @@ import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
-import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
@@ -37,6 +43,23 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 
 /**
  * Produces DevTomcat run configurations for web-oriented module contexts.
+ *
+ * <p>Produced configurations use the modern deployment model — a
+ * {@link DeploymentArtifact} ({@code AUTO_DETECTED}, exploded) pointing at the
+ * module's WAR <em>build output</em> — exactly the shape the Setup action
+ * creates and the validator accepts. Production therefore requires
+ * {@link ProjectTomcatProfileScanner#scanModule} to detect a WAR-packaging
+ * module: a discovered <em>source</em> web root alone is not deployable (the
+ * class-sync pipeline writes into {@code WEB-INF/classes} under the deployment
+ * path, so a source directory must never be one).
+ *
+ * <p>{@link #isConfigurationFromContext} recognizes an existing configuration
+ * when one of its deployments resolves to the context module (typed model +
+ * {@link DeploymentModuleResolver}), or via the legacy {@code docBase} field
+ * for configs saved by older plugin versions. Without that recognition the
+ * platform mints a temporary configuration on every run-from-context — showing
+ * the user duplicate entries in the run-configuration widget for an app their
+ * existing configuration already deploys.
  */
 public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer<TomcatRunConfiguration> {
 
@@ -91,11 +114,23 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return false;
         }
 
+        // A deployable configuration needs a build-output path. A discovered
+        // source web root is only the "this is a web context" signal — it must
+        // never become the deployment path itself (the class-sync pipeline
+        // writes into WEB-INF/classes under the deployment path).
+        ProjectTomcatProfileScanner.DetectedWebappModule detected =
+                ProjectTomcatProfileScanner.scanModule(module);
+        if (detected == null) {
+            LOG.debug("DevTomcat: No WAR build output detected for module '"
+                    + module.getName() + "'; not producing a configuration");
+            return false;
+        }
+
         if (!configureTomcatServer(configuration)) {
             return false;
         }
 
-        configureRunConfiguration(configuration, module, webRoots);
+        configureRunConfiguration(configuration, detected);
 
         LOG.debug("DevTomcat: Run configuration created for module: " + module.getName());
         return true;
@@ -116,9 +151,57 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return false;
         }
 
+        // Same gate as setupConfigurationFromContext: a context with no
+        // discoverable web root (incl. test sources) could not have produced a
+        // configuration, so no existing one should be claimed for it either.
         List<VirtualFile> webRoots = discoverWebRootsForContext(context.getLocation());
-        return webRoots.stream().anyMatch(webRoot ->
-                webRoot.getPath().equals(configuration.getDocBase()));
+        if (webRoots.isEmpty()) {
+            return false;
+        }
+
+        // Legacy match first (cheap string compare): configs saved by older
+        // plugin versions stored the discovered web root in docBase.
+        String docBase = configuration.getDocBase();
+        if (docBase != null && !docBase.isEmpty()
+                && webRoots.stream().anyMatch(r -> r.getPath().equals(docBase))) {
+            return true;
+        }
+
+        // Modern match: one of the configuration's deployments resolves to the
+        // context module — the configuration already covers this webapp, so the
+        // platform must reuse it instead of minting a temporary duplicate.
+        // Runs per existing config on the (background, cancelable) action-update
+        // path; resolveAll is index-free and PCE-safe. External file deployments
+        // resolve to no modules and can never match.
+        Module contextModule = context.getModule();
+        if (contextModule == null) {
+            return false;
+        }
+        Project project = contextModule.getProject();
+        Boolean covers = TomcatReadActions.compute(() -> {
+            for (Deployment deployment : configuration.getDeployments()) {
+                java.util.Set<Module> modules = DeploymentModuleResolver.resolveAll(deployment, project);
+                if (modules.contains(contextModule)) {
+                    return true;
+                }
+                // A deployment the typed model can't resolve — a dangling
+                // artifact pointer persisted before AUTO_DETECTED provenance
+                // existed, or an in-project file added via the external picker —
+                // still identifies its webapp by path: fall back to content-root
+                // ownership. Out-of-project paths resolve to no module and
+                // correctly never match.
+                if (modules.isEmpty()) {
+                    java.nio.file.Path path = deployment.getResolvedPath();
+                    if (path != null && contextModule.equals(
+                            DeploymentAdapter.resolveOwningModule(
+                                    project, deployment.getDisplayName(), path))) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        });
+        return Boolean.TRUE.equals(covers);
     }
 
     /**
@@ -196,74 +279,37 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         return true;
     }
 
+    /**
+     * Populates the configuration in the modern deployment model, mirroring the
+     * Setup action's single-module case: one {@code AUTO_DETECTED} exploded
+     * {@link DeploymentArtifact} at the detected WAR build output, default
+     * context path, local server mode, and auto-bumping port defaults.
+     */
     private void configureRunConfiguration(@NotNull TomcatRunConfiguration configuration,
-                                           @NotNull Module module,
-                                           @NotNull List<VirtualFile> webRoots) {
-        String contextPath = deriveContextPath(module);
-        String configName = buildConfigurationName(contextPath, module);
+                                           @NotNull ProjectTomcatProfileScanner.DetectedWebappModule detected) {
+        // Name derives from the module's own Maven identity — no framework or
+        // build-tool taxonomy. The prefix only marks the config as auto-created
+        // so it is distinguishable from user-authored ones in the run widget.
+        String configName = CONFIGURATION_PREFIX + detected.artifactId();
         configuration.setName(configName);
 
-        configuration.setDocBase(webRoots.get(0).getPath());
+        DeploymentArtifact artifact = new DeploymentArtifact(
+                detected.artifactId(), detected.explodedPath(), DeploymentArtifact.TYPE_EXPLODED);
+        artifact.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
+        artifact.setContextPath(detected.contextPath());
+        configuration.getConfigData().getDeploymentConfig().setArtifacts(List.of(artifact));
+        configuration.getConfigData().setServerMode(TomcatConstants.MODE_LOCAL);
 
-        String normalizedContextPath = normalizeAndValidateContextPath(contextPath);
-        configuration.setContextPath(normalizedContextPath);
+        // Same port seeding as the Setup action's auto mode: start at 8080,
+        // bump when busy; shutdown port keeps Tomcat's conventional 75 offset.
+        configuration.getConfigData().getPortConfig().setHttp(8080);
+        configuration.getConfigData().getPortConfig().setShutdown(8080 - 75);
+        configuration.getConfigData().getPortConfig().setStrategy(PortStrategy.AUTO_BUMP);
 
-
-        LOG.debug("Tomcat: Configuration setup complete - " + configName +
-                " at " + normalizedContextPath);
+        LOG.debug("Tomcat: Configuration setup complete - " + configName
+                + " deploying " + detected.explodedPath()
+                + " at " + detected.contextPath());
     }
-
-    private String deriveContextPath(@NotNull Module module) {
-        String contextPath = TomcatModuleUtils.extractContextPath(module);
-
-        if (contextPath == null || contextPath.trim().isEmpty() || contextPath.equals("/")) {
-            contextPath = module.getName();
-
-            contextPath = contextPath.replaceAll("[-_](web|webapp|app|main|server)$", "");
-            contextPath = contextPath.replaceAll("^(web|webapp|app)-?", "");
-        }
-
-        return contextPath;
-    }
-
-    private String buildConfigurationName(@NotNull String contextPath, @NotNull Module module) {
-        StringBuilder name = new StringBuilder(CONFIGURATION_PREFIX);
-        name.append(contextPath);
-
-        if (isSpringBootModule(module)) {
-            name.append(" (Spring Boot)");
-        } else if (isMavenModule(module)) {
-            name.append(" (Maven Web)");
-        } else if (isGradleModule(module)) {
-            name.append(" (Gradle Web)");
-        } else {
-            name.append(" (Web Application)");
-        }
-
-        return name.toString();
-    }
-
-    private String normalizeAndValidateContextPath(@NotNull String contextPath) {
-        if (contextPath.trim().isEmpty()) {
-            return "/";
-        }
-
-        if (!contextPath.startsWith("/")) {
-            contextPath = "/" + contextPath;
-        }
-
-        contextPath = contextPath.replaceAll("[^a-zA-Z0-9/_.~-]", "");
-
-        if (contextPath.equals("/")) {
-            LOG.debug("Tomcat: Using root context path for deployment");
-        } else {
-            LOG.debug("Tomcat: Context path configured: " + contextPath);
-        }
-
-        return contextPath;
-    }
-
-
 
     /**
      * Whether {@code element}'s file is a web context — used only to rank DevTomcat
@@ -380,61 +426,5 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
             return 0;
         }
     }
-
-    private boolean isSpringBootModule(@NotNull Module module) {
-        // Authoritative + build-agnostic: a spring-boot artifact on the module's
-        // runtime classpath. Immune to class-naming conventions and avoids the
-        // old depth-5 EDT recursion over main/java hunting for "*Application.java"
-        // filenames (which also false-matched any unrelated *Application class).
-        for (VirtualFile root : OrderEnumerator.orderEntries(module)
-                .runtimeOnly().recursively().classes().getRoots()) {
-            if (root.getName().startsWith("spring-boot")) {
-                return true;
-            }
-        }
-        // Structural fallback for a not-yet-imported project with no resolved
-        // classpath: the conventional Spring Boot config files.
-        for (VirtualFile sourceRoot : ModuleRootManager.getInstance(module).getSourceRoots()) {
-            VirtualFile resourcesDir = sourceRoot.findFileByRelativePath("main/resources");
-            if (resourcesDir != null && hasSpringBootResources(resourcesDir)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // The owning build tool comes from the resolved external-system model, not
-    // from probing for a pom.xml / build.gradle file. This is build-agnostic
-    // (any external system), immune to the case-sensitive findFileByRelativePath
-    // fragility, and correctly attributes a module whose build file lives
-    // elsewhere. getExternalSystemId() returns "MAVEN" / "GRADLE" (uppercase;
-    // Maven is locale-folded) — so compare case-insensitively, never a literal.
-    private boolean isMavenModule(@NotNull Module module) {
-        return isOwnedByExternalSystem(module, "MAVEN");
-    }
-
-    private boolean isGradleModule(@NotNull Module module) {
-        return isOwnedByExternalSystem(module, "GRADLE");
-    }
-
-    private static boolean isOwnedByExternalSystem(@NotNull Module module, @NotNull String systemId) {
-        String id = ExternalSystemModulePropertyManager.getInstance(module).getExternalSystemId();
-        return id != null && id.equalsIgnoreCase(systemId);
-    }
-
-    private boolean hasSpringBootResources(@NotNull VirtualFile resourcesDir) {
-        VirtualFile applicationProps = resourcesDir.findFileByRelativePath("application.properties");
-        VirtualFile applicationYml = resourcesDir.findFileByRelativePath("application.yml");
-        VirtualFile applicationYaml = resourcesDir.findFileByRelativePath("application.yaml");
-        VirtualFile bootstrapProps = resourcesDir.findFileByRelativePath("bootstrap.properties");
-        VirtualFile bootstrapYml = resourcesDir.findFileByRelativePath("bootstrap.yml");
-
-        return (applicationProps != null && applicationProps.exists()) ||
-                (applicationYml != null && applicationYml.exists()) ||
-                (applicationYaml != null && applicationYaml.exists()) ||
-                (bootstrapProps != null && bootstrapProps.exists()) ||
-                (bootstrapYml != null && bootstrapYml.exists());
-    }
-
 
 }

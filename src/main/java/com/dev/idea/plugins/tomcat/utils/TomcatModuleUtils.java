@@ -361,12 +361,23 @@ public final class TomcatModuleUtils {
                             out.add(vf);
                         }
                     }
-                } catch (NoSuchMethodException | IllegalAccessException
-                         | java.lang.reflect.InvocationTargetException ignored) {
+                } catch (java.lang.reflect.InvocationTargetException e) {
+                    // Cancellation must escape the reflective boundary — this
+                    // runs per existing config on the cancelable action-update
+                    // path (run-config producer matching).
+                    if (e.getCause() instanceof com.intellij.openapi.progress.ProcessCanceledException pce) {
+                        throw pce;
+                    }
+                    // Facet shape unexpected — skip this facet, try the next.
+                } catch (NoSuchMethodException | IllegalAccessException ignored) {
                     // Facet shape unexpected — skip this facet, try the next.
                 }
             }
             return new ArrayList<>(out);
+        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            // PCE before the generic handler — cancellation propagates instead
+            // of silently degrading facet discovery to convention fallbacks.
+            throw pce;
         } catch (NoClassDefFoundError | Exception e) {
             return java.util.Collections.emptyList();
         }

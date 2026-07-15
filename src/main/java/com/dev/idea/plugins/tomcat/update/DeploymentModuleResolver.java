@@ -81,13 +81,15 @@ public final class DeploymentModuleResolver {
     /**
      * Returns EVERY project module a deployment packages — all
      * {@code ModulePackagingElement}s in an artifact's packaging tree, not just
-     * the first {@link #resolve} returns. Used only to WIDEN the scoped
-     * hot-reload compile ({@link DeploymentCompileScope}) so a module the
-     * artifact packages but that is not a production dependency of the primary
-     * module still recompiles on "Update classes and resources". The launch
-     * classpath deliberately keeps using the single-module {@link #resolve}
-     * (unchanged). Empty for external deployments or when the artifact /
-     * packaging plugin is unavailable; never throws except
+     * the first {@link #resolve} returns. Two callers: {@link
+     * DeploymentCompileScope} WIDENS the scoped hot-reload compile with it (a
+     * packaged module that is not a production dependency of the primary module
+     * still recompiles on "Update classes and resources"), and the
+     * run-configuration producer uses it to recognize an existing configuration
+     * that already deploys a context module (existing-config matching). The
+     * launch classpath deliberately keeps using the single-module
+     * {@link #resolve} (unchanged). Empty for external deployments or when the
+     * artifact / packaging plugin is unavailable; never throws except
      * {@link com.intellij.openapi.progress.ProcessCanceledException}.
      *
      * <p><strong>Must be called under a read action.</strong>

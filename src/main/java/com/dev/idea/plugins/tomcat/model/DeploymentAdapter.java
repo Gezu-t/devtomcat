@@ -99,10 +99,18 @@ public final class DeploymentAdapter {
         return new ModuleBackedDeployment(pm.create(storedName), outputPath, contextPath, exploded, storedName);
     }
 
+    /**
+     * Public because path→module ownership is also the run-configuration
+     * producer's fallback for existing-config matching: a deployment the typed
+     * model can't resolve (dangling artifact pointer persisted before
+     * AUTO_DETECTED provenance existed, or an in-project external file) still
+     * identifies its webapp by path. <strong>Must be called under a read
+     * action.</strong>
+     */
     @Nullable
-    private static Module resolveOwningModule(@NotNull Project project,
-                                              @NotNull String storedName,
-                                              @NotNull Path outputPath) {
+    public static Module resolveOwningModule(@NotNull Project project,
+                                             @NotNull String storedName,
+                                             @NotNull Path outputPath) {
         ModuleManager mm = ModuleManager.getInstance(project);
 
         Module direct = mm.findModuleByName(storedName);

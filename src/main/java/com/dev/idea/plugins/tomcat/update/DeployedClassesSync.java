@@ -724,6 +724,14 @@ public final class DeployedClassesSync {
             Object result = method.invoke(element, ctx);
             return result instanceof Module m ? m : null;
         } catch (ReflectiveOperationException e) {
+            // Cancellation must escape the reflective boundary: this runs under
+            // cancelable read actions (launch prep, and per-config matching on
+            // the action-update path), where an InvocationTargetException
+            // wrapping a PCE must not degrade to "no module".
+            if (e instanceof java.lang.reflect.InvocationTargetException ite
+                    && ite.getCause() instanceof com.intellij.openapi.progress.ProcessCanceledException pce) {
+                throw pce;
+            }
             if (LOG.isDebugEnabled()) {
                 LOG.debug("ModulePackagingElement.findModule failed reflectively", e);
             }
