@@ -1,7 +1,9 @@
 package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.diagnostics.ArtifactStructureValidator;
+import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.update.ExplodedWebappAssembler;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import java.nio.file.Path;
 import com.intellij.execution.BeforeRunTaskProvider;
@@ -136,6 +138,15 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
 
         List<Deployment> deployments =
                 applyArtifactSelection(tomcatConfig.getDeployments(), task.getArtifactNames());
+
+        // Community / not-yet-packaged case: a module-backed exploded deployment
+        // whose build output does not exist yet (no IntelliJ web artifact, no
+        // `mvn package`) would fail the existence check below and dead-end the
+        // launch. DevTomcat has every ingredient to build that webapp itself, so
+        // it assembles it here (after Make, before the check). No-op once the
+        // directory exists, and untouched for artifact-backed / WAR deployments.
+        ExplodedWebappAssembler.assembleMissing(tomcatConfig.getProject(), deployments,
+                new TomcatDeploymentLogger(tomcatConfig.getProject()));
 
         boolean allValid = true;
         StringBuilder missing = new StringBuilder();

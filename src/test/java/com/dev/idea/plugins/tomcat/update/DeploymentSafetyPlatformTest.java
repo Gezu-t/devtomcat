@@ -46,6 +46,27 @@ public class DeploymentSafetyPlatformTest extends BasePlatformTestCase {
         assertFalse(result);
     }
 
+    public void testWouldCreateWalksToNearestExistingAncestor() throws Exception {
+        // A to-be-created path is classified by its nearest EXISTING ancestor, not by
+        // itself (which findFileByNioFile can't resolve). A deep nonexistent path
+        // under an existing real directory outside the project resolves that ancestor
+        // and classifies it as not-in-content → safe. (The in-content rejection this
+        // guards is the composition of this walk with the isInContent classification
+        // pinned above; the light fixture's in-memory VFS can't host a real on-disk
+        // content root to exercise it end to end.)
+        java.nio.file.Path realDir = java.nio.file.Files.createTempDirectory("devtomcat-safety");
+        try {
+            java.nio.file.Path nonexistent = realDir.resolve("a/b/c/WEB-INF/classes");
+            assertFalse(java.nio.file.Files.exists(nonexistent));
+            boolean result = ApplicationManager.getApplication().runReadAction(
+                    (Computable<Boolean>) () -> DeploymentSafety.wouldCreateInsideProjectContent(
+                            getProject(), nonexistent));
+            assertFalse(result);
+        } finally {
+            java.nio.file.Files.deleteIfExists(realDir);
+        }
+    }
+
     private boolean inContent(VirtualFile file) {
         return ApplicationManager.getApplication().runReadAction(
                 (Computable<Boolean>) () -> DeploymentSafety.isInsideProjectContent(getProject(), file));

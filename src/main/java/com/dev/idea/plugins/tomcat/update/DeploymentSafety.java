@@ -52,6 +52,29 @@ public final class DeploymentSafety {
     }
 
     /**
+     * Like {@link #isInsideProjectContent(Project, Path)} but for a path that may not
+     * exist yet (a directory about to be <em>created</em>): it classifies by the
+     * nearest existing ancestor, so a to-be-created dir is judged by where it would
+     * live. Use this at the point of deciding whether to CREATE a directory —
+     * {@link #isInsideProjectContent(Project, Path)}'s "not in the VFS ⇒ safe"
+     * shortcut is only valid for a path that already exists, so calling it on a
+     * guaranteed-nonexistent path would silently classify everything as safe and
+     * defeat the guard.
+     *
+     * <p><strong>Must be called under a read action.</strong>
+     */
+    public static boolean wouldCreateInsideProjectContent(@NotNull Project project, @NotNull Path path) {
+        for (Path p = path; p != null; p = p.getParent()) {
+            VirtualFile vf = LocalFileSystem.getInstance().findFileByNioFile(p);
+            if (vf != null) {
+                return isInsideProjectContent(project, vf);
+            }
+        }
+        // No existing ancestor is in the VFS at all — outside any project root, safe.
+        return false;
+    }
+
+    /**
      * {@link VirtualFile} overload of {@link #isInsideProjectContent(Project, Path)} —
      * the actual project-model classification, split out so it is directly testable
      * without local-filesystem resolution.

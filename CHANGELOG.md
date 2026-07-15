@@ -15,6 +15,7 @@
 - Child pom coordinates no longer shadowed by the parent's.
 - Class sync never writes into your source tree.
 - Auto-detected modules deploy build output, not sources.
+- Build the exploded webapp when no artifact or package step does (Community).
 
 ## [1.4.2]
 
