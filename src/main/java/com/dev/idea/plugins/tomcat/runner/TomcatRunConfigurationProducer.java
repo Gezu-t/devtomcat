@@ -5,7 +5,6 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
-import com.dev.idea.plugins.tomcat.model.PortStrategy;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
@@ -298,13 +297,12 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         artifact.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
         artifact.setContextPath(detected.contextPath());
         configuration.getConfigData().getDeploymentConfig().setArtifacts(List.of(artifact));
-        configuration.getConfigData().setServerMode(TomcatConstants.MODE_LOCAL);
 
-        // Same port seeding as the Setup action's auto mode: start at 8080,
-        // bump when busy; shutdown port keeps Tomcat's conventional 75 offset.
-        configuration.getConfigData().getPortConfig().setHttp(8080);
-        configuration.getConfigData().getPortConfig().setShutdown(8080 - 75);
-        configuration.getConfigData().getPortConfig().setStrategy(PortStrategy.AUTO_BUMP);
+        // Server mode (local) and ports (8080/8005, auto-bump) are the defaults a
+        // fresh TomcatConfigurationData already carries — re-seeding them here would
+        // only duplicate those defaults and override whatever the user set on the
+        // DevTomcat run-config template. The artifact above is the only thing this
+        // context actually determines.
 
         LOG.debug("Tomcat: Configuration setup complete - " + configName
                 + " deploying " + detected.explodedPath()

@@ -93,7 +93,9 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
         assertEquals(contentRootPath() + "/target/demo-webapp-2.0", artifact.getPath());
         assertEquals("/demo-webapp", artifact.getContextPath());
 
-        // Setup-action parity: same auto-mode port seeding and server mode.
+        // The produced config is launch-ready with the standard defaults (local
+        // mode, 8080/8005 auto-bump) — the producer inherits them from the config
+        // template rather than re-seeding hardcoded ports.
         assertEquals(8080, configuration.getConfigData().getPortConfig().getHttp());
         assertEquals(8005, configuration.getConfigData().getPortConfig().getShutdown());
         assertEquals(com.dev.idea.plugins.tomcat.model.PortStrategy.AUTO_BUMP,
