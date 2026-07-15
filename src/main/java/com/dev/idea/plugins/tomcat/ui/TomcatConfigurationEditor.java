@@ -5,6 +5,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTask;
 import com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTaskProvider;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
+import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
@@ -721,7 +722,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 // their paths before launch.
                 List<String> artifactNames = allDeployments.stream()
                         .filter(a -> a != null && !a.getDisplayName().isBlank())
-                        .map(DeploymentArtifact::getDisplayName)
+                        .map(a -> DeploymentAdapter.toTyped(project, a).getDisplayName())
                         .collect(Collectors.toList());
                 TomcatBuildArtifactsTask ceTask =
                         new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
@@ -804,7 +805,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (!allDeployments.isEmpty()) {
             List<String> artifactNames = allDeployments.stream()
                     .filter(a -> a != null && !a.getDisplayName().isBlank())
-                    .map(DeploymentArtifact::getDisplayName)
+                    .map(a -> DeploymentAdapter.toTyped(project, a).getDisplayName())
                     .collect(Collectors.toList());
 
             TomcatBuildArtifactsTask buildTask =

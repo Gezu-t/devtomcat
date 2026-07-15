@@ -36,9 +36,22 @@ public final class DeploymentAdapter {
         String context = legacy.getContextPath();
 
         return switch (legacy.getSource()) {
-            case INTELLIJ_ARTIFACT ->
-                    ArtifactBackedDeployment.ofName(project, legacy.getName(), context,
-                            legacy.getPath(), exploded);
+            case INTELLIJ_ARTIFACT -> {
+                ArtifactBackedDeployment artifactBacked = ArtifactBackedDeployment.ofName(
+                        project, legacy.getName(), context, legacy.getPath(), exploded);
+                // Community-first: an INTELLIJ_ARTIFACT deployment with no live
+                // artifact behind it (Community has no web artifacts at all; or the
+                // artifact was deleted) is really a module deployment that lost its
+                // artifact. When its path resolves to a project module, resolve it
+                // as module-backed so DevTomcat can assemble and sync it. On
+                // Ultimate a live artifact keeps it artifact-backed — the platform
+                // builds that one, DevTomcat leaves it alone.
+                Module owner = artifactBackedFallbackModule(project, legacy, artifactBacked);
+                yield owner != null
+                        ? buildAutoDetectedDeployment(
+                                project, legacy.getName(), Path.of(legacy.getPath()), context, exploded)
+                        : artifactBacked;
+            }
 
             case AUTO_DETECTED -> {
                 Path outputPath = Path.of(legacy.getPath());
@@ -50,6 +63,26 @@ public final class DeploymentAdapter {
                     new ExternalFileDeployment(
                             Path.of(legacy.getPath()), context, exploded);
         };
+    }
+
+    /**
+     * The owning module for an {@code INTELLIJ_ARTIFACT} deployment ONLY when it
+     * has no live artifact behind it — so DevTomcat should treat it as
+     * module-backed and build it. Returns {@code null} when a live artifact backs
+     * it (keep it artifact-backed; the platform builds that one) or when no module
+     * owns the path. Runs under a read action (artifact + module lookups).
+     */
+    @Nullable
+    private static Module artifactBackedFallbackModule(@NotNull Project project,
+                                                       @NotNull DeploymentArtifact legacy,
+                                                       @NotNull ArtifactBackedDeployment artifactBacked) {
+        if (legacy.getPath().isEmpty()) return null;
+        return TomcatReadActions.compute(() -> {
+            if (artifactBacked.getArtifactPointer().getArtifact() != null) {
+                return null; // live IntelliJ artifact — the platform build task produces it
+            }
+            return resolveOwningModule(project, legacy.getName(), Path.of(legacy.getPath()));
+        });
     }
 
     /**

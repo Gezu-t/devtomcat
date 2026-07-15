@@ -239,12 +239,19 @@ public final class TomcatConfigurationValidator {
             }
             File artifactFile = new File(path);
             if (!artifactFile.exists()) {
-                String hint = DeploymentArtifact.TYPE_WAR.equals(artifact.getType())
-                        ? " Build the project (Build → Build Artifacts) to generate the WAR file."
-                        : " Build the project first; the output directory will be created by the 'Build Artifact' Before Launch task.";
-                throw new RuntimeConfigurationWarning(
-                        "Artifact output not found: " + path + "." + hint +
-                                " This warning will clear once the artifact is built.");
+                // An exploded deployment's directory is produced by a before-launch
+                // step — DevTomcat assembles it from the module on Community, the
+                // platform's Build Artifacts task builds it on Ultimate — so a
+                // missing directory before the first build is expected, not a
+                // problem to flag. (The Verify before-launch task is the real gate,
+                // and it assembles first.) Only a WAR genuinely needs a manual
+                // package step, so keep the warning for that.
+                if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
+                    throw new RuntimeConfigurationWarning(
+                            "WAR not found: " + path + ". Build the project "
+                                    + "(e.g. mvn package / gradle war) to generate it. "
+                                    + "This warning clears once the WAR is built.");
+                }
             }
         }
 

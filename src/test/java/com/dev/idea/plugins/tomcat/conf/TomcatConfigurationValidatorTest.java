@@ -290,6 +290,40 @@ class TomcatConfigurationValidatorTest {
         }
 
         @Test
+        @DisplayName("missing exploded path does not warn — a before-launch step builds it")
+        void missingExplodedPathDoesNotWarn() {
+            // Community-first: an exploded deployment's directory is produced by a
+            // before-launch step (DevTomcat assembles it; the platform builds it on
+            // Ultimate), so a not-yet-built path must not raise the old confusing
+            // "Artifact output not found" warning.
+            data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
+            DeploymentArtifact exploded = new DeploymentArtifact(
+                    "web-module", "/does/not/exist/target/web-module-1.0",
+                    DeploymentArtifact.TYPE_EXPLODED);
+            exploded.setContextPath("/web-module");
+            data.getDeploymentConfig().addArtifact(exploded);
+
+            assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
+        }
+
+        @Test
+        @DisplayName("missing WAR path still warns — only a real package step produces it")
+        void missingWarPathWarns() {
+            data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
+            DeploymentArtifact war = new DeploymentArtifact(
+                    "web-module", "/does/not/exist/target/web-module-1.0.war",
+                    DeploymentArtifact.TYPE_WAR);
+            war.setContextPath("/web-module");
+            data.getDeploymentConfig().addArtifact(war);
+
+            RuntimeConfigurationWarning ex = assertThrows(
+                    RuntimeConfigurationWarning.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+            assertTrue(ex.getLocalizedMessage().contains("WAR not found"),
+                    "expected WAR-not-found message, got: " + ex.getLocalizedMessage());
+        }
+
+        @Test
         @DisplayName("duplicate artifact output paths throw warning")
         void duplicateArtifactPathsThrow() throws Exception {
             Path exploded = Files.createTempDirectory("devtomcat-artifact");

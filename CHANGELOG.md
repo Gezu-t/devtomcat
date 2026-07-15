@@ -16,6 +16,8 @@
 - Class sync never writes into your source tree.
 - Auto-detected modules deploy build output, not sources.
 - Build the exploded webapp when no artifact or package step does (Community).
+- No false "artifact not found" warning before the first build.
+- Artifact-based configs from older versions deploy on Community.
 
 ## [1.4.2]
 

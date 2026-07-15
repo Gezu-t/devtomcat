@@ -74,4 +74,23 @@ class TomcatBuildArtifactsTaskProviderTest {
         assertEquals(List.of(badSelected), result);
         assertFalse(result.get(0).isValid(), "selected invalid artifact is kept so the launch is blocked");
     }
+
+    @Test
+    @DisplayName("selection keys on getDisplayName — a mismatched name domain silently drops the deployment")
+    void selectionKeysOnDisplayName(@TempDir Path dir) throws IOException {
+        // Regression: the Before-Launch task's selection names must be derived from
+        // Deployment.getDisplayName() (what this filter matches), not a different name
+        // domain. A normalized module-backed deployment reports its MODULE name here,
+        // so the editor must persist that same name — selecting it by any other name
+        // (e.g. a legacy artifact name) silently drops it from pre-launch assembly and
+        // reproduces the "no artifact" symptom.
+        Deployment dep = dep(Files.createFile(dir.resolve("web-module")));
+        assertEquals("web-module", dep.getDisplayName());
+
+        assertEquals(List.of(dep), TomcatBuildArtifactsTaskProvider.applyArtifactSelection(
+                List.of(dep), List.of("web-module")), "selected by its display name → kept");
+        assertEquals(0, TomcatBuildArtifactsTaskProvider.applyArtifactSelection(
+                List.of(dep), List.of("web-module:war exploded")).size(),
+                "selected by a mismatched name domain → wrongly dropped");
+    }
 }
