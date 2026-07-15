@@ -397,8 +397,10 @@ public final class WebResourcesSync {
      * {@code <filtering>true</filtering>} (see {@link #findWebappSourceRoots}).
      *
      * <p>The configuration is read through {@link MavenModelProvider} (typed,
-     * optional Maven dependency); it is absent on Community / Gradle-only IDEs,
-     * where this degrades to an empty list.
+     * optional Maven dependency); it is present whenever the Maven plugin is —
+     * including IntelliJ Community, which bundles Maven support — and absent only
+     * on an IDE without it (e.g. a Gradle-only setup or Maven disabled), where
+     * this degrades to an empty list.
      */
     private static final String WAR_PLUGIN_WEB_RESOURCES_ELEMENT = "webResources";
     private static final String WAR_PLUGIN_RESOURCE_ELEMENT = "resource";
@@ -451,8 +453,9 @@ public final class WebResourcesSync {
     /**
      * The maven-war-plugin's resolved {@code <configuration>} element via the
      * typed {@link MavenModelProvider}, or {@code null} when the Maven plugin is
-     * absent (Community / Gradle-only IDE) or the war plugin isn't declared.
-     * Shared by the {@code <webResources>} and {@code <warSourceDirectory>} readers.
+     * absent (a Gradle-only IDE or Maven disabled — not Community, which bundles
+     * Maven) or the war plugin isn't declared. Shared by the
+     * {@code <webResources>} and {@code <warSourceDirectory>} readers.
      */
     @Nullable
     private static Element mavenWarPluginConfig(@NotNull Module module) {
