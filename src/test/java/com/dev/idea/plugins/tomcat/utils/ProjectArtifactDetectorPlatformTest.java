@@ -10,18 +10,6 @@ import java.util.List;
 
 public class ProjectArtifactDetectorPlatformTest extends BasePlatformTestCase {
 
-    public void testWebModuleTierWinsOverWarScan() throws Exception {
-        VirtualFile webRoot = createWebRoot();
-        myFixture.addFileToProject("build/libs/" + getModule().getName() + ".war", "war");
-
-        List<Deployment> detected = ProjectArtifactDetector.detect(getProject());
-
-        assertFalse(detected.isEmpty());
-        assertTrue("module-tier should produce an exploded deployment",
-                detected.get(0).isExploded());
-        assertEquals(webRoot.getPath(), detected.get(0).getResolvedPath().toString());
-    }
-
     public void testDetectWebModulesReturnsEmptyForNonWebProject() {
         myFixture.addFileToProject("src/main/java/com/example/App.java", "package com.example; class App {}");
 
@@ -37,6 +25,30 @@ public class ProjectArtifactDetectorPlatformTest extends BasePlatformTestCase {
 
         assertEquals(1, detected.size());
         assertEquals(TomcatModuleUtils.extractContextPath(getModule()), detected.get(0).getContextPath());
+        assertTrue(detected.get(0).isExploded());
+    }
+
+    public void testDetectWebModulesEmitsBuildOutputPathNotSourceForWarModule() throws Exception {
+        // A WAR module with a source web root: the emitted deployment path must be
+        // the exploded BUILD OUTPUT (target/<finalName>), never the source webapp —
+        // the sync pipeline writes WEB-INF/classes under the deployment path.
+        VirtualFile webRoot = createWebRoot();
+        myFixture.addFileToProject("pom.xml", """
+                <project>
+                    <groupId>com.example</groupId>
+                    <artifactId>demo-webapp</artifactId>
+                    <version>3.1</version>
+                    <packaging>war</packaging>
+                </project>
+                """);
+
+        List<Deployment> detected = ProjectArtifactDetector.detectWebModules(getProject());
+
+        assertEquals(1, detected.size());
+        String path = detected.get(0).getResolvedPath().toString();
+        assertTrue("expected a target/ build-output path, got: " + path,
+                path.endsWith("/target/demo-webapp-3.1"));
+        assertFalse("must not deploy the source web root", path.equals(webRoot.getPath()));
         assertTrue(detected.get(0).isExploded());
     }
 

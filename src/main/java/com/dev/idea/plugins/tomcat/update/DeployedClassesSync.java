@@ -224,6 +224,23 @@ public final class DeployedClassesSync {
                 continue;
             }
 
+            // Never write into the user's source tree. An exploded deployment
+            // whose docBase is a content directory (e.g. src/main/webapp) would
+            // have compiled classes mirrored — and reconcile-deleted — under it.
+            // Refuse and point the user at the build output instead. Build
+            // outputs (target/, build/, out/) are excluded from content, so this
+            // fires only for the genuinely unsafe case.
+            if (Boolean.TRUE.equals(TomcatReadActions.compute(
+                    () -> DeploymentSafety.isInsideProjectContent(project, artifactRoot)))) {
+                logger.logServerWarning("Class sync skipped '" + name
+                        + "': deployment path is inside the project source tree (" + artifactRoot + "). "
+                        + "DevTomcat will not write compiled classes into your sources. "
+                        + "Point this deployment at the exploded build output instead "
+                        + "(e.g. target/<finalName> for Maven, the exploded war output for Gradle).");
+                skipped++;
+                continue;
+            }
+
             Path webInfClasses = artifactRoot.resolve(WEB_INF_CLASSES_PATH);
             // Some exploded layouts don't have a WEB-INF/classes/ yet (e.g. a
             // build that never produced bytecode). Create it on demand so the

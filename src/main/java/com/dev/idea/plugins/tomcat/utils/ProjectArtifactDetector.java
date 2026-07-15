@@ -1,7 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
-import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
@@ -12,7 +11,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
-import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.packaging.artifacts.ArtifactType;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -25,18 +23,20 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Headless deployment detection for Tomcat.
+ * Headless deployment detection for Tomcat, feeding the deployment-picker UI.
  *
- * <p>Produces typed {@link Deployment} objects from one of three sources, in priority
- * order:
- * <ol>
- *   <li>IntelliJ-configured web artifacts → {@link ArtifactBackedDeployment}</li>
- *   <li>Web modules with web roots → {@link ModuleBackedDeployment}</li>
- *   <li>WAR files / exploded directories on disk → {@link ExternalFileDeployment}</li>
- * </ol>
+ * <p>Produces typed {@link Deployment} objects from two sources:
+ * <ul>
+ *   <li>{@link #detectWebModules} — web modules, as {@link ModuleBackedDeployment}s
+ *       pointing at the module's exploded <em>build output</em> (never a source
+ *       directory — the sync pipeline writes {@code WEB-INF/classes} under the
+ *       deployment path).</li>
+ *   <li>{@link #scanForWarFiles} — WAR files / exploded directories in build output,
+ *       as {@link ExternalFileDeployment}s.</li>
+ * </ul>
  *
- * <p>UI-free and safe to call from configuration initialization, factory defaults,
- * or any non-EDT context (read-action handled internally).
+ * <p>UI-free and safe to call from any non-EDT context (read-action handled
+ * internally).
  */
 public final class ProjectArtifactDetector {
 
@@ -44,64 +44,16 @@ public final class ProjectArtifactDetector {
 
     private ProjectArtifactDetector() {}
 
-    @NotNull
-    public static List<Deployment> detect(@NotNull Project project) {
-        List<Deployment> artifacts = detectIntelliJWebArtifacts(project);
-        if (!artifacts.isEmpty()) {
-            LOG.info("DevTomcat: Auto-detected " + artifacts.size() +
-                    " IntelliJ web artifact(s) for project: " + project.getName());
-            return artifacts;
-        }
-
-        artifacts = detectWebModules(project);
-        if (!artifacts.isEmpty()) {
-            LOG.info("DevTomcat: Auto-detected " + artifacts.size() +
-                    " web module(s) for project: " + project.getName());
-            return artifacts;
-        }
-
-        artifacts = scanForWarFiles(project);
-        if (!artifacts.isEmpty()) {
-            LOG.info("DevTomcat: Auto-detected " + artifacts.size() +
-                    " WAR file(s) in build output for project: " + project.getName());
-            return artifacts;
-        }
-
-        LOG.debug("DevTomcat: No deployable artifacts detected in project: " + project.getName());
-        return Collections.emptyList();
-    }
-
     /**
-     * Detects IntelliJ-configured web artifacts as {@link ArtifactBackedDeployment}s.
+     * Detects deployable web modules as {@link ModuleBackedDeployment}s, one per
+     * web module, with an <em>exploded build-output</em> deployment path.
      *
-     * <p>{@code artifactManager.getArtifacts()} only returns live, registered
-     * artifacts, and {@link ArtifactBackedDeployment} holds an {@code ArtifactPointer}
-     * the platform keeps valid across rename/delete, so orphan concerns are handled
-     * structurally downstream. We deliberately do <em>not</em> filter by a
-     * name-string-to-module-name heuristic here: that silently dropped valid
-     * user-renamed artifacts whose name no longer encodes the module name.
-     */
-    @NotNull
-    public static List<Deployment> detectIntelliJWebArtifacts(@NotNull Project project) {
-        return ApplicationManager.getApplication().runReadAction((Computable<List<Deployment>>) () -> {
-            ArtifactManager artifactManager = getArtifactManager(project);
-            if (artifactManager == null) return Collections.<Deployment>emptyList();
-
-            List<Deployment> results = new ArrayList<>();
-            for (Artifact artifact : artifactManager.getArtifacts()) {
-                if (!isWebArtifact(artifact)) continue;
-
-                results.add(ArtifactBackedDeployment.ofName(
-                        project,
-                        artifact.getName(),
-                        ContextPathUtils.generateContextPath(artifact.getName())));
-            }
-            return deduplicate(results);
-        });
-    }
-
-    /**
-     * Detects web modules with web root directories as {@link ModuleBackedDeployment}s.
+     * <p>Exploded deployments deploy in place ({@code docBase} = the path) and the
+     * sync pipeline writes {@code WEB-INF/classes} under it, so the path must be a
+     * build output, never a source directory. For a Maven WAR module the scanner
+     * gives {@code target/<finalName>}; only when no build output is determinable
+     * does it fall back to a web root (which {@link DeploymentSafety} then refuses
+     * to write into at sync time, so a source tree is never corrupted either way).
      */
     @NotNull
     public static List<Deployment> detectWebModules(@NotNull Project project) {
@@ -113,29 +65,12 @@ public final class ProjectArtifactDetector {
                     if (!TomcatModuleUtils.isWebModule(module)) continue;
 
                     String contextPath = TomcatModuleUtils.extractContextPath(module);
-                    List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(module);
-                    if (webRoots.isEmpty()) {
-                        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-                        if (contentRoots.length > 0) {
-                            results.add(ModuleBackedDeployment.ofName(
-                                    project, module.getName(),
-                                    Path.of(contentRoots[0].getPath()),
-                                    contextPath, /* exploded */ true));
-                        }
-                    } else {
-                        for (VirtualFile webRoot : webRoots) {
-                            // The display name on ModuleBackedDeployment comes from the
-                            // ModulePointer; the multi-webroot disambiguation suffix
-                            // ("(webroot-name)") that legacy applied to a free-form
-                            // string can't ride along the pointer. Multi-webroot is rare
-                            // in practice — pick the first match for now.
-                            results.add(ModuleBackedDeployment.ofName(
-                                    project, module.getName(),
-                                    Path.of(webRoot.getPath()),
-                                    contextPath, /* exploded */ true));
-                            break;
-                        }
-                    }
+                    Path deployPath = deployableExplodedPath(module);
+                    if (deployPath == null) continue;
+
+                    results.add(ModuleBackedDeployment.ofName(
+                            project, module.getName(), deployPath,
+                            contextPath, /* exploded */ true));
                 }
             } catch (Exception e) {
                 LOG.warn("DevTomcat: Error detecting web modules", e);
@@ -143,6 +78,26 @@ public final class ProjectArtifactDetector {
 
             return results;
         });
+    }
+
+    /**
+     * The exploded deployment path for a web module: its build output when one is
+     * determinable (Maven {@code target/<finalName>}), else a web root as a
+     * fallback, else the module content root. Never returns {@code null} for a
+     * module with any content root. Must be called under a read action.
+     */
+    @Nullable
+    private static Path deployableExplodedPath(@NotNull Module module) {
+        var detected = com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner.scanModule(module);
+        if (detected != null) {
+            return Path.of(detected.explodedPath());
+        }
+        List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(module);
+        if (!webRoots.isEmpty()) {
+            return Path.of(webRoots.get(0).getPath());
+        }
+        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
+        return contentRoots.length > 0 ? Path.of(contentRoots[0].getPath()) : null;
     }
 
     /**
@@ -241,16 +196,6 @@ public final class ProjectArtifactDetector {
     // =====================================================================
     // Private helpers
     // =====================================================================
-
-    @Nullable
-    private static ArtifactManager getArtifactManager(@NotNull Project project) {
-        try {
-            return ArtifactManager.getInstance(project);
-        } catch (Exception e) {
-            LOG.debug("DevTomcat: ArtifactManager not available: " + e.getMessage());
-            return null;
-        }
-    }
 
     private static void scanWarDirectory(@NotNull File dir, @NotNull List<Deployment> results) {
         if (!dir.isDirectory()) return;

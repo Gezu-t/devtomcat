@@ -182,6 +182,18 @@ public final class WebResourcesSync {
                 continue;
             }
 
+            // Never mirror into the user's source tree — same invariant as class
+            // sync. A content-directory docBase (e.g. src/main/webapp) is refused
+            // so an overlay source is never copied over hand-authored files.
+            if (Boolean.TRUE.equals(TomcatReadActions.compute(
+                    () -> DeploymentSafety.isInsideProjectContent(project, artifactRoot)))) {
+                logger.logServerWarning("Web resources sync skipped '" + name
+                        + "': deployment path is inside the project source tree (" + artifactRoot + "). "
+                        + "Point this deployment at the exploded build output instead.");
+                skipped++;
+                continue;
+            }
+
             // Resolve every applicable source directory: convention dirs (Maven
             // src/main/webapp, Eclipse WebContent, IntelliJ default web/, etc.),
             // content-root-IS-webapp layouts, AND Maven war-plugin <webResources>

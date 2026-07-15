@@ -13,6 +13,8 @@
 - No duplicate run configs from run-from-context.
 - Context-created configs deploy real build outputs.
 - Child pom coordinates no longer shadowed by the parent's.
+- Class sync never writes into your source tree.
+- Auto-detected modules deploy build output, not sources.
 
 ## [1.4.2]
 
