@@ -48,7 +48,7 @@ class WebResourcesSyncTest {
         Path dst = Files.createDirectories(tmp.resolve("target/webapp-portal"));
         writeFile(src.resolve("index.jsp"), "<%-- v1 --%>");
 
-        WebResourcesSync.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied());
         assertEquals("<%-- v1 --%>", Files.readString(dst.resolve("index.jsp")));
@@ -63,7 +63,7 @@ class WebResourcesSyncTest {
         writeFile(src.resolve("static/js/app.js"), "$(function(){});");
         writeFile(src.resolve("WEB-INF/views/login.jsp"), "<form/>");
 
-        WebResourcesSync.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
 
         assertEquals(3, r.copied());
         assertTrue(Files.exists(dst.resolve("static/style.css")));
@@ -79,7 +79,7 @@ class WebResourcesSyncTest {
         // Unusual but legal: src/main/webapp/WEB-INF/classes/ exists.
         writeFile(src.resolve("WEB-INF/classes/marker.txt"), "would-collide");
 
-        WebResourcesSync.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied(), "WEB-INF/classes/ must be skipped");
         assertFalse(Files.exists(dst.resolve("WEB-INF/classes/marker.txt")));
@@ -92,7 +92,7 @@ class WebResourcesSyncTest {
         Path dst = Files.createDirectories(tmp.resolve("target/app"));
         writeFile(src.resolve("WEB-INF/lib/whatever.jar"), "fake-jar");
 
-        WebResourcesSync.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied(), "WEB-INF/lib/ must be skipped");
         assertFalse(Files.exists(dst.resolve("WEB-INF/lib/whatever.jar")));
@@ -167,7 +167,7 @@ class WebResourcesSyncTest {
         Path dst = Files.createDirectories(tmp.resolve("a/inner"));
         writeFile(src.resolve("index.jsp"), "x");
 
-        WebResourcesSync.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
         assertEquals(0, r.copied(), "nested src/dst must bail without copying");
         assertTrue(r.walkFailed(),
                 "a refused walk must be marked failed so the caller defers stale cleanup");
@@ -181,7 +181,7 @@ class WebResourcesSyncTest {
         // make every file it previously synced look stale — mark walk failed.
         Path fakeSrc = tmp.resolve("not-a-dir.txt");
         Files.writeString(fakeSrc, "x");
-        assertEquals(WebResourcesSync.MirrorResult.FAILED,
+        assertEquals(TreeMirror.MirrorResult.FAILED,
                 WebResourcesSync.mirrorTree(fakeSrc, dst));
     }
 
@@ -241,7 +241,7 @@ class WebResourcesSyncTest {
                 java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x");
         Files.setPosixFilePermissions(sub, readOnlyNoExec);
         try {
-            WebResourcesSync.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
+            TreeMirror.MirrorResult r = WebResourcesSync.mirrorTree(src, dst);
 
             assertTrue(r.walkFailed(),
                     "an unvisitable source entry must defer the caller's stale cleanup");
@@ -279,13 +279,13 @@ class WebResourcesSyncTest {
         // Run 1: two pages exist in src; mirror + reconcile records them.
         writeFile(src.resolve("keep.jsp"), "<%-- v1 --%>");
         writeFile(src.resolve("gone.jsp"), "<%-- delete me --%>");
-        WebResourcesSync.MirrorResult first = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult first = WebResourcesSync.mirrorTree(src, dst);
         assertEquals(0, reconcile(dst, first.contributedPaths()),
                 "first run establishes the baseline and deletes nothing");
 
         // User deletes gone.jsp from source. Run 2: reconcile cleans it.
         Files.delete(src.resolve("gone.jsp"));
-        WebResourcesSync.MirrorResult second = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult second = WebResourcesSync.mirrorTree(src, dst);
         int removed = reconcile(dst, second.contributedPaths());
 
         assertEquals(1, removed);
@@ -311,7 +311,7 @@ class WebResourcesSyncTest {
         writeFile(dst.resolve("META-INF/MANIFEST.MF"), "generated");
 
         for (int run = 1; run <= 2; run++) {
-            WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+            TreeMirror.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
             assertEquals(0, reconcile(dst, mr.contributedPaths()),
                     "run " + run + ": a file the sync never wrote must never be deleted");
         }
@@ -339,7 +339,7 @@ class WebResourcesSyncTest {
                 dst.resolve("WEB-INF/classes"));
         SyncManifest.write(classSyncManifest, java.util.Set.of("com/foo/App.class"));
 
-        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
         int removed = reconcile(dst, mr.contributedPaths());
 
         assertEquals(0, removed);
@@ -363,7 +363,7 @@ class WebResourcesSyncTest {
         writeFile(src.resolve("index.jsp"), "page");
         writeFile(dst.resolve("legacy.html"), "from-an-old-build");
 
-        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
         int removed = reconcile(dst, mr.contributedPaths());
 
         assertEquals(0, removed, "no prior manifest -> nothing is a proven orphan");
@@ -411,7 +411,7 @@ class WebResourcesSyncTest {
         // A leftover manifest an old version wrote into the SOURCE webapp.
         writeFile(src.resolve("WEB-INF").resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST), "stale");
 
-        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
 
         assertFalse(Files.exists(dst.resolve("WEB-INF")
                         .resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST)),

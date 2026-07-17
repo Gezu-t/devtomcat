@@ -93,7 +93,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(src, "com/foo/Controller.class", "controller-bytes");
         writeClass(src, "com/foo/util/Helper.class", "helper-bytes");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(3, r.copied(), "all three classes must copy on cold start");
         assertEquals(0, r.brokenSkipped());
@@ -117,7 +117,7 @@ class DeployedClassesSyncScenariosTest {
         Files.setLastModifiedTime(src.resolve("A.class"), FileTime.fromMillis(5_000L));
         Files.setLastModifiedTime(dst.resolve("A.class"), FileTime.fromMillis(5_000L));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied(), "steady-state sync must copy nothing");
         assertEquals(0, r.brokenSkipped());
@@ -143,7 +143,7 @@ class DeployedClassesSyncScenariosTest {
         Files.setLastModifiedTime(src.resolve("B.class"), FileTime.fromMillis(10_000L));
         Files.setLastModifiedTime(dst.resolve("B.class"), FileTime.fromMillis(5_000L));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "exactly one file must copy — the edited one");
         assertEquals(0, r.brokenSkipped());
@@ -168,7 +168,7 @@ class DeployedClassesSyncScenariosTest {
         // from a prior mvn install). The mirror must NOT replace it.
         writeClass(dst, "BrokenConfig.class", "working-config-from-mvn");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "only Good.class should copy");
         assertEquals(1, r.brokenSkipped(), "BrokenConfig.class must be flagged as broken");
@@ -188,7 +188,7 @@ class DeployedClassesSyncScenariosTest {
 
         writeRaw(src.resolve("Broken.class"), ecjBrokenPayload());
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied());
         assertEquals(1, r.brokenSkipped());
@@ -213,7 +213,7 @@ class DeployedClassesSyncScenariosTest {
                 ecjBrokenPayload());
         writeClass(src, "pkg/Working3.class", "w3");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(3, r.copied(), "three working classes must mirror");
         assertEquals(2, r.brokenSkipped(), "two broken stubs must be refused");
@@ -238,7 +238,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(src, "com/example/app/web/dao/UserDao.class", "dao");
         writeClass(src, "com/example/app/shared/util/Strings.class", "strings");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(4, r.copied());
         assertEquals(0, r.brokenSkipped());
@@ -264,7 +264,7 @@ class DeployedClassesSyncScenariosTest {
         writeRaw(src.resolve("application.yml"), "server: { port: 8080 }".getBytes(StandardCharsets.UTF_8));
         writeRaw(src.resolve("schema.json"), "{}".getBytes(StandardCharsets.UTF_8));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(5, r.copied(), "all 5 (1 class + 4 resources) must mirror");
         assertEquals(0, r.brokenSkipped());
@@ -289,7 +289,7 @@ class DeployedClassesSyncScenariosTest {
         Files.writeString(src.resolve("errors.properties"),
                 "ecj.error=Unresolved compilation problems found");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied());
         assertEquals(0, r.brokenSkipped(),
@@ -312,7 +312,7 @@ class DeployedClassesSyncScenariosTest {
         Files.setLastModifiedTime(src.resolve("Edited.class"), FileTime.fromMillis(5_000L));
         Files.setLastModifiedTime(dst.resolve("Edited.class"), FileTime.fromMillis(5_000L));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "size mismatch under equal mtime must trigger copy");
         assertEquals(0, r.brokenSkipped());
@@ -331,10 +331,10 @@ class DeployedClassesSyncScenariosTest {
         writeClass(src, "X.class", "x");
         writeClass(src, "Y.class", "y");
 
-        DeployedClassesSync.MirrorResult first = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult first = DeployedClassesSync.mirrorTree(src, dst);
         assertEquals(2, first.copied(), "first sync mirrors everything");
 
-        DeployedClassesSync.MirrorResult second = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult second = DeployedClassesSync.mirrorTree(src, dst);
         assertEquals(0, second.copied(),
                 "second sync over identical state must be a no-op (the sync aligns the deployed mtime to the source)");
         assertEquals(0, second.brokenSkipped());
@@ -349,7 +349,7 @@ class DeployedClassesSyncScenariosTest {
         Path src = Files.createDirectories(tmp.resolve("src"));
         Path dst = Files.createDirectories(tmp.resolve("dst"));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied());
         assertEquals(0, r.brokenSkipped());
@@ -365,7 +365,7 @@ class DeployedClassesSyncScenariosTest {
         Files.writeString(file, "oops");
         Path dst = Files.createDirectories(tmp.resolve("dst"));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(file, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(file, dst);
 
         assertEquals(0, r.copied(), "mirrorTree must gracefully handle non-directory src");
         assertEquals(0, r.brokenSkipped());
@@ -394,8 +394,8 @@ class DeployedClassesSyncScenariosTest {
         writeClass(depSrc, "com/example/common/util/DateUtils.class", "dates");
         writeClass(depSrc, "com/example/common/dto/UserDto.class", "user");
 
-        DeployedClassesSync.MirrorResult web = DeployedClassesSync.mirrorTree(webSrc, dst);
-        DeployedClassesSync.MirrorResult dep = DeployedClassesSync.mirrorTree(depSrc, dst);
+        TreeMirror.MirrorResult web = DeployedClassesSync.mirrorTree(webSrc, dst);
+        TreeMirror.MirrorResult dep = DeployedClassesSync.mirrorTree(depSrc, dst);
 
         assertEquals(2, web.copied());
         assertEquals(2, dep.copied());
@@ -448,7 +448,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(dst, "com/example/config/SomeConfig.class", "working-config");
         writeClass(dst, "com/example/integration/AnyFrameworkHook.class", "working-hook");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(3, r.copied(), "three healthy classes must mirror");
         assertEquals(2, r.brokenSkipped(), "two broken stubs must be refused regardless of class type");
@@ -482,7 +482,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(dst, "Legacy.class", "legacy-must-survive");
         Files.writeString(dst.resolve("manifest.txt"), "deployment-manifest");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied());
         assertTrue(Files.exists(dst.resolve("A.class")));
@@ -507,7 +507,7 @@ class DeployedClassesSyncScenariosTest {
         // User adds a new package.
         writeClass(src, "fresh/NewClass.class", "new");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "exactly one new file (the fresh/NewClass) must copy");
         assertEquals(0, r.brokenSkipped());
@@ -529,7 +529,7 @@ class DeployedClassesSyncScenariosTest {
         Files.setLastModifiedTime(src.resolve("Jitter.class"), FileTime.fromMillis(1_000_001L));
         Files.setLastModifiedTime(dst.resolve("Jitter.class"), FileTime.fromMillis(1_000_000L));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "even 1ms newer src must trigger copy");
         assertFileContent(dst.resolve("Jitter.class"), "edited");
@@ -552,7 +552,7 @@ class DeployedClassesSyncScenariosTest {
         // size-fast-reject path keeps this cheap (no readAllBytes called).
         Files.createFile(src.resolve("Empty.class"));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "empty .class is still a file to mirror");
         assertEquals(0, r.brokenSkipped(),
@@ -575,7 +575,7 @@ class DeployedClassesSyncScenariosTest {
                 0, 0, 0, 0x3D, 0, 10};
         Files.write(src.resolve("Tiny.class"), tiny);
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied());
         assertEquals(0, r.brokenSkipped());
@@ -608,7 +608,7 @@ class DeployedClassesSyncScenariosTest {
             return;
         }
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "only the real file should mirror");
         assertEquals(0, r.brokenSkipped());
@@ -639,7 +639,7 @@ class DeployedClassesSyncScenariosTest {
             return;
         }
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "only the real file in src copies");
         assertFalse(Files.exists(dst.resolve("linkedpkg/HiddenFromSync.class")),
@@ -656,7 +656,7 @@ class DeployedClassesSyncScenariosTest {
         Path src = Files.createDirectories(dst.resolve("nested/src"));
         writeClass(src, "X.class", "x");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied(),
                 "src nested under dst would loop — must be refused without copying anything");
@@ -673,7 +673,7 @@ class DeployedClassesSyncScenariosTest {
         Path dst = Files.createDirectories(src.resolve("nested/dst"));
         writeClass(src, "Y.class", "y");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied(),
                 "dst nested under src would re-enter dst during the walk — must be refused");
@@ -700,7 +700,7 @@ class DeployedClassesSyncScenariosTest {
         Files.write(src.resolve("EdgeCase.class"), all);
         writeClass(dst, "EdgeCase.class", "previous-clean-copy");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(0, r.copied());
         assertEquals(1, r.brokenSkipped(),
@@ -725,7 +725,7 @@ class DeployedClassesSyncScenariosTest {
                 "k=v".getBytes(StandardCharsets.UTF_8));
         writeClass(src, "com/example/日本語.class", "japanese-class");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(3, r.copied(), "all 3 non-ASCII-named files must mirror");
         assertTrue(Files.exists(dst.resolve("com/example/Λ.class")));
@@ -771,7 +771,7 @@ class DeployedClassesSyncScenariosTest {
             writeRaw(src.resolve(p), ("content of " + p).getBytes(StandardCharsets.UTF_8));
         }
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(paths.length, r.copied(),
                 "all " + paths.length + " file types must mirror");
@@ -796,7 +796,7 @@ class DeployedClassesSyncScenariosTest {
         Files.createDirectories(src.resolve("com/example/empty"));
         writeClass(src, "com/example/A.class", "a");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(), "only the actual class file counts");
         assertEquals(0, r.brokenSkipped());
@@ -819,7 +819,7 @@ class DeployedClassesSyncScenariosTest {
         // A real .class file with the marker
         writeRaw(src.resolve("RealBroken.class"), ecjBrokenPayload());
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, r.copied(),
                 "the data file (despite containing the marker as user text) must mirror");
@@ -843,7 +843,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(src, "com/foo/A.class", "a-v1");
         writeClass(src, "com/foo/B.class", "b-v1");
         writeClass(src, "com/foo/C.class", "c-v1");
-        DeployedClassesSync.MirrorResult first = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult first = DeployedClassesSync.mirrorTree(src, dst);
         assertEquals(3, first.copied());
 
         // User then edits B with an unresolved import; IDE Make produces an
@@ -855,7 +855,7 @@ class DeployedClassesSyncScenariosTest {
                         .toMillis() + 5000L));
         Files.writeString(src.resolve("com/foo/A.class"), "a-v2-edited");
 
-        DeployedClassesSync.MirrorResult second = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult second = DeployedClassesSync.mirrorTree(src, dst);
 
         assertEquals(1, second.copied(), "only A (the cleanly-edited class) refreshes");
         assertEquals(1, second.brokenSkipped(), "B (the broken stub) refused");
@@ -887,7 +887,7 @@ class DeployedClassesSyncScenariosTest {
         // src has the broken ECJ stub.
         writeRaw(src.resolve("com/foo/Broken.class"), ecjBrokenPayload());
 
-        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst);
         assertEquals(0, mr.copied(), "broken stub must not overwrite working dst");
         assertEquals(1, mr.brokenSkipped());
         assertTrue(mr.contributedPaths().contains("com/foo/Broken.class"),
@@ -1051,7 +1051,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(src, "META-INF/services/com.example.Spi", "com.example.Impl");
         writeClass(src, "descriptors/registry.xml", "<registry/>");
 
-        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true);
+        TreeMirror.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true);
 
         assertEquals(2, mr.copied(), "only the two .class files may be mirrored");
         assertTrue(Files.exists(dst.resolve("com/example/dao/UserDao.class")));
@@ -1088,7 +1088,7 @@ class DeployedClassesSyncScenariosTest {
         writeClass(dst, "com/example/dao/UserDao.class", "stale-dao");
         writeClass(dst, "descriptors/registry.xml", "<registry/>");
 
-        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true);
+        TreeMirror.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true);
 
         // Classes-only mode claims ONLY the .class as contributed — the
         // resource is deliberately unclaimed so a downstream reconcile keyed
@@ -1113,7 +1113,7 @@ class DeployedClassesSyncScenariosTest {
 
         // Full-content path (the web module's own output): the 2-arg overload
         // and the explicit classesOnly=false must behave identically.
-        DeployedClassesSync.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, false);
+        TreeMirror.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, false);
 
         assertEquals(3, mr.copied(), "own root mirrors .class AND resources");
         assertTrue(Files.exists(dst.resolve("com/example/web/HomeController.class")));
@@ -1137,7 +1137,7 @@ class DeployedClassesSyncScenariosTest {
         Path dst = Files.createDirectories(tmp.resolve("dst"));
         writeClass(src, "com/foo/Service.class", "bytes");
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertFalse(r.walkFailed(),
                 "a fully-enumerated source root must not mark the walk failed");
@@ -1149,7 +1149,7 @@ class DeployedClassesSyncScenariosTest {
         Path src = Files.createDirectories(tmp.resolve("src"));
         Path dst = Files.createDirectories(tmp.resolve("dst"));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertFalse(r.walkFailed(),
                 "an empty but readable source is a successful (empty) walk, not a failure");
@@ -1162,7 +1162,7 @@ class DeployedClassesSyncScenariosTest {
         Files.writeString(file, "oops");
         Path dst = Files.createDirectories(tmp.resolve("dst"));
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(file, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(file, dst);
 
         assertTrue(r.walkFailed(),
                 "a vanished / non-directory source root must defer the caller's orphan pass");
@@ -1174,7 +1174,7 @@ class DeployedClassesSyncScenariosTest {
         Path src = Files.createDirectories(tmp.resolve("root"));
         Path dst = Files.createDirectories(src.resolve("WEB-INF/classes")); // dst nested under src
 
-        DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+        TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
         assertTrue(r.walkFailed(),
                 "the nesting-guard refusal is an untrusted walk and must defer orphan removal");
@@ -1202,7 +1202,7 @@ class DeployedClassesSyncScenariosTest {
                 java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x");
         Files.setPosixFilePermissions(locked, readOnlyNoExec);
         try {
-            DeployedClassesSync.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
+            TreeMirror.MirrorResult r = DeployedClassesSync.mirrorTree(src, dst);
 
             assertTrue(r.walkFailed(),
                     "an unvisitable source entry must defer the caller's reconcile");

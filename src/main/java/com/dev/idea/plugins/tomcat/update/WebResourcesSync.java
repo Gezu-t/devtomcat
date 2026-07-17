@@ -18,12 +18,8 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -89,32 +85,6 @@ public final class WebResourcesSync {
             WEB_INF_LIB_PATH);
 
     private WebResourcesSync() {}
-
-    /**
-     * Result of mirroring one source webapp root.
-     *
-     * <p>{@code contributedPaths} is the set of forward-slash-normalized
-     * relative paths the source walk visited (regardless of copy outcome).
-     * The union across every webapp source root is what the stale-file
-     * reconcile ({@link SyncManifest#reconcile}) records as this run's
-     * synced set — a file previously in the manifest but no longer
-     * contributed was removed from source and is cleaned.
-     *
-     * <p>{@code walkFailed} marks a root whose walk could not be trusted to
-     * have enumerated its full contribution — a vanished/non-directory
-     * source, a nesting-guard refusal, an unreadable directory subtree, or
-     * an outer walk failure. The caller must NOT reconcile when any source
-     * root reports this: a partial {@code contributedPaths} union would make
-     * previously-synced files from the failed root look stale and get
-     * deleted even though their source still exists.
-     */
-    public record MirrorResult(int copied,
-                               @NotNull java.util.Set<String> contributedPaths,
-                               boolean walkFailed) {
-        /** Nothing contributed and the walk cannot be trusted — the caller must defer stale cleanup. */
-        public static final MirrorResult FAILED = new MirrorResult(
-                0, java.util.Collections.emptySet(), true);
-    }
 
     /** Aggregate result across all artifacts in a single call. */
     public record SyncReport(int artifactsSynced, int totalCopied, int skipped) {}
@@ -286,7 +256,7 @@ public final class WebResourcesSync {
                             + " leftover DevTomcat metadata file(s) from " + src.resolve(WEB_INF));
                 }
                 logger.logServerInfo("Web resources sync: '" + name + "' -> " + src + " -> " + artifactRoot);
-                MirrorResult mr = mirrorTree(src, artifactRoot);
+                TreeMirror.MirrorResult mr = mirrorTree(src, artifactRoot);
                 copiedForThisArtifact += mr.copied();
                 contributedPaths.addAll(mr.contributedPaths());
                 if (mr.walkFailed()) {
@@ -525,154 +495,28 @@ public final class WebResourcesSync {
 
     /**
      * Walks {@code src} and copies every regular file that's missing in
-     * {@code dst} or older / different size than its source. Files under
-     * {@link #SKIP_SUBTREES} are not visited. Symlinks (file and directory)
-     * are skipped — same reasoning as {@link DeployedClassesSync#mirrorTree}.
-     * Per-file IOExceptions are swallowed with a debug log so a single
-     * locked file does not abort the whole sync.
+     * {@code dst} or older / different size than its source, via
+     * {@link TreeMirror} with the web-resources policy: subtrees under
+     * {@link #SKIP_SUBTREES} are not visited, symlinks (file and directory)
+     * are skipped, and DevTomcat's own metadata files are never imported
+     * into the deployment.
      *
      * <p>Package-visible for {@code WebResourcesSyncTest}.
      */
     @NotNull
-    static MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst) {
-        // Source vanished / not a directory: treat as a failed walk so the
-        // caller defers the stale-file reconcile rather than marking every
-        // file this root previously synced as stale.
-        if (!Files.isDirectory(src)) return MirrorResult.FAILED;
-
-        // Nesting guard: same hazard as DeployedClassesSync — if dst is
-        // inside src (or vice versa), the walker would either loop or
-        // overwrite the source. The user pointed somewhere wrong; bail
-        // loudly rather than fill the disk.
-        Path srcNorm = src.toAbsolutePath().normalize();
-        Path dstNorm = dst.toAbsolutePath().normalize();
-        if (dstNorm.startsWith(srcNorm) || srcNorm.startsWith(dstNorm)) {
-            LOG.warn("Web resources sync: refusing nested src/dst paths: src=" + srcNorm + " dst=" + dstNorm);
-            return MirrorResult.FAILED;
-        }
-
-        final int[] copied = {0};
-        // Flipped true when a whole subtree is silently dropped from the walk
-        // (an unreadable directory) or the outer walk aborts — either way the
-        // contributedPaths set is incomplete and the caller must not reconcile
-        // against it.
-        final boolean[] walkFailed = {false};
-        final java.util.Set<String> contributedPaths = new java.util.HashSet<>();
-        try {
-            Files.walkFileTree(src, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (attrs.isSymbolicLink()) {
-                        LOG.debug("Web resources sync: skipping symlinked directory " + dir);
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    // Skip subtrees that are owned by other pipelines.
-                    Path rel = src.relativize(dir);
-                    String relPath = rel.toString().replace('\\', '/');
-                    for (String skip : SKIP_SUBTREES) {
-                        if (relPath.equals(skip) || relPath.startsWith(skip + "/")) {
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    // Cooperative cancellation: this walk runs under the
-                    // launch-prep modal and the update task's indicator.
-                    TomcatProgress.checkCanceled();
-                    try {
-                        if (attrs.isSymbolicLink()) {
-                            LOG.debug("Web resources sync: skipping symlink " + file);
-                            return FileVisitResult.CONTINUE;
-                        }
-                        // Never import DevTomcat's own metadata (e.g. a legacy
-                        // .devtomcat-*.manifest an old version left in the source
-                        // webapp) into the deployment — and never claim it as
-                        // contributed content.
-                        if (file.getFileName().toString().startsWith(".devtomcat-")) {
-                            return FileVisitResult.CONTINUE;
-                        }
-                        Path rel = src.relativize(file);
-                        contributedPaths.add(rel.toString().replace('\\', '/'));
-                        Path target = dst.resolve(rel.toString());
-
-                        if (shouldCopy(file, attrs, target)) {
-                            Path parent = target.getParent();
-                            if (parent != null) {
-                                Files.createDirectories(parent);
-                            }
-                            try {
-                                // Copy WITHOUT COPY_ATTRIBUTES on every platform;
-                                // mirror just the source mtime so shouldCopy's gate
-                                // stays exact. Behaviour is identical on Windows,
-                                // Linux, and macOS — the speedup is just largest on
-                                // Windows, where COPY_ATTRIBUTES also re-applies NTFS
-                                // ACLs per file. Same rationale as
-                                // DeployedClassesSync.mirrorTree.
-                                Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
-                                try {
-                                    Files.setLastModifiedTime(target, attrs.lastModifiedTime());
-                                } catch (IOException ignoreMtime) {
-                                    // mtime is a gate optimization, not correctness.
-                                }
-                                copied[0]++;
-                            } catch (java.nio.file.NoSuchFileException vanished) {
-                                LOG.debug("Web resources sync: source vanished during copy: " + file);
-                            }
-                        }
-                    } catch (IOException | RuntimeException e) {
-                        LOG.debug("Web resources sync: skipped " + file + " (" + e.getMessage() + ")");
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    // Walk continues (the mirror still copies everything else),
-                    // but ANY unvisitable entry marks the walk failed: the
-                    // entry is absent from contributedPaths even though its
-                    // source exists, so reconciling would delete its deployed
-                    // copy. No isDirectory probe here — visitFileFailed fires
-                    // because the stat itself failed, and Files.isDirectory
-                    // returns false when the type "cannot be determined"
-                    // (no-execute parent dir, vanished entry), which is exactly
-                    // when an entire subtree may be silently missing.
-                    walkFailed[0] = true;
-                    LOG.debug("Web resources sync: cannot visit " + file + " (" + exc.getMessage() + ")");
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException e) {
-            // Outer walk aborted: contributedPaths holds only a partial union,
-            // so mark the walk failed to keep the caller's reconcile off it.
-            walkFailed[0] = true;
-            LOG.debug("Web resources sync: walk failed for " + src + " (" + e.getMessage() + ")");
-        }
-        return new MirrorResult(copied[0], contributedPaths, walkFailed[0]);
-    }
-
-    /**
-     * Copy decision: copy when the destination is missing, the source
-     * mtime is strictly newer, OR the sizes differ. Mirrors the class-sync
-     * gate's logic so the two stay consistent (especially the size
-     * tie-breaker which catches fast successive edits that land within
-     * filesystem mtime resolution).
-     */
-    private static boolean shouldCopy(@NotNull Path src,
-                                      @NotNull BasicFileAttributes srcAttrs,
-                                      @NotNull Path target) throws IOException {
-        // Single stat: try to read dst attrs; NoSuchFile => copy.
-        BasicFileAttributes dstAttrs;
-        try {
-            dstAttrs = Files.readAttributes(target, BasicFileAttributes.class);
-        } catch (java.nio.file.NoSuchFileException missing) {
-            return true;
-        }
-        long srcMillis = srcAttrs.lastModifiedTime().toMillis();
-        long dstMillis = dstAttrs.lastModifiedTime().toMillis();
-        if (srcMillis > dstMillis) return true;
-        return srcAttrs.size() != dstAttrs.size();
+    static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst) {
+        return TreeMirror.mirrorTree(src, dst, new TreeMirror.Policy(
+                "Web resources sync",
+                SKIP_SUBTREES,
+                // Never import DevTomcat's own metadata (e.g. a legacy
+                // .devtomcat-*.manifest an old version left in the source
+                // webapp) into the deployment — and never claim it as
+                // contributed content.
+                f -> f.getFileName().toString().startsWith(".devtomcat-"),
+                null,
+                // Generic failure stat-ing the destination: skip the file
+                // for this run (it stays contributed; the engine debug-logs
+                // the skip).
+                false));
     }
 }
