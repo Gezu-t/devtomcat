@@ -1301,61 +1301,6 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * Low-level primitive: walks {@code dst} and deletes regular files whose
-     * forward-slash-normalized relative path is NOT in {@code retain}.
-     *
-     * <p><b>Not the class-sync production path any more.</b> Class sync reconciles via
-     * {@link SyncManifest#reconcile}, which deletes only files WE previously synced —
-     * because {@code retain} (the mirror's contributed paths) is NOT a complete
-     * authority for {@code WEB-INF/classes}: an artifact build legitimately deploys
-     * classes from roots the module resolver doesn't enumerate, and deleting them
-     * here caused {@code ClassNotFoundException}. Retained as a tested primitive for
-     * the resource self-heal scenario (a resource an earlier full-content sync
-     * duplicated into {@code WEB-INF/classes} and the current classes-only sync no
-     * longer produces).
-     *
-     * <p>Per-file IOExceptions are debug-logged and skipped. Visible for testing.
-     */
-    static int removeOrphans(@NotNull Path dst,
-                             @NotNull java.util.Set<String> retain) {
-        if (!Files.isDirectory(dst)) return 0;
-        final int[] removed = {0};
-        try {
-            Files.walkFileTree(dst, new SimpleFileVisitor<>() {
-                @Override
-                public @NotNull FileVisitResult visitFile(Path file, @NotNull BasicFileAttributes attrs) {
-                    TomcatProgress.checkCanceled();
-                    if (attrs.isSymbolicLink()) {
-                        return FileVisitResult.CONTINUE;
-                    }
-                    String rel = dst.relativize(file).toString().replace('\\', '/');
-                    if (!retain.contains(rel)) {
-                        try {
-                            Files.delete(file);
-                            removed[0]++;
-                            LOG.debug("Class sync: removed orphan " + file);
-                        } catch (IOException e) {
-                            LOG.debug("Class sync: could not delete orphan "
-                                    + file + " (" + e.getMessage() + ")");
-                        }
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public @NotNull FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    LOG.debug("Class sync: orphan walk could not visit "
-                            + file + " (" + exc.getMessage() + ")");
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException e) {
-            LOG.debug("Class sync: orphan walk failed for " + dst + " (" + e.getMessage() + ")");
-        }
-        return removed[0];
-    }
-
-    /**
      * Marker bytes embedded by Eclipse JDT Compiler (ECJ) into class files
      * generated under its "proceed with errors" mode. When a Java source has
      * unresolved imports / symbols, ECJ can still emit a {@code .class} file

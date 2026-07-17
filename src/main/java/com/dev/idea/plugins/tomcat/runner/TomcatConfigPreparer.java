@@ -421,7 +421,13 @@ public final class TomcatConfigPreparer {
      * temp file and then performing an atomic move. Prevents a partially-written
      * {@code server.xml} if the process crashes or is killed mid-write.
      */
-    private static void atomicWriteString(@NotNull Path target, @NotNull String content) throws IOException {
+    /**
+     * Write-then-atomic-rename so a reader (Tomcat, another launch) never sees a
+     * half-written file. Package-private: shared with {@link CatalinaHomeMirror}
+     * — keep the single copy here.
+     */
+    static void atomicWriteString(@NotNull Path target, @NotNull String content) throws IOException {
+        Files.createDirectories(target.getParent());
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
         try {
             Files.writeString(tmp, content);

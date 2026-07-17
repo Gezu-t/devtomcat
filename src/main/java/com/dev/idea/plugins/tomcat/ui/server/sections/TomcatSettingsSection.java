@@ -260,22 +260,8 @@ public class TomcatSettingsSection implements ConfigurationSection {
 
     @Override
     public void applyTo(@NotNull TomcatRunConfiguration configuration) throws ConfigurationException {
-        Integer httpPort = PortUtils.parsePort(httpPortField.getText(), "HTTP");
-        Integer shutdownPort = PortUtils.parsePort(shutdownPortField.getText(), "Shutdown");
-        Integer httpsPort = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
-        Integer jmxPort = PortUtils.parsePort(jmxPortField.getText(), "JMX");
-        Integer ajpPort = PortUtils.parsePort(ajpPortField.getText(), "AJP");
-
-        PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
-                .httpPort(httpPort)
-                .shutdownPort(shutdownPort)
-                .httpsPort(httpsPort)
-                .httpsEnabled(httpsPort != null)
-                .jmxPort(jmxPort)
-                .jmxEnabled(jmxPort != null)
-                .ajpPort(ajpPort)
-                .ajpEnabled(ajpPort != null)
-                .build();
+        PortValidator.PortConfiguration portConfig =
+                parsePortConfiguration(/* lenientShutdown */ false);
 
         PortValidator.validateOrThrow(portConfig);
 
@@ -319,25 +305,39 @@ public class TomcatSettingsSection implements ConfigurationSection {
         }
     }
 
+    /**
+     * Parses the port fields into the validator's input shape. The enabled flags
+     * derive from presence — an empty optional-port field means disabled.
+     *
+     * @param lenientShutdown validation paths tolerate an unparsable shutdown port
+     *                        (treated as absent) so the other ports still validate;
+     *                        the apply path must instead throw on it
+     */
+    private PortValidator.PortConfiguration parsePortConfiguration(boolean lenientShutdown)
+            throws ConfigurationException {
+        Integer httpPort = PortUtils.parsePort(httpPortField.getText(), "HTTP");
+        Integer httpsPort = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
+        Integer jmxPort = PortUtils.parsePort(jmxPortField.getText(), "JMX");
+        Integer ajpPort = PortUtils.parsePort(ajpPortField.getText(), "AJP");
+        Integer shutdownPort = lenientShutdown
+                ? parseShutdownPort()
+                : PortUtils.parsePort(shutdownPortField.getText(), "Shutdown");
+        return PortValidator.PortConfiguration.builder()
+                .httpPort(httpPort)
+                .shutdownPort(shutdownPort)
+                .httpsPort(httpsPort)
+                .httpsEnabled(httpsPort != null)
+                .jmxPort(jmxPort)
+                .jmxEnabled(jmxPort != null)
+                .ajpPort(ajpPort)
+                .ajpEnabled(ajpPort != null)
+                .build();
+    }
+
     @Override
     public boolean isConfigurationValid() {
         try {
-            Integer httpP = PortUtils.parsePort(httpPortField.getText(), "HTTP");
-            Integer httpsP = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
-            Integer jmxP = PortUtils.parsePort(jmxPortField.getText(), "JMX");
-            Integer ajpP = PortUtils.parsePort(ajpPortField.getText(), "AJP");
-            Integer shutdownP = parseShutdownPort();
-            PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
-                    .httpPort(httpP)
-                    .shutdownPort(shutdownP)
-                    .httpsPort(httpsP)
-                    .httpsEnabled(httpsP != null)
-                    .jmxPort(jmxP)
-                    .jmxEnabled(jmxP != null)
-                    .ajpPort(ajpP)
-                    .ajpEnabled(ajpP != null)
-                    .build();
-            return PortValidator.validate(portConfig).isValid();
+            return PortValidator.validate(parsePortConfiguration(true)).isValid();
         } catch (ConfigurationException e) {
             return false;
         }
@@ -416,23 +416,7 @@ public class TomcatSettingsSection implements ConfigurationSection {
         List<ValidationInfo> errors = new ArrayList<>();
 
         try {
-            Integer httpP = PortUtils.parsePort(httpPortField.getText(), "HTTP");
-            Integer httpsP = PortUtils.parsePort(httpsPortField.getText(), "HTTPS");
-            Integer jmxP = PortUtils.parsePort(jmxPortField.getText(), "JMX");
-            Integer ajpP = PortUtils.parsePort(ajpPortField.getText(), "AJP");
-            Integer shutdownP = parseShutdownPort();
-            PortValidator.PortConfiguration portConfig = PortValidator.PortConfiguration.builder()
-                    .httpPort(httpP)
-                    .shutdownPort(shutdownP)
-                    .httpsPort(httpsP)
-                    .httpsEnabled(httpsP != null)
-                    .jmxPort(jmxP)
-                    .jmxEnabled(jmxP != null)
-                    .ajpPort(ajpP)
-                    .ajpEnabled(ajpP != null)
-                    .build();
-
-            ValidationResult result = PortValidator.validate(portConfig);
+            ValidationResult result = PortValidator.validate(parsePortConfiguration(true));
 
             if (!result.isValid()) {
                 for (String error : result.getErrors()) {

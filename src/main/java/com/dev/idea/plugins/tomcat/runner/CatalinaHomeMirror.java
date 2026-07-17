@@ -403,7 +403,7 @@ public final class CatalinaHomeMirror {
                 String ctxFile = sanitizeStem(name) + ".xml";
                 Path ctxPath = ctxTarget.resolve(ctxFile);
                 try {
-                    atomicWriteString(ctxPath, buildSharedContextXml(entry));
+                    TomcatConfigPreparer.atomicWriteString(ctxPath, buildSharedContextXml(entry));
                     manifestEntries.add(CATALINA_LOCALHOST + "/" + ctxFile);
                     counters.synthesized++;
                 } catch (IOException e) {
@@ -503,24 +503,6 @@ public final class CatalinaHomeMirror {
                         StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tmp, manifest, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } catch (IOException e) {
-            Files.deleteIfExists(tmp);
-            throw e;
-        }
-    }
-
-    private static void atomicWriteString(@NotNull Path target, @NotNull String content) throws IOException {
-        Files.createDirectories(target.getParent());
-        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
-        try {
-            Files.writeString(tmp, content);
-            try {
-                Files.move(tmp, target,
-                        StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
             Files.deleteIfExists(tmp);
