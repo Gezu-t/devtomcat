@@ -20,7 +20,6 @@ class DeploymentTableManagerTest {
         a.setPath("/tmp/" + name);
         a.setType(DeploymentArtifact.TYPE_WAR);
         a.setApplicationContext(ctx);
-        a.setServerPath(ctx);
         return a;
     }
 

@@ -6,7 +6,6 @@ import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.ui.Messages;
 
 import com.intellij.util.xmlb.annotations.XCollection;
 import org.jetbrains.annotations.NotNull;
@@ -360,83 +359,9 @@ public final class TomcatServerManagerState implements PersistentStateComponent<
     // TOMCAT CREATION & DETECTION
     // =====================================================================
 
-    /**
-     * Create a new TomcatInfo from an installation directory.
-     *
-     * <p>Extracts version information from catalina.jar and generates a unique name.
-     *
-     * @param tomcatHome the Tomcat installation directory path (cannot be null)
-     * @return Optional containing the created TomcatInfo, or empty if validation fails
-     * @throws NullPointerException if tomcatHome is null
-     */
-    @NotNull
-    public static Optional<TomcatInfo> createTomcatInfo(@NotNull String tomcatHome) {
-        return createTomcatInfo(tomcatHome, null);
-    }
-
     @NotNull
     public static Optional<TomcatInfo> tryCreateTomcatInfo(@NotNull String tomcatHome) {
         return tryCreateTomcatInfo(tomcatHome, null);
-    }
-
-    /**
-     * Create a new TomcatInfo with a custom name generator.
-     *
-     * <p>Validates the directory, extracts version information, and applies
-     * the name generator to create a unique name.
-     *
-     * @param tomcatHome the Tomcat installation directory path (cannot be null)
-     * @param nameGenerator optional function to generate the server name (can be null)
-     * @return Optional containing the created TomcatInfo, or empty if validation fails
-     * @throws NullPointerException if tomcatHome is null
-     */
-    @NotNull
-    public static Optional<TomcatInfo> createTomcatInfo(@NotNull String tomcatHome,
-                                                        @Nullable UnaryOperator<String> nameGenerator) {
-        LOG.debug("Creating TomcatInfo for: " + tomcatHome);
-
-        Path tomcatPath = Paths.get(tomcatHome);
-        if (!Files.exists(tomcatPath)) {
-            showErrorOnEdt("Tomcat home directory does not exist: " + tomcatHome, "Invalid Directory");
-            return Optional.empty();
-        }
-
-        if (!Files.isDirectory(tomcatPath)) {
-            showErrorOnEdt("Path is not a directory: " + tomcatHome, "Invalid Directory");
-            return Optional.empty();
-        }
-
-        File catalinaJar = tomcatPath.resolve(CATALINA_JAR).toFile();
-        if (!catalinaJar.exists()) {
-            showErrorOnEdt(
-                    "Cannot find catalina.jar in " + tomcatHome +
-                    "\nPlease select a valid Tomcat installation directory.",
-                    "Invalid Tomcat Installation"
-            );
-            return Optional.empty();
-        }
-
-        try {
-            ServerInfo serverInfo = extractServerInfo(catalinaJar);
-            String name = nameGenerator != null ?
-                    nameGenerator.apply(serverInfo.serverInfo()) :
-                    generateTomcatName(serverInfo.serverInfo());
-
-            // Constructor: (String name, String version, String path)
-            TomcatInfo tomcatInfo = new TomcatInfo(name, serverInfo.serverNumber(), tomcatHome);
-
-            LOG.info("Created TomcatInfo: " + name + " (v" + serverInfo.serverNumber() + ") at " + tomcatHome);
-            return Optional.of(tomcatInfo);
-
-        } catch (IOException e) {
-            LOG.error("Failed to read Tomcat version from " + tomcatHome, e);
-            showErrorOnEdt(
-                    "Cannot read server version from " + tomcatHome +
-                    "\nError: " + e.getMessage(),
-                    "Error Reading Version"
-            );
-            return Optional.empty();
-        }
     }
 
     @NotNull
@@ -557,72 +482,6 @@ public final class TomcatServerManagerState implements PersistentStateComponent<
 
         LOG.debug("Generated unique name: '" + newName + "' (from: '" + baseName + "')");
         return newName;
-    }
-
-    // =====================================================================
-    // VALIDATION & STATISTICS
-    // =====================================================================
-
-    /**
-     * Validate all configured servers.
-     *
-     * <p>Returns a list of error messages for any invalid servers.
-     *
-     * @return list of validation error messages (never null, may be empty)
-     */
-    @NotNull
-    public List<String> validateAllServers() {
-        List<String> errors = new ArrayList<>();
-
-        for (TomcatInfo info : tomcatInfos) {
-            try {
-                info.validate();
-            } catch (IllegalStateException e) {
-                errors.add(info.getName() + ": " + e.getMessage());
-            }
-        }
-
-        if (!errors.isEmpty()) {
-            LOG.warn("Validation errors found: " + errors.size());
-        }
-
-        return errors;
-    }
-
-    /**
-     * Get statistics about configured servers.
-     *
-     * <p>Returns a map containing:
-     * - `totalServers`: total number of configured servers
-     * - `validServers`: count of servers with valid configurations
-     * - `invalidServers`: count of servers with invalid configurations
-     *
-     * @return statistics map (never null)
-     */
-    @NotNull
-    public Map<String, Object> getStatistics() {
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("totalServers", tomcatInfos.size());
-
-        long validCount = tomcatInfos.stream()
-                .filter(TomcatInfo::isValid)
-                .count();
-
-        stats.put("validServers", validCount);
-        stats.put("invalidServers", tomcatInfos.size() - validCount);
-
-        return stats;
-    }
-
-    // =====================================================================
-    // EDT-SAFE DIALOGS
-    // =====================================================================
-
-    /**
-     * Show an error dialog on the EDT, regardless of calling thread.
-     */
-    private static void showErrorOnEdt(@NotNull String message, @NotNull String title) {
-        ApplicationManager.getApplication().invokeLater(() -> Messages.showErrorDialog(message, title));
     }
 
     // =====================================================================

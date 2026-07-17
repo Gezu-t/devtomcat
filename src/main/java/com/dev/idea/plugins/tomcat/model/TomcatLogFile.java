@@ -1,7 +1,5 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.execution.configurations.LogFileOptions;
-import com.intellij.execution.configurations.PredefinedLogFile;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
@@ -93,64 +91,6 @@ public class TomcatLogFile {
         return logsDirPath + File.separator + resolveTodayFilename();
     }
 
-    /**
-     * Builds the path pattern string for IntelliJ's {@link LogFileOptions}.
-     * Uses the original glob pattern (e.g. {@code catalina.*.log}) so that
-     * IntelliJ's log console can resolve and watch the file dynamically.
-     * <p>
-     * This avoids passing glob characters through {@link Path#resolve} (which
-     * would cause URI-validation errors) by using direct string concatenation.
-     */
-    @NotNull
-    public String resolvePathPattern(@NotNull Path logsDirPath) {
-        return logsDirPath + File.separator + filenamePattern;
-    }
-
-    @NotNull
-    public LogFileOptions createLogFileOptions(@NotNull Path logsDirPath) {
-        Objects.requireNonNull(logsDirPath, "Logs directory path cannot be null");
-
-        try {
-            String path = resolveFullPath(logsDirPath);
-            // skipContent=true, showAll=false — Tomcat logs append across launches,
-            // so each new tab should start from the tail (new content only) rather
-            // than reloading accumulated history from prior runs.
-            LogFileOptions opts = new LogFileOptions(id, path, enabledByDefault, true, false);
-            LOG.debug("Created LogFileOptions: id=" + id + ", path=" + path);
-            return opts;
-        } catch (Exception e) {
-            LOG.error("Failed to create LogFileOptions for: " + id, e);
-            throw new IllegalStateException("Cannot create log file options for: " + id, e);
-        }
-    }
-
-    @NotNull
-    public LogFileOptions createLogFileOptions(@NotNull PredefinedLogFile file,
-                                               @NotNull Path logsDirPath) {
-        Objects.requireNonNull(file, "PredefinedLogFile cannot be null");
-        Objects.requireNonNull(logsDirPath, "Logs directory path cannot be null");
-
-        try {
-            String path = resolveFullPath(logsDirPath);
-            LogFileOptions opts = new LogFileOptions(file.getId(), path, file.isEnabled(), true, false);
-            LOG.debug("Created LogFileOptions from PredefinedLogFile: id=" + file.getId());
-            return opts;
-        } catch (Exception e) {
-            LOG.error("Failed to create LogFileOptions from PredefinedLogFile: " + file.getId(), e);
-            throw new IllegalStateException("Cannot create log file options from predefined file", e);
-        }
-    }
-
-    @NotNull
-    public PredefinedLogFile createPredefinedLogFile() {
-        return new PredefinedLogFile(id, enabledByDefault);
-    }
-
-    @NotNull
-    public PredefinedLogFile createPredefinedLogFile(boolean enabled) {
-        return new PredefinedLogFile(id, enabled);
-    }
-
     @NotNull
     public static TomcatLogFile createCatalinaOut() {
         // Disabled by default: when launching Java directly (not via catalina.sh),
@@ -198,14 +138,6 @@ public class TomcatLogFile {
                 createAccessLog(),
                 createManagerLog(),
                 createHostManagerLog()
-        };
-    }
-
-    @NotNull
-    public static TomcatLogFile[] getDefaultEnabledLogFiles() {
-        return new TomcatLogFile[]{
-                createCatalinaLog(),
-                createLocalhostLog()
         };
     }
 

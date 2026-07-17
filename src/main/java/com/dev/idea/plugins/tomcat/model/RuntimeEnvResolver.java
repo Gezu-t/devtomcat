@@ -53,40 +53,6 @@ public final class RuntimeEnvResolver {
     }
 
     /**
-     * Merges computed defaults into per-mode runner settings, respecting user overrides.
-     * Only updates keys that are still auto-managed (present in computedKeys and not
-     * in deletedComputedKeys).
-     *
-     * @param runnerSettings the per-mode runner settings to update
-     * @param defaults       computed defaults from {@link #computeDefaults}
-     * @param computedKeys   keys still auto-managed for this mode
-     * @param deletedKeys    keys the user explicitly removed
-     */
-    public static void mergeIntoRunnerSettings(@NotNull RunnerSettings runnerSettings,
-                                                @NotNull Map<String, String> defaults,
-                                                @NotNull Set<String> computedKeys,
-                                                @NotNull Set<String> deletedKeys) {
-        Map<String, String> envVars = runnerSettings.getEnvironmentVariables();
-
-        for (Map.Entry<String, String> entry : defaults.entrySet()) {
-            String key = entry.getKey();
-            if (computedKeys.contains(key) && !deletedKeys.contains(key)) {
-                envVars.put(key, entry.getValue());
-            }
-        }
-        for (String key : new LinkedHashSet<>(computedKeys)) {
-            if (!defaults.containsKey(key) && !deletedKeys.contains(key)) {
-                envVars.remove(key);
-                computedKeys.remove(key);
-            }
-        }
-
-        runnerSettings.setEnvironmentVariables(envVars);
-        runnerSettings.setComputedEnvironmentKeys(computedKeys);
-        runnerSettings.setDeletedComputedEnvironmentKeys(deletedKeys);
-    }
-
-    /**
      * Ensures computed env vars in the runner settings reflect the current config state.
      * Called at apply/launch time so correctness does not depend on the user visiting
      * the Startup/Connection tab.
@@ -128,12 +94,5 @@ public final class RuntimeEnvResolver {
         rs.setEnvironmentVariables(envVars);
         rs.setComputedEnvironmentKeys(computedKeys);
         rs.setDeletedComputedEnvironmentKeys(deletedKeys);
-    }
-
-    /**
-     * Checks whether a given key is a computed (auto-derived) key.
-     */
-    public static boolean isComputedKey(@NotNull String key) {
-        return COMPUTED_KEYS.contains(key);
     }
 }

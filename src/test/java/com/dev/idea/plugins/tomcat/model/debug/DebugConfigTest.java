@@ -35,27 +35,6 @@ class DebugConfigTest {
     }
 
     @Nested
-    @DisplayName("3-arg constructor")
-    class ThreeArgConstructor {
-
-        @Test
-        @DisplayName("sets all fields")
-        void setsAll() {
-            DebugConfig config = new DebugConfig(8000, TomcatConstants.TRANSPORT_SOCKET, true);
-            assertEquals(8000, config.getPort());
-            assertEquals(TomcatConstants.TRANSPORT_SOCKET, config.getTransport());
-            assertTrue(config.isUseModuleClasspath());
-        }
-
-        @Test
-        @DisplayName("unsupported transport normalizes to Socket")
-        void unsupportedTransportNormalized() {
-            DebugConfig config = new DebugConfig(8000, "Shared Memory", false);
-            assertEquals(TomcatConstants.TRANSPORT_SOCKET, config.getTransport());
-        }
-    }
-
-    @Nested
     @DisplayName("setPort validation")
     class SetPort {
 
@@ -150,41 +129,10 @@ class DebugConfigTest {
         @Test
         @DisplayName("valid custom config")
         void validCustom() {
-            DebugConfig config = new DebugConfig(8000, TomcatConstants.TRANSPORT_SOCKET, true);
-            assertTrue(config.isValid());
-        }
-    }
-
-    @Nested
-    @DisplayName("JDWP strings")
-    class JdwpStrings {
-
-        @Test
-        @DisplayName("getJdwpConnectionString for socket")
-        void jdwpSocket() {
-            DebugConfig config = new DebugConfig(5005, TomcatConstants.TRANSPORT_SOCKET, false);
-            String jdwp = config.getJdwpConnectionString();
-            assertTrue(jdwp.contains("dt_socket"));
-            assertTrue(jdwp.contains("5005"));
-            assertTrue(jdwp.contains("server=y"));
-            assertTrue(jdwp.contains("suspend=n"));
-        }
-
-        @Test
-        @DisplayName("getJdwpConnectionString always uses dt_socket even for Shared Memory input")
-        void jdwpSocketOnly() {
-            DebugConfig config = new DebugConfig(5005, "Shared Memory", false);
-            String jdwp = config.getJdwpConnectionString();
-            assertTrue(jdwp.contains("dt_socket"));
-        }
-
-        @Test
-        @DisplayName("getDebugVmArgument includes -agentlib prefix")
-        void debugVmArg() {
             DebugConfig config = new DebugConfig();
-            String vmArg = config.getDebugVmArgument();
-            assertTrue(vmArg.startsWith("-agentlib:jdwp=transport="));
-            assertTrue(vmArg.contains("dt_socket"));
+            config.setPort(8000);
+            config.setUseModuleClasspath(true);
+            assertTrue(config.isValid());
         }
     }
 
@@ -195,7 +143,9 @@ class DebugConfigTest {
         @Test
         @DisplayName("clone equals original")
         void cloneEquals() {
-            DebugConfig original = new DebugConfig(8000, TomcatConstants.TRANSPORT_SOCKET, true);
+            DebugConfig original = new DebugConfig();
+            original.setPort(8000);
+            original.setUseModuleClasspath(true);
             DebugConfig cloned = original.clone();
             assertEquals(original, cloned);
         }

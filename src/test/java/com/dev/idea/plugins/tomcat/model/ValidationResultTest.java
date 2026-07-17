@@ -18,7 +18,6 @@ class ValidationResultTest {
         void noErrors() {
             ValidationResult result = new ValidationResult();
             assertFalse(result.hasErrors());
-            assertEquals(0, result.getErrorCount());
             assertTrue(result.getErrors().isEmpty());
             assertTrue(result.isValid());
         }
@@ -28,17 +27,7 @@ class ValidationResultTest {
         void noWarnings() {
             ValidationResult result = new ValidationResult();
             assertFalse(result.hasWarnings());
-            assertEquals(0, result.getWarningCount());
             assertTrue(result.getWarnings().isEmpty());
-        }
-
-        @Test
-        @DisplayName("no suggestions by default")
-        void noSuggestions() {
-            ValidationResult result = new ValidationResult();
-            assertFalse(result.hasSuggestions());
-            assertEquals(0, result.getSuggestionCount());
-            assertTrue(result.getSuggestions().isEmpty());
         }
     }
 
@@ -52,7 +41,6 @@ class ValidationResultTest {
             ValidationResult result = new ValidationResult();
             result.addError("Port out of range");
             assertTrue(result.hasErrors());
-            assertEquals(1, result.getErrorCount());
             assertFalse(result.isValid());
             assertEquals("Port out of range", result.getErrors().get(0));
         }
@@ -70,7 +58,6 @@ class ValidationResultTest {
             ValidationResult result = new ValidationResult();
             result.addError("Error 1");
             result.addError("Error 2");
-            assertEquals(2, result.getErrorCount());
             assertTrue(result.getErrorMessage().contains("Error 1"));
             assertTrue(result.getErrorMessage().contains("Error 2"));
         }
@@ -86,7 +73,6 @@ class ValidationResultTest {
             ValidationResult result = new ValidationResult();
             result.addWarning("Port in use");
             assertTrue(result.hasWarnings());
-            assertEquals(1, result.getWarningCount());
             assertTrue(result.isValid()); // warnings don't affect validity
         }
 
@@ -100,15 +86,6 @@ class ValidationResultTest {
     @Nested
     @DisplayName("addSuggestion")
     class AddSuggestion {
-
-        @Test
-        @DisplayName("adds suggestion and updates state")
-        void addsSuggestion() {
-            ValidationResult result = new ValidationResult();
-            result.addSuggestion("Use port 8081");
-            assertTrue(result.hasSuggestions());
-            assertEquals(1, result.getSuggestionCount());
-        }
 
         @Test
         @DisplayName("rejects null message")
@@ -140,21 +117,11 @@ class ValidationResultTest {
         }
 
         @Test
-        @DisplayName("suggestion message joins with newline")
-        void suggestionMessageJoins() {
-            ValidationResult result = new ValidationResult();
-            result.addSuggestion("S1");
-            result.addSuggestion("S2");
-            assertEquals("S1\nS2", result.getSuggestionMessage());
-        }
-
-        @Test
         @DisplayName("empty messages return empty string")
         void emptyMessages() {
             ValidationResult result = new ValidationResult();
             assertEquals("", result.getErrorMessage());
             assertEquals("", result.getWarningMessage());
-            assertEquals("", result.getSuggestionMessage());
         }
     }
 
@@ -178,13 +145,6 @@ class ValidationResultTest {
             assertThrows(UnsupportedOperationException.class, () -> result.getWarnings().add("extra"));
         }
 
-        @Test
-        @DisplayName("getSuggestions returns unmodifiable list")
-        void suggestionsUnmodifiable() {
-            ValidationResult result = new ValidationResult();
-            result.addSuggestion("test");
-            assertThrows(UnsupportedOperationException.class, () -> result.getSuggestions().add("extra"));
-        }
     }
 
     @Nested

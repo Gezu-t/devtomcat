@@ -123,20 +123,6 @@ class DeploymentArtifactTest {
         art.setApplicationContext("/app");
         assertEquals("/app", art.getApplicationContext());
         assertEquals("/app", art.getContextPath());
-        assertEquals("/app", art.getServerPath());
-
-        art.setServerPath("/other");
-        assertEquals("/other", art.getContextPath());
-    }
-
-    @Test
-    @DisplayName("isUsingDefaultContext checks / and empty")
-    void isUsingDefaultContext() {
-        DeploymentArtifact art = new DeploymentArtifact();
-        assertTrue(art.isUsingDefaultContext());
-
-        art.setContextPath("/myapp");
-        assertFalse(art.isUsingDefaultContext());
     }
 
     @Test

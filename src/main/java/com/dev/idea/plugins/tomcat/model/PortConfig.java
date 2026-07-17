@@ -4,9 +4,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.Serial;
 import java.io.Serializable;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Port Configuration for Tomcat server.
@@ -21,9 +19,6 @@ public class PortConfig implements Serializable, Cloneable {
     public static final int DEFAULT_JMX_PORT = 1099;
     public static final int DEFAULT_AJP_PORT = 8009;
     public static final int DEFAULT_SHUTDOWN_PORT = 8005;
-    public static final int MIN_PORT = 1;
-    public static final int MAX_PORT = 65535;
-    public static final int PRIVILEGED_PORT_THRESHOLD = 1024;
 
     private int http = DEFAULT_HTTP_PORT;
     private int https = DEFAULT_HTTPS_PORT;
@@ -139,46 +134,6 @@ public class PortConfig implements Serializable, Cloneable {
 
     public boolean isAjpEnabled() { return ajpEnabled; }
     public void setAjpEnabled(boolean enabled) { this.ajpEnabled = enabled; }
-
-    @NotNull
-    public ValidationResult validate() {
-        ValidationResult result = new ValidationResult();
-        validatePort(http, "HTTP", result);
-        validatePort(shutdown, "Shutdown", result);
-        if (httpsEnabled) validatePort(https, "HTTPS", result);
-        if (jmxEnabled) validatePort(jmx, "JMX", result);
-        if (ajpEnabled) validatePort(ajp, "AJP", result);
-        checkConflicts(result);
-        return result;
-    }
-
-    private void validatePort(int port, String name, ValidationResult result) {
-        if (port < MIN_PORT || port > MAX_PORT) {
-            result.addError(name + " port must be between " + MIN_PORT + "-" + MAX_PORT);
-        }
-        // Port availability (socket binding) is intentionally NOT checked here — this method
-        // runs on the EDT during live validation. Availability is checked at launch time
-        // by PortConflictDetector and TomcatJavaParametersBuilder.
-        if (port < PRIVILEGED_PORT_THRESHOLD) {
-            result.addWarning(name + " port " + port + " requires admin privileges");
-        }
-    }
-
-    private void checkConflicts(ValidationResult result) {
-        Set<Integer> used = new HashSet<>();
-        checkPortConflict(http, "HTTP", used, result);
-        checkPortConflict(shutdown, "Shutdown", used, result);
-        if (httpsEnabled) checkPortConflict(https, "HTTPS", used, result);
-        if (jmxEnabled) checkPortConflict(jmx, "JMX", used, result);
-        if (ajpEnabled) checkPortConflict(ajp, "AJP", used, result);
-    }
-
-    private void checkPortConflict(int port, String name, Set<Integer> used, ValidationResult result) {
-        if (!used.add(port)) {
-            result.addError("Port " + port + " is used by multiple services");
-        }
-    }
-
 
     @NotNull
     @Override

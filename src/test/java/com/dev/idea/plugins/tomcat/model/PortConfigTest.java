@@ -75,47 +75,6 @@ class PortConfigTest {
     }
 
     @Test
-    @DisplayName("validate catches out-of-range ports")
-    void validateOutOfRange() {
-        PortConfig pc = new PortConfig();
-        pc.setHttp(0);
-        ValidationResult result = pc.validate();
-        assertTrue(result.hasErrors());
-        assertTrue(result.getErrorMessage().contains("HTTP"));
-    }
-
-    @Test
-    @DisplayName("validate catches port conflicts")
-    void validateConflicts() {
-        PortConfig pc = new PortConfig();
-        pc.setHttp(8080);
-        pc.setShutdown(8080); // Conflict
-        ValidationResult result = pc.validate();
-        assertTrue(result.hasErrors());
-        assertTrue(result.getErrorMessage().contains("multiple services"));
-    }
-
-    @Test
-    @DisplayName("validate with all ports unique passes without errors")
-    void validateCleanConfig() {
-        PortConfig pc = new PortConfig(8080, 8005);
-        ValidationResult result = pc.validate();
-        // May have warnings (port in use) but should not have errors for valid range
-        assertFalse(result.getErrorMessage().contains("must be between"));
-    }
-
-    @Test
-    @DisplayName("validate only checks enabled optional ports")
-    void validateSkipsDisabledPorts() {
-        PortConfig pc = new PortConfig();
-        pc.setHttps(0); // Invalid but disabled
-        pc.setHttpsEnabled(false);
-        ValidationResult result = pc.validate();
-        // Should not have HTTPS error since it's disabled
-        assertFalse(result.getErrorMessage().contains("HTTPS"));
-    }
-
-    @Test
     @DisplayName("equals and hashCode contract")
     void equalsAndHashCode() {
         PortConfig a = new PortConfig(8080, 8443, 1099, 8005);

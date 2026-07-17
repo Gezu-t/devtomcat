@@ -116,29 +116,6 @@ class DeploymentConfigTest {
     }
 
     @Test
-    @DisplayName("copy constructor deep copies")
-    void copyConstructor() {
-        DeploymentConfig original = new DeploymentConfig();
-        original.addArtifact(new DeploymentArtifact("app", "/path", "war"));
-        original.setHotDeploymentEnabled(true);
-
-        DeploymentConfig copy = new DeploymentConfig(original);
-        assertEquals(1, copy.getArtifactCount());
-        assertTrue(copy.isHotDeploymentEnabled());
-
-        copy.clearArtifacts();
-        assertEquals(1, original.getArtifactCount());
-    }
-
-    @Test
-    @DisplayName("copy constructor with null creates empty config")
-    void copyConstructorNull() {
-        DeploymentConfig dc = new DeploymentConfig(null);
-        assertFalse(dc.hasArtifacts());
-        assertFalse(dc.isHotDeploymentEnabled());
-    }
-
-    @Test
     @DisplayName("removeArtifactAt returns removed artifact")
     void removeArtifactAt() {
         DeploymentConfig dc = new DeploymentConfig();

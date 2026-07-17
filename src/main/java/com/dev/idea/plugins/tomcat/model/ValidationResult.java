@@ -42,33 +42,12 @@ public class ValidationResult {
         return Collections.unmodifiableList(warnings);
     }
 
-    @NotNull
-    public List<String> getSuggestions() {
-        return Collections.unmodifiableList(suggestions);
-    }
-
-    public int getErrorCount() {
-        return errors.size();
-    }
-
-    public int getWarningCount() {
-        return warnings.size();
-    }
-
-    public int getSuggestionCount() {
-        return suggestions.size();
-    }
-
     public boolean hasErrors() {
         return !errors.isEmpty();
     }
 
     public boolean hasWarnings() {
         return !warnings.isEmpty();
-    }
-
-    public boolean hasSuggestions() {
-        return !suggestions.isEmpty();
     }
 
     public boolean isValid() {
@@ -83,11 +62,6 @@ public class ValidationResult {
     @NotNull
     public String getWarningMessage() {
         return String.join("\n", warnings);
-    }
-
-    @NotNull
-    public String getSuggestionMessage() {
-        return String.join("\n", suggestions);
     }
 
     @NotNull

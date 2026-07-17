@@ -71,26 +71,6 @@ public final class RemoteCredentialStore {
         return "";
     }
 
-    /**
-     * Removes the stored password for the given manager URL.
-     * All {@link PasswordSafe} access is deferred to a pooled thread.
-     */
-    public static void removePassword(@NotNull String managerUrl) {
-        try {
-            ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                try {
-                    PasswordSafe safe = PasswordSafe.getInstance();
-                    CredentialAttributes attributes = createAttributes(managerUrl);
-                    safe.set(attributes, null);
-                } catch (Exception e) {
-                    LOG.debug("Failed to remove password from credential store", e);
-                }
-            });
-        } catch (Exception e) {
-            LOG.debug("Failed to schedule password removal", e);
-        }
-    }
-
     @NotNull
     private static CredentialAttributes createAttributes(@NotNull String managerUrl) {
         return new CredentialAttributes(

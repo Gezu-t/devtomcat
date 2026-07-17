@@ -1,13 +1,8 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.execution.configurations.LogFileOptions;
-import com.intellij.execution.configurations.PredefinedLogFile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -193,70 +188,6 @@ class TomcatLogFileTest {
             assertFalse(files[3].isEnabledByDefault());  // access log
             assertFalse(files[4].isEnabledByDefault());  // manager log
             assertFalse(files[5].isEnabledByDefault());  // host-manager log
-        }
-    }
-
-    @Nested
-    @DisplayName("getDefaultEnabledLogFiles")
-    class DefaultEnabledLogFiles {
-
-        @Test
-        @DisplayName("returns 2 files (catalina log and localhost log)")
-        void returnsTwoFiles() {
-            TomcatLogFile[] files = TomcatLogFile.getDefaultEnabledLogFiles();
-            assertEquals(2, files.length);
-        }
-
-        @Test
-        @DisplayName("all are enabled by default")
-        void allEnabled() {
-            for (TomcatLogFile file : TomcatLogFile.getDefaultEnabledLogFiles()) {
-                assertTrue(file.isEnabledByDefault());
-            }
-        }
-    }
-
-    @Nested
-    @DisplayName("createLogFileOptions")
-    class CreateLogFileOptions {
-
-        @Test
-        @DisplayName("creates options with resolved path")
-        void createsWithResolvedPath(@TempDir Path tempDir) {
-            TomcatLogFile log = TomcatLogFile.createCatalinaLog();
-            LogFileOptions opts = log.createLogFileOptions(tempDir);
-
-            assertEquals(TomcatLogFile.TOMCAT_CATALINA_LOG_ID, opts.getName());
-            assertTrue(opts.getPathPattern().contains("catalina"));
-        }
-
-        @Test
-        @DisplayName("rejects null path")
-        void rejectsNullPath() {
-            TomcatLogFile log = TomcatLogFile.createCatalinaLog();
-            assertThrows(Exception.class, () -> log.createLogFileOptions((Path) null));
-        }
-    }
-
-    @Nested
-    @DisplayName("createPredefinedLogFile")
-    class CreatePredefinedLogFileTests {
-
-        @Test
-        @DisplayName("no-arg uses enabledByDefault")
-        void noArgUsesDefault() {
-            TomcatLogFile log = TomcatLogFile.createCatalinaLog();
-            PredefinedLogFile plf = log.createPredefinedLogFile();
-            assertEquals(TomcatLogFile.TOMCAT_CATALINA_LOG_ID, plf.getId());
-            assertTrue(plf.isEnabled());
-        }
-
-        @Test
-        @DisplayName("boolean arg overrides enabled")
-        void booleanArgOverrides() {
-            TomcatLogFile log = TomcatLogFile.createCatalinaLog();
-            PredefinedLogFile plf = log.createPredefinedLogFile(false);
-            assertFalse(plf.isEnabled());
         }
     }
 

@@ -171,29 +171,6 @@ public class DeploymentArtifact implements Serializable, Cloneable {
         return file.getName();
     }
 
-    /**
-     * Gets the server path for deployment.
-     * This is an alias for contextPath.
-     */
-    @NotNull
-    public String getServerPath() {
-        return contextPath;
-    }
-
-    /**
-     * Sets the server path for deployment.
-     * This is an alias for setContextPath.
-     */
-    public void setServerPath(@Nullable String serverPath) {
-        setContextPath(serverPath);
-    }
-
-    public boolean isUsingDefaultContext() {
-        // contextPath is canonicalised by the setter to a non-empty, slash-prefixed
-        // form, so the default-context check is just an equality test against "/".
-        return contextPath.equals("/");
-    }
-
     public boolean isValid() {
         if (name.isEmpty() || path.isEmpty()) return false;
         File file = new File(path);

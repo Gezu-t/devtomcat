@@ -3,8 +3,6 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
@@ -429,23 +427,6 @@ public final class DeployedClassesSync {
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
                 + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
         return new SyncReport(syncedArtifacts, totalCopied, skipped);
-    }
-
-    /**
-     * Resolves the owning module via the typed {@link Deployment}
-     * hierarchy — no string matching anywhere. Three dispatch arms cover
-     * the three deployment shapes — IntelliJ-registered artifact,
-     * project module, and external file — each backed by a stable platform
-     * pointer ({@code ArtifactPointer} / {@code ModulePointer}) so renames
-     * and reloads are tracked automatically.
-     *
-     * <p><b>Must be called inside a read action.</b>
-     */
-    @NotNull
-    static ResolutionReport resolveModuleOutputRootsVerbose(@NotNull Project project,
-                                                            @NotNull DeploymentArtifact artifact) {
-        Deployment typed = DeploymentAdapter.toTyped(project, artifact);
-        return resolveTyped(project, typed);
     }
 
     @NotNull
@@ -1051,27 +1032,6 @@ public final class DeployedClassesSync {
                     + ": " + e.getMessage());
         }
         return keys;
-    }
-
-    /**
-     * Resolves the deployment artifact to its owning module and returns the
-     * full production classpath roots — the owning module plus every
-     * dependency module it transitively pulls in. SDK and library-JAR
-     * roots are excluded (those belong in {@code WEB-INF/lib/}, not
-     * {@code WEB-INF/classes/}). Empty list when no module resolves or
-     * none of its output dirs exist on disk.
-     *
-     * <p><b>Must be called inside a read action.</b>
-     *
-     * <p>Thin facade over {@link #resolveModuleOutputRootsVerbose} — kept so
-     * existing test fixtures (and any future internal caller that only
-     * cares about the roots) don't need to unpack the ResolutionReport.
-     */
-    @NotNull
-    static List<Path> resolveModuleOutputRoots(@NotNull Project project,
-                                               @NotNull DeploymentArtifact artifact) {
-        return resolveModuleOutputRootsVerbose(project, artifact).sourceRoots()
-                .stream().map(SourceRoot::path).toList();
     }
 
     /**

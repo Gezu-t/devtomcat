@@ -191,10 +191,6 @@ public class TomcatServersConfigurable extends MasterDetailsComponent implements
         LOG.debug("Validated server name '" + trimmedName + "'");
     }
 
-    public int getServerCount() {
-        return myRoot.getChildCount();
-    }
-
     @NotNull
     public List<String> getServerNames() {
         List<String> names = new ArrayList<>();
@@ -203,29 +199,6 @@ public class TomcatServersConfigurable extends MasterDetailsComponent implements
             names.add(node.getDisplayName());
         }
         return names;
-    }
-
-    @NotNull
-    public List<TomcatInfo> getServers() {
-        List<TomcatInfo> servers = new ArrayList<>();
-        for (int i = 0; i < myRoot.getChildCount(); i++) {
-            MyNode node = (MyNode) myRoot.getChildAt(i);
-            TomcatInfoConfigurable configurable = (TomcatInfoConfigurable) node.getConfigurable();
-            servers.add(configurable.getEditableObject());
-        }
-        return servers;
-    }
-
-    public boolean hasConfiguredServers() {
-        return getServerCount() > 0;
-    }
-
-    @Nullable
-    public TomcatInfo findServerByName(@NotNull String name) {
-        return getServers().stream()
-                .filter(info -> name.equals(info.getName()))
-                .findFirst()
-                .orElse(null);
     }
 
     private class AddTomcatAction extends DumbAwareAction {

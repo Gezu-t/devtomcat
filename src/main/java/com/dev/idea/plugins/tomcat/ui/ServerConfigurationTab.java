@@ -178,23 +178,6 @@ public class ServerConfigurationTab extends JBPanel<ServerConfigurationTab> {
         }
     }
 
-    public boolean isModified(TomcatRunConfiguration config) {
-        String mode = config.getServerMode();
-
-        if (TomcatConstants.MODE_REMOTE.equalsIgnoreCase(mode)) {
-            if (remoteConnectionSection != null && remoteConnectionSection.isModified(config)) {
-                return true;
-            }
-        }
-
-        for (ConfigurationSection section : sharedSections) {
-            if (section.isModified(config)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public void validateSettings() throws ConfigurationException {
         if (config == null) {
             throw new ConfigurationException("Configuration is not initialized");

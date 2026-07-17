@@ -103,52 +103,6 @@ class CoverageConfigBridgeTest {
     }
 
     @Nested
-    @DisplayName("fromClassFilters")
-    class FromClassFilters {
-
-        @Test
-        @DisplayName("round-trips back into include/exclude string lists")
-        void roundTripsByInclude() {
-            ClassFilter include = enabledFilter("com.foo.*", true);
-            ClassFilter exclude = enabledFilter("com.test.*", false);
-
-            CoverageConfig reconstructed =
-                    CoverageConfigBridge.fromClassFilters(new ClassFilter[]{include, exclude});
-
-            assertEquals(List.of("com.foo.*"), reconstructed.getIncludePatterns());
-            assertEquals(List.of("com.test.*"), reconstructed.getExcludePatterns());
-        }
-
-        @Test
-        @DisplayName("drops disabled filters rather than silently re-enabling them")
-        void dropsDisabledFilters() {
-            // Platform keeps disabled entries for history; DevTomcat's string
-            // model has no enabled/disabled concept, so round-tripping them
-            // would flip them back on.
-            ClassFilter enabled = enabledFilter("com.foo.*", true);
-            ClassFilter disabled = new ClassFilter("com.bar.*");
-            disabled.setInclude(true);
-            disabled.setEnabled(false);
-
-            CoverageConfig reconstructed =
-                    CoverageConfigBridge.fromClassFilters(new ClassFilter[]{enabled, disabled});
-
-            assertEquals(List.of("com.foo.*"), reconstructed.getIncludePatterns());
-            assertEquals(List.of(), reconstructed.getExcludePatterns());
-        }
-
-        @Test
-        @DisplayName("null filter entries are tolerated, not a crash")
-        void tolerantOfNullEntries() {
-            ClassFilter real = enabledFilter("com.foo.*", true);
-            CoverageConfig reconstructed =
-                    CoverageConfigBridge.fromClassFilters(new ClassFilter[]{null, real, null});
-
-            assertEquals(List.of("com.foo.*"), reconstructed.getIncludePatterns());
-        }
-    }
-
-    @Nested
     @DisplayName("pattern string extractors")
     class PatternStringExtractors {
 

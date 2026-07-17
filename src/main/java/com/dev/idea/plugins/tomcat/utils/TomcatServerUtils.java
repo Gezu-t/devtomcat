@@ -6,10 +6,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 import java.util.List;
@@ -183,41 +181,6 @@ public final class TomcatServerUtils {
         } while (existingNames.contains(candidateName));
 
         return candidateName;
-    }
-
-    public static boolean isValidTomcatInstallation(@Nullable String installPath) {
-        if (StringUtil.isEmpty(installPath)) {
-            return false;
-        }
-        return TomcatServerValidator.isValidInstallation(installPath);
-    }
-
-    @Nullable
-    public static String getValidationErrorSummary(@NotNull String installPath) {
-        Objects.requireNonNull(installPath, "Install path cannot be null");
-
-        ValidationResult result = TomcatServerValidator.validateInstallation(installPath);
-
-        if (result.isValid()) {
-            return null;
-        }
-
-        StringBuilder summary = new StringBuilder();
-
-        if (!result.getErrors().isEmpty()) {
-            summary.append("Errors: ");
-            summary.append(String.join(", ", result.getErrors()));
-        }
-
-        if (!result.getWarnings().isEmpty()) {
-            if (summary.length() > 0) {
-                summary.append("; ");
-            }
-            summary.append("Warnings: ");
-            summary.append(String.join(", ", result.getWarnings()));
-        }
-
-        return summary.toString();
     }
 
     @NotNull

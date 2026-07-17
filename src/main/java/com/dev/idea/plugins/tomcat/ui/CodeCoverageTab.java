@@ -396,36 +396,11 @@ public class CodeCoverageTab extends JBPanel<CodeCoverageTab> {
         }
     }
 
-    public boolean hasIncludePatterns() {
-        return !includePatterns.isEmpty();
-    }
-
-    public boolean hasExcludePatterns() {
-        return !excludePatterns.isEmpty();
-    }
-
-    public int getIncludePatternsCount() {
-        return includePatterns.size();
-    }
-
-    public int getExcludePatternsCount() {
-        return excludePatterns.size();
-    }
-
     public List<String> getIncludePatterns() {
         return new ArrayList<>(includePatterns);
     }
 
     public List<String> getExcludePatterns() {
         return new ArrayList<>(excludePatterns);
-    }
-
-    public String getCoverageSummary() {
-        if (!hasIncludePatterns() && !hasExcludePatterns()) {
-            return "No coverage patterns configured";
-        }
-
-        return String.format("Coverage patterns: %d include, %d exclude",
-                includePatterns.size(), excludePatterns.size());
     }
 }

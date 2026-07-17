@@ -30,12 +30,6 @@ package com.dev.idea.plugins.tomcat.model.debug;
             this.useModuleClasspath = false;
         }
 
-        public DebugConfig(int port, @NotNull String transport, boolean useModuleClasspath) {
-            this.setPort(port);
-            this.setTransport(transport);
-            this.setUseModuleClasspath(useModuleClasspath);
-        }
-
         public int getPort() {
             return port;
         }
@@ -107,17 +101,5 @@ package com.dev.idea.plugins.tomcat.model.debug;
 
         public boolean isValid() {
             return port >= MIN_DEBUG_PORT && port <= MAX_DEBUG_PORT;
-        }
-
-        /** Returns JDWP connection string, e.g. "dt_socket,server=y,suspend=n,address=5005" */
-        @NotNull
-        public String getJdwpConnectionString() {
-            return String.format(TomcatConstants.JDWP_CONNECTION_FORMAT, TomcatConstants.JDWP_TRANSPORT_SOCKET, port);
-        }
-
-        /** Returns complete -agentlib VM argument for debug startup. */
-        @NotNull
-        public String getDebugVmArgument() {
-            return TomcatConstants.JDWP_AGENT_PREFIX + getJdwpConnectionString();
         }
     }

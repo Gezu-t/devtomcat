@@ -55,38 +55,6 @@ public final class CoverageConfigBridge {
     }
 
     /**
-     * Reverse direction — splits a {@link ClassFilter} array back into the
-     * DevTomcat include/exclude string pairs. Used to keep the tab's in-memory
-     * state coherent when the platform persists filter changes into its own
-     * configuration (for instance when the user toggles coverage settings
-     * elsewhere in the IDE).
-     *
-     * <p>Disabled filters are dropped on the way back out — the platform
-     * keeps disabled entries for history, but DevTomcat's model has no
-     * enabled/disabled concept, so round-tripping them would re-enable
-     * silently.
-     */
-    @NotNull
-    public static CoverageConfig fromClassFilters(@NotNull ClassFilter[] filters) {
-        CoverageConfig config = new CoverageConfig();
-        List<String> includes = new ArrayList<>();
-        List<String> excludes = new ArrayList<>();
-        for (ClassFilter filter : filters) {
-            if (filter == null || !filter.isEnabled()) continue;
-            String pattern = trimmedOrNull(filter.getPattern());
-            if (pattern == null) continue;
-            if (filter.isInclude()) {
-                includes.add(pattern);
-            } else {
-                excludes.add(pattern);
-            }
-        }
-        config.setIncludePatterns(includes);
-        config.setExcludePatterns(excludes);
-        return config;
-    }
-
-    /**
      * Extracts only the include-pattern strings from a {@link ClassFilter}
      * array — the shape {@code JavaCoverageRunner.appendCoverageArgument}
      * accepts directly. Mirrors the platform's own
@@ -136,9 +104,4 @@ public final class CoverageConfigBridge {
                 .collect(Collectors.toList());
     }
 
-    private static String trimmedOrNull(String pattern) {
-        if (pattern == null) return null;
-        String trimmed = pattern.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
 }

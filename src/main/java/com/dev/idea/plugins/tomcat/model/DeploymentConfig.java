@@ -38,25 +38,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
     public DeploymentConfig() {
     }
 
-    /**
-     * Deep-copy constructor. Null source produces an empty config.
-     */
-    public DeploymentConfig(@Nullable DeploymentConfig other) {
-        if (other == null) return;
-        try {
-            for (DeploymentArtifact a : other.artifacts) {
-                if (a != null) artifacts.add(a.clone());
-            }
-            this.hotDeploymentEnabled = other.hotDeploymentEnabled;
-            this.updateClassesAndResources = other.updateClassesAndResources;
-            this.preserveSessions = other.preserveSessions;
-        } catch (Exception e) {
-            LOG.error("Error copying DeploymentConfig", e);
-            this.artifacts = new ArrayList<>();
-            throw new RuntimeException("Failed to copy DeploymentConfig", e);
-        }
-    }
-
     // =====================================================================
     // Persistence-layer accessors
     //
