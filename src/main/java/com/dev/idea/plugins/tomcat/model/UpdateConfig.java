@@ -98,11 +98,6 @@ public class UpdateConfig implements Serializable, Cloneable {
         return UPDATE_CLASSES_AND_RESOURCES.equals(onUpdate) || UPDATE_RESOURCES.equals(onUpdate);
     }
 
-    public boolean isUpdateClassesEnabled() { return UPDATE_CLASSES_AND_RESOURCES.equals(onUpdate); }
-    public boolean isRedeployOnUpdate() { return REDEPLOY.equals(onUpdate); }
-    public boolean isRestartOnUpdate() { return RESTART_SERVER.equals(onUpdate); }
-    public boolean isFrameDeactivationActive() { return !DO_NOTHING.equals(onFrameDeactivation); }
-
     public void resetToDefaults() {
         this.onUpdate = DEFAULT_ON_UPDATE;
         this.onFrameDeactivation = DEFAULT_ON_FRAME_DEACTIVATION;

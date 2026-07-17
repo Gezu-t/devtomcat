@@ -34,7 +34,6 @@ public class DeploymentTableManager {
 
     private Consumer<String> deploymentChangeListener;
     private Runnable artifactListChangeListener;
-    private Consumer<DeploymentArtifact> selectionChangeListener;
 
     public DeploymentTableManager() {
         listModel = new CollectionListModel<>();
@@ -58,11 +57,6 @@ public class DeploymentTableManager {
                 }
             }
         });
-        deploymentList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                fireSelectionChanged();
-            }
-        });
         LOG.debug("DeploymentTableManager initialized with JBList");
     }
 
@@ -74,20 +68,9 @@ public class DeploymentTableManager {
         this.artifactListChangeListener = listener;
     }
 
-    public void setSelectionChangeListener(@Nullable Consumer<DeploymentArtifact> listener) {
-        this.selectionChangeListener = listener;
-    }
-
     private void fireArtifactListChanged() {
         if (artifactListChangeListener != null) {
             artifactListChangeListener.run();
-        }
-    }
-
-    private void fireSelectionChanged() {
-        if (selectionChangeListener != null) {
-            DeploymentArtifact selected = deploymentList.getSelectedValue();
-            selectionChangeListener.accept(selected != null ? selected.clone() : null);
         }
     }
 
@@ -159,7 +142,6 @@ public class DeploymentTableManager {
                     " with context: " + deployment.getApplicationContext());
             fireDeploymentChanged();
             fireArtifactListChanged();
-            fireSelectionChanged();
 
         } catch (Exception e) {
             LOG.warn("Error adding deployment", e);
@@ -177,7 +159,6 @@ public class DeploymentTableManager {
             LOG.debug("Removed deployment: " + deployment.getDisplayName());
             fireDeploymentChanged();
             fireArtifactListChanged();
-            fireSelectionChanged();
         }
     }
 
@@ -191,7 +172,6 @@ public class DeploymentTableManager {
 
             deploymentList.setSelectedIndex(selectedIndex - 1);
             fireDeploymentChanged();
-            fireSelectionChanged();
         }
     }
 
@@ -205,7 +185,6 @@ public class DeploymentTableManager {
 
             deploymentList.setSelectedIndex(selectedIndex + 1);
             fireDeploymentChanged();
-            fireSelectionChanged();
         }
     }
 
@@ -219,14 +198,12 @@ public class DeploymentTableManager {
         if (isValidIndex(selectedIndex)) {
             listModel.setElementAt(deployment, selectedIndex);
             LOG.debug("Updated deployment: " + deployment.getDisplayName());
-            // fire deploymentChangeListener too so context-path edits made
-            // through the edit dialog propagate to the browser URL, matching
-            // the behaviour of updateSelectedContext() for the inline field.
-            // Previously this fired only fireSelectionChanged(), so a dialog
-            // edit of the context path saved cleanly but the browser URL
-            // kept pointing at the pre-edit context on the next launch.
+            // Fire deploymentChangeListener so context-path edits made through
+            // the edit dialog propagate to the browser URL, matching the
+            // behaviour of updateSelectedContext() for the inline field —
+            // without this, a dialog edit of the context path saved cleanly but
+            // the browser URL kept pointing at the pre-edit context.
             fireDeploymentChanged();
-            fireSelectionChanged();
         }
     }
 
@@ -234,7 +211,6 @@ public class DeploymentTableManager {
         listModel.removeAll();
         LOG.debug("Cleared all deployments");
         fireArtifactListChanged();
-        fireSelectionChanged();
     }
 
     public JComponent getComponent() {
@@ -377,7 +353,6 @@ public class DeploymentTableManager {
         if (index >= 0 && index < listModel.getSize()) {
             deploymentList.setSelectedIndex(index);
             deploymentList.ensureIndexIsVisible(index);
-            fireSelectionChanged();
         }
     }
 }

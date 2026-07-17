@@ -122,22 +122,6 @@ public final class TomcatServerManagerState implements PersistentStateComponent<
     }
 
     /**
-     * Remove a Tomcat server configuration.
-     *
-     * @param tomcatInfo the server configuration to remove (cannot be null)
-     * @return true if removed, false if not found
-     * @throws NullPointerException if tomcatInfo is null
-     */
-    public boolean removeTomcatInfo(@NotNull TomcatInfo tomcatInfo) {
-
-        boolean removed = tomcatInfos.remove(tomcatInfo);
-        if (removed) {
-            LOG.info("Removed Tomcat server: " + tomcatInfo.getName());
-        }
-        return removed;
-    }
-
-    /**
      * Find a Tomcat server by its unique ID.
      *
      * @param id the server ID (cannot be null)

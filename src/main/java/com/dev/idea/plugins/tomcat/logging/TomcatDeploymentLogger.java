@@ -69,14 +69,6 @@ public class TomcatDeploymentLogger {
     private static final String REG_DEBUG_MODE = "devtomcat.debug.mode";
 
     // =====================================================================
-    // PROGRESS BAR CONFIGURATION
-    // =====================================================================
-
-    private static final int PROGRESS_BAR_LENGTH = 10;
-    private static final char PROGRESS_FILLED = '=';
-    private static final char PROGRESS_EMPTY = '-';
-
-    // =====================================================================
     // INSTANCE FIELDS
     // =====================================================================
 
@@ -232,24 +224,6 @@ public class TomcatDeploymentLogger {
             logPrefixed(message, DEBUG_PREFIX, ConsoleViewContentType.LOG_DEBUG_OUTPUT);
             LOG.debug("Debug: " + message);
         }
-    }
-
-    // =====================================================================
-    // PROGRESS LOGGING
-    // =====================================================================
-
-    // Package-private + static for TomcatDeploymentLoggerTest; uses no instance state.
-    @NotNull
-    static String createProgressBar(int progress) {
-        int filled = Math.max(0, Math.min(PROGRESS_BAR_LENGTH, progress / 10));
-        StringBuilder bar = new StringBuilder("[");
-
-        for (int i = 0; i < PROGRESS_BAR_LENGTH; i++) {
-            bar.append(i < filled ? PROGRESS_FILLED : PROGRESS_EMPTY);
-        }
-
-        bar.append("]");
-        return bar.toString();
     }
 
     // =====================================================================

@@ -115,7 +115,7 @@ class TomcatConfigurationDataTest {
         assertEquals("/myapp", cloned.getContextPath());
         assertEquals("Remote", cloned.getServerMode());
         assertEquals(9090, cloned.getPortConfig().getHttp());
-        assertEquals(1, cloned.getDeploymentConfig().getArtifactCount());
+        assertEquals(1, cloned.getDeploymentConfig().getArtifacts().size());
         assertEquals(5006, cloned.getDebugConfig().getPort());
         assertNotNull(cloned.getTomcatInfo());
 
@@ -123,8 +123,8 @@ class TomcatConfigurationDataTest {
         cloned.getPortConfig().setHttp(7070);
         assertEquals(9090, original.getPortConfig().getHttp());
 
-        cloned.getDeploymentConfig().clearArtifacts();
-        assertEquals(1, original.getDeploymentConfig().getArtifactCount());
+        cloned.getDeploymentConfig().setArtifacts(null);
+        assertEquals(1, original.getDeploymentConfig().getArtifacts().size());
 
         cloned.setContextPath("/other");
         assertEquals("/myapp", original.getContextPath());
@@ -170,7 +170,7 @@ class TomcatConfigurationDataTest {
         assertEquals("Remote", target.getServerMode());
         assertEquals("Java 17", target.getJreSelection());
         assertEquals(9999, target.getPortConfig().getHttp());
-        assertEquals(1, target.getDeploymentConfig().getArtifactCount());
+        assertEquals(1, target.getDeploymentConfig().getArtifacts().size());
         assertEquals("-Xmx2g", target.getVmConfig().getVmOptions());
         assertNotNull(target.getTomcatInfo());
         assertEquals("ImportedTomcat", target.getTomcatInfo().getName());

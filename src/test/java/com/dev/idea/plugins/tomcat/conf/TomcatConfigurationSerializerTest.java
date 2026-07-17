@@ -250,7 +250,7 @@ class TomcatConfigurationSerializerTest {
         // Should have defaults, not crash
         assertEquals("/", data.getContextPath());
         assertNull(data.getTomcatInfo());
-        assertEquals(0, data.getDeploymentConfig().getArtifactCount());
+        assertEquals(0, data.getDeploymentConfig().getArtifacts().size());
     }
 
     @Test

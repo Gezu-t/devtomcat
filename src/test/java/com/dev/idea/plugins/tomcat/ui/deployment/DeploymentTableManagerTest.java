@@ -28,7 +28,7 @@ class DeploymentTableManagerTest {
     void updateSelectedFiresDeploymentChangeListener() {
         // The Deployment tab has two paths that mutate an artifact's context:
         //   - inline context field (updateSelectedContext)   — fires deploymentChangeListener ✓
-        //   - edit dialog (updateSelectedDeployment)         — previously fired ONLY selectionChangeListener
+        //   - edit dialog (updateSelectedDeployment)         — previously did NOT fire it
         //
         // The asymmetry meant that editing a context path through the dialog
         // saved the new path but left the browser URL pinned to the old one.
@@ -50,25 +50,6 @@ class DeploymentTableManagerTest {
         assertNotNull(delivered, "deploymentChangeListener must fire after edit-dialog mutation");
         assertEquals("/myapp-renamed", delivered,
                 "listener must receive the updated context path so the browser URL can follow");
-    }
-
-    @Test
-    @DisplayName("updateSelectedDeployment also keeps selectionChangeListener firing for Before Launch sync")
-    void updateSelectedAlsoFiresSelectionListener() {
-        DeploymentTableManager manager = new DeploymentTableManager();
-
-        DeploymentArtifact artifact = newArtifact("app", "/app");
-        manager.addDeployment(artifact);
-
-        AtomicReference<DeploymentArtifact> seen = new AtomicReference<>();
-        manager.setSelectionChangeListener(seen::set);
-
-        artifact.setApplicationContext("/app2");
-        manager.updateSelectedDeployment(artifact);
-
-        // Before Launch sync keys on this listener; the fix must not remove it.
-        assertNotNull(seen.get(),
-                "selectionChangeListener must still fire after the fix so Before Launch stays in sync");
     }
 
     // -------------------------------------------------------------------------

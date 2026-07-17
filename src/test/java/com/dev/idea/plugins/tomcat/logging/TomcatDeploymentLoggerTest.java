@@ -17,47 +17,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TomcatDeploymentLoggerTest {
 
     @Nested
-    @DisplayName("createProgressBar — 10-cell bar from a 0..100 value")
-    class ProgressBar {
-
-        @Test
-        @DisplayName("0% is all empty")
-        void empty() {
-            assertEquals("[----------]", TomcatDeploymentLogger.createProgressBar(0));
-        }
-
-        @Test
-        @DisplayName("100% is all filled")
-        void full() {
-            assertEquals("[==========]", TomcatDeploymentLogger.createProgressBar(100));
-        }
-
-        @Test
-        @DisplayName("50% fills exactly half")
-        void half() {
-            assertEquals("[=====-----]", TomcatDeploymentLogger.createProgressBar(50));
-        }
-
-        @Test
-        @DisplayName("below 10% shows no filled cell")
-        void belowTenPercent() {
-            assertEquals("[----------]", TomcatDeploymentLogger.createProgressBar(5));
-        }
-
-        @Test
-        @DisplayName("over 100% is clamped to full (never overflows the bar)")
-        void overshootClamped() {
-            assertEquals("[==========]", TomcatDeploymentLogger.createProgressBar(150));
-        }
-
-        @Test
-        @DisplayName("negative is clamped to empty")
-        void negativeClamped() {
-            assertEquals("[----------]", TomcatDeploymentLogger.createProgressBar(-20));
-        }
-    }
-
-    @Nested
     @DisplayName("applyCategoryPrefix — no double-prefixing")
     class CategoryPrefix {
 

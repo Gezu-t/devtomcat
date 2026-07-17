@@ -23,26 +23,6 @@ class PortConfigTest {
     }
 
     @Test
-    @DisplayName("two-arg constructor sets http and shutdown")
-    void twoArgConstructor() {
-        PortConfig pc = new PortConfig(9090, 9005);
-        assertEquals(9090, pc.getHttp());
-        assertEquals(9005, pc.getShutdown());
-        // Others remain default
-        assertEquals(8443, pc.getHttps());
-    }
-
-    @Test
-    @DisplayName("four-arg constructor sets http, https, jmx, shutdown")
-    void fourArgConstructor() {
-        PortConfig pc = new PortConfig(9090, 9443, 9099, 9005);
-        assertEquals(9090, pc.getHttp());
-        assertEquals(9443, pc.getHttps());
-        assertEquals(9099, pc.getJmx());
-        assertEquals(9005, pc.getShutdown());
-    }
-
-    @Test
     @DisplayName("copy constructor produces independent copy")
     void copyConstructor() {
         PortConfig original = new PortConfig();
@@ -77,8 +57,12 @@ class PortConfigTest {
     @Test
     @DisplayName("equals and hashCode contract")
     void equalsAndHashCode() {
-        PortConfig a = new PortConfig(8080, 8443, 1099, 8005);
-        PortConfig b = new PortConfig(8080, 8443, 1099, 8005);
+        PortConfig a = new PortConfig();
+        a.setHttps(9443);
+        a.setJmx(9099);
+        PortConfig b = new PortConfig();
+        b.setHttps(9443);
+        b.setJmx(9099);
         assertEquals(a, b);
         assertEquals(a.hashCode(), b.hashCode());
 

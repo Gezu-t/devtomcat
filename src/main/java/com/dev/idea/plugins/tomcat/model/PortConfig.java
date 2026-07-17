@@ -40,18 +40,6 @@ public class PortConfig implements Serializable, Cloneable {
 
     public PortConfig() {}
 
-    public PortConfig(int http, int shutdown) {
-        this.http = http;
-        this.shutdown = shutdown;
-    }
-
-    public PortConfig(int http, int https, int jmx, int shutdown) {
-        this.http = http;
-        this.https = https;
-        this.jmx = jmx;
-        this.shutdown = shutdown;
-    }
-
     public PortConfig(@NotNull PortConfig other) {
         Objects.requireNonNull(other, "PortConfig cannot be null");
         this.http = other.http;

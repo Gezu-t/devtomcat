@@ -97,10 +97,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
                 .orElse(null);
     }
 
-    public int getArtifactCount() {
-        return artifacts.size();
-    }
-
     public boolean hasArtifacts() {
         return !artifacts.isEmpty();
     }
@@ -184,16 +180,6 @@ public class DeploymentConfig implements Serializable, Cloneable {
     public boolean removeDeployment(@NotNull Deployment deployment) {
         Objects.requireNonNull(deployment, "Deployment cannot be null");
         return removeArtifact(DeploymentAdapter.toLegacy(deployment));
-    }
-
-    @Nullable
-    public DeploymentArtifact removeArtifactAt(int index) {
-        if (index < 0 || index >= artifacts.size()) return null;
-        return artifacts.remove(index);
-    }
-
-    public void clearArtifacts() {
-        artifacts.clear();
     }
 
     public void setHotDeploymentEnabled(boolean enabled) {

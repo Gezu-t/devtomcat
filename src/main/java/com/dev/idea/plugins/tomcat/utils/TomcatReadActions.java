@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.utils;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.Computable;
-import com.intellij.openapi.util.ThrowableComputable;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -31,19 +30,6 @@ public final class TomcatReadActions {
             // only possible in plain unit tests; in production an Application
             // always exists. Run directly so model-free logic stays testable
             // without a platform fixture.
-            return computable.compute();
-        }
-        return app.runReadAction(computable);
-    }
-
-    /**
-     * Runs {@code computable} under a read action, allowing it to throw a
-     * checked exception of type {@code E} which is propagated unchanged.
-     */
-    public static <T, E extends Throwable> T computeThrowing(@NotNull ThrowableComputable<T, E> computable) throws E {
-        Application app = ApplicationManager.getApplication();
-        if (app == null) {
-            // Same no-Application fallback as compute(); see that method.
             return computable.compute();
         }
         return app.runReadAction(computable);

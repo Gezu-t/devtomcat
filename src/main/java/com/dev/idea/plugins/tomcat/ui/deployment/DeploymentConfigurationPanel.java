@@ -32,7 +32,6 @@ import java.awt.*;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import com.intellij.openapi.diagnostic.Logger;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
@@ -245,23 +244,6 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         // getTypedDeployments adapts on the way out.
         config.getConfigData().getDeploymentConfig()
                 .setDeployments(tableManager.getTypedDeployments(config.getProject()));
-    }
-
-    public boolean isModified(@NotNull TomcatRunConfiguration config) {
-        List<DeploymentArtifact> currentArtifacts = tableManager.getDeployments();
-        List<DeploymentArtifact> savedArtifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
-
-        if (currentArtifacts.size() != savedArtifacts.size()) return true;
-
-        for (int i = 0; i < currentArtifacts.size(); i++) {
-            DeploymentArtifact current = currentArtifacts.get(i);
-            DeploymentArtifact saved = savedArtifacts.get(i);
-            if (!Objects.equals(current.getName(), saved.getName())) return true;
-            if (!Objects.equals(current.getPath(), saved.getPath())) return true;
-            if (!Objects.equals(current.getContextPath(), saved.getContextPath())) return true;
-            if (!Objects.equals(current.getType(), saved.getType())) return true;
-        }
-        return false;
     }
 
     public boolean isConfigurationValid() {

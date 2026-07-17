@@ -16,7 +16,7 @@ class DeploymentConfigTest {
     void defaultValues() {
         DeploymentConfig dc = new DeploymentConfig();
         assertFalse(dc.hasArtifacts());
-        assertEquals(0, dc.getArtifactCount());
+        assertEquals(0, dc.getArtifacts().size());
         assertFalse(dc.isHotDeploymentEnabled());
         assertFalse(dc.isUpdateClassesAndResources());
         assertFalse(dc.isPreserveSessions());
@@ -29,15 +29,15 @@ class DeploymentConfigTest {
         DeploymentArtifact art = new DeploymentArtifact("myapp", "/path/to/myapp.war", "war");
 
         assertTrue(dc.addArtifact(art));
-        assertEquals(1, dc.getArtifactCount());
+        assertEquals(1, dc.getArtifacts().size());
         assertTrue(dc.hasArtifacts());
 
         // Duplicate not added
         assertFalse(dc.addArtifact(art));
-        assertEquals(1, dc.getArtifactCount());
+        assertEquals(1, dc.getArtifacts().size());
 
         assertTrue(dc.removeArtifact(art));
-        assertEquals(0, dc.getArtifactCount());
+        assertEquals(0, dc.getArtifacts().size());
     }
 
     @Test
@@ -50,7 +50,7 @@ class DeploymentConfigTest {
         list.add(new DeploymentArtifact("app2", "/path2", "war"));
 
         dc.setArtifacts(list);
-        assertEquals(2, dc.getArtifactCount());
+        assertEquals(2, dc.getArtifacts().size());
     }
 
     @Test
@@ -59,7 +59,7 @@ class DeploymentConfigTest {
         DeploymentConfig dc = new DeploymentConfig();
         dc.addArtifact(new DeploymentArtifact("app", "/path", "war"));
         dc.setArtifacts(null);
-        assertEquals(0, dc.getArtifactCount());
+        assertEquals(0, dc.getArtifacts().size());
     }
 
     @Test
@@ -70,7 +70,7 @@ class DeploymentConfigTest {
 
         List<DeploymentArtifact> list = dc.getArtifacts();
         list.clear(); // Modify the returned list
-        assertEquals(1, dc.getArtifactCount()); // Original unaffected
+        assertEquals(1, dc.getArtifacts().size()); // Original unaffected
     }
 
     @Test
@@ -107,27 +107,12 @@ class DeploymentConfigTest {
 
         DeploymentConfig cloned = original.clone();
         assertEquals(original, cloned);
-        assertEquals(1, cloned.getArtifactCount());
+        assertEquals(1, cloned.getArtifacts().size());
         assertTrue(cloned.isHotDeploymentEnabled());
 
         // Mutating clone doesn't affect original
-        cloned.clearArtifacts();
-        assertEquals(1, original.getArtifactCount());
-    }
-
-    @Test
-    @DisplayName("removeArtifactAt returns removed artifact")
-    void removeArtifactAt() {
-        DeploymentConfig dc = new DeploymentConfig();
-        DeploymentArtifact art = new DeploymentArtifact("app", "/path", "war");
-        dc.addArtifact(art);
-
-        DeploymentArtifact removed = dc.removeArtifactAt(0);
-        assertNotNull(removed);
-        assertEquals("app", removed.getName());
-        assertEquals(0, dc.getArtifactCount());
-
-        assertNull(dc.removeArtifactAt(0));
+        cloned.setArtifacts(null);
+        assertEquals(1, original.getArtifacts().size());
     }
 
     @Test

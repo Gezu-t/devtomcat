@@ -3,8 +3,6 @@ package com.dev.idea.plugins.tomcat.utils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -33,21 +31,5 @@ class TomcatReadActionsTest {
                     throw new IllegalStateException("boom");
                 }));
         assertEquals("boom", thrown.getMessage());
-    }
-
-    @Test
-    @DisplayName("computeThrowing returns the computable's value")
-    void computeThrowingReturnsValue() throws IOException {
-        assertEquals("ok", TomcatReadActions.<String, IOException>computeThrowing(() -> "ok"));
-    }
-
-    @Test
-    @DisplayName("computeThrowing propagates the checked exception unchanged")
-    void computeThrowingPropagatesChecked() {
-        IOException thrown = assertThrows(IOException.class,
-                () -> TomcatReadActions.<String, IOException>computeThrowing(() -> {
-                    throw new IOException("disk");
-                }));
-        assertEquals("disk", thrown.getMessage());
     }
 }

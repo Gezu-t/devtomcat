@@ -136,7 +136,6 @@ class UpdateConfigTest {
             UpdateConfig config = new UpdateConfig();
             config.setOnUpdate(UpdateConfig.UPDATE_CLASSES_AND_RESOURCES);
             assertTrue(config.isHotDeploymentEnabled());
-            assertTrue(config.isUpdateClassesEnabled());
         }
 
         @Test
@@ -145,7 +144,6 @@ class UpdateConfigTest {
             UpdateConfig config = new UpdateConfig();
             config.setOnUpdate(UpdateConfig.UPDATE_RESOURCES);
             assertTrue(config.isHotDeploymentEnabled());
-            assertFalse(config.isUpdateClassesEnabled());
         }
 
         @Test
@@ -154,7 +152,6 @@ class UpdateConfigTest {
             UpdateConfig config = new UpdateConfig();
             config.setOnUpdate(UpdateConfig.REDEPLOY);
             assertFalse(config.isHotDeploymentEnabled());
-            assertTrue(config.isRedeployOnUpdate());
         }
 
         @Test
@@ -163,7 +160,6 @@ class UpdateConfigTest {
             UpdateConfig config = new UpdateConfig();
             config.setOnUpdate(UpdateConfig.RESTART_SERVER);
             assertFalse(config.isHotDeploymentEnabled());
-            assertTrue(config.isRestartOnUpdate());
         }
 
         @Test
@@ -172,26 +168,6 @@ class UpdateConfigTest {
             UpdateConfig config = new UpdateConfig();
             config.setOnUpdate(UpdateConfig.DO_NOTHING);
             assertFalse(config.isHotDeploymentEnabled());
-        }
-    }
-
-    @Nested
-    @DisplayName("frame deactivation queries")
-    class FrameDeactivationQueries {
-
-        @Test
-        @DisplayName("do_nothing means inactive")
-        void doNothingInactive() {
-            UpdateConfig config = new UpdateConfig();
-            assertFalse(config.isFrameDeactivationActive());
-        }
-
-        @Test
-        @DisplayName("any action means active")
-        void actionMeansActive() {
-            UpdateConfig config = new UpdateConfig();
-            config.setOnFrameDeactivation(UpdateConfig.UPDATE_RESOURCES);
-            assertTrue(config.isFrameDeactivationActive());
         }
     }
 

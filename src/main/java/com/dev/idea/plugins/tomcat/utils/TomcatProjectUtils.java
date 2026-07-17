@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.utils;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
-import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -147,23 +146,6 @@ public final class TomcatProjectUtils {
         String hexHash = Integer.toHexString(hash & 0x7FFFFFFF);
         String projectName = Paths.get(basePath).getFileName().toString();
         return sanitizeFileName(projectName) + "_" + hexHash;
-    }
-
-    @Nullable
-    public static Path getTomcatHome(@NotNull TomcatRunConfiguration config) {
-        Objects.requireNonNull(config, "Configuration cannot be null");
-
-        TomcatConfigurationData data = config.getConfigData();
-        if (data == null) {
-            return null;
-        }
-
-        TomcatInfo tomcatInfo = data.getTomcatInfo();
-        if (tomcatInfo == null || StringUtil.isEmpty(tomcatInfo.getPath())) {
-            return null;
-        }
-
-        return Paths.get(tomcatInfo.getPath());
     }
 
     @Nullable
