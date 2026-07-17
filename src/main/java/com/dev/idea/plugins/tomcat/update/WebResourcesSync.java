@@ -120,22 +120,55 @@ public final class WebResourcesSync {
     public record SyncReport(int artifactsSynced, int totalCopied, int skipped) {}
 
     /**
-     * File name of the per-deployment web-resources manifest. Lives directly under
-     * the deployed {@code WEB-INF/} (protected from HTTP, off the classpath),
-     * beside — but distinct from — the class-sync manifest
+     * File name of the LEGACY per-deployment web-resources manifest, which earlier
+     * versions wrote into the deployed {@code WEB-INF/}. The live manifest now
+     * resides in the IDE-owned {@link SyncManifestStore} (never inside the webapp);
+     * this name survives only as the migration source and the self-heal target.
+     * Distinct from the class-sync manifest
      * ({@link DeployedClassesSync#CLASS_SYNC_MANIFEST}); each pipeline reconciles
-     * exclusively against its own record. Co-located with the tree it tracks so it
-     * resets naturally when a clean rebuild recreates the exploded artifact.
+     * exclusively against its own record. Note the store manifest deliberately
+     * survives a clean rebuild — reconcile stamps (size+mtime+creation) keep
+     * deletions correct across it.
      */
     static final String WEB_RESOURCES_MANIFEST = ".devtomcat-webresources.manifest";
 
     /**
+     * Deletes DevTomcat's own leftover metadata files from {@code webInfDir} —
+     * exactly {@link #WEB_RESOURCES_MANIFEST} and
+     * {@link DeployedClassesSync#CLASS_SYNC_MANIFEST}, nothing else. Earlier
+     * versions could write them into a <em>source</em> webapp's {@code WEB-INF};
+     * they are plugin bookkeeping and never belong in the user's tree. Exact
+     * filename match only; best-effort (IO failures are logged and skipped).
+     * Returns how many files were removed. Package-visible for tests.
+     */
+    static int removeLegacyMetadata(@NotNull Path webInfDir) {
+        int removed = 0;
+        for (String name : new String[]{WEB_RESOURCES_MANIFEST, DeployedClassesSync.CLASS_SYNC_MANIFEST}) {
+            try {
+                if (Files.deleteIfExists(webInfDir.resolve(name))) {
+                    removed++;
+                    LOG.info("Removed leftover DevTomcat metadata: " + webInfDir.resolve(name));
+                }
+            } catch (IOException e) {
+                LOG.debug("Could not remove leftover metadata " + webInfDir.resolve(name)
+                        + " (" + e.getMessage() + ")");
+            }
+        }
+        return removed;
+    }
+
+    /**
      * Location of the per-deployment web-resources manifest for a given exploded
-     * artifact root: {@code <artifactRoot>/WEB-INF/.devtomcat-webresources.manifest}.
+     * artifact root: in the IDE-owned manifest store, never inside the webapp.
+     * A legacy manifest written by earlier versions at
+     * {@code <artifactRoot>/WEB-INF/.devtomcat-webresources.manifest} is adopted
+     * into the store (and removed from the webapp) on first contact.
      */
     @NotNull
     static Path webResourcesManifestFor(@NotNull Path artifactRoot) {
-        return artifactRoot.resolve(WEB_INF).resolve(WEB_RESOURCES_MANIFEST);
+        return SyncManifestStore.resolveWithMigration(
+                "webresources", artifactRoot,
+                artifactRoot.resolve(WEB_INF).resolve(WEB_RESOURCES_MANIFEST));
     }
 
     /**
@@ -243,6 +276,15 @@ public final class WebResourcesSync {
             // the failed root still owns. Defer the reconcile instead.
             boolean allRootsWalkedCleanly = true;
             for (Path src : webappSources) {
+                // Self-heal: earlier versions (before the source-tree guard and
+                // the manifest store) could leave DevTomcat manifests inside a
+                // SOURCE webapp's WEB-INF. They are ours by exact name — remove
+                // them so the user's tree stays clean.
+                int healed = removeLegacyMetadata(src.resolve(WEB_INF));
+                if (healed > 0) {
+                    logger.logServerInfo("Web resources sync: removed " + healed
+                            + " leftover DevTomcat metadata file(s) from " + src.resolve(WEB_INF));
+                }
                 logger.logServerInfo("Web resources sync: '" + name + "' -> " + src + " -> " + artifactRoot);
                 MirrorResult mr = mirrorTree(src, artifactRoot);
                 copiedForThisArtifact += mr.copied();
@@ -543,6 +585,13 @@ public final class WebResourcesSync {
                     try {
                         if (attrs.isSymbolicLink()) {
                             LOG.debug("Web resources sync: skipping symlink " + file);
+                            return FileVisitResult.CONTINUE;
+                        }
+                        // Never import DevTomcat's own metadata (e.g. a legacy
+                        // .devtomcat-*.manifest an old version left in the source
+                        // webapp) into the deployment — and never claim it as
+                        // contributed content.
+                        if (file.getFileName().toString().startsWith(".devtomcat-")) {
                             return FileVisitResult.CONTINUE;
                         }
                         Path rel = src.relativize(file);

@@ -52,6 +52,18 @@ import static org.mockito.Mockito.withSettings;
  */
 class DeployedClassesSyncTest {
 
+    // The manifest store must never write into the real IDE system directory
+    // from a test; redirect it to a per-test temp root.
+    @org.junit.jupiter.api.BeforeEach
+    void redirectManifestStore(@org.junit.jupiter.api.io.TempDir java.nio.file.Path storeRoot) {
+        SyncManifestStore.setRootOverride(storeRoot);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void resetManifestStore() {
+        SyncManifestStore.setRootOverride(null);
+    }
+
     private final Project project = mock(Project.class);
     private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
 

@@ -18,6 +18,7 @@
 - Build the exploded webapp when no artifact or package step does (Community).
 - No false "artifact not found" warning before the first build.
 - Artifact-based configs from older versions deploy on Community.
+- No DevTomcat metadata files inside your webapp; leftovers cleaned up.
 
 ## [1.4.2]
 

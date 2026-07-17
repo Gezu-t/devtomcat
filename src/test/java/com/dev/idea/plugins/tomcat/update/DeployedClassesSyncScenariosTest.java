@@ -49,6 +49,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DeployedClassesSyncScenariosTest {
 
+    // The manifest store must never write into the real IDE system directory
+    // from a test; redirect it to a per-test temp root.
+    @org.junit.jupiter.api.BeforeEach
+    void redirectManifestStore(@TempDir Path storeRoot) {
+        SyncManifestStore.setRootOverride(storeRoot);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void resetManifestStore() {
+        SyncManifestStore.setRootOverride(null);
+    }
+
     /**
      * ECJ "compile-with-errors" stub payload. The detector only cares that
      * the file ends in {@code .class} and contains the literal string
@@ -975,11 +987,11 @@ class DeployedClassesSyncScenariosTest {
     }
 
     @Test
-    @DisplayName("reconcile integration — across two launches over a real WEB-INF/classes: manifest in WEB-INF/, stale removed, artifact preserved")
+    @DisplayName("reconcile integration — across two launches over a real WEB-INF/classes: manifest outside the webapp, stale removed, artifact preserved")
     void reconcile06_acrossLaunchesRealLayout(@TempDir Path tmp) throws Exception {
-        // Real deployed layout: <docBase>/WEB-INF/classes. The manifest must land at
-        // the production location (sibling → WEB-INF/), persist between launches, and
-        // reconcile correctly through the same path computation syncDeployments uses.
+        // Real deployed layout: <docBase>/WEB-INF/classes. The manifest must land in
+        // the IDE-owned store — NEVER inside the webapp — persist between launches,
+        // and reconcile correctly through the same path computation syncDeployments uses.
         Path webInfClasses = Files.createDirectories(tmp.resolve("app/WEB-INF/classes"));
         Path manifest = DeployedClassesSync.classSyncManifestFor(webInfClasses);
 
@@ -992,8 +1004,10 @@ class DeployedClassesSyncScenariosTest {
 
         assertEquals(0, removed1, "first launch establishes the baseline and deletes nothing");
         assertTrue(Files.isRegularFile(manifest), "manifest is written");
-        assertEquals("WEB-INF", manifest.getParent().getFileName().toString(),
-                "manifest lives directly in WEB-INF/ (protected, off-classpath), NOT in WEB-INF/classes");
+        assertFalse(manifest.startsWith(tmp.resolve("app")),
+                "manifest must live in the store, never inside the webapp");
+        assertTrue(manifest.getFileName().toString().endsWith(".classsync.manifest"),
+                "store file is identifiable by its kind");
 
         // ---- Launch 2: user removed B from source; the sync now only produces A. ----
         int removed2 = SyncManifest.reconcile(

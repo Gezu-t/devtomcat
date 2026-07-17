@@ -1283,21 +1283,26 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * File name of the per-deployment class-sync manifest. Kept directly under the
-     * deployed {@code WEB-INF/} (protected from HTTP, never on the classpath, ignored
-     * by Tomcat's lib/classes scans); co-located with the classes it tracks so it
-     * resets naturally when a clean rebuild recreates the exploded artifact.
+     * File name of the LEGACY per-deployment class-sync manifest, which earlier
+     * versions wrote into the deployed {@code WEB-INF/}. The live manifest now
+     * resides in the IDE-owned {@link SyncManifestStore} (never inside the webapp);
+     * this name survives only as the migration source and the self-heal target.
+     * Note the store manifest deliberately survives a clean rebuild — reconcile
+     * stamps (size+mtime+creation) keep deletions correct across it.
      */
     static final String CLASS_SYNC_MANIFEST = ".devtomcat-classsync.manifest";
 
     /**
      * Location of the per-deployment class-sync manifest for a given
-     * {@code WEB-INF/classes} directory: its sibling, i.e. directly in
-     * {@code WEB-INF/} (protected from HTTP, off the classpath).
+     * {@code WEB-INF/classes} directory: in the IDE-owned manifest store, never
+     * inside the webapp. A legacy manifest written by earlier versions at
+     * {@code WEB-INF/.devtomcat-classsync.manifest} is adopted into the store
+     * (and removed from the webapp) on first contact.
      */
     @NotNull
     static Path classSyncManifestFor(@NotNull Path webInfClasses) {
-        return webInfClasses.resolveSibling(CLASS_SYNC_MANIFEST);
+        return SyncManifestStore.resolveWithMigration(
+                "classsync", webInfClasses, webInfClasses.resolveSibling(CLASS_SYNC_MANIFEST));
     }
 
     /**

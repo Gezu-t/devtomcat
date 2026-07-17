@@ -24,6 +24,18 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("WebResourcesSync")
 class WebResourcesSyncTest {
 
+    // The manifest store must never write into the real IDE system directory
+    // from a test; redirect it to a per-test temp root.
+    @org.junit.jupiter.api.BeforeEach
+    void redirectManifestStore(@TempDir Path storeRoot) {
+        SyncManifestStore.setRootOverride(storeRoot);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void resetManifestStore() {
+        SyncManifestStore.setRootOverride(null);
+    }
+
     private static void writeFile(Path file, String content) throws IOException {
         Files.createDirectories(file.getParent());
         Files.writeString(file, content);
@@ -362,16 +374,66 @@ class WebResourcesSyncTest {
     }
 
     @Test
-    @DisplayName("Stale reconcile — manifest lives in WEB-INF/ (protected from HTTP), distinct from the class-sync's")
+    @DisplayName("Stale reconcile — manifest lives in the store outside the webapp, distinct from the class-sync's")
     void reconcile05_manifestLocation(@TempDir Path tmp) {
         Path dst = tmp.resolve("target/app");
         Path manifest = WebResourcesSync.webResourcesManifestFor(dst);
 
-        assertEquals("WEB-INF", manifest.getParent().getFileName().toString(),
-                "manifest lives directly in WEB-INF/ — protected from HTTP, off the classpath");
+        assertFalse(manifest.startsWith(dst),
+                "manifest must live in the store, never inside the webapp");
         assertNotEquals(
                 DeployedClassesSync.classSyncManifestFor(dst.resolve("WEB-INF/classes")),
                 manifest,
                 "each pipeline reconciles exclusively against its own manifest");
+    }
+
+    @Test
+    @DisplayName("Migration — a legacy in-webapp manifest is adopted into the store and removed from the webapp")
+    void legacyManifestMigrated(@TempDir Path tmp) throws Exception {
+        Path dst = tmp.resolve("target/app");
+        Path legacy = dst.resolve("WEB-INF").resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST);
+        writeFile(legacy, "index.jsp");
+
+        Path manifest = WebResourcesSync.webResourcesManifestFor(dst);
+
+        assertFalse(Files.exists(legacy), "legacy in-webapp manifest is removed");
+        assertTrue(Files.isRegularFile(manifest), "its entries moved into the store");
+        assertEquals(java.util.Set.of("index.jsp"), SyncManifest.read(manifest),
+                "reconcile history survives the relocation");
+    }
+
+    @Test
+    @DisplayName("Mirror — DevTomcat metadata files in the source are never imported nor claimed")
+    void mirrorSkipsDevtomcatMetadata(@TempDir Path tmp) throws Exception {
+        Path src = tmp.resolve("src/main/webapp");
+        Path dst = tmp.resolve("target/app");
+        writeFile(src.resolve("index.jsp"), "page");
+        // A leftover manifest an old version wrote into the SOURCE webapp.
+        writeFile(src.resolve("WEB-INF").resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST), "stale");
+
+        WebResourcesSync.MirrorResult mr = WebResourcesSync.mirrorTree(src, dst);
+
+        assertFalse(Files.exists(dst.resolve("WEB-INF")
+                        .resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST)),
+                "plugin metadata must never be copied into the deployment");
+        assertFalse(mr.contributedPaths().stream().anyMatch(p -> p.contains(".devtomcat-")),
+                "plugin metadata must never be claimed as contributed content");
+        assertTrue(Files.exists(dst.resolve("index.jsp")), "real content still mirrors");
+    }
+
+    @Test
+    @DisplayName("Self-heal — leftover DevTomcat manifests are removed from a source WEB-INF (exact names only)")
+    void legacyMetadataHealedFromSource(@TempDir Path tmp) throws Exception {
+        Path webInf = tmp.resolve("src/main/webapp/WEB-INF");
+        writeFile(webInf.resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST), "x");
+        writeFile(webInf.resolve(DeployedClassesSync.CLASS_SYNC_MANIFEST), "y");
+        writeFile(webInf.resolve("web.xml"), "<web-app/>");
+
+        int removed = WebResourcesSync.removeLegacyMetadata(webInf);
+
+        assertEquals(2, removed);
+        assertFalse(Files.exists(webInf.resolve(WebResourcesSync.WEB_RESOURCES_MANIFEST)));
+        assertFalse(Files.exists(webInf.resolve(DeployedClassesSync.CLASS_SYNC_MANIFEST)));
+        assertTrue(Files.exists(webInf.resolve("web.xml")), "user files are untouched");
     }
 }
