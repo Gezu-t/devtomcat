@@ -2,7 +2,11 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentKind;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.intellij.execution.actions.ConfigurationContext;
@@ -15,6 +19,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -22,7 +27,7 @@ import java.util.List;
  *
  * <ul>
  *   <li><b>Creation</b> builds a configuration in the modern deployment model —
- *       an {@code AUTO_DETECTED} exploded {@link DeploymentArtifact} at the
+ *       an exploded {@link ModuleBackedDeployment} at the
  *       module's WAR build output — never the legacy docBase shape, and never
  *       a source web root as a deployment path. No WAR build output → no
  *       configuration.</li>
@@ -84,14 +89,16 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
         // build-tool suffix taxonomy.
         assertEquals("DevTomcat: demo-webapp", configuration.getName());
 
-        List<DeploymentArtifact> artifacts =
-                configuration.getConfigData().getDeploymentConfig().getArtifacts();
-        assertEquals(1, artifacts.size());
-        DeploymentArtifact artifact = artifacts.get(0);
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, artifact.getType());
-        assertEquals(DeploymentArtifact.Source.AUTO_DETECTED, artifact.getSource());
-        assertEquals(contentRootPath() + "/target/demo-webapp-2.0", artifact.getPath());
-        assertEquals("/demo-webapp", artifact.getContextPath());
+        List<Deployment> deployments =
+                configuration.getConfigData().getDeploymentConfig().getDeployments(getProject());
+        assertEquals(1, deployments.size());
+        Deployment deployment = deployments.get(0);
+        assertEquals(DeploymentKind.MODULE, deployment.getKind());
+        assertTrue(deployment.isExploded());
+        assertNotNull(deployment.getResolvedPath());
+        assertEquals(contentRootPath() + "/target/demo-webapp-2.0",
+                deployment.getResolvedPath().toString());
+        assertEquals("/demo-webapp", deployment.getContextPath());
 
         // The produced config is launch-ready with the standard defaults (local
         // mode, 8080/8005 auto-bump) — the producer inherits them from the config
@@ -131,10 +138,13 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
         assertTrue(producer.setupConfigurationFromContext(
                 configuration, new ConfigurationContext(jsp), Ref.create((PsiElement) jsp)));
 
-        DeploymentArtifact artifact =
-                configuration.getConfigData().getDeploymentConfig().getArtifacts().get(0);
-        assertEquals(contentRootPath() + "/target/demo-webapp-2.0", artifact.getPath());
-        assertEquals("/demo-webapp", artifact.getContextPath());
+        Deployment deployment =
+                configuration.getConfigData().getDeploymentConfig().getDeployments(getProject()).get(0);
+        assertEquals(DeploymentKind.MODULE, deployment.getKind());
+        assertNotNull(deployment.getResolvedPath());
+        assertEquals(contentRootPath() + "/target/demo-webapp-2.0",
+                deployment.getResolvedPath().toString());
+        assertEquals("/demo-webapp", deployment.getContextPath());
     }
 
     public void testMatchesConfigurationSavedBeforeAutoDetectedProvenance() {
@@ -148,13 +158,12 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
         TomcatRunConfigurationProducer producer = new TomcatRunConfigurationProducer();
         TomcatRunConfiguration configuration = newConfiguration(producer);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "demo-webapp", contentRootPath() + "/target/demo-webapp-2.0",
-                DeploymentArtifact.TYPE_EXPLODED);
-        // Deliberately NOT AUTO_DETECTED — the pre-change default.
-        artifact.setSource(DeploymentArtifact.Source.INTELLIJ_ARTIFACT);
-        artifact.setContextPath("/demo-webapp");
-        configuration.getConfigData().getDeploymentConfig().setArtifacts(List.of(artifact));
+        // Artifact-backed with a dangling pointer — the typed shape an old
+        // INTELLIJ_ARTIFACT record deserializes to when no live artifact matches.
+        ArtifactBackedDeployment deployment = ArtifactBackedDeployment.ofName(
+                getProject(), "demo-webapp", "/demo-webapp",
+                contentRootPath() + "/target/demo-webapp-2.0", true);
+        configuration.getConfigData().getDeploymentConfig().setDeployments(List.of(deployment));
 
         assertTrue(producer.isConfigurationFromContext(configuration, new ConfigurationContext(jsp)));
     }
@@ -172,7 +181,7 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
                 configuration, new ConfigurationContext(jsp), Ref.create((PsiElement) jsp));
 
         assertFalse(created);
-        assertEmpty(configuration.getConfigData().getDeploymentConfig().getArtifacts());
+        assertEmpty(configuration.getConfigData().getDeploymentConfig().getDeployments(getProject()));
     }
 
     public void testReturnsFalseForNonWebJavaContext() {
@@ -225,12 +234,13 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
         TomcatRunConfigurationProducer producer = new TomcatRunConfigurationProducer();
         TomcatRunConfiguration configuration = newConfiguration(producer);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "demo-webapp", contentRootPath() + "/target/demo-webapp-2.0",
-                DeploymentArtifact.TYPE_EXPLODED);
-        artifact.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
-        artifact.setContextPath("/demo-webapp");
-        configuration.getConfigData().getDeploymentConfig().setArtifacts(List.of(artifact));
+        // Pointer name deliberately carries the build-output name, not the module
+        // name — matching falls through to content-root ownership of the path.
+        ModuleBackedDeployment deployment = ModuleBackedDeployment.ofName(
+                getProject(), "demo-webapp",
+                Path.of(contentRootPath() + "/target/demo-webapp-2.0"),
+                "/demo-webapp", true);
+        configuration.getConfigData().getDeploymentConfig().setDeployments(List.of(deployment));
 
         assertTrue(producer.isConfigurationFromContext(configuration, new ConfigurationContext(jsp)));
     }
@@ -241,10 +251,9 @@ public class TomcatRunConfigurationProducerPlatformTest extends BasePlatformTest
         TomcatRunConfigurationProducer producer = new TomcatRunConfigurationProducer();
         TomcatRunConfiguration configuration = newConfiguration(producer);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "vendor-app", "/opt/vendor/vendor-app.war", DeploymentArtifact.TYPE_WAR);
-        artifact.setSource(DeploymentArtifact.Source.EXTERNAL);
-        configuration.getConfigData().getDeploymentConfig().setArtifacts(List.of(artifact));
+        ExternalFileDeployment deployment = new ExternalFileDeployment(
+                Path.of("/opt/vendor/vendor-app.war"), "/", false);
+        configuration.getConfigData().getDeploymentConfig().setDeployments(List.of(deployment));
 
         assertFalse(producer.isConfigurationFromContext(configuration, new ConfigurationContext(jsp)));
     }

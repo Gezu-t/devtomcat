@@ -177,6 +177,30 @@ class DeploymentTest {
         }
 
         @Test
+        @DisplayName("isExploded on a generic-typed live artifact falls back to output shape")
+        void isExplodedGenericTypeUsesOutputShape(@TempDir Path tempDir) {
+            // Community Edition type ids ("plain"/"jar") carry no packaging
+            // signal — the live verdict must come from the same full policy
+            // that seeded lastKnownExploded at add time, not the id alone.
+            ArtifactType plainType = mock(ArtifactType.class);
+            when(plainType.getId()).thenReturn("plain");
+            Artifact live = mock(Artifact.class);
+            when(live.getArtifactType()).thenReturn(plainType);
+            when(live.getName()).thenReturn("app-1.0.0");
+            when(live.getOutputFilePath()).thenReturn(tempDir.toString());
+
+            ArtifactPointer ptr = mock(ArtifactPointer.class);
+            when(ptr.getArtifactName()).thenReturn("app-1.0.0");
+            when(ptr.getArtifact()).thenReturn(live);
+
+            // Stored packaging says war — the live directory output must win,
+            // matching what add-time detection would have said.
+            ArtifactBackedDeployment d = new ArtifactBackedDeployment(
+                    ptr, "/c", tempDir.toString(), false);
+            assertTrue(d.isExploded());
+        }
+
+        @Test
         @DisplayName("equality keys on the pointer's name + context path")
         void equality() {
             ArtifactPointer a = mock(ArtifactPointer.class);

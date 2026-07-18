@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.deployment;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentRow;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.icons.AllIcons;
 import com.intellij.ui.CollectionListModel;
@@ -20,15 +21,15 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Handles list operations for deployment artifacts.
+ * Handles list operations for deployment rows.
  * Uses {@link CollectionListModel} as the single source of truth.
  */
 public class DeploymentTableManager {
 
     private static final Logger LOG = Logger.getInstance(DeploymentTableManager.class);
 
-    private final CollectionListModel<DeploymentArtifact> listModel;
-    private final JBList<DeploymentArtifact> deploymentList;
+    private final CollectionListModel<DeploymentRow> listModel;
+    private final JBList<DeploymentRow> deploymentList;
 
     private static final int ROW_HEIGHT = 26;
 
@@ -43,8 +44,8 @@ public class DeploymentTableManager {
         deploymentList.getEmptyText().setText("No artifacts configured for deployment");
         deploymentList.setCellRenderer(new ColoredListCellRenderer<>() {
             @Override
-            protected void customizeCellRenderer(@NotNull JList<? extends DeploymentArtifact> list,
-                                                 DeploymentArtifact value,
+            protected void customizeCellRenderer(@NotNull JList<? extends DeploymentRow> list,
+                                                 DeploymentRow value,
                                                  int index,
                                                  boolean selected,
                                                  boolean hasFocus) {
@@ -52,7 +53,7 @@ public class DeploymentTableManager {
                     setIcon(AllIcons.Nodes.Artifact);
                     // Format display name using colon notation (e.g. "app:war exploded")
                     String displayName = ContextPathUtils.formatArtifactDisplayName(
-                            value.getDisplayName(), value.getType());
+                            value.getDisplayName(), value.isExploded());
                     append(displayName, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                 }
             }
@@ -77,7 +78,7 @@ public class DeploymentTableManager {
     private void fireDeploymentChanged() {
         if (deploymentChangeListener != null) {
             String contextPath = listModel.getSize() > 0
-                    ? listModel.getElementAt(0).getApplicationContext()
+                    ? listModel.getElementAt(0).getContextPath()
                     : "/";
             deploymentChangeListener.accept(contextPath);
         }
@@ -97,23 +98,18 @@ public class DeploymentTableManager {
             return false;
         }
 
-        DeploymentArtifact deployment = listModel.getElementAt(index);
-        deployment.setApplicationContext(newContext);
+        DeploymentRow row = listModel.getElementAt(index);
+        row.setContextPath(newContext);
 
         fireDeploymentChanged();
         return true;
     }
 
-    public void addDeployment(@NotNull DeploymentArtifact deployment) {
+    public void addDeployment(@NotNull DeploymentRow row) {
         try {
-            if (deployment.getApplicationContext() == null ||
-                    deployment.getApplicationContext().isEmpty()) {
-                deployment.setApplicationContext(ContextPathUtils.generateContextPath(deployment.getName()));
-            }
-
-            // Auto-adjust context path if it collides with an existing artifact
-            String ctx = ContextPathUtils.normalizeContextPath(deployment.getApplicationContext());
-            deployment.setApplicationContext(ctx);
+            // Auto-adjust context path if it collides with an existing row
+            String ctx = ContextPathUtils.normalizeContextPath(row.getContextPath());
+            row.setContextPath(ctx);
             if (isContextPathTaken(ctx, -1)) {
                 String base = ctx.endsWith("/") ? ctx.substring(0, ctx.length() - 1) : ctx;
                 for (int suffix = 2; suffix <= 99; suffix++) {
@@ -124,13 +120,13 @@ public class DeploymentTableManager {
                     // the same normalized value to every further root-defaulting row.
                     String candidate = ContextPathUtils.normalizeContextPath(base + "-" + suffix);
                     if (!isContextPathTaken(candidate, -1)) {
-                        deployment.setApplicationContext(candidate);
+                        row.setContextPath(candidate);
                         break;
                     }
                 }
             }
 
-            listModel.add(deployment);
+            listModel.add(row);
 
             int lastIndex = listModel.getSize() - 1;
             if (lastIndex >= 0) {
@@ -138,8 +134,8 @@ public class DeploymentTableManager {
                 deploymentList.ensureIndexIsVisible(lastIndex);
             }
 
-            LOG.debug("Added deployment: " + deployment.getDisplayName() +
-                    " with context: " + deployment.getApplicationContext());
+            LOG.debug("Added deployment: " + row.getDisplayName() +
+                    " with context: " + row.getContextPath());
             fireDeploymentChanged();
             fireArtifactListChanged();
 
@@ -151,12 +147,12 @@ public class DeploymentTableManager {
     public void removeSelectedDeployment() {
         int selectedIndex = deploymentList.getSelectedIndex();
         if (isValidIndex(selectedIndex)) {
-            DeploymentArtifact deployment = listModel.getElementAt(selectedIndex);
+            DeploymentRow row = listModel.getElementAt(selectedIndex);
             listModel.remove(selectedIndex);
 
             updateSelectionAfterRemoval(selectedIndex);
 
-            LOG.debug("Removed deployment: " + deployment.getDisplayName());
+            LOG.debug("Removed deployment: " + row.getDisplayName());
             fireDeploymentChanged();
             fireArtifactListChanged();
         }
@@ -165,8 +161,8 @@ public class DeploymentTableManager {
     public void moveSelectedUp() {
         int selectedIndex = deploymentList.getSelectedIndex();
         if (selectedIndex > 0 && isValidIndex(selectedIndex)) {
-            DeploymentArtifact current = listModel.getElementAt(selectedIndex);
-            DeploymentArtifact above = listModel.getElementAt(selectedIndex - 1);
+            DeploymentRow current = listModel.getElementAt(selectedIndex);
+            DeploymentRow above = listModel.getElementAt(selectedIndex - 1);
             listModel.setElementAt(above, selectedIndex);
             listModel.setElementAt(current, selectedIndex - 1);
 
@@ -178,8 +174,8 @@ public class DeploymentTableManager {
     public void moveSelectedDown() {
         int selectedIndex = deploymentList.getSelectedIndex();
         if (selectedIndex >= 0 && selectedIndex < listModel.getSize() - 1) {
-            DeploymentArtifact current = listModel.getElementAt(selectedIndex);
-            DeploymentArtifact below = listModel.getElementAt(selectedIndex + 1);
+            DeploymentRow current = listModel.getElementAt(selectedIndex);
+            DeploymentRow below = listModel.getElementAt(selectedIndex + 1);
             listModel.setElementAt(below, selectedIndex);
             listModel.setElementAt(current, selectedIndex + 1);
 
@@ -189,15 +185,15 @@ public class DeploymentTableManager {
     }
 
     @Nullable
-    public DeploymentArtifact getSelectedDeployment() {
+    public DeploymentRow getSelectedDeployment() {
         return deploymentList.getSelectedValue();
     }
 
-    public void updateSelectedDeployment(@NotNull DeploymentArtifact deployment) {
+    public void updateSelectedDeployment(@NotNull DeploymentRow row) {
         int selectedIndex = deploymentList.getSelectedIndex();
         if (isValidIndex(selectedIndex)) {
-            listModel.setElementAt(deployment, selectedIndex);
-            LOG.debug("Updated deployment: " + deployment.getDisplayName());
+            listModel.setElementAt(row, selectedIndex);
+            LOG.debug("Updated deployment: " + row.getDisplayName());
             // Fire deploymentChangeListener so context-path edits made through
             // the edit dialog propagate to the browser URL, matching the
             // behaviour of updateSelectedContext() for the inline field —
@@ -217,45 +213,26 @@ public class DeploymentTableManager {
         return deploymentList;
     }
 
-    public List<DeploymentArtifact> getDeployments() {
-        List<DeploymentArtifact> result = new ArrayList<>();
-        for (int i = 0; i < listModel.getSize(); i++) {
-            result.add(listModel.getElementAt(i).clone());
-        }
-        return result;
-    }
-
     /**
-     * Typed view of the table contents — each legacy row is adapted via
-     * {@link com.dev.idea.plugins.tomcat.model.DeploymentAdapter#toTyped}.
-     * Used by the configuration apply path so the {@code DeploymentConfig}
-     * can store typed entries directly without an intermediate legacy list.
+     * The live {@link DeploymentRow} objects held by the list model, in order.
+     * Rows are mutable and identity-compared, so callers get the real rows —
+     * mutations propagate to the UI (repaint via {@link #refreshList()}).
      */
     @NotNull
-    public List<com.dev.idea.plugins.tomcat.model.Deployment> getTypedDeployments(
-            @NotNull com.intellij.openapi.project.Project project) {
-        List<com.dev.idea.plugins.tomcat.model.Deployment> result = new ArrayList<>(listModel.getSize());
-        for (int i = 0; i < listModel.getSize(); i++) {
-            result.add(com.dev.idea.plugins.tomcat.model.DeploymentAdapter
-                    .toTyped(project, listModel.getElementAt(i)));
-        }
-        return result;
-    }
-
-    /**
-     * Returns the actual {@link DeploymentArtifact} instances held by the list model.
-     * Unlike {@link #getDeployments()}, these are not clones — field mutations
-     * ({@code setName}, {@code setPath}) propagate directly to the UI.
-     *
-     * <p>Intended for {@link com.dev.idea.plugins.tomcat.conf.ArtifactReferenceRefresher}
-     * to repair stale references in-place when modules or artifacts are renamed.
-     * Call {@link #refreshList()} after mutating the returned items to repaint the UI.
-     */
-    @NotNull
-    public List<DeploymentArtifact> getLiveDeployments() {
-        List<DeploymentArtifact> result = new ArrayList<>();
+    public List<DeploymentRow> getRows() {
+        List<DeploymentRow> result = new ArrayList<>(listModel.getSize());
         for (int i = 0; i < listModel.getSize(); i++) {
             result.add(listModel.getElementAt(i));
+        }
+        return result;
+    }
+
+    /** Typed view of the table contents — each row materialized with its edits applied. */
+    @NotNull
+    public List<Deployment> getTypedDeployments() {
+        List<Deployment> result = new ArrayList<>(listModel.getSize());
+        for (int i = 0; i < listModel.getSize(); i++) {
+            result.add(listModel.getElementAt(i).toDeployment());
         }
         return result;
     }
@@ -266,7 +243,7 @@ public class DeploymentTableManager {
 
     public boolean hasDeployment(String artifactName) {
         for (int i = 0; i < listModel.getSize(); i++) {
-            if (listModel.getElementAt(i).getName().equals(artifactName)) {
+            if (listModel.getElementAt(i).getDisplayName().equals(artifactName)) {
                 return true;
             }
         }
@@ -278,14 +255,14 @@ public class DeploymentTableManager {
     }
 
     /**
-     * Checks if a context path is already used by another artifact.
+     * Checks if a context path is already used by another row.
      * @param contextPath the path to check
-     * @param excludeIndex index to skip (use -1 when adding a new artifact)
+     * @param excludeIndex index to skip (use -1 when adding a new row)
      */
     private boolean isContextPathTaken(@NotNull String contextPath, int excludeIndex) {
         for (int i = 0; i < listModel.getSize(); i++) {
             if (i == excludeIndex) continue;
-            if (contextPath.equals(listModel.getElementAt(i).getApplicationContext())) {
+            if (contextPath.equals(listModel.getElementAt(i).getContextPath())) {
                 return true;
             }
         }
@@ -293,10 +270,10 @@ public class DeploymentTableManager {
     }
 
     /**
-     * Checks if {@code contextPath} is already used by an artifact OTHER than
+     * Checks if {@code contextPath} is already used by a row OTHER than
      * {@code except}. Identity-based ({@code ==}) so the comparison is robust
      * to mutations of {@code except}'s own context — the dialog mutates the
-     * deployment in place and validates after, so reference identity is the
+     * row in place and validates after, so reference identity is the
      * only stable "this is the one being edited" signal we have.
      *
      * <p>Exposed package-visible so {@code DeploymentConfigurationPanel} can
@@ -306,11 +283,11 @@ public class DeploymentTableManager {
      * would have rejected.
      */
     boolean isContextPathTakenByOthers(@NotNull String contextPath,
-                                        @NotNull DeploymentArtifact except) {
+                                        @NotNull DeploymentRow except) {
         for (int i = 0; i < listModel.getSize(); i++) {
-            DeploymentArtifact other = listModel.getElementAt(i);
+            DeploymentRow other = listModel.getElementAt(i);
             if (other == except) continue;
-            if (contextPath.equals(other.getApplicationContext())) {
+            if (contextPath.equals(other.getContextPath())) {
                 return true;
             }
         }
@@ -344,9 +321,9 @@ public class DeploymentTableManager {
         }
     }
 
-    public void addAndSelectDeployment(DeploymentArtifact deployment) {
+    public void addAndSelectDeployment(DeploymentRow row) {
         // addDeployment already selects and scrolls to the appended row.
-        addDeployment(deployment);
+        addDeployment(row);
     }
 
     public void setSelectedIndex(int index) {

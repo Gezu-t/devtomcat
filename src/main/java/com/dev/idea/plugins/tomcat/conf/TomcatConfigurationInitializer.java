@@ -28,8 +28,8 @@ public class TomcatConfigurationInitializer {
 
     /**
      * Reconciles stored deployment artifact references against the current state of
-     * IntelliJ's ArtifactManager. Detects and repairs stale name/path strings caused
-     * by artifact or module renames in Project Structure.
+     * IntelliJ's ArtifactManager. Repairs stale output-path / packaging values caused
+     * by Project Structure edits (names rename-track via the artifact pointer).
      *
      * <p>Runs after deserialization so that downstream consumers (validator, deployment
      * strategy, Before Launch sync) see current artifact metadata. Gracefully degrades

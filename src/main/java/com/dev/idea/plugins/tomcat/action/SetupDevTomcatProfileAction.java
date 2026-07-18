@@ -3,7 +3,8 @@ package com.dev.idea.plugins.tomcat.action;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.PortStrategy;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
@@ -42,7 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-// Creates ONE Tomcat run config with all detected WAR modules as DeploymentArtifacts
+// Creates ONE Tomcat run config with all detected WAR modules as module-backed deployments
 // "multiple deployments per Tomcat" topology.
 // User picks port mode at setup time (auto-resolve vs fixed).
 public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
@@ -110,30 +111,23 @@ public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
             TomcatInfo tomcat = dialog.getSelectedTomcat();
             if (tomcat != null) cfg.getConfigData().setTomcatInfo(tomcat);
 
-            List<DeploymentArtifact> artifacts = new ArrayList<>();
+            List<Deployment> deployments = new ArrayList<>();
             for (ProjectTomcatProfileScanner.DetectedWebappModule m : selected) {
-                // artifactId carries the meaningful Maven name (display label);
-                // contextPath is the user-edited value from the table column.
-                DeploymentArtifact a = new DeploymentArtifact(
-                        m.artifactId(), m.explodedPath(), DeploymentArtifact.TYPE_EXPLODED);
-                // These entries are scanner-derived Maven build outputs, not
-                // IntelliJ artifacts — AUTO_DETECTED provenance makes the typed
-                // adapter resolve them to their owning module (content-root
-                // containment) instead of dangling ArtifactPointers, which is
-                // what the class sync and the run-config producer's existing-
-                // config matching key off.
-                a.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
-                a.setContextPath(m.contextPath());
-                artifacts.add(a);
+                // Module-backed: the pointer binds the scanner's owning module
+                // directly (moduleName, not the Maven artifactId), so class sync
+                // and producer matching need no name-guessing resolution.
+                deployments.add(ModuleBackedDeployment.ofName(
+                        project, m.moduleName(), java.nio.file.Path.of(m.explodedPath()),
+                        m.contextPath(), true));
             }
-            cfg.getConfigData().getDeploymentConfig().setArtifacts(artifacts);
+            cfg.getConfigData().getDeploymentConfig().setDeployments(deployments);
             cfg.getConfigData().setServerMode(TomcatConstants.MODE_LOCAL);
 
             runManager.addConfiguration(settings);
             runManager.setSelectedConfiguration(settings);
 
             Messages.showInfoMessage(project,
-                    "Created run configuration '" + name + "' with " + artifacts.size()
+                    "Created run configuration '" + name + "' with " + deployments.size()
                     + " deployment(s).",
                     "DevTomcat Setup");
         } catch (Throwable t) {

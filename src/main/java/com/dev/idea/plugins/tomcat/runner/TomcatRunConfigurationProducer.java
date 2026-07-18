@@ -3,8 +3,8 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.DeploymentResolver;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
@@ -44,7 +44,7 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
  * Produces DevTomcat run configurations for web-oriented module contexts.
  *
  * <p>Produced configurations use the modern deployment model — a
- * {@link DeploymentArtifact} ({@code AUTO_DETECTED}, exploded) pointing at the
+ * {@link ModuleBackedDeployment} (exploded) pointing at the
  * module's WAR <em>build output</em> — exactly the shape the Setup action
  * creates and the validator accepts. Production therefore requires
  * {@link ProjectTomcatProfileScanner#scanModule} to detect a WAR-packaging
@@ -192,7 +192,7 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
                 if (modules.isEmpty()) {
                     java.nio.file.Path path = deployment.getResolvedPath();
                     if (path != null && contextModule.equals(
-                            DeploymentAdapter.resolveOwningModule(
+                            DeploymentResolver.resolveOwningModule(
                                     project, deployment.getDisplayName(), path))) {
                         return true;
                     }
@@ -280,8 +280,8 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
 
     /**
      * Populates the configuration in the modern deployment model, mirroring the
-     * Setup action's single-module case: one {@code AUTO_DETECTED} exploded
-     * {@link DeploymentArtifact} at the detected WAR build output, default
+     * Setup action's single-module case: one exploded
+     * {@link ModuleBackedDeployment} at the detected WAR build output, default
      * context path, local server mode, and auto-bumping port defaults.
      */
     private void configureRunConfiguration(@NotNull TomcatRunConfiguration configuration,
@@ -292,11 +292,12 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         String configName = CONFIGURATION_PREFIX + detected.artifactId();
         configuration.setName(configName);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                detected.artifactId(), detected.explodedPath(), DeploymentArtifact.TYPE_EXPLODED);
-        artifact.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
-        artifact.setContextPath(detected.contextPath());
-        configuration.getConfigData().getDeploymentConfig().setArtifacts(List.of(artifact));
+        // Module pointer binds by IntelliJ module name (NOT the Maven artifactId,
+        // which names the build output, not the module).
+        ModuleBackedDeployment deployment = ModuleBackedDeployment.ofName(
+                configuration.getProject(), detected.moduleName(),
+                java.nio.file.Path.of(detected.explodedPath()), detected.contextPath(), true);
+        configuration.getConfigData().getDeploymentConfig().setDeployments(List.of(deployment));
 
         // Server mode (local) and ports (8080/8005, auto-bump) are the defaults a
         // fresh TomcatConfigurationData already carries — re-seeding them here would

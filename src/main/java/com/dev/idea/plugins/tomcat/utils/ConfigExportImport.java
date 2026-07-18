@@ -4,9 +4,11 @@ import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.JDOMUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +39,14 @@ public final class ConfigExportImport {
     private static final String VERSION_ATTR = "version";
     private static final String EXPORTED_AT_ATTR = "exportedAt";
     private static final String CONFIG_VERSION = "1.0";
+
+    // <artifact> vocabulary. `kind` carries typed provenance (DeploymentKind
+    // name); `type` keeps the war/exploded packaging for old importers.
+    private static final String KIND_ATTR = "kind";
+    private static final String ARTIFACT_TYPE_WAR = "war";
+    private static final String ARTIFACT_TYPE_EXPLODED = "exploded";
+    /** Pre-provenance exports marked a user-picked file with this type value. */
+    private static final String LEGACY_TYPE_EXTERNAL = "external";
 
     private ConfigExportImport() {}
 
@@ -139,13 +149,18 @@ public final class ConfigExportImport {
         Element deployEl = new Element("deployment");
         deployEl.addContent(createElement("hotDeploymentEnabled", String.valueOf(deployment.isHotDeploymentEnabled())));
         deployEl.addContent(createElement("preserveSessions", String.valueOf(deployment.isPreserveSessions())));
-        List<DeploymentArtifact> artifacts = deployment.getArtifacts();
-        for (DeploymentArtifact artifact : artifacts) {
+        // Detached typed view (no Project on this API) — name/path/context/
+        // packaging plus the kind attribute, which fixes the old export shape
+        // silently dropping module/external provenance.
+        for (Deployment d : deployment.getDeployments()) {
             Element artEl = new Element("artifact");
-            artEl.addContent(createElement("name", artifact.getName()));
-            artEl.addContent(createElement("sourcePath", artifact.getPath()));
-            artEl.addContent(createElement("contextPath", artifact.getContextPath()));
-            artEl.addContent(createElement("type", artifact.getType()));
+            artEl.setAttribute(KIND_ATTR, d.getKind().name());
+            artEl.addContent(createElement("name", d.getDisplayName()));
+            java.nio.file.Path resolved = d.getResolvedPath();
+            artEl.addContent(createElement("sourcePath", resolved == null ? "" : resolved.toString()));
+            artEl.addContent(createElement("contextPath", d.getContextPath()));
+            artEl.addContent(createElement("type",
+                    d.isExploded() ? ARTIFACT_TYPE_EXPLODED : ARTIFACT_TYPE_WAR));
             deployEl.addContent(artEl);
         }
         root.addContent(deployEl);
@@ -191,15 +206,27 @@ public final class ConfigExportImport {
     // Import
     // =========================================================================
 
+    /** Project-free import — deployment pointers stay detached (never resolve). */
+    @NotNull
+    public static TomcatConfigurationData importFromXml(@NotNull String xml) throws Exception {
+        return importFromXml(xml, null);
+    }
+
     /**
-     * Import a TomcatConfigurationData from an XML string.
+     * Import a TomcatConfigurationData from an XML string. When {@code project}
+     * is non-null, deployment pointers are created through the platform pointer
+     * managers so the imported entries resolve (and rename-track) against the
+     * live project model — a detached pointer would defeat the validator, the
+     * build-before-launch matching and the resolver's live-artifact guard.
      *
      * @param xml the XML string to parse
+     * @param project target project for pointer creation, or null for detached
      * @return the imported configuration data
      * @throws Exception if parsing fails
      */
     @NotNull
-    public static TomcatConfigurationData importFromXml(@NotNull String xml) throws Exception {
+    public static TomcatConfigurationData importFromXml(@NotNull String xml,
+                                                        @Nullable Project project) throws Exception {
         Element root = JDOMUtil.load(new StringReader(xml));
 
         if (!ROOT_ELEMENT.equals(root.getName())) {
@@ -290,16 +317,11 @@ public final class ConfigExportImport {
             DeploymentConfig deployment = data.getDeploymentConfig();
             deployment.setHotDeploymentEnabled(getChildBool(deployEl, "hotDeploymentEnabled", false));
             deployment.setPreserveSessions(getChildBool(deployEl, "preserveSessions", false));
-            List<DeploymentArtifact> artifacts = new ArrayList<>();
+            List<Deployment> deployments = new ArrayList<>();
             for (Element artEl : deployEl.getChildren("artifact")) {
-                DeploymentArtifact artifact = new DeploymentArtifact();
-                artifact.setName(getChildText(artEl, "name", ""));
-                artifact.setPath(getChildText(artEl, "sourcePath", ""));
-                artifact.setContextPath(getChildText(artEl, "contextPath", "/"));
-                artifact.setType(getChildText(artEl, "type", ""));
-                artifacts.add(artifact);
+                deployments.add(readDeployment(artEl, project));
             }
-            deployment.setArtifacts(artifacts);
+            deployment.setDeployments(deployments);
         }
 
         // Remote config (password must be entered manually after import)
@@ -339,6 +361,13 @@ public final class ConfigExportImport {
 
     @NotNull
     public static TomcatConfigurationData importFromFile(@NotNull File file) throws Exception {
+        return importFromFile(file, null);
+    }
+
+    /** File import with live-project pointer creation — see {@link #importFromXml(String, Project)}. */
+    @NotNull
+    public static TomcatConfigurationData importFromFile(@NotNull File file,
+                                                         @Nullable Project project) throws Exception {
         if (file.length() > MAX_IMPORT_FILE_SIZE) {
             throw new IOException("Configuration file too large (" + file.length()
                     + " bytes). Maximum allowed: " + MAX_IMPORT_FILE_SIZE + " bytes.");
@@ -351,13 +380,53 @@ public final class ConfigExportImport {
             while ((read = reader.read(buffer)) != -1) {
                 sb.append(buffer, 0, read);
             }
-            return importFromXml(sb.toString());
+            return importFromXml(sb.toString(), project);
         }
     }
 
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * One {@code <artifact>} element → typed deployment. Pointers are created
+     * through the platform managers when a project is supplied (live,
+     * rename-tracked) and stay detached otherwise — same split as the
+     * run-config serializer's read path.
+     */
+    @NotNull
+    private static Deployment readDeployment(@NotNull Element artEl, @Nullable Project project) {
+        String name = getChildText(artEl, "name", "");
+        String path = getChildText(artEl, "sourcePath", "");
+        String contextPath = getChildText(artEl, "contextPath", "/");
+        String type = getChildText(artEl, "type", "");
+        boolean exploded = ARTIFACT_TYPE_EXPLODED.equalsIgnoreCase(type);
+
+        String kindAttr = artEl.getAttributeValue(KIND_ATTR);
+        if (kindAttr != null) {
+            try {
+                return switch (DeploymentKind.valueOf(kindAttr)) {
+                    case ARTIFACT -> new ArtifactBackedDeployment(
+                            DeploymentPointers.artifactPointer(project, name), contextPath, path, exploded);
+                    case MODULE -> new ModuleBackedDeployment(
+                            DeploymentPointers.modulePointer(project, name),
+                            java.nio.file.Path.of(path), contextPath, exploded);
+                    case EXTERNAL -> new ExternalFileDeployment(
+                            java.nio.file.Path.of(path), contextPath, exploded);
+                };
+            } catch (IllegalArgumentException unknownKind) {
+                LOG.warn("Unknown deployment kind '" + kindAttr + "'; falling back to legacy mapping");
+            }
+        }
+        // Old exports carried no provenance: "external" marked a user-picked
+        // file (packaging was not recorded); everything else was an IntelliJ
+        // artifact reference.
+        if (LEGACY_TYPE_EXTERNAL.equalsIgnoreCase(type)) {
+            return new ExternalFileDeployment(java.nio.file.Path.of(path), contextPath, false);
+        }
+        return new ArtifactBackedDeployment(
+                DeploymentPointers.artifactPointer(project, name), contextPath, path, exploded);
+    }
 
     private static Element createElement(String name, String text) {
         Element el = new Element(name);

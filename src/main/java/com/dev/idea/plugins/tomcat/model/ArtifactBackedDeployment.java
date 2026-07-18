@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.model;
 
+import com.dev.idea.plugins.tomcat.utils.ArtifactPackagingDetector;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactPointer;
@@ -64,6 +65,12 @@ public final class ArtifactBackedDeployment implements Deployment {
 
     @Override public @NotNull DeploymentKind getKind() { return DeploymentKind.ARTIFACT; }
 
+    /** Copy with a different context path; pointer and last-known fallbacks carry over. */
+    @Override
+    public @NotNull ArtifactBackedDeployment withContextPath(@NotNull String contextPath) {
+        return new ArtifactBackedDeployment(artifactPointer, contextPath, lastKnownPath, lastKnownExploded);
+    }
+
     @Override public @NotNull String getContextPath() { return contextPath; }
 
     @Override public @NotNull String getDisplayName() { return artifactPointer.getArtifactName(); }
@@ -86,9 +93,11 @@ public final class ArtifactBackedDeployment implements Deployment {
         // Pointer unresolved: fall back to the last-known packaging so the round
         // trip does not silently flip an exploded deployment to war.
         if (artifact == null) return lastKnownExploded;
-        // Exploded artifact types in IntelliJ all carry "exploded" in their type id
-        // (e.g. "exploded-war", "exploded-jar").
-        return artifact.getArtifactType().getId().contains("exploded");
+        // Live artifact: the same packaging policy that seeded lastKnownExploded
+        // at add time. Generic type ids ("plain"/"jar") carry no packaging
+        // signal, so an id-only check here would let the refresher overwrite
+        // the stronger persisted verdict with a weaker one.
+        return ArtifactPackagingDetector.resolveExplodedPackaging(artifact);
     }
 
     @Override
@@ -110,6 +119,12 @@ public final class ArtifactBackedDeployment implements Deployment {
     public @NotNull ArtifactPointer getArtifactPointer() { return artifactPointer; }
 
     public @NotNull String getArtifactName() { return artifactPointer.getArtifactName(); }
+
+    /** Path captured from the persisted record; null when built fresh from a live artifact. */
+    public @Nullable String getLastKnownPath() { return lastKnownPath; }
+
+    /** Persisted packaging — pure data, no pointer deref. What the serializer writes. */
+    public boolean getLastKnownExploded() { return lastKnownExploded; }
 
     private static String normaliseContextPath(@NotNull String input) {
         String trimmed = input.trim();

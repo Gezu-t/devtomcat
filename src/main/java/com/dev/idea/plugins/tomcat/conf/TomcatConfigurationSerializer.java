@@ -4,12 +4,18 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.CoverageConfig;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
+import com.dev.idea.plugins.tomcat.model.DeploymentPointers;
+import com.dev.idea.plugins.tomcat.model.DeploymentSource;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.RemoteCredentialStore;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PathMacroManager;
@@ -20,6 +26,7 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -106,6 +113,18 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_ARTIFACT_TYPE = "type";
     private static final String ATTR_ARTIFACT_CONTEXT = "contextPath";
     private static final String ATTR_ARTIFACT_SOURCE = "source";
+    // Typed-shape discriminator. Additive on the same <artifact> tag —
+    // the legacy attrs above still carry correct values so an older plugin
+    // build loads a new-format config losslessly through its legacy reader.
+    private static final String ATTR_ARTIFACT_KIND = "kind";
+    private static final String ATTR_ARTIFACT_MODULE = "module";
+    private static final String KIND_ARTIFACT = "artifact";
+    private static final String KIND_MODULE = "module";
+    private static final String KIND_EXTERNAL = "external";
+    // Pre-source-field configs overloaded the packaging attribute with this
+    // value to mark a user-picked file — the legacy read branch splits it into
+    // source=EXTERNAL + packaging=WAR.
+    private static final String LEGACY_TYPE_EXTERNAL = "external";
 
     private static final String TAG_COVERAGE = "coverageConfig";
     private static final String TAG_COVERAGE_INCLUDE = "include";
@@ -174,7 +193,7 @@ public class TomcatConfigurationSerializer {
         element.setAttribute(ATTR_HOT_DEPLOYMENT_ENABLED, String.valueOf(deploymentConfig.isHotDeploymentEnabled()));
         element.setAttribute(ATTR_UPDATE_CLASSES_AND_RESOURCES, String.valueOf(deploymentConfig.isUpdateClassesAndResources()));
         element.setAttribute(ATTR_PRESERVE_SESSIONS, String.valueOf(deploymentConfig.isPreserveSessions()));
-        writeDeploymentArtifacts(element, deploymentConfig.getArtifacts(), project);
+        writeDeployments(element, deploymentConfig.getDeployments(), project);
 
         var updateConfig = data.getUpdateConfig();
         element.setAttribute(ATTR_ON_UPDATE, StringUtil.notNullize(updateConfig.getOnUpdate()));
@@ -260,21 +279,52 @@ public class TomcatConfigurationSerializer {
 
 
 
-    private static void writeDeploymentArtifacts(@NotNull Element element, @NotNull List<DeploymentArtifact> artifacts, @Nullable Project project) {
-        Element deployments = new Element(TAG_DEPLOYMENTS);
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
+    private static void writeDeployments(@NotNull Element element, @NotNull List<Deployment> deployments, @Nullable Project project) {
+        Element out = new Element(TAG_DEPLOYMENTS);
+        for (Deployment deployment : deployments) {
+            if (deployment == null) continue;
+            // Element name stays <artifact>: older plugin builds dispatch on
+            // getChildren("artifact") and read the legacy attrs, which are
+            // always written with correct values (lossless downgrade carrier).
             Element art = new Element(TAG_ARTIFACT);
-            art.setAttribute(ATTR_ARTIFACT_NAME, StringUtil.notNullize(artifact.getName()));
-            art.setAttribute(ATTR_ARTIFACT_PATH, collapseMacros(artifact.getPath(), project));
-            art.setAttribute(ATTR_ARTIFACT_TYPE, StringUtil.notNullize(artifact.getType()));
-            art.setAttribute(ATTR_ARTIFACT_CONTEXT, StringUtil.notNullize(artifact.getContextPath(), TomcatConstants.DEFAULT_CONTEXT_PATH));
-            art.setAttribute(ATTR_ARTIFACT_SOURCE, artifact.getSource().name());
-            deployments.addContent(art);
+            if (deployment instanceof ArtifactBackedDeployment a) {
+                art.setAttribute(ATTR_ARTIFACT_KIND, KIND_ARTIFACT);
+                art.setAttribute(ATTR_ARTIFACT_NAME, a.getArtifactName());
+                // Saves run on arbitrary threads — never dereference the
+                // ArtifactPointer here. lastKnownPath / lastKnownExploded are
+                // pure data, maintained by ArtifactReferenceRefresher; a
+                // load→save cycle keeps them byte-identical even when nothing
+                // resolves.
+                art.setAttribute(ATTR_ARTIFACT_PATH, collapseMacros(a.getLastKnownPath(), project));
+                art.setAttribute(ATTR_ARTIFACT_SOURCE, DeploymentSource.INTELLIJ_ARTIFACT.name());
+                setTypeAttr(art, a.getLastKnownExploded());
+            } else if (deployment instanceof ModuleBackedDeployment m) {
+                art.setAttribute(ATTR_ARTIFACT_KIND, KIND_MODULE);
+                art.setAttribute(ATTR_ARTIFACT_MODULE, m.getModuleName());
+                art.setAttribute(ATTR_ARTIFACT_NAME, m.getLegacyName());
+                art.setAttribute(ATTR_ARTIFACT_PATH, collapseMacros(m.getOutputPath().toString(), project));
+                art.setAttribute(ATTR_ARTIFACT_SOURCE, DeploymentSource.AUTO_DETECTED.name());
+                setTypeAttr(art, m.isExploded()); // stored flag, no deref
+            } else if (deployment instanceof ExternalFileDeployment e) {
+                art.setAttribute(ATTR_ARTIFACT_KIND, KIND_EXTERNAL);
+                art.setAttribute(ATTR_ARTIFACT_NAME, e.getDisplayName());
+                art.setAttribute(ATTR_ARTIFACT_PATH, collapseMacros(e.getExternalPath().toString(), project));
+                art.setAttribute(ATTR_ARTIFACT_SOURCE, DeploymentSource.EXTERNAL.name());
+                setTypeAttr(art, e.isExploded()); // stored flag, no deref
+            }
+            art.setAttribute(ATTR_ARTIFACT_CONTEXT,
+                    StringUtil.notNullize(deployment.getContextPath(), TomcatConstants.DEFAULT_CONTEXT_PATH));
+            out.addContent(art);
         }
-        if (!deployments.getChildren(TAG_ARTIFACT).isEmpty()) {
-            element.addContent(deployments);
+        if (!out.getChildren(TAG_ARTIFACT).isEmpty()) {
+            element.addContent(out);
         }
+    }
+
+    /** Packaging attr from pure stored data — the write path never derefs pointers. */
+    private static void setTypeAttr(@NotNull Element art, boolean exploded) {
+        art.setAttribute(ATTR_ARTIFACT_TYPE,
+                exploded ? ContextPathUtils.TYPE_EXPLODED : ContextPathUtils.TYPE_WAR);
     }
 
     private static void writeTomcatInfo(@NotNull Element element, @Nullable TomcatInfo info, @Nullable Project project) {
@@ -392,7 +442,7 @@ public class TomcatConfigurationSerializer {
         readBool(element, ATTR_HOT_DEPLOYMENT_ENABLED, deploymentConfig::setHotDeploymentEnabled);
         readBool(element, ATTR_UPDATE_CLASSES_AND_RESOURCES, deploymentConfig::setUpdateClassesAndResources);
         readBool(element, ATTR_PRESERVE_SESSIONS, deploymentConfig::setPreserveSessions);
-        readDeploymentArtifacts(element, deploymentConfig, project);
+        readDeployments(element, deploymentConfig, project);
 
         var updateConfig = data.getUpdateConfig();
 
@@ -522,47 +572,88 @@ public class TomcatConfigurationSerializer {
 
 
 
-    private static void readDeploymentArtifacts(@NotNull Element element, @NotNull DeploymentConfig deploymentConfig, @Nullable Project project) {
+    private static void readDeployments(@NotNull Element element, @NotNull DeploymentConfig deploymentConfig, @Nullable Project project) {
         Element deployments = element.getChild(TAG_DEPLOYMENTS);
-        List<DeploymentArtifact> artifacts = new ArrayList<>();
+        List<Deployment> list = new ArrayList<>();
         if (deployments != null) {
             for (Element art : deployments.getChildren(TAG_ARTIFACT)) {
-                DeploymentArtifact artifact = new DeploymentArtifact();
-                artifact.setName(StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_NAME)));
-                // Expand IntelliJ path macros (e.g. $PROJECT_DIR$) — the platform
-                // auto-contracts absolute project-relative paths on write, but
-                // does NOT auto-expand them on read for custom XML attributes.
-                // Without this call, Files.exists(stored_path) hits a literal
-                // directory named "$PROJECT_DIR$" in cwd and returns false,
-                // causing the pre-launch validator to refuse every deployment.
-                artifact.setPath(expandMacros(art.getAttributeValue(ATTR_ARTIFACT_PATH), project));
-
-                // Read type first. setType() route-maps the legacy value
-                // "external" (from pre-source-field configs) to source=EXTERNAL +
-                // type=WAR — a best-effort recovery since the real packaging was
-                // never persisted. The explicit source attribute below then
-                // overrides this mapping if present in the XML.
-                String rawType = StringUtil.notNullize(
-                        art.getAttributeValue(ATTR_ARTIFACT_TYPE), DeploymentArtifact.TYPE_WAR);
-                artifact.setType(rawType);
-                artifact.setContextPath(StringUtil.notNullize(
-                        art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), TomcatConstants.DEFAULT_CONTEXT_PATH));
-
-                // Source is orthogonal to type. Absent attribute = INTELLIJ_ARTIFACT
-                // (the pre-source-field behaviour), so legacy configs without the
-                // attribute keep behaving as before. The legacy type="external"
-                // route above already set source=EXTERNAL for those configs.
-                String sourceAttr = art.getAttributeValue(ATTR_ARTIFACT_SOURCE);
-                if (sourceAttr != null) {
-                    artifact.setSource(DeploymentArtifact.Source.fromSerialized(sourceAttr));
-                }
-
-                // Note: legacy "deployed" attribute is intentionally ignored on read.
-                // All artifacts in the list are deployed; to exclude one, remove it.
-                artifacts.add(artifact);
+                list.add(readOneDeployment(art, project));
             }
         }
-        deploymentConfig.setArtifacts(artifacts);
+        deploymentConfig.setDeployments(list);
+    }
+
+    /**
+     * One deployment entry, dispatched on the {@code kind} attribute: present
+     * means typed shape, absent means any legacy variant. ZERO resolution here
+     * — pointers are created by name only (rename-tracked by the platform);
+     * config load can run before the module/artifact models exist.
+     */
+    @NotNull
+    private static Deployment readOneDeployment(@NotNull Element art, @Nullable Project project) {
+        String name = StringUtil.notNullize(art.getAttributeValue(ATTR_ARTIFACT_NAME));
+        // Expand IntelliJ path macros (e.g. $PROJECT_DIR$) — the platform
+        // auto-contracts absolute project-relative paths on write, but
+        // does NOT auto-expand them on read for custom XML attributes.
+        // Without this call, Files.exists(stored_path) hits a literal
+        // directory named "$PROJECT_DIR$" in cwd and returns false,
+        // causing the pre-launch validator to refuse every deployment.
+        String path = expandMacros(art.getAttributeValue(ATTR_ARTIFACT_PATH), project);
+        String rawType = StringUtil.notNullize(
+                art.getAttributeValue(ATTR_ARTIFACT_TYPE), ContextPathUtils.TYPE_WAR);
+        String context = StringUtil.notNullize(
+                art.getAttributeValue(ATTR_ARTIFACT_CONTEXT), TomcatConstants.DEFAULT_CONTEXT_PATH);
+
+        String kind = art.getAttributeValue(ATTR_ARTIFACT_KIND);
+        if (kind != null) {
+            boolean exploded = ContextPathUtils.TYPE_EXPLODED.equals(rawType);
+            switch (kind) {
+                case KIND_ARTIFACT:
+                    return new ArtifactBackedDeployment(
+                            DeploymentPointers.artifactPointer(project, name), context, path, exploded);
+                case KIND_MODULE: {
+                    // Pointer name from the module attribute; the stored name
+                    // attribute is the legacy display name (may differ).
+                    String moduleAttr = art.getAttributeValue(ATTR_ARTIFACT_MODULE);
+                    String pointerName = StringUtil.isEmpty(moduleAttr) ? name : moduleAttr;
+                    return new ModuleBackedDeployment(
+                            DeploymentPointers.modulePointer(project, pointerName), Path.of(path), context, exploded, name);
+                }
+                case KIND_EXTERNAL:
+                    return new ExternalFileDeployment(Path.of(path), context, exploded);
+                default:
+                    // Unknown kind (config from a future build) — fall through
+                    // to the source-based legacy mapping below.
+            }
+        }
+
+        // Legacy variant (no kind attribute): normalize the same way the
+        // pre-typed reader did. The overloaded packaging value "external" (from
+        // pre-source-field configs) route-maps to source=EXTERNAL + packaging=WAR
+        // — a best-effort recovery since the real packaging was never persisted.
+        // An explicit source attribute overrides that mapping. The legacy
+        // "deployed" attribute stays intentionally ignored.
+        String normalizedContext = ContextPathUtils.normalizeContextPath(context);
+        String sourceAttr = art.getAttributeValue(ATTR_ARTIFACT_SOURCE);
+        DeploymentSource source;
+        boolean exploded;
+        if (LEGACY_TYPE_EXTERNAL.equalsIgnoreCase(rawType) && sourceAttr == null) {
+            source = DeploymentSource.EXTERNAL;
+            exploded = false; // packaging lost on disk — default to WAR
+        } else {
+            source = DeploymentSource.fromSerialized(sourceAttr); // null/unknown -> INTELLIJ_ARTIFACT
+            exploded = ContextPathUtils.TYPE_EXPLODED.equals(rawType);
+        }
+
+        return switch (source) {
+            case INTELLIJ_ARTIFACT -> new ArtifactBackedDeployment(
+                    DeploymentPointers.artifactPointer(project, name), normalizedContext, path, exploded);
+            case AUTO_DETECTED -> new ModuleBackedDeployment(
+                    DeploymentPointers.modulePointer(project, name), Path.of(path),
+                    normalizedContext, exploded, name);
+            case EXTERNAL -> new ExternalFileDeployment(
+                    Path.of(path), normalizedContext, exploded);
+        };
     }
 
     private static void readTomcatInfo(@NotNull Element element, Consumer<TomcatInfo> setter, @Nullable Project project) {
@@ -571,7 +662,7 @@ public class TomcatConfigurationSerializer {
 
         String name = tomcat.getAttributeValue("name");
         // Expand IntelliJ path macros (e.g. $PROJECT_DIR$) — same issue as
-        // readDeploymentArtifacts: the platform contracts on write but does
+        // readDeployments: the platform contracts on write but does
         // not expand custom attributes on read. Without this, the launcher
         // looks for catalina.jar inside a literal "$PROJECT_DIR$" directory
         // in cwd and the entire launch fails.

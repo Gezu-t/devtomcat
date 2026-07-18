@@ -103,8 +103,8 @@ class TomcatConfigurationDataTest {
         original.setContextPath("/myapp");
         original.setServerMode("Remote");
         original.getPortConfig().setHttp(9090);
-        original.getDeploymentConfig().addArtifact(
-                new DeploymentArtifact("app", "/path", "war"));
+        original.getDeploymentConfig().addDeployment(new ArtifactBackedDeployment(
+                DeploymentPointers.detachedArtifactPointer("app"), "/app", "/path", false));
         original.getDebugConfig().setPort(5006);
         TomcatInfo info = new TomcatInfo("MyTomcat", "9.0", "/opt/tomcat");
         original.setTomcatInfo(info);
@@ -115,7 +115,7 @@ class TomcatConfigurationDataTest {
         assertEquals("/myapp", cloned.getContextPath());
         assertEquals("Remote", cloned.getServerMode());
         assertEquals(9090, cloned.getPortConfig().getHttp());
-        assertEquals(1, cloned.getDeploymentConfig().getArtifacts().size());
+        assertEquals(1, cloned.getDeploymentConfig().getDeployments().size());
         assertEquals(5006, cloned.getDebugConfig().getPort());
         assertNotNull(cloned.getTomcatInfo());
 
@@ -123,8 +123,8 @@ class TomcatConfigurationDataTest {
         cloned.getPortConfig().setHttp(7070);
         assertEquals(9090, original.getPortConfig().getHttp());
 
-        cloned.getDeploymentConfig().setArtifacts(null);
-        assertEquals(1, original.getDeploymentConfig().getArtifacts().size());
+        cloned.getDeploymentConfig().setDeployments(null);
+        assertEquals(1, original.getDeploymentConfig().getDeployments().size());
 
         cloned.setContextPath("/other");
         assertEquals("/myapp", original.getContextPath());
@@ -152,8 +152,8 @@ class TomcatConfigurationDataTest {
         source.setServerMode("Remote");
         source.setJreSelection("Java 17");
         source.getPortConfig().setHttp(9999);
-        source.getDeploymentConfig().addArtifact(
-                new DeploymentArtifact("importedApp", "/imp", "war"));
+        source.getDeploymentConfig().addDeployment(new ArtifactBackedDeployment(
+                DeploymentPointers.detachedArtifactPointer("importedApp"), "/importedApp", "/imp", false));
         source.getVmConfig().setVmOptions("-Xmx2g");
         source.getBrowserConfig().setUrl("http://imported:9999/");
         TomcatInfo srcInfo = new TomcatInfo("ImportedTomcat", "10.1.5", "/imported/path");
@@ -170,7 +170,7 @@ class TomcatConfigurationDataTest {
         assertEquals("Remote", target.getServerMode());
         assertEquals("Java 17", target.getJreSelection());
         assertEquals(9999, target.getPortConfig().getHttp());
-        assertEquals(1, target.getDeploymentConfig().getArtifacts().size());
+        assertEquals(1, target.getDeploymentConfig().getDeployments().size());
         assertEquals("-Xmx2g", target.getVmConfig().getVmOptions());
         assertNotNull(target.getTomcatInfo());
         assertEquals("ImportedTomcat", target.getTomcatInfo().getName());

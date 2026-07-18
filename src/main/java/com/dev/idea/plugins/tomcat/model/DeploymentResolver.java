@@ -13,86 +13,83 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.file.Path;
 
 /**
- * Bridges between the {@link DeploymentArtifact} persistence shape and the
- * typed {@link Deployment} hierarchy. Two callers own each direction:
- *
- * <ul>
- *   <li>{@code toTyped}: invoked when reading a {@code DeploymentConfig}
- *       through {@link DeploymentConfig#getDeployments(Project)} — the
- *       runtime hot path consumes only the typed view.</li>
- *   <li>{@code toLegacy}: invoked when writing back to the storage list
- *       (UI dialogs, programmatic edits) and when {@link DeploymentConfig}
- *       exposes its persistence list via {@link DeploymentConfig#getArtifacts()}.</li>
- * </ul>
+ * Access-time resolution for stored {@link Deployment}s. Storage keeps
+ * name-only pointers exactly as persisted; {@link #resolve} re-evaluates the
+ * project model on every call and never mutates storage — the Community-first
+ * artifact→module fold stays dynamic, so installing Ultimate (or re-adding a
+ * deleted artifact) restores artifact-backed behaviour without a config edit.
  */
-public final class DeploymentAdapter {
+public final class DeploymentResolver {
 
-    private DeploymentAdapter() {}
+    private DeploymentResolver() {}
 
-    /** Map a legacy artifact to the appropriate typed subclass. */
-    public static @NotNull Deployment toTyped(@NotNull Project project,
-                                              @NotNull DeploymentArtifact legacy) {
-        boolean exploded = DeploymentArtifact.TYPE_EXPLODED.equals(legacy.getType());
-        String context = legacy.getContextPath();
-
-        return switch (legacy.getSource()) {
-            case INTELLIJ_ARTIFACT -> {
-                ArtifactBackedDeployment artifactBacked = ArtifactBackedDeployment.ofName(
-                        project, legacy.getName(), context, legacy.getPath(), exploded);
-                // Community-first: an INTELLIJ_ARTIFACT deployment with no live
-                // artifact behind it (Community has no web artifacts at all; or the
-                // artifact was deleted) is really a module deployment that lost its
-                // artifact. When its path resolves to a project module, resolve it
-                // as module-backed so DevTomcat can assemble and sync it. On
-                // Ultimate a live artifact keeps it artifact-backed — the platform
-                // builds that one, DevTomcat leaves it alone.
-                Module owner = artifactBackedFallbackModule(project, legacy, artifactBacked);
-                yield owner != null
-                        ? buildAutoDetectedDeployment(
-                                project, legacy.getName(), Path.of(legacy.getPath()), context, exploded)
-                        : artifactBacked;
-            }
-
-            case AUTO_DETECTED -> {
-                Path outputPath = Path.of(legacy.getPath());
-                yield buildAutoDetectedDeployment(
-                        project, legacy.getName(), outputPath, context, exploded);
-            }
-
-            case EXTERNAL ->
-                    new ExternalFileDeployment(
-                            Path.of(legacy.getPath()), context, exploded);
-        };
+    /**
+     * Resolved view of one stored deployment:
+     * <ul>
+     *   <li>{@link ArtifactBackedDeployment} with no live artifact whose
+     *       last-known path is owned by a project module folds to a
+     *       {@link ModuleBackedDeployment} — DevTomcat assembles and syncs it
+     *       (the Community-edition path). A live artifact keeps it
+     *       artifact-backed; the platform builds that one.</li>
+     *   <li>{@link ModuleBackedDeployment} whose pointer no longer resolves is
+     *       rebound to the owning module recovered from its stored name and
+     *       output path; if nothing resolves the input is returned unchanged.</li>
+     *   <li>Everything else passes through unchanged.</li>
+     * </ul>
+     */
+    public static @NotNull Deployment resolve(@NotNull Project project, @NotNull Deployment deployment) {
+        if (deployment instanceof ArtifactBackedDeployment a) {
+            String path = a.getLastKnownPath();
+            if (path == null || path.isEmpty()) return a;
+            Module owner = artifactBackedFallbackModule(project, a, a.getArtifactName(), Path.of(path));
+            return owner != null
+                    ? buildAutoDetectedDeployment(
+                            project, a.getArtifactName(), Path.of(path), a.getContextPath(), a.isExploded())
+                    : a;
+        }
+        if (deployment instanceof ModuleBackedDeployment m) {
+            // Null covers both "pointer is live" and "nothing resolves" — the
+            // deployment stays as stored either way; only a recovered owner rebinds.
+            Module rebindTo = TomcatReadActions.compute(() -> {
+                if (m.getModule() != null) return null;
+                return resolveOwningModule(project, m.getLegacyName(), m.getOutputPath());
+            });
+            if (rebindTo == null) return m;
+            return new ModuleBackedDeployment(
+                    ModulePointerManager.getInstance(project).create(rebindTo),
+                    m.getOutputPath(), m.getContextPath(), m.isExploded(), m.getLegacyName());
+        }
+        return deployment;
     }
 
     /**
-     * The owning module for an {@code INTELLIJ_ARTIFACT} deployment ONLY when it
-     * has no live artifact behind it — so DevTomcat should treat it as
-     * module-backed and build it. Returns {@code null} when a live artifact backs
-     * it (keep it artifact-backed; the platform builds that one) or when no module
-     * owns the path. Runs under a read action (artifact + module lookups).
+     * The owning module for an artifact-backed deployment ONLY when it has no
+     * live artifact behind it — so DevTomcat should treat it as module-backed
+     * and build it. Returns {@code null} when a live artifact backs it (keep it
+     * artifact-backed; the platform builds that one) or when no module owns the
+     * path. Runs under a read action (artifact + module lookups).
      */
     @Nullable
-    private static Module artifactBackedFallbackModule(@NotNull Project project,
-                                                       @NotNull DeploymentArtifact legacy,
-                                                       @NotNull ArtifactBackedDeployment artifactBacked) {
-        if (legacy.getPath().isEmpty()) return null;
+    static Module artifactBackedFallbackModule(@NotNull Project project,
+                                               @NotNull ArtifactBackedDeployment artifactBacked,
+                                               @NotNull String storedName,
+                                               @NotNull Path storedPath) {
         return TomcatReadActions.compute(() -> {
             if (artifactBacked.getArtifactPointer().getArtifact() != null) {
                 return null; // live IntelliJ artifact — the platform build task produces it
             }
-            return resolveOwningModule(project, legacy.getName(), Path.of(legacy.getPath()));
+            return resolveOwningModule(project, storedName, storedPath);
         });
     }
 
     /**
      * Resolves the owning {@link Module} for an AUTO_DETECTED deployment, then
      * creates the {@link ModuleBackedDeployment} from a pointer bound to that
-     * module. Falls back through three strategies because the stored "name"
-     * field on {@link DeploymentArtifact} carries the artifact's display name
-     * (e.g. {@code webapp-deploy.war}), not the IntelliJ module name (e.g.
-     * {@code webapp-deploy}) — a long-standing data-model overload from when
-     * {@code ProjectArtifactDetector} created these entries.
+     * module. Falls back through three strategies because the stored deployment
+     * name carries the artifact's display name (e.g. {@code webapp-deploy.war}),
+     * not the IntelliJ module name (e.g. {@code webapp-deploy}) — a long-standing
+     * data-model overload from when {@code ProjectArtifactDetector} created these
+     * entries.
      *
      * <p>Resolution order:
      * <ol>
@@ -114,11 +111,11 @@ public final class DeploymentAdapter {
      * still exists, so callers can surface a clearer error.
      */
     @NotNull
-    private static ModuleBackedDeployment buildAutoDetectedDeployment(@NotNull Project project,
-                                                                      @NotNull String storedName,
-                                                                      @NotNull Path outputPath,
-                                                                      @NotNull String contextPath,
-                                                                      boolean exploded) {
+    static ModuleBackedDeployment buildAutoDetectedDeployment(@NotNull Project project,
+                                                              @NotNull String storedName,
+                                                              @NotNull Path outputPath,
+                                                              @NotNull String contextPath,
+                                                              boolean exploded) {
         Module module = TomcatReadActions.compute(() -> resolveOwningModule(project, storedName, outputPath));
         ModulePointerManager pm = ModulePointerManager.getInstance(project);
         // Carry storedName as the legacy name so the round trip echoes back the
@@ -200,33 +197,5 @@ public final class DeploymentAdapter {
         if (name.endsWith(".ear")) return name.substring(0, name.length() - 4);
         if (name.endsWith(".jar")) return name.substring(0, name.length() - 4);
         return name;
-    }
-
-    /** Map a typed deployment back to legacy form for serialization. */
-    public static @NotNull DeploymentArtifact toLegacy(@NotNull Deployment typed) {
-        DeploymentArtifact out = new DeploymentArtifact();
-        out.setContextPath(typed.getContextPath());
-        out.setType(typed.isExploded()
-                ? DeploymentArtifact.TYPE_EXPLODED
-                : DeploymentArtifact.TYPE_WAR);
-
-        if (typed instanceof ArtifactBackedDeployment a) {
-            out.setName(a.getArtifactName());
-            Path resolved = a.getResolvedPath();
-            out.setPath(resolved == null ? "" : resolved.toString());
-            out.setSource(DeploymentArtifact.Source.INTELLIJ_ARTIFACT);
-        } else if (typed instanceof ModuleBackedDeployment m) {
-            out.setName(m.getLegacyName());
-            out.setPath(m.getOutputPath().toString());
-            out.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
-        } else if (typed instanceof ExternalFileDeployment e) {
-            out.setName(e.getDisplayName());
-            out.setPath(e.getExternalPath().toString());
-            out.setSource(DeploymentArtifact.Source.EXTERNAL);
-        } else {
-            throw new IllegalStateException(
-                    "Unhandled Deployment subtype: " + typed.getClass());
-        }
-        return out;
     }
 }

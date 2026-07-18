@@ -3,8 +3,6 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.dev.idea.plugins.tomcat.utils.CredentialResolver;
 import com.intellij.execution.process.ProcessHandler;
@@ -186,17 +184,12 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
                         + "' to " + deployment.getContextPath() + "...");
                 lifecycleListener.onArtifactDeploying(configurationName, artifactName);
 
-                // TomcatManagerDeployer still consumes the legacy artifact shape;
-                // adapt at the call boundary. The deployer itself migrates in a
-                // later phase (LOCAL_NOTES.md "Phase 4d").
-                DeploymentArtifact legacy = DeploymentAdapter.toLegacy(deployment);
-
                 // No ProgressIndicator — we surface progress directly to the
                 // console via the deployer's logger calls. The BooleanSupplier
                 // abort check polls our termination flag so a user Stop
                 // interrupts mid-upload, not just between artifacts.
                 TomcatManagerDeployer.DeployResult result =
-                        deployer.deployWithProgress(legacy, deploymentLogger, null, abortRequested::get);
+                        deployer.deployWithProgress(deployment, deploymentLogger, null, abortRequested::get);
 
                 switch (result) {
                     case SUCCESS -> {

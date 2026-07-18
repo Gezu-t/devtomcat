@@ -5,8 +5,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTask;
 import com.dev.idea.plugins.tomcat.conf.TomcatBuildArtifactsTaskProvider;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.DeploymentRow;
 import com.dev.idea.plugins.tomcat.model.RuntimeEnvResolver;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
@@ -128,7 +127,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             if (deploymentTab != null) {
                 deploymentTab.resetFrom(configuration);
                 LOG.debug("DevTomcat: Deployment tab reset - " +
-                        configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
+                        deploymentTableManager.getDeploymentCount() + " deployments");
             }
             if (logsPanel != null) {
                 logsPanel.resetFrom(configuration);
@@ -194,7 +193,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         if (deploymentTab != null) {
             deploymentTab.applyTo(configuration);
             LOG.debug("DevTomcat: Deployment tab applied - " +
-                    configuration.getConfigData().getDeploymentConfig().getArtifacts().size() + " artifacts");
+                    deploymentTableManager.getDeploymentCount() + " deployments");
         }
         if (logsPanel != null) {
             logsPanel.applyTo(configuration);
@@ -447,12 +446,12 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
     /**
      * Reconciles stored deployment artifact references against the current project state.
-     * Detects artifacts/modules that were renamed since the configuration was last saved
-     * and updates the stored name/path to match. This prevents the Deployment tab from
-     * showing orphaned references and ensures Before Launch tasks resolve correctly.
+     * Detects output-path / packaging drift on live artifacts and updates the persisted
+     * values to match (names need no refresh — artifact pointers rename-track). This keeps
+     * the Deployment tab and Before Launch tasks in step with Project Structure edits.
      *
      * <p>Runs inside {@code resetEditorFrom()} before tabs are populated, so the user
-     * sees current artifact names from the moment the dialog opens. Failures are logged
+     * sees current artifact data from the moment the dialog opens. Failures are logged
      * and swallowed — a failed refresh must never block the editor from opening.
      */
     private void refreshArtifactReferences(@NotNull TomcatRunConfiguration config) {
@@ -525,15 +524,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
      * Handles artifact or module changes detected while the editor is open.
      *
      * <p>Coalesces multiple rapid-fire events (a module rename can trigger several
-     * artifact change events) into a single refresh-then-sync pass on the next EDT
-     * cycle. The pass:
-     * <ol>
-     *   <li>Runs {@link ArtifactReferenceRefresher#refreshInPlace} on the live
-     *       deployment table items to repair stale names and paths.</li>
-     *   <li>Repaints the deployment list to show the updated names.</li>
-     *   <li>Re-syncs the Before Launch panel so {@code findMatchingArtifact}
-     *       sees the current artifact names.</li>
-     * </ol>
+     * artifact change events) into a single refresh pass on the next EDT cycle.
+     * Table rows delegate their display names to platform Artifact/Module pointers,
+     * which rename-track on their own — the pass just repaints the deployment list
+     * and re-syncs the Before Launch panel so it sees the current names.
      */
     private void onArtifactOrModuleChanged() {
         if (isDisposing.get() || !editorInitialized.get()) return;
@@ -544,22 +538,10 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             if (!isEditorAvailable(tabbedPane, deploymentTableManager)) return;
 
             try {
-                List<DeploymentArtifact> liveItems = deploymentTableManager.getLiveDeployments();
-                if (liveItems.isEmpty()) return;
+                if (deploymentTableManager.getDeploymentCount() == 0) return;
 
-                ArtifactReferenceRefresher.RefreshResult result =
-                        ArtifactReferenceRefresher.refreshInPlace(project, liveItems);
-
-                if (result.hasUpdates()) {
-                    LOG.info("DevTomcat: Live rename refresh updated " +
-                            result.getUpdateCount() + " artifact reference(s)");
-                    for (ArtifactReferenceRefresher.RefreshAction action : result.getUpdatedActions()) {
-                        LOG.info("DevTomcat:   " + action);
-                    }
-
-                    deploymentTableManager.refreshList();
-                    syncBeforeLaunchPanelWithSelectedDeployment();
-                }
+                deploymentTableManager.refreshList();
+                syncBeforeLaunchPanelWithSelectedDeployment();
             } catch (Exception e) {
                 LOG.warn("DevTomcat: Error during live rename refresh", e);
             }
@@ -686,8 +668,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
         }
 
         // 3. Add the appropriate artifact build task
-        List<DeploymentArtifact> allDeployments = deploymentTableManager != null
-                ? deploymentTableManager.getDeployments()
+        List<DeploymentRow> allDeployments = deploymentTableManager != null
+                ? deploymentTableManager.getRows()
                 : Collections.emptyList();
 
         if (!allDeployments.isEmpty()) {
@@ -698,11 +680,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             BuildArtifactsBeforeRunTask buildTask = new BuildArtifactsBeforeRunTask(project);
             List<Artifact> matched = TomcatReadActions.compute(() -> {
                 List<Artifact> out = new ArrayList<>();
-                for (DeploymentArtifact legacy : allDeployments) {
-                    if (legacy == null) continue;
-                    com.dev.idea.plugins.tomcat.model.Deployment typed =
-                            com.dev.idea.plugins.tomcat.model.DeploymentAdapter.toTyped(project, legacy);
-                    Artifact a = ArtifactMatchingUtils.findMatching(typed);
+                for (DeploymentRow row : allDeployments) {
+                    if (row == null) continue;
+                    Artifact a = ArtifactMatchingUtils.findMatching(row.toDeployment());
                     if (a != null) out.add(a);
                 }
                 return out;
@@ -722,7 +702,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 // their paths before launch.
                 List<String> artifactNames = allDeployments.stream()
                         .filter(a -> a != null && !a.getDisplayName().isBlank())
-                        .map(a -> DeploymentAdapter.toTyped(project, a).getDisplayName())
+                        .map(DeploymentRow::getDisplayName)
                         .collect(Collectors.toList());
                 TomcatBuildArtifactsTask ceTask =
                         new TomcatBuildArtifactsTask(TomcatBuildArtifactsTaskProvider.ID);
@@ -798,14 +778,14 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             updatedSteps.add(0, makeTask);
         }
 
-        List<DeploymentArtifact> allDeployments = deploymentTableManager != null
-                ? deploymentTableManager.getDeployments()
+        List<DeploymentRow> allDeployments = deploymentTableManager != null
+                ? deploymentTableManager.getRows()
                 : Collections.emptyList();
 
         if (!allDeployments.isEmpty()) {
             List<String> artifactNames = allDeployments.stream()
                     .filter(a -> a != null && !a.getDisplayName().isBlank())
-                    .map(a -> DeploymentAdapter.toTyped(project, a).getDisplayName())
+                    .map(DeploymentRow::getDisplayName)
                     .collect(Collectors.toList());
 
             TomcatBuildArtifactsTask buildTask =
@@ -883,7 +863,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     tomcatInfo != null ? tomcatInfo.getName() : "None",
                     httpPort != null ? httpPort : "N/A",
                     configuration.isJmxEnabled() ? String.valueOf(configuration.getJmxPort()) : "disabled",
-                    configuration.getConfigData().getDeploymentConfig().getArtifacts().size(),
+                    configuration.getConfigData().getDeploymentConfig().getDeployments(project).size(),
                     configuration.getAllLogFiles().size());
         } catch (Exception e) {
             return "summary unavailable";
@@ -983,7 +963,9 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             if (files.length == 0) return;
 
             File file = new File(files[0].getPath());
-            var importedData = ConfigExportImport.importFromFile(file);
+            // Pass the project so imported deployment pointers are live
+            // (validator / build-before-launch / resolver all deref them).
+            var importedData = ConfigExportImport.importFromFile(file, project);
 
             if (currentConfiguration == null) {
                 currentConfiguration = createTemplateConfiguration();

@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -58,16 +58,16 @@ public final class TomcatManagerDeployer {
      * Deploys with optional progress reporting for WAR uploads.
      * Returns a tri-state result so callers can distinguish cancellation from failure.
      *
-     * <p>Equivalent to calling {@link #deployWithProgress(DeploymentArtifact,
+     * <p>Equivalent to calling {@link #deployWithProgress(Deployment,
      * TomcatDeploymentLogger, ProgressIndicator, BooleanSupplier)} with a
      * no-op abort check; preserved for callers that don't have a
      * process-state predicate to thread through.
      */
     @NotNull
-    public DeployResult deployWithProgress(@NotNull DeploymentArtifact artifact,
+    public DeployResult deployWithProgress(@NotNull Deployment deployment,
                                             @Nullable TomcatDeploymentLogger logger,
                                             @Nullable ProgressIndicator indicator) {
-        return deployWithProgress(artifact, logger, indicator, () -> false);
+        return deployWithProgress(deployment, logger, indicator, () -> false);
     }
 
     /**
@@ -83,21 +83,21 @@ public final class TomcatManagerDeployer {
      *                   {@link DeployResult#CANCELLED}. Must not block.
      */
     @NotNull
-    public DeployResult deployWithProgress(@NotNull DeploymentArtifact artifact,
+    public DeployResult deployWithProgress(@NotNull Deployment deployment,
                                             @Nullable TomcatDeploymentLogger logger,
                                             @Nullable ProgressIndicator indicator,
                                             @NotNull BooleanSupplier abortCheck) {
         if (indicator != null && indicator.isCanceled()) {
-            log(logger, "Deployment skipped (cancelled): " + artifact.getDisplayName());
+            log(logger, "Deployment skipped (cancelled): " + deployment.getDisplayName());
             return DeployResult.CANCELLED;
         }
         if (abortCheck.getAsBoolean()) {
-            log(logger, "Deployment skipped (process terminating): " + artifact.getDisplayName());
+            log(logger, "Deployment skipped (process terminating): " + deployment.getDisplayName());
             return DeployResult.CANCELLED;
         }
 
-        String contextPath = normalizeContextPath(artifact.getContextPath());
-        log(logger, "Deploying '" + artifact.getDisplayName() + "' to " + contextPath + " ...");
+        String contextPath = normalizeContextPath(deployment.getContextPath());
+        log(logger, "Deploying '" + deployment.getDisplayName() + "' to " + contextPath + " ...");
 
         try {
             // No client-side pre-undeploy: both deploy paths pass update=true,
@@ -106,10 +106,10 @@ public final class TomcatManagerDeployer {
             // client-side undeploy here would tear down the running app up front,
             // leaving the context serving nothing if the upload then fails or is
             // cancelled.
-            if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
-                return deployWarViaPut(artifact, contextPath, logger, indicator, abortCheck);
+            if (!deployment.isExploded()) {
+                return deployWarViaPut(deployment, contextPath, logger, indicator, abortCheck);
             } else {
-                return deployExplodedViaPath(artifact, contextPath, logger)
+                return deployExplodedViaPath(deployment, contextPath, logger)
                         ? DeployResult.SUCCESS : DeployResult.FAILED;
             }
         } catch (Exception e) {
@@ -119,10 +119,10 @@ public final class TomcatManagerDeployer {
             // socket write. Classify those as CANCELLED, not FAILED, so a
             // deliberate stop is not reported as a deployment error.
             if ((indicator != null && indicator.isCanceled()) || abortCheck.getAsBoolean()) {
-                log(logger, "Deployment cancelled: " + artifact.getDisplayName());
+                log(logger, "Deployment cancelled: " + deployment.getDisplayName());
                 return DeployResult.CANCELLED;
             }
-            LOG.warn("Remote deployment failed: " + artifact.getDisplayName(), e);
+            LOG.warn("Remote deployment failed: " + deployment.getDisplayName(), e);
             logError(logger, "Deployment failed: " + e.getMessage());
             return DeployResult.FAILED;
         }
@@ -205,21 +205,23 @@ public final class TomcatManagerDeployer {
     /**
      * Deploys a WAR file by uploading it via HTTP PUT to the Manager API.
      */
-    private DeployResult deployWarViaPut(@NotNull DeploymentArtifact artifact,
+    private DeployResult deployWarViaPut(@NotNull Deployment deployment,
                                          @NotNull String contextPath,
                                          @Nullable TomcatDeploymentLogger logger,
                                          @Nullable ProgressIndicator indicator,
                                          @NotNull BooleanSupplier abortCheck) throws IOException {
-        Path warFile = Path.of(artifact.getPath());
-        if (!Files.exists(warFile)) {
-            logError(logger, "WAR file not found: " + artifact.getPath());
+        // Resolved path can be null for an unresolved artifact pointer — same
+        // outcome as a missing file: nothing to upload.
+        Path warFile = deployment.getResolvedPath();
+        if (warFile == null || !Files.exists(warFile)) {
+            logError(logger, "WAR file not found: " + (warFile == null ? "" : warFile));
             return DeployResult.FAILED;
         }
 
         long fileSize = Files.size(warFile);
         log(logger, "Uploading WAR (" + formatSize(fileSize) + ") via PUT...");
         if (indicator != null) {
-            indicator.setText("Uploading " + artifact.getDisplayName());
+            indicator.setText("Uploading " + deployment.getDisplayName());
             indicator.setIndeterminate(false);
             indicator.setFraction(0.0);
         }
@@ -293,7 +295,7 @@ public final class TomcatManagerDeployer {
             String response = readResponse(conn);
             boolean success = response != null && response.startsWith(OK_PREFIX);
             if (success) {
-                log(logger, "Deployed WAR successfully: " + artifact.getDisplayName());
+                log(logger, "Deployed WAR successfully: " + deployment.getDisplayName());
             } else {
                 logError(logger, "Deploy failed: " + truncate(response, 300));
             }
@@ -307,10 +309,15 @@ public final class TomcatManagerDeployer {
      * Deploys an exploded directory using the {@code war=file:} parameter.
      * This requires the directory to be accessible from the Tomcat server's filesystem.
      */
-    private boolean deployExplodedViaPath(@NotNull DeploymentArtifact artifact,
+    private boolean deployExplodedViaPath(@NotNull Deployment deployment,
                                            @NotNull String contextPath,
                                            @Nullable TomcatDeploymentLogger logger) throws IOException {
-        String docBase = artifact.getPath().replace('\\', '/');
+        Path resolved = deployment.getResolvedPath();
+        if (resolved == null) {
+            logError(logger, "Deployment directory not found: " + deployment.getDisplayName());
+            return false;
+        }
+        String docBase = resolved.toString().replace('\\', '/');
         if (docBase.contains("..")) {
             throw new IOException("Deployment path must not contain '..': " + docBase);
         }
@@ -322,7 +329,7 @@ public final class TomcatManagerDeployer {
         String response = executeGet(url);
         boolean success = response != null && response.startsWith(OK_PREFIX);
         if (success) {
-            log(logger, "Deployed exploded artifact successfully: " + artifact.getDisplayName());
+            log(logger, "Deployed exploded artifact successfully: " + deployment.getDisplayName());
         } else {
             logError(logger, "Deploy failed: " + truncate(response, 300));
         }

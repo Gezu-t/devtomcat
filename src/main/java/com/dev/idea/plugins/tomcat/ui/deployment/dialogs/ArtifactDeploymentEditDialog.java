@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.deployment.dialogs;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.DeploymentKind;
+import com.dev.idea.plugins.tomcat.model.DeploymentRow;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -18,26 +19,31 @@ import java.awt.*;
 import java.util.function.Predicate;
 
 public class ArtifactDeploymentEditDialog extends DialogWrapper {
-    private final DeploymentArtifact deployment;
+
+    /** Packaging strings shown in the combo — same vocabulary the renderer / persistence use. */
+    private static final String PACKAGING_EXPLODED = "exploded";
+    private static final String PACKAGING_WAR = "war";
+
+    private final DeploymentRow row;
     private final Predicate<String> isDuplicateContext;
     private JBTextField contextField;
     private ComboBox<String> typeCombo;
 
     /**
      * @param parent              parent component used to anchor the dialog window.
-     * @param deployment          artifact whose application context / packaging is being edited.
+     * @param row                 deployment row whose application context / packaging is being edited.
      * @param isDuplicateContext  predicate that returns {@code true} when the supplied
      *                            (already-normalized) context path collides with another
-     *                            artifact's context. Closes the UX asymmetry where the
+     *                            row's context. Closes the UX asymmetry where the
      *                            inline context field rejected duplicates but this
      *                            dialog accepted them silently — only to fail later in
      *                            {@code DeploymentConfigurationPanel#isConfigurationValid}.
      */
     public ArtifactDeploymentEditDialog(JComponent parent,
-                                        @NotNull DeploymentArtifact deployment,
+                                        @NotNull DeploymentRow row,
                                         @NotNull Predicate<String> isDuplicateContext) {
         super(SwingUtilities.getWindowAncestor(parent), true);
-        this.deployment = deployment;
+        this.row = row;
         this.isDuplicateContext = isDuplicateContext;
         setTitle("Edit Deployment");
         setModal(true);
@@ -60,14 +66,14 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         // filename derived from an arbitrary path, so '<', '>' or '&' would
         // otherwise garble or truncate this HTML label.
         JBLabel infoLabel = new JBLabel("<html>Edit <b>"
-                + com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(deployment.getDisplayName())
+                + com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(row.getDisplayName())
                 + "</b>:</html>");
         panel.add(infoLabel, gbc);
 
         gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1;
         JBLabel contextLabel = new JBLabel("Application context:");
         contextField = new JBTextField();
-        contextField.setText(deployment.getApplicationContext());
+        contextField.setText(row.getContextPath());
         contextField.setPreferredSize(new Dimension(JBUI.scale(250), JBUI.scale(25)));
         contextField.selectAll();
         // Associate the label with its field for screen readers / mnemonic focus.
@@ -77,20 +83,18 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
         gbc.gridx = 1; gbc.weightx = 1.0;
         panel.add(contextField, gbc);
 
-        // Packaging type dropdown. Editable only for EXTERNAL sources — for
-        // INTELLIJ_ARTIFACT / AUTO_DETECTED deployments the packaging is dictated
-        // by the underlying artifact (LocalDeploymentStrategy branches on type),
+        // Packaging type dropdown. Editable only for EXTERNAL deployments — for
+        // artifact/module-backed deployments the packaging is dictated
+        // by the underlying artifact (LocalDeploymentStrategy branches on it),
         // so flipping WAR↔EXPLODED here would misdirect the deployment code path.
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1; gbc.weightx = 0;
         JBLabel packagingLabel = new JBLabel("Packaging:");
         typeCombo = new ComboBox<>(new String[]{
-                DeploymentArtifact.TYPE_EXPLODED,
-                DeploymentArtifact.TYPE_WAR
+                PACKAGING_EXPLODED,
+                PACKAGING_WAR
         });
-        typeCombo.setSelectedItem(DeploymentArtifact.TYPE_WAR.equalsIgnoreCase(deployment.getType())
-                ? DeploymentArtifact.TYPE_WAR
-                : DeploymentArtifact.TYPE_EXPLODED);
-        boolean isExternal = deployment.getSource() == DeploymentArtifact.Source.EXTERNAL;
+        typeCombo.setSelectedItem(row.isExploded() ? PACKAGING_EXPLODED : PACKAGING_WAR);
+        boolean isExternal = row.getKind() == DeploymentKind.EXTERNAL;
         typeCombo.setEnabled(isExternal);
         if (!isExternal) {
             typeCombo.setToolTipText(
@@ -146,13 +150,13 @@ public class ArtifactDeploymentEditDialog extends DialogWrapper {
     @Override
     protected void doOKAction() {
         String context = ContextPathUtils.normalizeContextPath(contextField.getText().trim());
-        deployment.setApplicationContext(context);
-        // Only apply the type change for EXTERNAL sources; for others the combo
-        // is disabled and the selected value is just the current type.
-        if (deployment.getSource() == DeploymentArtifact.Source.EXTERNAL) {
+        row.setContextPath(context);
+        // Only apply the packaging change for EXTERNAL deployments; for others the
+        // combo is disabled and the selected value is just the current packaging.
+        if (row.getKind() == DeploymentKind.EXTERNAL) {
             Object selected = typeCombo.getSelectedItem();
             if (selected instanceof String typeValue) {
-                deployment.setType(typeValue);
+                row.setExploded(PACKAGING_EXPLODED.equals(typeValue));
             }
         }
         super.doOKAction();

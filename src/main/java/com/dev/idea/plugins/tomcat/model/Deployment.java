@@ -15,6 +15,9 @@ public sealed interface Deployment
 
     @NotNull DeploymentKind getKind();
 
+    /** Copy of this deployment with a different context path; everything else carries over. */
+    @NotNull Deployment withContextPath(@NotNull String contextPath);
+
     @NotNull String getContextPath();
 
     @NotNull String getDisplayName();

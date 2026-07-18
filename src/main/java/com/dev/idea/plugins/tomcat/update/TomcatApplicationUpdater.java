@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
@@ -546,10 +545,10 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         Project project = configuration.getProject();
         if (project == null || project.isDisposed()) return;
 
-        java.util.List<DeploymentArtifact> artifacts =
-                configuration.getConfigData().getDeploymentConfig().getArtifacts();
+        java.util.List<Deployment> deployments =
+                configuration.getConfigData().getDeploymentConfig().getDeployments(project);
         java.util.List<WarToExplodedQuickFix.FixCandidate> candidates =
-                WarToExplodedQuickFix.findFixableArtifacts(project, artifacts);
+                WarToExplodedQuickFix.findFixableArtifacts(project, deployments);
         if (candidates.isEmpty()) return;
 
         // Log every candidate to the console BEFORE popping the balloon. The
@@ -560,7 +559,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         StringBuilder mapping = new StringBuilder();
         for (WarToExplodedQuickFix.FixCandidate c : candidates) {
             if (mapping.length() > 0) mapping.append(", ");
-            mapping.append(c.artifact().getDisplayName())
+            mapping.append(c.deployment().getDisplayName())
                    .append(" → module '")
                    .append(c.moduleName())
                    .append("'");

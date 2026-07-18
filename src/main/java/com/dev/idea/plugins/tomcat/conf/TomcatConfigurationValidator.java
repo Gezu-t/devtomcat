@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.model.ValidationResult;
@@ -212,8 +211,10 @@ public final class TomcatConfigurationValidator {
     }
 
     private static void validateDeploymentArtifacts(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationException {
-        List<DeploymentArtifact> artifacts = data.getDeploymentConfig().getArtifacts();
-        if (artifacts.isEmpty()) {
+        // Detached typed view: this overload is project-free by contract, so
+        // pointers stay name-only — path/name/context checks need no resolution.
+        List<Deployment> deployments = data.getDeploymentConfig().getDeployments();
+        if (deployments.isEmpty()) {
             // Blocking error. Previously this was a non-blocking warning, which
             // mirrored the post-launch warning in LocalDeploymentStrategy but
             // still let the user click Run and wait for Tomcat to come up with
@@ -229,12 +230,12 @@ public final class TomcatConfigurationValidator {
         }
 
         // Validate artifact paths exist
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
-            String path = artifact.getPath();
+        for (Deployment deployment : deployments) {
+            java.nio.file.Path resolved = deployment.getResolvedPath();
+            String path = resolved == null ? "" : resolved.toString();
             if (StringUtil.isEmpty(path)) {
                 throw new RuntimeConfigurationWarning(
-                        "Deployment artifact '" + artifact.getDisplayName() +
+                        "Deployment artifact '" + deployment.getDisplayName() +
                                 "' has no path configured. Remove it or reconfigure in the Deployment tab.");
             }
             File artifactFile = new File(path);
@@ -246,7 +247,7 @@ public final class TomcatConfigurationValidator {
                 // problem to flag. (The Verify before-launch task is the real gate,
                 // and it assembles first.) Only a WAR genuinely needs a manual
                 // package step, so keep the warning for that.
-                if (DeploymentArtifact.TYPE_WAR.equals(artifact.getType())) {
+                if (!deployment.isExploded()) {
                     throw new RuntimeConfigurationWarning(
                             "WAR not found: " + path + ". Build the project "
                                     + "(e.g. mvn package / gradle war) to generate it. "
@@ -276,24 +277,23 @@ public final class TomcatConfigurationValidator {
         // Duplicate detection only matters when there are 2+ artifacts to compare.
         // The traversal/path-validity branch above runs unconditionally so even a
         // single-artifact config rejects '..' / '\' / ':' at Apply time.
-        final boolean canHaveDuplicates = artifacts.size() >= 2;
-        Map<String, DeploymentArtifact> seenByContextName = new HashMap<>();
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
+        final boolean canHaveDuplicates = deployments.size() >= 2;
+        Map<String, Deployment> seenByContextName = new HashMap<>();
+        for (Deployment deployment : deployments) {
             String resolvedName;
             try {
-                resolvedName = ContextPathUtils.resolveContextName(artifact.getContextPath());
+                resolvedName = ContextPathUtils.resolveContextName(deployment.getContextPath());
             } catch (IllegalArgumentException e) {
                 // Invalid characters in the context path (.., \, :) — hard
                 // error, surface as RuntimeConfigurationException so Apply
                 // refuses the bad path early instead of letting it through
                 // to a less informative ExecutionException at deploy time.
                 throw new RuntimeConfigurationException(
-                        "Invalid context path on artifact '" + artifact.getDisplayName()
+                        "Invalid context path on artifact '" + deployment.getDisplayName()
                                 + "': " + e.getMessage());
             }
             if (!canHaveDuplicates) continue;
-            DeploymentArtifact previous = seenByContextName.putIfAbsent(resolvedName, artifact);
+            Deployment previous = seenByContextName.putIfAbsent(resolvedName, deployment);
             if (previous != null) {
                 String displayPath = resolvedName.equals(TomcatConstants.ROOT_CONTEXT_NAME)
                         ? "/ (ROOT)"
@@ -301,18 +301,16 @@ public final class TomcatConfigurationValidator {
                 throw new RuntimeConfigurationWarning(
                         "Duplicate context path " + displayPath + ": artifacts '"
                                 + previous.getDisplayName() + "' and '"
-                                + artifact.getDisplayName() + "' both deploy here. "
+                                + deployment.getDisplayName() + "' both deploy here. "
                                 + "Tomcat will only serve one — change the context path "
                                 + "of one in the Deployment tab.");
             }
         }
 
-        Map<String, DeploymentArtifact> seenByPath = new HashMap<>();
+        Map<String, Deployment> seenByPath = new HashMap<>();
         Set<String> seenBaseNames = new HashSet<>();
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
-
-            String baseName = ContextPathUtils.extractBaseModuleName(artifact.getName());
+        for (Deployment deployment : deployments) {
+            String baseName = ContextPathUtils.extractBaseModuleName(deployment.getDisplayName());
             if (!baseName.isEmpty() && !seenBaseNames.add(baseName)) {
                 throw new RuntimeConfigurationWarning(
                         "Duplicate deployment for module '" + baseName + "': the same application " +
@@ -320,15 +318,16 @@ public final class TomcatConfigurationValidator {
                                 "variant to avoid Tomcat redeploy loops and JSP scratchDir errors.");
             }
 
-            String normalizedPath = normalizeArtifactPath(artifact.getPath());
+            java.nio.file.Path resolved = deployment.getResolvedPath();
+            String normalizedPath = normalizeArtifactPath(resolved == null ? null : resolved.toString());
             if (normalizedPath == null) continue;
 
-            DeploymentArtifact existing = seenByPath.putIfAbsent(normalizedPath, artifact);
+            Deployment existing = seenByPath.putIfAbsent(normalizedPath, deployment);
             if (existing != null) {
                 throw new RuntimeConfigurationWarning(
                         "Multiple deployments point to the same artifact output: " + normalizedPath +
                                 ". Remove either '" + existing.getDisplayName() + "' or '" +
-                                artifact.getDisplayName() + "' to avoid duplicate docBase deployment.");
+                                deployment.getDisplayName() + "' to avoid duplicate docBase deployment.");
             }
         }
     }

@@ -1,7 +1,11 @@
 package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentRow;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.utils.ArtifactPackagingDetector;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.ProjectArtifactDetector;
@@ -24,8 +28,8 @@ import com.intellij.packaging.artifacts.ArtifactType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -59,8 +63,8 @@ public class ArtifactSelectionHandler {
         // the EDT first — the table manager backs a Swing model and must not be
         // read from a pooled thread — then run the detection off the EDT under a
         // cancelable modal progress, and finally show the dialog back on the EDT.
-        Set<String> existingNames = tableManager.getDeployments().stream()
-                .map(DeploymentArtifact::getName)
+        Set<String> existingNames = tableManager.getRows().stream()
+                .map(DeploymentRow::getDisplayName)
                 .collect(Collectors.toSet());
 
         DetectionResult result;
@@ -111,15 +115,15 @@ public class ArtifactSelectionHandler {
      * artifacts (preferred) or the auto-detected fallback deployments.
      */
     private record DetectionResult(@Nullable List<Artifact> artifacts,
-                                   @Nullable List<DeploymentArtifact> detected) {
+                                   @Nullable List<Deployment> detected) {
     }
 
     private void showIntelliJArtifactDialog(@NotNull List<Artifact> artifacts) {
         IntelliJArtifactSelectionDialog dialog = new IntelliJArtifactSelectionDialog(project, artifacts);
 
         if (dialog.showAndGet()) {
-            Set<String> existingBaseNames = tableManager.getDeployments().stream()
-                    .map(d -> extractBaseModuleName(d.getName()))
+            Set<String> existingBaseNames = tableManager.getRows().stream()
+                    .map(d -> extractBaseModuleName(d.getDisplayName()))
                     .collect(Collectors.toSet());
 
             for (Artifact artifact : dialog.getSelectedArtifacts()) {
@@ -135,33 +139,31 @@ public class ArtifactSelectionHandler {
         }
     }
 
-    private void showAutoDetectedDialog(@NotNull List<DeploymentArtifact> detected) {
+    private void showAutoDetectedDialog(@NotNull List<Deployment> detected) {
         ModuleDeploymentDialog dialog = new ModuleDeploymentDialog(project, detected);
 
         if (dialog.showAndGet()) {
-            Set<String> existingBaseNames = tableManager.getDeployments().stream()
-                    .map(d -> extractBaseModuleName(d.getName()))
+            Set<String> existingBaseNames = tableManager.getRows().stream()
+                    .map(d -> extractBaseModuleName(d.getDisplayName()))
                     .collect(Collectors.toSet());
 
-            for (DeploymentArtifact deployment : dialog.getSelectedDeployments()) {
-                String baseName = extractBaseModuleName(deployment.getName());
+            for (Deployment deployment : dialog.getSelectedDeployments()) {
+                String baseName = extractBaseModuleName(deployment.getDisplayName());
                 if (existingBaseNames.contains(baseName)) {
-                    LOG.debug("Skipping duplicate deployment (base name match): " + deployment.getName());
+                    LOG.debug("Skipping duplicate deployment (base name match): " + deployment.getDisplayName());
                     continue;
                 }
                 existingBaseNames.add(baseName);
+                // Provenance is structural now: ModuleBackedDeployment vs
+                // ExternalFileDeployment already says module-backed vs disk-scanned WAR.
                 String context = getUniqueContext(deployment.getContextPath());
-                deployment.setContextPath(context);
-                // Do NOT overwrite the source here. DeploymentAdapter.toLegacy already
-                // set the right source for each subtype: ModuleBackedDeployment carries
-                // AUTO_DETECTED (name = module name, suitable for rename-tracking) and
-                // ExternalFileDeployment carries EXTERNAL (name = WAR filename, no
-                // owning module). Stamping AUTO_DETECTED blindly mislabels disk-scanned
-                // WARs as module-backed, then the loader can't resolve the "module".
+                DeploymentRow row = DeploymentRow.of(deployment);
+                row.setContextPath(context);
 
-                tableManager.addAndSelectDeployment(deployment);
-                LOG.info("Added auto-detected deployment: " + deployment.getName() +
-                        " [" + deployment.getType() + "] source=" + deployment.getSource() +
+                tableManager.addAndSelectDeployment(row);
+                LOG.info("Added auto-detected deployment: " + deployment.getDisplayName() +
+                        " [" + (deployment.isExploded() ? "exploded" : "war") +
+                        "] kind=" + deployment.getKind() +
                         " context=" + context);
             }
         }
@@ -172,36 +174,30 @@ public class ArtifactSelectionHandler {
      * Delegates to {@link ProjectArtifactDetector} and filters out artifacts already
      * present in the deployment table.
      */
-    private List<DeploymentArtifact> detectDeployables() {
-        // ProjectArtifactDetector returns typed Deployments; adapt at the boundary
-        // because the rest of this handler (UI dialogs, table manager) still
-        // consumes legacy DeploymentArtifact. The full UI-tier migration moves
-        // that boundary upward.
-        List<DeploymentArtifact> modules = ProjectArtifactDetector.detectWebModules(project).stream()
-                .map(com.dev.idea.plugins.tomcat.model.DeploymentAdapter::toLegacy)
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    private List<Deployment> detectDeployables() {
+        List<Deployment> modules = new ArrayList<>(ProjectArtifactDetector.detectWebModules(project));
         LOG.info("Auto-detection: " + modules.size() + " web module(s) found");
-        for (DeploymentArtifact m : modules) {
-            LOG.info("  Web module: " + m.getName() + " [" + m.getType() + "] path=" + m.getPath());
+        for (Deployment m : modules) {
+            LOG.info("  Web module: " + m.getDisplayName() +
+                    " [" + (m.isExploded() ? "exploded" : "war") + "] path=" + m.getResolvedPath());
         }
 
-        List<DeploymentArtifact> wars = ProjectArtifactDetector.scanForWarFiles(project).stream()
-                .map(com.dev.idea.plugins.tomcat.model.DeploymentAdapter::toLegacy)
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        List<Deployment> wars = new ArrayList<>(ProjectArtifactDetector.scanForWarFiles(project));
         LOG.info("Auto-detection: " + wars.size() + " WAR file(s)/exploded dir(s) found");
-        for (DeploymentArtifact w : wars) {
-            LOG.info("  WAR/Exploded: " + w.getName() + " [" + w.getType() + "] path=" + w.getPath());
+        for (Deployment w : wars) {
+            LOG.info("  WAR/Exploded: " + w.getDisplayName() +
+                    " [" + (w.isExploded() ? "exploded" : "war") + "] path=" + w.getResolvedPath());
         }
 
         // Combine with modules first (higher quality), then deduplicate by name
-        List<DeploymentArtifact> combined = new ArrayList<>(modules);
+        List<Deployment> combined = new ArrayList<>(modules);
         combined.addAll(wars);
         combined = deduplicateByName(combined);
 
         // Filter out POM-packaged parent modules that leak through WAR scans
         Set<String> pomModuleNames = detectPomModuleNames();
         if (!pomModuleNames.isEmpty()) {
-            combined.removeIf(item -> pomModuleNames.contains(extractBaseModuleName(item.getName())));
+            combined.removeIf(item -> pomModuleNames.contains(extractBaseModuleName(item.getDisplayName())));
         }
 
         // Filter out stale artifacts from renamed/removed modules.
@@ -210,7 +206,7 @@ public class ArtifactSelectionHandler {
         // sees old module names in the selection dialog alongside current ones.
         Set<String> activeModules = getActiveModuleNames();
         int beforeFilter = combined.size();
-        combined.removeIf(item -> !hasActiveSourceModule(item.getName(), activeModules));
+        combined.removeIf(item -> !hasActiveSourceModule(item.getDisplayName(), activeModules));
         int filtered = beforeFilter - combined.size();
         if (filtered > 0) {
             LOG.info("Auto-detection: filtered " + filtered +
@@ -222,23 +218,23 @@ public class ArtifactSelectionHandler {
     }
 
     /**
-     * Deduplicates artifacts by base module name + type (case-insensitive).
+     * Deduplicates deployments by base module name + packaging (case-insensitive).
      * Strips common suffixes like {@code _war_exploded}, {@code _war}, {@code .war}
      * to recognize e.g. "webapp-one" and "webapp-one_war_exploded" as the same module.
-     * Only merges items of the same deployment type (exploded with exploded, WAR with WAR).
+     * Only merges items of the same packaging (exploded with exploded, WAR with WAR).
      * When duplicates exist, prefers the variant with a build output path.
      */
-    private static List<DeploymentArtifact> deduplicateByName(List<DeploymentArtifact> artifacts) {
-        LinkedHashMap<String, DeploymentArtifact> unique = new LinkedHashMap<>();
-        for (DeploymentArtifact item : artifacts) {
-            String key = extractBaseModuleName(item.getName()) + "|" + item.getType();
-            DeploymentArtifact existing = unique.get(key);
+    private static List<Deployment> deduplicateByName(List<Deployment> deployments) {
+        LinkedHashMap<String, Deployment> unique = new LinkedHashMap<>();
+        for (Deployment item : deployments) {
+            String key = extractBaseModuleName(item.getDisplayName()) + "|" + item.isExploded();
+            Deployment existing = unique.get(key);
             if (existing == null) {
                 unique.put(key, item);
             } else {
                 // Prefer the variant whose path points to build output (out/artifacts, target)
                 // over a source directory (src/main/webapp)
-                if (isBuildOutputPath(item.getPath()) && !isBuildOutputPath(existing.getPath())) {
+                if (isBuildOutputPath(item.getResolvedPath()) && !isBuildOutputPath(existing.getResolvedPath())) {
                     unique.put(key, item);
                 }
             }
@@ -250,9 +246,9 @@ public class ArtifactSelectionHandler {
         return ContextPathUtils.extractBaseModuleName(name);
     }
 
-    private static boolean isBuildOutputPath(String path) {
+    private static boolean isBuildOutputPath(@Nullable Path path) {
         if (path == null) return false;
-        String normalized = path.replace('\\', '/').toLowerCase(Locale.ROOT);
+        String normalized = path.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
         return normalized.contains("/out/artifacts/") ||
                 normalized.contains("/target/") ||
                 normalized.contains("/build/libs/");
@@ -332,12 +328,13 @@ public class ArtifactSelectionHandler {
         // would add two rows deploying the same bytes to different context paths,
         // which is almost never what the user wants. Refuse silently with an info
         // dialog so the user doesn't get a mysterious second row.
-        for (DeploymentArtifact existing : tableManager.getDeployments()) {
-            if (existing != null && localPath.equals(existing.getPath())) {
+        Path chosenPath = Path.of(localPath);
+        for (DeploymentRow existing : tableManager.getRows()) {
+            if (existing != null && chosenPath.equals(existing.getResolvedPath())) {
                 Messages.showInfoMessage(project,
                         "This file or directory is already in the deployment list as '"
                                 + existing.getDisplayName() + "' at context '"
-                                + existing.getApplicationContext() + "'.\n\n"
+                                + existing.getContextPath() + "'.\n\n"
                                 + "Remove the existing entry first if you want to re-add it.",
                         "Already Added");
                 LOG.debug("Refused duplicate external-source add: " + localPath);
@@ -346,16 +343,13 @@ public class ArtifactSelectionHandler {
         }
 
         String name = chosen.getName();
-        String type = chosen.isDirectory() ? DeploymentArtifact.TYPE_EXPLODED : DeploymentArtifact.TYPE_WAR;
-
         String context = getUniqueContext(ContextPathUtils.generateContextPath(name));
-        DeploymentArtifact deployment = new DeploymentArtifact(name, localPath, type);
-        deployment.setContextPath(context);
-        // Mark as EXTERNAL so the validator never flags this entry as an orphaned
-        // IntelliJ artifact (it isn't one) and the rename refresher skips it.
-        deployment.setSource(DeploymentArtifact.Source.EXTERNAL);
+        // ExternalFileDeployment carries EXTERNAL provenance structurally — the
+        // validator never flags it as orphaned and the rename refresher skips it.
+        ExternalFileDeployment deployment =
+                new ExternalFileDeployment(chosenPath, context, chosen.isDirectory());
 
-        tableManager.addAndSelectDeployment(deployment);
+        tableManager.addAndSelectDeployment(DeploymentRow.of(deployment));
         LOG.debug("Added external source: " + name + " at " + localPath);
     }
 
@@ -470,70 +464,31 @@ public class ArtifactSelectionHandler {
     }
 
     private boolean isContextInUse(String context) {
-        return tableManager.getDeployments().stream()
-                .anyMatch(d -> d.getApplicationContext().equals(context));
+        return tableManager.getRows().stream()
+                .anyMatch(d -> d.getContextPath().equals(context));
     }
 
     private void addArtifactWithContext(@NotNull Artifact artifact, @NotNull String applicationContext) {
         try {
-            String type = resolveDeploymentType(artifact);
+            boolean exploded = ArtifactPackagingDetector.resolveExplodedPackaging(artifact);
 
-            String outputPath = artifact.getOutputFilePath();
-            if (outputPath == null) {
-                outputPath = "";
-            }
-
-            DeploymentArtifact deployment = new DeploymentArtifact(
+            // Output path / packaging read off the platform Artifact now double as
+            // the typed deployment's last-known fallbacks for unresolved pointers.
+            ArtifactBackedDeployment deployment = ArtifactBackedDeployment.ofName(
+                    project,
                     artifact.getName(),
-                    outputPath,
-                    type
-            );
-            deployment.setContextPath(applicationContext);
+                    applicationContext,
+                    artifact.getOutputFilePath(),
+                    exploded);
 
-            tableManager.addAndSelectDeployment(deployment);
+            tableManager.addAndSelectDeployment(DeploymentRow.of(deployment));
 
             LOG.debug("Added artifact: " + artifact.getName() +
-                    " [" + type + "] with context: " + applicationContext);
+                    " [" + (exploded ? "exploded" : "war") + "] with context: " + applicationContext);
 
         } catch (Exception e) {
             LOG.warn("Error adding artifact", e);
         }
-    }
-
-    /**
-     * Resolves the deployment type for an IntelliJ Artifact.
-     * Checks the artifact type ID first (authoritative when the platform provides
-     * a web-typed ID), then falls back to checking the artifact name and output
-     * path — needed when the project only carries generic type IDs like
-     * {@code "plain"} or {@code "jar"}.
-     */
-    static String resolveDeploymentType(@NotNull Artifact artifact) {
-        // 1. Check IntelliJ artifact type ID (authoritative when web-typed)
-        try {
-            String typeId = artifact.getArtifactType().getId().toLowerCase(Locale.ROOT);
-            if (typeId.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
-            if (typeId.contains("war")) return DeploymentArtifact.TYPE_WAR;
-        } catch (RuntimeException e) {
-            LOG.debug("Error resolving artifact type for deployment '" + artifact.getName() + "'", e);
-        }
-
-        // 2. Check artifact name for type hints (CE users often follow naming conventions)
-        String name = artifact.getName().toLowerCase(Locale.ROOT);
-        if (name.contains("exploded")) return DeploymentArtifact.TYPE_EXPLODED;
-        if (name.endsWith("_war") || name.endsWith(".war") || name.endsWith(":war")) {
-            return DeploymentArtifact.TYPE_WAR;
-        }
-
-        // 3. Check output path — directory = exploded, file = packaged
-        String outputPath = artifact.getOutputFilePath();
-        if (outputPath != null) {
-            File outputFile = new File(outputPath);
-            if (outputFile.isDirectory()) return DeploymentArtifact.TYPE_EXPLODED;
-            if (outputPath.toLowerCase(Locale.ROOT).endsWith(".war")) return DeploymentArtifact.TYPE_WAR;
-        }
-
-        // Default: treat as exploded (better for local development — supports hot reload)
-        return DeploymentArtifact.TYPE_EXPLODED;
     }
 
     private String generateContextPath(@NotNull Artifact artifact) {

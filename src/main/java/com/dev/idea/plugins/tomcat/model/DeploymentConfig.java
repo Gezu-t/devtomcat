@@ -5,31 +5,29 @@ import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.Serial;
-import java.io.Serializable;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * Deployment configuration: artifact list + hot-deploy / update-classes / sessions flags.
+ * Deployment configuration: typed {@link Deployment} list + hot-deploy /
+ * update-classes / sessions flags.
  *
- * <p>Storage is still legacy {@link DeploymentArtifact} during the typed-Deployment
- * migration — see LOCAL_NOTES.md "Phase 4d". Typed accessors / mutators convert
- * on the boundary; once every caller is on the typed API, the field flips to
- * {@code List<Deployment>} and legacy getters become {@link DeploymentAdapter}
- * views.
+ * <p>Storage is natively typed — the list holds {@link Deployment} values
+ * directly; persistence goes through the XML serializer.
+ *
+ * <p>No longer {@code Serializable}: nothing java-serializes this class, and
+ * the platform pointers inside typed deployments aren't serializable anyway —
+ * persistence goes through the XML serializer.
  */
-public class DeploymentConfig implements Serializable, Cloneable {
+public class DeploymentConfig implements Cloneable {
 
     private static final Logger LOG = Logger.getInstance(DeploymentConfig.class);
 
-    @Serial
-    private static final long serialVersionUID = 1L;
-
     @NotNull
-    private List<DeploymentArtifact> artifacts = new ArrayList<>();
+    private List<Deployment> deployments = new ArrayList<>();
 
     private boolean hotDeploymentEnabled = false;
     private boolean updateClassesAndResources = false;
@@ -39,66 +37,48 @@ public class DeploymentConfig implements Serializable, Cloneable {
     }
 
     // =====================================================================
-    // Persistence-layer accessors
-    //
-    // DeploymentArtifact is the XML serialization shape — the typed
-    // Deployment hierarchy lives on top of it through DeploymentAdapter.
-    // These methods are the table-and-serializer boundary, not deprecated.
-    // =====================================================================
-
-    /**
-     * Returns a defensive copy of the persistence-layer artifact list.
-     */
-    @NotNull
-    public List<DeploymentArtifact> getArtifacts() {
-        return new ArrayList<>(artifacts);
-    }
-
-    // =====================================================================
     // Typed accessors
     // =====================================================================
 
     /**
-     * Typed view of the deployment list. Each legacy entry is adapted via {@link DeploymentAdapter#toTyped}.
+     * Stored deployment list, as persisted — no project resolution.
+     * Snapshot copy: avoids CME when a concurrent UI Apply / setDeployments
+     * replaces or mutates the storage list while background update/sync
+     * threads are iterating.
+     */
+    @NotNull
+    public List<Deployment> getDeployments() {
+        return new ArrayList<>(deployments);
+    }
+
+    /**
+     * Resolved view for launch/UI consumers — each stored entry re-evaluated
+     * against the live project model via {@link DeploymentResolver#resolve}
+     * (Community artifact→module fold, stale module-pointer rebind). Dynamic
+     * per call; never mutates storage.
      */
     @NotNull
     public List<Deployment> getDeployments(@NotNull Project project) {
-        // Snapshot first — mirrors getArtifacts(); avoids CME when a concurrent
-        // UI Apply / setArtifacts replaces or mutates the storage list while
-        // background update/sync threads are iterating.
-        List<DeploymentArtifact> snapshot = new ArrayList<>(artifacts);
+        List<Deployment> snapshot = new ArrayList<>(deployments);
         List<Deployment> out = new ArrayList<>(snapshot.size());
-        for (DeploymentArtifact a : snapshot) {
-            if (a != null) out.add(DeploymentAdapter.toTyped(project, a));
+        for (Deployment d : snapshot) {
+            if (d != null) out.add(DeploymentResolver.resolve(project, d));
         }
         return out;
     }
 
+    /** Resolved-view lookup by display name (legacy name-match semantics). */
     @Nullable
     public Deployment getDeploymentByName(@NotNull Project project, @NotNull String name) {
-        DeploymentArtifact a = getArtifactByName(name);
-        return a == null ? null : DeploymentAdapter.toTyped(project, a);
-    }
-
-    @Nullable
-    public DeploymentArtifact getArtifact(int index) {
-        if (index < 0 || index >= artifacts.size()) return null;
-        return artifacts.get(index);
-    }
-
-    @Nullable
-    public DeploymentArtifact getArtifactByName(@NotNull String name) {
-        Objects.requireNonNull(name, "Artifact name cannot be null");
-        // Snapshot to match the getArtifacts() / getDeployments() defensive-copy
-        // contract — concurrent setArtifacts could otherwise CME mid-stream.
-        return new ArrayList<>(artifacts).stream()
-                .filter(a -> a != null && a.getName().equals(name))
+        Objects.requireNonNull(name, "Deployment name cannot be null");
+        return getDeployments(project).stream()
+                .filter(d -> d.getDisplayName().equals(name))
                 .findFirst()
                 .orElse(null);
     }
 
     public boolean hasArtifacts() {
-        return !artifacts.isEmpty();
+        return !deployments.isEmpty();
     }
 
     public boolean isHotDeploymentEnabled() {
@@ -114,72 +94,37 @@ public class DeploymentConfig implements Serializable, Cloneable {
     }
 
     // =====================================================================
-    // Setters
+    // Typed mutators
     // =====================================================================
 
-    /**
-     * Legacy setter — called by the XML serializer and a handful of in-flight
-     * call sites. Filters out nulls. Will be replaced by {@link #setDeployments}
-     * once consumers stop producing {@link DeploymentArtifact} directly.
-     */
-    public void setArtifacts(@Nullable List<DeploymentArtifact> artifacts) {
-        if (artifacts == null) {
-            this.artifacts = new ArrayList<>();
-            return;
-        }
-        List<DeploymentArtifact> valid = artifacts.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toCollection(ArrayList::new));
-        if (valid.size() < artifacts.size()) {
-            LOG.warn("Filtered out " + (artifacts.size() - valid.size()) + " null artifacts");
-        }
-        this.artifacts = valid;
-    }
-
-    /**
-     * Typed setter — converts each {@link Deployment} back to legacy via {@link DeploymentAdapter}.
-     */
     public void setDeployments(@Nullable List<? extends Deployment> deployments) {
         if (deployments == null) {
-            this.artifacts = new ArrayList<>();
+            this.deployments = new ArrayList<>();
             return;
         }
-        List<DeploymentArtifact> out = new ArrayList<>(deployments.size());
-        for (Deployment d : deployments) {
-            if (d != null) out.add(DeploymentAdapter.toLegacy(d));
+        List<Deployment> valid = deployments.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (valid.size() < deployments.size()) {
+            LOG.warn("Filtered out " + (deployments.size() - valid.size()) + " null deployments");
         }
-        this.artifacts = out;
+        this.deployments = valid;
     }
 
     /**
-     * Returns {@code true} if added, {@code false} if already present.
-     */
-    public boolean addArtifact(@NotNull DeploymentArtifact artifact) {
-        Objects.requireNonNull(artifact, "Artifact cannot be null");
-        if (artifacts.contains(artifact)) return false;
-        artifacts.add(artifact);
-        return true;
-    }
-
-    /**
-     * Typed add — converts via {@link DeploymentAdapter#toLegacy}.
+     * Returns {@code true} if added, {@code false} if already present
+     * (value equality on the typed classes).
      */
     public boolean addDeployment(@NotNull Deployment deployment) {
         Objects.requireNonNull(deployment, "Deployment cannot be null");
-        return addArtifact(DeploymentAdapter.toLegacy(deployment));
+        if (deployments.contains(deployment)) return false;
+        deployments.add(deployment);
+        return true;
     }
 
-    public boolean removeArtifact(@NotNull DeploymentArtifact artifact) {
-        Objects.requireNonNull(artifact, "Artifact cannot be null");
-        return artifacts.remove(artifact);
-    }
-
-    /**
-     * Typed remove — converts via {@link DeploymentAdapter#toLegacy}.
-     */
     public boolean removeDeployment(@NotNull Deployment deployment) {
         Objects.requireNonNull(deployment, "Deployment cannot be null");
-        return removeArtifact(DeploymentAdapter.toLegacy(deployment));
+        return deployments.remove(deployment);
     }
 
     public void setHotDeploymentEnabled(boolean enabled) {
@@ -198,12 +143,31 @@ public class DeploymentConfig implements Serializable, Cloneable {
     // Validation
     // =====================================================================
 
+    /**
+     * Data-level validity mirroring the legacy artifact check: nonempty
+     * display name, nonempty stored path, and the path exists on disk.
+     * No pointer resolution — safe before the project model loads.
+     */
     public boolean isValid() {
-        if (!hasArtifacts()) return false;
-        for (DeploymentArtifact a : artifacts) {
-            if (a == null || !a.isValid()) return false;
+        if (deployments.isEmpty()) return false;
+        for (Deployment d : deployments) {
+            if (d == null || d.getDisplayName().isEmpty()) return false;
+            String path = storedPathOf(d);
+            if (path.isEmpty() || !new File(path).exists()) return false;
         }
         return true;
+    }
+
+    /** Stored data path — never dereferences pointers. */
+    @NotNull
+    private static String storedPathOf(@NotNull Deployment d) {
+        if (d instanceof ArtifactBackedDeployment a) {
+            return a.getLastKnownPath() == null ? "" : a.getLastKnownPath();
+        }
+        if (d instanceof ModuleBackedDeployment m) {
+            return m.getOutputPath().toString();
+        }
+        return ((ExternalFileDeployment) d).getExternalPath().toString();
     }
 
     // =====================================================================
@@ -215,10 +179,8 @@ public class DeploymentConfig implements Serializable, Cloneable {
     public DeploymentConfig clone() {
         try {
             DeploymentConfig clone = (DeploymentConfig) super.clone();
-            clone.artifacts = new ArrayList<>();
-            for (DeploymentArtifact a : this.artifacts) {
-                if (a != null) clone.artifacts.add(a.clone());
-            }
+            // Typed deployments are immutable — a fresh list of the same elements is a deep copy.
+            clone.deployments = new ArrayList<>(this.deployments);
             return clone;
         } catch (CloneNotSupportedException e) {
             throw new RuntimeException("DeploymentConfig cloning failed", e);
@@ -232,19 +194,19 @@ public class DeploymentConfig implements Serializable, Cloneable {
         return hotDeploymentEnabled == that.hotDeploymentEnabled
                 && updateClassesAndResources == that.updateClassesAndResources
                 && preserveSessions == that.preserveSessions
-                && artifacts.equals(that.artifacts);
+                && deployments.equals(that.deployments);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(artifacts, hotDeploymentEnabled,
+        return Objects.hash(deployments, hotDeploymentEnabled,
                 updateClassesAndResources, preserveSessions);
     }
 
     @NotNull
     public String getSummary() {
         return String.format("DeploymentConfig{artifacts=%d, hotDeploy=%s, updateClasses=%s}",
-                artifacts.size(), hotDeploymentEnabled, updateClassesAndResources);
+                deployments.size(), hotDeploymentEnabled, updateClassesAndResources);
     }
 
     @NotNull

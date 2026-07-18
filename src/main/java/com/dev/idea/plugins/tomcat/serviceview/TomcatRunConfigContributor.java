@@ -2,7 +2,7 @@ package com.dev.idea.plugins.tomcat.serviceview;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
@@ -85,24 +85,25 @@ public final class TomcatRunConfigContributor
     @Override
     @NotNull
     public List<TomcatArtifactItem> getServices(@NotNull Project project) {
-        List<DeploymentArtifact> artifacts =
-                tomcatConfig.getConfigData().getDeploymentConfig().getArtifacts();
-        if (artifacts == null || artifacts.isEmpty()) return Collections.emptyList();
+        // Full typed view (project-resolved) so display names match what the
+        // runtime pipeline reports to the deployment status service.
+        List<Deployment> deployments =
+                tomcatConfig.getConfigData().getDeploymentConfig().getDeployments(project);
+        if (deployments.isEmpty()) return Collections.emptyList();
 
         Endpoint endpoint = resolveEndpoint(project);
         Map<String, TomcatDeploymentStatusService.ArtifactState> artifactStates =
                 resolveArtifactStates(project);
 
-        List<TomcatArtifactItem> items = new ArrayList<>(artifacts.size());
-        for (DeploymentArtifact artifact : artifacts) {
-            if (artifact == null) continue;
+        List<TomcatArtifactItem> items = new ArrayList<>(deployments.size());
+        for (Deployment deployment : deployments) {
             items.add(new TomcatArtifactItem(
-                    artifact,
+                    deployment,
                     tomcatConfig.getName(),
                     endpoint.host(),
                     endpoint.https(),
                     endpoint.port(),
-                    artifactStates.get(artifact.getDisplayName())));
+                    artifactStates.get(deployment.getDisplayName())));
         }
         return items;
     }
@@ -358,7 +359,7 @@ public final class TomcatRunConfigContributor
         @Override
         public ItemPresentation getPresentation() {
             PresentationData data = new PresentationData();
-            DeploymentArtifact artifact = item.getArtifact();
+            Deployment deployment = item.getDeployment();
 
             // Icon reflects live status.
             TomcatDeploymentStatusService.ArtifactState state = item.getState();
@@ -373,17 +374,16 @@ public final class TomcatRunConfigContributor
                 data.setIcon(AllIcons.Nodes.Artifact);
             }
 
-            data.addText(artifact.getDisplayName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            data.addText(deployment.getDisplayName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
 
-            String typeBadge = DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
-                    ? " [Exploded]" : " [WAR]";
+            String typeBadge = deployment.isExploded() ? " [Exploded]" : " [WAR]";
             data.addText(typeBadge,
                     SimpleTextAttributes.merge(
                             SimpleTextAttributes.GRAYED_ATTRIBUTES,
                             SimpleTextAttributes.REGULAR_ITALIC_ATTRIBUTES));
 
-            String contextPath = artifact.getContextPath();
-            if (contextPath != null && !contextPath.isEmpty()) {
+            String contextPath = deployment.getContextPath();
+            if (!contextPath.isEmpty()) {
                 data.addText("  " + contextPath, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             }
 
@@ -460,9 +460,8 @@ public final class TomcatRunConfigContributor
 
         @NotNull
         private String buildUrl() {
-            DeploymentArtifact artifact = item.getArtifact();
-            String context = artifact.getContextPath();
-            if (context == null || context.isEmpty()) {
+            String context = item.getDeployment().getContextPath();
+            if (context.isEmpty()) {
                 context = TomcatConstants.DEFAULT_CONTEXT_PATH;
             }
             return (item.isHttps() ? "https" : "http")
@@ -484,11 +483,10 @@ public final class TomcatRunConfigContributor
 
         @NotNull
         private String buildTooltip() {
-            DeploymentArtifact artifact = item.getArtifact();
+            Deployment deployment = item.getDeployment();
             StringBuilder sb = new StringBuilder();
-            sb.append(artifact.getDisplayName());
-            sb.append(DeploymentArtifact.TYPE_EXPLODED.equals(artifact.getType())
-                    ? " (Exploded)" : " (WAR)");
+            sb.append(deployment.getDisplayName());
+            sb.append(deployment.isExploded() ? " (Exploded)" : " (WAR)");
             if (item.getPort() > 0) {
                 sb.append("\n").append(buildUrl());
             }

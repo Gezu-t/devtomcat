@@ -26,7 +26,7 @@ public final class ModuleBackedDeployment implements Deployment {
      * Original stored display name from the persisted legacy record (e.g.
      * {@code webapp.war}), which may differ from the resolved module name when
      * the artifact filename was mapped to a differently-named module by
-     * {@code DeploymentAdapter}. Preserved so the legacy round trip echoes back
+     * {@link DeploymentResolver}. Preserved so the legacy round trip echoes back
      * the persisted name instead of silently rewriting it to the module name.
      * Null when the deployment was created directly from a module (name ==
      * module name). Deliberately excluded from equals/hashCode — identity stays
@@ -68,6 +68,12 @@ public final class ModuleBackedDeployment implements Deployment {
     @Override
     public @NotNull DeploymentKind getKind() {
         return DeploymentKind.MODULE;
+    }
+
+    /** Copy with a different context path; pointer, output path, packaging and legacy name carry over. */
+    @Override
+    public @NotNull ModuleBackedDeployment withContextPath(@NotNull String contextPath) {
+        return new ModuleBackedDeployment(modulePointer, outputPath, contextPath, exploded, legacyName);
     }
 
     @Override

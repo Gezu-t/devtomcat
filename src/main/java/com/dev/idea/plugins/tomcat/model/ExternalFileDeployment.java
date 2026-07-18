@@ -30,6 +30,17 @@ public final class ExternalFileDeployment implements Deployment {
         return DeploymentKind.EXTERNAL;
     }
 
+    /** Copy with a different context path; path and packaging carry over. */
+    @Override
+    public @NotNull ExternalFileDeployment withContextPath(@NotNull String contextPath) {
+        return new ExternalFileDeployment(externalPath, contextPath, exploded);
+    }
+
+    /** Copy with a different packaging; path and context carry over. */
+    public @NotNull ExternalFileDeployment withExploded(boolean exploded) {
+        return new ExternalFileDeployment(externalPath, contextPath, exploded);
+    }
+
     @Override
     public @NotNull String getContextPath() {
         return contextPath;

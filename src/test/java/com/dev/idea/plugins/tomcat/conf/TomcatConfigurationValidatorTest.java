@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.conf;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.DeploymentPointers;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
@@ -22,6 +23,13 @@ class TomcatConfigurationValidatorTest {
 
     private TomcatConfigurationData data;
 
+    /** Headless typed fixture — name-only module pointer, no platform services. */
+    private static ModuleBackedDeployment deployment(String name, String path,
+                                                     String contextPath, boolean exploded) {
+        return new ModuleBackedDeployment(
+                DeploymentPointers.detachedModulePointer(name), Path.of(path), contextPath, exploded);
+    }
+
     @BeforeEach
     void setUp(@TempDir Path tempDir) throws Exception {
         data = new TomcatConfigurationData();
@@ -41,10 +49,8 @@ class TomcatConfigurationValidatorTest {
         // — tests that specifically exercise empty-list behaviour can clear
         // this back out.
         Path baselineArtifact = Files.createTempDirectory(tempDir, "baseline-app");
-        DeploymentArtifact baseline = new DeploymentArtifact(
-                "baseline-app", baselineArtifact.toString(), DeploymentArtifact.TYPE_EXPLODED);
-        baseline.setContextPath("/baseline-app");
-        data.getDeploymentConfig().addArtifact(baseline);
+        data.getDeploymentConfig().addDeployment(
+                deployment("baseline-app", baselineArtifact.toString(), "/baseline-app", true));
     }
 
     // =========================================================================
@@ -275,7 +281,7 @@ class TomcatConfigurationValidatorTest {
             // yet Tomcat still launched. Now this is a blocking
             // RuntimeConfigurationException — red stripe, launch refused —
             // because launching with zero deployments is never the happy path.
-            data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
+            data.getDeploymentConfig().setDeployments(java.util.Collections.emptyList());
 
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,
@@ -296,12 +302,10 @@ class TomcatConfigurationValidatorTest {
             // before-launch step (DevTomcat assembles it; the platform builds it on
             // Ultimate), so a not-yet-built path must not raise the old confusing
             // "Artifact output not found" warning.
-            data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
-            DeploymentArtifact exploded = new DeploymentArtifact(
+            data.getDeploymentConfig().setDeployments(java.util.Collections.emptyList());
+            data.getDeploymentConfig().addDeployment(deployment(
                     "web-module", "/does/not/exist/target/web-module-1.0",
-                    DeploymentArtifact.TYPE_EXPLODED);
-            exploded.setContextPath("/web-module");
-            data.getDeploymentConfig().addArtifact(exploded);
+                    "/web-module", true));
 
             assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
         }
@@ -309,12 +313,10 @@ class TomcatConfigurationValidatorTest {
         @Test
         @DisplayName("missing WAR path still warns — only a real package step produces it")
         void missingWarPathWarns() {
-            data.getDeploymentConfig().setArtifacts(java.util.Collections.emptyList());
-            DeploymentArtifact war = new DeploymentArtifact(
+            data.getDeploymentConfig().setDeployments(java.util.Collections.emptyList());
+            data.getDeploymentConfig().addDeployment(deployment(
                     "web-module", "/does/not/exist/target/web-module-1.0.war",
-                    DeploymentArtifact.TYPE_WAR);
-            war.setContextPath("/web-module");
-            data.getDeploymentConfig().addArtifact(war);
+                    "/web-module", false));
 
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
@@ -328,13 +330,10 @@ class TomcatConfigurationValidatorTest {
         void duplicateArtifactPathsThrow() throws Exception {
             Path exploded = Files.createTempDirectory("devtomcat-artifact");
 
-            DeploymentArtifact first = new DeploymentArtifact("webapp-one", exploded.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            first.setContextPath("/webapp-one");
-            DeploymentArtifact second = new DeploymentArtifact("webapp-other", exploded.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            second.setContextPath("/webapp-other");
-
-            data.getDeploymentConfig().addArtifact(first);
-            data.getDeploymentConfig().addArtifact(second);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("webapp-one", exploded.toString(), "/webapp-one", true));
+            data.getDeploymentConfig().addDeployment(
+                    deployment("webapp-other", exploded.toString(), "/webapp-other", true));
 
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
@@ -348,13 +347,10 @@ class TomcatConfigurationValidatorTest {
             Path firstPath = Files.createTempDirectory("devtomcat-artifact-a");
             Path secondPath = Files.createTempDirectory("devtomcat-artifact-b");
 
-            DeploymentArtifact first = new DeploymentArtifact("webapp-two", firstPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            first.setContextPath("/webapp-two");
-            DeploymentArtifact second = new DeploymentArtifact("webapp-two_war_exploded", secondPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            second.setContextPath("/webapp-two-2");
-
-            data.getDeploymentConfig().addArtifact(first);
-            data.getDeploymentConfig().addArtifact(second);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("webapp-two", firstPath.toString(), "/webapp-two", true));
+            data.getDeploymentConfig().addDeployment(
+                    deployment("webapp-two_war_exploded", secondPath.toString(), "/webapp-two-2", true));
 
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
@@ -367,12 +363,10 @@ class TomcatConfigurationValidatorTest {
         void identicalContextPathsCollide() throws Exception {
             Path aPath = Files.createTempDirectory("devtomcat-art-a");
             Path bPath = Files.createTempDirectory("devtomcat-art-b");
-            DeploymentArtifact a = new DeploymentArtifact("artifact-alpha", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            a.setContextPath("/myapp");
-            DeploymentArtifact b = new DeploymentArtifact("artifact-beta", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            b.setContextPath("/myapp");
-            data.getDeploymentConfig().addArtifact(a);
-            data.getDeploymentConfig().addArtifact(b);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("artifact-alpha", aPath.toString(), "/myapp", true));
+            data.getDeploymentConfig().addDeployment(
+                    deployment("artifact-beta", bPath.toString(), "/myapp", true));
 
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
@@ -392,12 +386,10 @@ class TomcatConfigurationValidatorTest {
         void trailingSlashVariantCollides() throws Exception {
             Path aPath = Files.createTempDirectory("devtomcat-trail-a");
             Path bPath = Files.createTempDirectory("devtomcat-trail-b");
-            DeploymentArtifact a = new DeploymentArtifact("trail-app-a", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            a.setContextPath("/foo");
-            DeploymentArtifact b = new DeploymentArtifact("trail-app-b", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            b.setContextPath("/foo/");
-            data.getDeploymentConfig().addArtifact(a);
-            data.getDeploymentConfig().addArtifact(b);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("trail-app-a", aPath.toString(), "/foo", true));
+            data.getDeploymentConfig().addDeployment(
+                    deployment("trail-app-b", bPath.toString(), "/foo/", true));
 
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
@@ -411,12 +403,10 @@ class TomcatConfigurationValidatorTest {
         void emptyAndDefaultBothCollideAsRoot() throws Exception {
             Path aPath = Files.createTempDirectory("devtomcat-root-a");
             Path bPath = Files.createTempDirectory("devtomcat-root-b");
-            DeploymentArtifact a = new DeploymentArtifact("root-app-a", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            a.setContextPath("");
-            DeploymentArtifact b = new DeploymentArtifact("root-app-b", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            b.setContextPath("/");
-            data.getDeploymentConfig().addArtifact(a);
-            data.getDeploymentConfig().addArtifact(b);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("root-app-a", aPath.toString(), "", true));
+            data.getDeploymentConfig().addDeployment(
+                    deployment("root-app-b", bPath.toString(), "/", true));
 
             RuntimeConfigurationWarning ex = assertThrows(
                     RuntimeConfigurationWarning.class,
@@ -432,12 +422,10 @@ class TomcatConfigurationValidatorTest {
         void distinctContextPathsPass() throws Exception {
             Path aPath = Files.createTempDirectory("devtomcat-distinct-a");
             Path bPath = Files.createTempDirectory("devtomcat-distinct-b");
-            DeploymentArtifact a = new DeploymentArtifact("distinct-a", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            a.setContextPath("/alpha");
-            DeploymentArtifact b = new DeploymentArtifact("distinct-b", bPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            b.setContextPath("/beta");
-            data.getDeploymentConfig().addArtifact(a);
-            data.getDeploymentConfig().addArtifact(b);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("distinct-a", aPath.toString(), "/alpha", true));
+            data.getDeploymentConfig().addDeployment(
+                    deployment("distinct-b", bPath.toString(), "/beta", true));
 
             assertDoesNotThrow(() -> TomcatConfigurationValidator.validate(data));
         }
@@ -446,9 +434,8 @@ class TomcatConfigurationValidatorTest {
         @DisplayName("invalid context path with .. throws hard exception")
         void invalidContextPathThrowsHardException() throws Exception {
             Path aPath = Files.createTempDirectory("devtomcat-invalid");
-            DeploymentArtifact a = new DeploymentArtifact("invalid-app", aPath.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            a.setContextPath("/foo/../bar");
-            data.getDeploymentConfig().addArtifact(a);
+            data.getDeploymentConfig().addDeployment(
+                    deployment("invalid-app", aPath.toString(), "/foo/../bar", true));
 
             RuntimeConfigurationException ex = assertThrows(
                     RuntimeConfigurationException.class,

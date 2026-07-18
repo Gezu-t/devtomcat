@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -60,12 +61,10 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", tempDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
-        artifact.setContextPath("/test");
+        Deployment deployment = new ExternalFileDeployment(tempDir, "/test", true);
 
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null);
+                deployer.deployWithProgress(deployment, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
                 "Deploy should fail for unreachable host");
     }
@@ -77,13 +76,12 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "ROOT", "/nonexistent/path/ROOT.war", DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/");
+        Deployment deployment = new ExternalFileDeployment(
+                Path.of("/nonexistent/path/ROOT.war"), "/", false);
 
         // Should not throw — handles "/" context path correctly
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null);
+                deployer.deployWithProgress(deployment, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result); // fails: file doesn't exist
     }
 
@@ -94,12 +92,12 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "app", "/nonexistent/path/app.war", DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("");
+        // Empty context path folds to "/" at the typed-model boundary.
+        Deployment deployment = new ExternalFileDeployment(
+                Path.of("/nonexistent/path/app.war"), "", false);
 
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null);
+                deployer.deployWithProgress(deployment, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result);
     }
 
@@ -124,12 +122,10 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/test");
+        Deployment deployment = new ExternalFileDeployment(warFile, "/test", false);
 
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null);
+                deployer.deployWithProgress(deployment, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
                 "Unreachable host should return FAILED, not CANCELLED");
     }
@@ -144,9 +140,7 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/test");
+        Deployment deployment = new ExternalFileDeployment(warFile, "/test", false);
 
         // Simulate a pre-cancelled indicator using a simple stub
         com.intellij.openapi.progress.ProgressIndicator indicator =
@@ -154,7 +148,7 @@ class TomcatManagerDeployerTest {
         indicator.cancel();
 
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, indicator);
+                deployer.deployWithProgress(deployment, null, indicator);
         assertEquals(TomcatManagerDeployer.DeployResult.CANCELLED, result,
                 "Pre-cancelled indicator should return CANCELLED immediately");
     }
@@ -166,12 +160,11 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", "/nonexistent/path/app.war", DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/test");
+        Deployment deployment = new ExternalFileDeployment(
+                Path.of("/nonexistent/path/app.war"), "/test", false);
 
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null);
+                deployer.deployWithProgress(deployment, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
                 "Missing WAR file should return FAILED");
     }
@@ -201,12 +194,10 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/test");
+        Deployment deployment = new ExternalFileDeployment(warFile, "/test", false);
 
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null, () -> true);
+                deployer.deployWithProgress(deployment, null, null, () -> true);
         assertEquals(TomcatManagerDeployer.DeployResult.CANCELLED, result,
                 "Abort predicate returning true before upload starts must yield CANCELLED, not FAILED");
     }
@@ -223,13 +214,11 @@ class TomcatManagerDeployerTest {
                 "admin", "admin", true);
         TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-        DeploymentArtifact artifact = new DeploymentArtifact(
-                "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
-        artifact.setContextPath("/test");
+        Deployment deployment = new ExternalFileDeployment(warFile, "/test", false);
 
         // No abort predicate - falls through to the unreachable-host FAILED path.
         TomcatManagerDeployer.DeployResult result =
-                deployer.deployWithProgress(artifact, null, null);
+                deployer.deployWithProgress(deployment, null, null);
         assertEquals(TomcatManagerDeployer.DeployResult.FAILED, result,
                 "Three-arg overload must still produce FAILED on unreachable host (not CANCELLED)");
     }
@@ -271,16 +260,14 @@ class TomcatManagerDeployerTest {
                     "http://127.0.0.1:" + port + "/manager", "admin", "admin", true);
             TomcatManagerDeployer deployer = new TomcatManagerDeployer(config);
 
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "test-app", warFile.toString(), DeploymentArtifact.TYPE_WAR);
-            artifact.setContextPath("/test");
+            Deployment deployment = new ExternalFileDeployment(warFile, "/test", false);
 
             // Abort predicate polls: index 0 is the pre-upload check in
             // deployWithProgress, index 1 is the first in-loop poll (lets the
             // first chunk go out), index >= 2 aborts the in-flight upload.
             AtomicInteger polls = new AtomicInteger();
             TomcatManagerDeployer.DeployResult result =
-                    deployer.deployWithProgress(artifact, null, null,
+                    deployer.deployWithProgress(deployment, null, null,
                             () -> polls.getAndIncrement() >= 2);
 
             assertEquals(TomcatManagerDeployer.DeployResult.CANCELLED, result,

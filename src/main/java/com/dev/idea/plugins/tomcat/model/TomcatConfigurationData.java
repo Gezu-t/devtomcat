@@ -71,10 +71,10 @@ package com.dev.idea.plugins.tomcat.model;
             }
             public void setContextPath(@Nullable String path) {
                 // Canonicalize at the model boundary — guarantees slash-prefix, no
-                // double slashes, no trailing slash (except root). Mirrors the
-                // 1.0.9 DeploymentArtifact.setContextPath fix so non-UI callers
-                // (XML deserializer, imported configs, programmatic edits) cannot
-                // produce broken URLs in autoBrowserUrl().
+                // double slashes, no trailing slash (except root). Same canonicalization
+                // the deployment context paths get, so non-UI callers (XML deserializer,
+                // imported configs, programmatic edits) cannot produce broken URLs in
+                // autoBrowserUrl().
                 this.contextPath = com.dev.idea.plugins.tomcat.utils.ContextPathUtils
                         .normalizeContextPath(path);
             }

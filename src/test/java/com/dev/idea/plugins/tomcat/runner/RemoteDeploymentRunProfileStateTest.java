@@ -3,7 +3,7 @@ package com.dev.idea.plugins.tomcat.runner;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfigurationType;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.remote.RemoteConfig;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.RunManager;
@@ -13,6 +13,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -127,12 +128,10 @@ public class RemoteDeploymentRunProfileStateTest extends BasePlatformTestCase {
         // by the isValid() check (so the user can recover per-artifact when a
         // file is added later) and surfaced as a "no valid artifacts" warning.
         TomcatRunConfiguration cfg = createRemoteConfig("InvalidArtifact");
-        DeploymentArtifact a = new DeploymentArtifact(
-                "ghost",
-                "/tmp/devtomcat-does-not-exist-" + System.nanoTime() + ".war",
-                DeploymentArtifact.TYPE_WAR);
-        a.setContextPath("/ghost");
-        cfg.getConfigData().getDeploymentConfig().setArtifacts(List.of(a));
+        ExternalFileDeployment a = new ExternalFileDeployment(
+                Path.of("/tmp/devtomcat-does-not-exist-" + System.nanoTime() + ".war"),
+                "/ghost", false);
+        cfg.getConfigData().getDeploymentConfig().setDeployments(List.of(a));
         RemoteDeploymentRunProfileState state = stateFor(cfg);
         // No throw — the artifact is invalid (file missing) but its context path
         // is fine, so this gate is satisfied. Downstream cleanup handles it.

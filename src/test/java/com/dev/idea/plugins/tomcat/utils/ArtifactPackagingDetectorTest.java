@@ -1,38 +1,41 @@
-package com.dev.idea.plugins.tomcat.ui.deployment;
+package com.dev.idea.plugins.tomcat.utils;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-@DisplayName("ArtifactSelectionHandler")
-class ArtifactSelectionHandlerTest {
+@DisplayName("ArtifactPackagingDetector")
+class ArtifactPackagingDetectorTest {
 
     @Test
-    @DisplayName("resolves WAR type from artifact type ID")
+    @DisplayName("resolves WAR packaging from artifact type ID")
     void resolvesWarTypeFromArtifactTypeId() {
         Artifact artifact = mock(Artifact.class);
         ArtifactType type = mock(ArtifactType.class);
         when(artifact.getArtifactType()).thenReturn(type);
         when(type.getId()).thenReturn("war");
 
-        assertEquals(DeploymentArtifact.TYPE_WAR, ArtifactSelectionHandler.resolveDeploymentType(artifact));
+        assertFalse(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
     }
 
     @Test
-    @DisplayName("resolves exploded type from artifact type ID")
+    @DisplayName("resolves exploded packaging from artifact type ID")
     void resolvesExplodedTypeFromArtifactTypeId() {
         Artifact artifact = mock(Artifact.class);
         ArtifactType type = mock(ArtifactType.class);
         when(artifact.getArtifactType()).thenReturn(type);
         when(type.getId()).thenReturn("exploded");
 
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, ArtifactSelectionHandler.resolveDeploymentType(artifact));
+        assertTrue(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
     }
 
     @Test
@@ -44,7 +47,23 @@ class ArtifactSelectionHandlerTest {
         when(type.getId()).thenReturn("plain"); // CE artifact type
         when(artifact.getName()).thenReturn("myapp:war exploded");
 
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, ArtifactSelectionHandler.resolveDeploymentType(artifact));
+        assertTrue(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
+    }
+
+    @Test
+    @DisplayName("Community Edition plain type with directory output resolves exploded")
+    void communityEditionPlainTypeWithDirectoryOutput(@TempDir Path tempDir) {
+        // A generic type id and a hint-free name carry no packaging signal —
+        // the output-path shape (a directory) must decide. This is the shape
+        // where an id-only check would wrongly report WAR.
+        Artifact artifact = mock(Artifact.class);
+        ArtifactType type = mock(ArtifactType.class);
+        when(artifact.getArtifactType()).thenReturn(type);
+        when(type.getId()).thenReturn("plain");
+        when(artifact.getName()).thenReturn("app-1.0.0");
+        when(artifact.getOutputFilePath()).thenReturn(tempDir.toString());
+
+        assertTrue(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
     }
 
     @Test
@@ -57,7 +76,7 @@ class ArtifactSelectionHandlerTest {
         when(artifact.getName()).thenReturn("utils");
         when(artifact.getOutputFilePath()).thenReturn(null);
 
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, ArtifactSelectionHandler.resolveDeploymentType(artifact));
+        assertTrue(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
     }
 
     @Test
@@ -69,7 +88,7 @@ class ArtifactSelectionHandlerTest {
         when(type.getId()).thenThrow(new RuntimeException("boom"));
         when(artifact.getName()).thenReturn("sample.war");
 
-        assertEquals(DeploymentArtifact.TYPE_WAR, ArtifactSelectionHandler.resolveDeploymentType(artifact));
+        assertFalse(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
     }
 
     @Test
@@ -82,6 +101,6 @@ class ArtifactSelectionHandlerTest {
         when(artifact.getName()).thenReturn("sample");
         when(artifact.getOutputFilePath()).thenReturn(System.getProperty("java.io.tmpdir"));
 
-        assertEquals(DeploymentArtifact.TYPE_EXPLODED, ArtifactSelectionHandler.resolveDeploymentType(artifact));
+        assertTrue(ArtifactPackagingDetector.resolveExplodedPackaging(artifact));
     }
 }

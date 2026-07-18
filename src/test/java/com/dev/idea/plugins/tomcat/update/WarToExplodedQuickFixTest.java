@@ -1,6 +1,13 @@
 package com.dev.idea.plugins.tomcat.update;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentKind;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModulePointer;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -28,6 +35,17 @@ class WarToExplodedQuickFixTest {
         Path explodedDir = target.resolve(warName);
         Files.createDirectories(explodedDir.resolve("WEB-INF").resolve("classes"));
         return warFile;
+    }
+
+    /**
+     * Name-only module pointer — lets tests build {@link ModuleBackedDeployment}
+     * without an IntelliJ {@code Project} / {@code ModulePointerManager}.
+     */
+    private static ModulePointer pointerTo(String moduleName) {
+        return new ModulePointer() {
+            @Override public @Nullable Module getModule() { return null; }
+            @Override public @NotNull String getModuleName() { return moduleName; }
+        };
     }
 
     /**
@@ -143,16 +161,15 @@ class WarToExplodedQuickFixTest {
         @DisplayName("offers fix when sibling exploded directory exists with WEB-INF and a module owns it")
         void offersFixForMavenLayout(@TempDir Path tempDir) throws IOException {
             Path warFile = createMavenWebappLayout(tempDir, "app");
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app.war", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+            Deployment deployment = new ExternalFileDeployment(warFile, "/", false);
 
             List<WarToExplodedQuickFix.FixCandidate> candidates =
                     WarToExplodedQuickFix.findFixableArtifacts(
                             singleOwner(tempDir, "app-module"),
-                            List.of(artifact));
+                            List.of(deployment));
 
             assertEquals(1, candidates.size());
-            assertEquals(artifact, candidates.get(0).artifact());
+            assertEquals(deployment, candidates.get(0).deployment());
             assertEquals(tempDir.resolve("app"), candidates.get(0).explodedDirectory());
             assertEquals("app-module", candidates.get(0).moduleName());
         }
@@ -162,14 +179,13 @@ class WarToExplodedQuickFixTest {
         void noFixWhenNoModuleOwns(@TempDir Path tempDir) throws IOException {
             // A real exploded directory exists alongside the WAR, but the
             // user's project doesn't have any module rooted there. Flipping
-            // to AUTO_DETECTED wouldn't help — class sync still wouldn't find
+            // to module-owned wouldn't help — class sync still wouldn't find
             // a source classes/ directory to copy from.
             Path warFile = createMavenWebappLayout(tempDir, "app");
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app.war", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+            Deployment deployment = new ExternalFileDeployment(warFile, "/", false);
 
             assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
-                    NO_OWNER, List.of(artifact)).isEmpty());
+                    NO_OWNER, List.of(deployment)).isEmpty());
         }
 
         @Test
@@ -178,11 +194,10 @@ class WarToExplodedQuickFixTest {
             // .war file exists, but no sibling directory
             Path warFile = tempDir.resolve("app.war");
             Files.createFile(warFile);
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app.war", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+            Deployment deployment = new ExternalFileDeployment(warFile, "/", false);
 
             assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
-                    singleOwner(tempDir, "any"), List.of(artifact)).isEmpty());
+                    singleOwner(tempDir, "any"), List.of(deployment)).isEmpty());
         }
 
         @Test
@@ -194,50 +209,45 @@ class WarToExplodedQuickFixTest {
             // some other build step happened to leave a directory with the
             // same base name. Don't flip into it.
             Files.createDirectories(tempDir.resolve("app"));
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app.war", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+            Deployment deployment = new ExternalFileDeployment(warFile, "/", false);
 
             assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
-                    singleOwner(tempDir, "any"), List.of(artifact)).isEmpty());
+                    singleOwner(tempDir, "any"), List.of(deployment)).isEmpty());
         }
 
         @Test
-        @DisplayName("already-exploded artifacts with non-EXTERNAL source are skipped")
-        void alreadyExplodedAutoDetectedSkipped(@TempDir Path tempDir) throws IOException {
-            // type=exploded + source=AUTO_DETECTED is the steady state — the
-            // loader builds ModuleBackedDeployment, class sync works, nothing
-            // to fix. (Default source on a fresh DeploymentArtifact is
-            // INTELLIJ_ARTIFACT, also a steady state for our purposes.)
+        @DisplayName("already-exploded module-backed deployments are skipped")
+        void alreadyExplodedModuleBackedSkipped(@TempDir Path tempDir) throws IOException {
+            // An exploded ModuleBackedDeployment is the steady state — class
+            // sync works, nothing to fix. Only exploded EXTERNAL deployments
+            // qualify for the recovery branch.
             Path explodedDir = tempDir.resolve("app");
             Files.createDirectories(explodedDir.resolve("WEB-INF"));
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app", explodedDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            artifact.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
+            Deployment deployment = new ModuleBackedDeployment(
+                    pointerTo("app"), explodedDir, "/", true);
 
             assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
-                    singleOwner(tempDir, "any"), List.of(artifact)).isEmpty());
+                    singleOwner(tempDir, "any"), List.of(deployment)).isEmpty());
         }
 
         @Test
-        @DisplayName("recovery case: type=EXPLODED + source=EXTERNAL is fixable when module owns the path")
+        @DisplayName("recovery case: exploded EXTERNAL deployment is fixable when module owns the path")
         void recoveryCaseExplodedButExternal(@TempDir Path tempDir) throws IOException {
             // The reported regression's residual state: an earlier flip
-            // changed path/type but left source=EXTERNAL. The loader builds
-            // ExternalFileDeployment, class sync reports "could not resolve
-            // owning module — null". The candidate detector must offer to
-            // reclaim this as AUTO_DETECTED so class sync wires through.
+            // changed path/packaging but the entry stayed external. The loader
+            // builds ExternalFileDeployment, class sync reports "could not
+            // resolve owning module — null". The candidate detector must offer
+            // to reclaim this as module-owned so class sync wires through.
             Path explodedDir = tempDir.resolve("app");
             Files.createDirectories(explodedDir.resolve("WEB-INF"));
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app", explodedDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            artifact.setSource(DeploymentArtifact.Source.EXTERNAL);
+            Deployment deployment = new ExternalFileDeployment(explodedDir, "/", true);
 
             List<WarToExplodedQuickFix.FixCandidate> candidates =
                     WarToExplodedQuickFix.findFixableArtifacts(
-                            singleOwner(tempDir, "app-module"), List.of(artifact));
+                            singleOwner(tempDir, "app-module"), List.of(deployment));
 
             assertEquals(1, candidates.size());
-            // For the recovery case, the candidate path is the artifact's
+            // For the recovery case, the candidate path is the deployment's
             // current path — no derivation, no .war stripping.
             assertEquals(explodedDir, candidates.get(0).explodedDirectory());
             assertEquals("app-module", candidates.get(0).moduleName());
@@ -246,18 +256,16 @@ class WarToExplodedQuickFixTest {
         @Test
         @DisplayName("recovery case: skipped when external path doesn't live under any module")
         void recoveryCaseSkippedWhenOutsideAnyModule(@TempDir Path tempDir) throws IOException {
-            // type=EXPLODED + source=EXTERNAL is only a valid recovery target
+            // An exploded EXTERNAL deployment is only a valid recovery target
             // when the path is genuinely under a project module. An external
             // directory outside the project (user's deliberate choice) stays
             // as-is.
             Path explodedDir = tempDir.resolve("app");
             Files.createDirectories(explodedDir.resolve("WEB-INF"));
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app", explodedDir.toString(), DeploymentArtifact.TYPE_EXPLODED);
-            artifact.setSource(DeploymentArtifact.Source.EXTERNAL);
+            Deployment deployment = new ExternalFileDeployment(explodedDir, "/", true);
 
             assertTrue(WarToExplodedQuickFix.findFixableArtifacts(
-                    NO_OWNER, List.of(artifact)).isEmpty());
+                    NO_OWNER, List.of(deployment)).isEmpty());
         }
 
         @Test
@@ -270,8 +278,8 @@ class WarToExplodedQuickFixTest {
             Path warB = createMavenWebappLayout(
                     Files.createDirectories(moduleBDir.resolve("target")), "module-b");
 
-            DeploymentArtifact a = new DeploymentArtifact("module-a.war", warA.toString(), DeploymentArtifact.TYPE_WAR);
-            DeploymentArtifact b = new DeploymentArtifact("module-b.war", warB.toString(), DeploymentArtifact.TYPE_WAR);
+            Deployment a = new ExternalFileDeployment(warA, "/", false);
+            Deployment b = new ExternalFileDeployment(warB, "/", false);
 
             // Resolver that knows about both modules and picks the deepest
             // matching root — same logic as the production version.
@@ -298,22 +306,21 @@ class WarToExplodedQuickFixTest {
             // Each candidate matches the right module — verifies the resolver
             // picks the deepest containing root rather than the first hit.
             for (WarToExplodedQuickFix.FixCandidate c : candidates) {
-                if (c.artifact() == a) assertEquals("module-a", c.moduleName());
-                else if (c.artifact() == b) assertEquals("module-b", c.moduleName());
-                else fail("unexpected candidate artifact");
+                if (c.deployment() == a) assertEquals("module-a", c.moduleName());
+                else if (c.deployment() == b) assertEquals("module-b", c.moduleName());
+                else fail("unexpected candidate deployment");
             }
         }
 
         @Test
-        @DisplayName("null entries in the artifact list are skipped without NPE")
+        @DisplayName("null entries in the deployment list are skipped without NPE")
         void nullEntriesSkipped(@TempDir Path tempDir) throws IOException {
             Path warFile = createMavenWebappLayout(tempDir, "app");
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app.war", warFile.toString(), DeploymentArtifact.TYPE_WAR);
+            Deployment deployment = new ExternalFileDeployment(warFile, "/", false);
 
-            List<DeploymentArtifact> input = new java.util.ArrayList<>();
+            List<Deployment> input = new java.util.ArrayList<>();
             input.add(null);
-            input.add(artifact);
+            input.add(deployment);
             input.add(null);
 
             List<WarToExplodedQuickFix.FixCandidate> candidates =
@@ -324,43 +331,43 @@ class WarToExplodedQuickFixTest {
     }
 
     @Nested
-    @DisplayName("applyAll (mutation contract)")
+    @DisplayName("applyAll (replacement contract)")
     class ApplyAllBehaviour {
 
         @Test
-        @DisplayName("flipping an EXTERNAL .war artifact rewrites path, type, source, AND name")
-        void flipsAllFourFields(@TempDir Path tempDir) throws IOException {
+        @DisplayName("flipping an EXTERNAL .war deployment yields a module-owned exploded replacement")
+        void flipsToModuleOwnedExploded(@TempDir Path tempDir) throws IOException {
             // The user-reported regression: external .war picked via auto-detect
-            // or external source path. Without flipping source+name, the loader
-            // rebuilds ExternalFileDeployment (no module link) and class sync
-            // returns "external-source-skipped" with diagnostic=null. The fix
-            // must claim the deployment as module-owned and replace the name
-            // with the actual module name so loader tier-1 lookup matches.
+            // or external source path. Without reclaiming the entry as
+            // module-owned, the loader keeps ExternalFileDeployment (no module
+            // link) and class sync returns "external-source-skipped" with
+            // diagnostic=null. The fix must replace the entry with a
+            // ModuleBackedDeployment pointing at the exploded directory so
+            // the module link and packaging are both correct.
             Path warFile = createMavenWebappLayout(tempDir, "app");
-            DeploymentArtifact artifact = new DeploymentArtifact(
-                    "app.war", warFile.toString(), DeploymentArtifact.TYPE_WAR);
-            artifact.setSource(DeploymentArtifact.Source.EXTERNAL);
+            Deployment deployment = new ExternalFileDeployment(warFile, "/", false);
 
             List<WarToExplodedQuickFix.FixCandidate> candidates =
                     WarToExplodedQuickFix.findFixableArtifacts(
-                            singleOwner(tempDir, "app-module"), List.of(artifact));
+                            singleOwner(tempDir, "app-module"), List.of(deployment));
             assertEquals(1, candidates.size());
 
-            // applyAll requires a TomcatRunConfiguration but only uses it for
-            // logging; pass null is too lossy — we exercise the per-artifact
-            // mutation by simulating apply directly here (the integration
-            // path is covered by the platform test that uses a real run-config).
-            // Mirror what applyAll does:
+            // applyAll requires a TomcatRunConfiguration (project services for
+            // ModulePointerManager); here we pin only the replacement SHAPE by
+            // mirroring what applyAll builds. The real applyAll write-back —
+            // stored-list persistence and resolved-slot consumption — is
+            // covered by WarToExplodedQuickFixPlatformTest.
             WarToExplodedQuickFix.FixCandidate c = candidates.get(0);
-            c.artifact().setPath(c.explodedDirectory().toString());
-            c.artifact().setType(DeploymentArtifact.TYPE_EXPLODED);
-            c.artifact().setSource(DeploymentArtifact.Source.AUTO_DETECTED);
-            c.artifact().setName(c.moduleName());
+            Deployment replacement = new ModuleBackedDeployment(
+                    pointerTo(c.moduleName()), c.explodedDirectory(),
+                    c.deployment().getContextPath(), true);
 
-            assertEquals(tempDir.resolve("app").toString(), artifact.getPath());
-            assertEquals(DeploymentArtifact.TYPE_EXPLODED, artifact.getType());
-            assertEquals(DeploymentArtifact.Source.AUTO_DETECTED, artifact.getSource());
-            assertEquals("app-module", artifact.getName());
+            assertEquals(tempDir.resolve("app"), replacement.getResolvedPath());
+            assertTrue(replacement.isExploded());
+            assertEquals(DeploymentKind.MODULE, replacement.getKind());
+            assertEquals("app-module", replacement.getDisplayName());
+            // Context path carries over from the replaced deployment.
+            assertEquals("/", replacement.getContextPath());
         }
     }
 }

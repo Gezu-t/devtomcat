@@ -1,7 +1,8 @@
 package com.dev.idea.plugins.tomcat.ui.deployment;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.DeploymentRow;
 import com.dev.idea.plugins.tomcat.ui.deployment.dialogs.ArtifactDeploymentEditDialog;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.openapi.options.ConfigurationException;
@@ -96,13 +97,13 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
         contextTextField.getDocument().addDocumentListener(contextDocListener);
 
         @SuppressWarnings("unchecked")
-        JList<DeploymentArtifact> list = (JList<DeploymentArtifact>) tableManager.getComponent();
+        JList<DeploymentRow> list = (JList<DeploymentRow>) tableManager.getComponent();
         listSelectionListener = e -> {
             if (!e.getValueIsAdjusting()) {
-                DeploymentArtifact selected = tableManager.getSelectedDeployment();
+                DeploymentRow selected = tableManager.getSelectedDeployment();
                 isUpdatingContextField = true;
                 if (selected != null) {
-                    contextTextField.setText(selected.getApplicationContext());
+                    contextTextField.setText(selected.getContextPath());
                     contextTextField.setEnabled(true);
                 } else {
                     contextTextField.setText("");
@@ -197,20 +198,20 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     }
 
     private void editSelectedArtifact() {
-        DeploymentArtifact deployment = tableManager.getSelectedDeployment();
-        if (deployment != null) {
+        DeploymentRow row = tableManager.getSelectedDeployment();
+        if (row != null) {
             ArtifactDeploymentEditDialog dialog =
                     new ArtifactDeploymentEditDialog(
-                            this, deployment,
+                            this, row,
                             // Reject context-path duplicates against every other
-                            // artifact in the list — same contract the inline
+                            // row in the list — same contract the inline
                             // context-path field already enforces.
-                            ctx -> tableManager.isContextPathTakenByOthers(ctx, deployment)
+                            ctx -> tableManager.isContextPathTakenByOthers(ctx, row)
                     );
 
             if (dialog.showAndGet()) {
-                tableManager.updateSelectedDeployment(deployment);
-                LOG.debug("Updated deployment: " + deployment.getDisplayName());
+                tableManager.updateSelectedDeployment(row);
+                LOG.debug("Updated deployment: " + row.getDisplayName());
             }
         }
     }
@@ -222,13 +223,17 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     public void resetFrom(@NotNull TomcatRunConfiguration config) {
         tableManager.clearAll();
 
-        List<DeploymentArtifact> artifacts = config.getConfigData().getDeploymentConfig().getArtifacts();
-        if (artifacts != null) {
-            for (DeploymentArtifact artifact : artifacts) {
-                if (artifact != null) {
-                    tableManager.addDeployment(artifact.clone());
-                }
-            }
+        // Typed read of the STORED list — never the resolved view. applyTo
+        // writes these rows straight back into storage, so seeding them from
+        // getDeployments(project) would bake the resolver's read-only folds
+        // (e.g. dangling artifact→module in Community Edition) into storage on
+        // any OK/Apply, destroying artifact provenance for entries the user
+        // never touched. Stored entries render fine as-is: an unresolved
+        // artifact entry falls back to its last-known path/packaging.
+        List<Deployment> deployments =
+                config.getConfigData().getDeploymentConfig().getDeployments();
+        for (Deployment deployment : deployments) {
+            tableManager.addDeployment(DeploymentRow.of(deployment));
         }
 
         if (tableManager.getDeploymentCount() > 0) {
@@ -239,21 +244,21 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
     }
 
     public void applyTo(@NotNull TomcatRunConfiguration config) throws ConfigurationException {
-        // Flow the typed list into the config so the storage path can hold
-        // Deployment directly. The table still tracks legacy rows internally;
-        // getTypedDeployments adapts on the way out.
+        // Rows materialize back to typed deployments with their edits applied.
+        // Safe to write wholesale because resetFrom seeded the rows from
+        // storage — each unedited row round-trips to a value-identical entry.
         config.getConfigData().getDeploymentConfig()
-                .setDeployments(tableManager.getTypedDeployments(config.getProject()));
+                .setDeployments(tableManager.getTypedDeployments());
     }
 
     public boolean isConfigurationValid() {
         Set<String> seenContextPaths = new HashSet<>();
-        for (DeploymentArtifact d : tableManager.getDeployments()) {
-            if (d.getPath() == null || d.getPath().trim().isEmpty()) {
+        for (DeploymentRow row : tableManager.getRows()) {
+            java.nio.file.Path path = row.getResolvedPath();
+            if (path == null || path.toString().trim().isEmpty()) {
                 return false;
             }
-            String ctx = d.getContextPath();
-            if (ctx != null && !seenContextPaths.add(ctx)) {
+            if (!seenContextPaths.add(row.getContextPath())) {
                 return false; // duplicate context path
             }
         }
@@ -267,7 +272,7 @@ public class DeploymentConfigurationPanel extends JBPanel<DeploymentConfiguratio
             contextDocListener = null;
         }
         if (tableManager != null && listSelectionListener != null) {
-            JList<DeploymentArtifact> list = (JList<DeploymentArtifact>) tableManager.getComponent();
+            JList<DeploymentRow> list = (JList<DeploymentRow>) tableManager.getComponent();
             list.removeListSelectionListener(listSelectionListener);
             listSelectionListener = null;
         }

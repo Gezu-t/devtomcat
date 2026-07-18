@@ -1,6 +1,6 @@
 package com.dev.idea.plugins.tomcat.conf;
 
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
@@ -67,13 +67,9 @@ public class TomcatConfigurationValidatorPlatformTest extends BasePlatformTestCa
         // for the baseline to match against.
         File artifactDir = FileUtil.createTempDirectory("devtomcat-validator-deployment-", null, true);
         tempDirs.add(artifactDir);
-        DeploymentArtifact baseline = new DeploymentArtifact(
-                "baseline-app",
-                artifactDir.getAbsolutePath(),
-                DeploymentArtifact.TYPE_EXPLODED);
-        baseline.setContextPath("/baseline-app");
-        baseline.setSource(DeploymentArtifact.Source.EXTERNAL);
-        cfg.getConfigData().getDeploymentConfig().addArtifact(baseline);
+        ExternalFileDeployment baseline = new ExternalFileDeployment(
+                artifactDir.toPath(), "/baseline-app", true);
+        cfg.getConfigData().getDeploymentConfig().addDeployment(baseline);
         return cfg;
     }
 

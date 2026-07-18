@@ -2,27 +2,31 @@ package com.dev.idea.plugins.tomcat.conf;
 
 import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.DeploymentConfig;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Reconciles legacy {@link DeploymentArtifact} storage against the current
- * project model. The reconciliation is a one-pass walk: each stored entry is
- * built into a typed {@link ArtifactBackedDeployment} whose
- * {@link com.intellij.packaging.artifacts.ArtifactPointer} the platform
- * already updates on rename / delete; if the pointer reports a different
- * name or output path than what's stored, the legacy entry is patched in
- * place.
+ * Reconciles persisted deployment entries against the current project model.
+ * Walks the STORED deployment list — never the resolved view; resolution is a
+ * read-only projection and must not leak into storage. Each
+ * {@link ArtifactBackedDeployment} whose
+ * {@link com.intellij.packaging.artifacts.ArtifactPointer} resolves is checked
+ * for drift between the live artifact's output path / packaging and the
+ * persisted last-known values; on drift, only that entry is replaced with a
+ * fresh deployment carrying the live values and the stored list is written
+ * back through {@link DeploymentConfig#setDeployments}.
+ *
+ * <p>Name refresh is obsolete: the pointer rename-tracks and the serializer
+ * writes the live pointer name, so a rename persists with no reconciliation.
+ * Packaging IS reconciled — the serializer persists {@code lastKnownExploded}
+ * (pure data, no pointer deref), so a war↔exploded flip in Project Structure
+ * only reaches the XML through this pass.
  *
  * <p>This replaces a 4-strategy fuzzy matcher (exact-name, output-path,
  * base-module-name, with a separate EXTERNAL provenance guard). All of
@@ -30,7 +34,7 @@ import java.util.List;
  * than runtime heuristics.
  *
  * <p>Module-backed and external deployments don't participate — neither has a
- * platform Artifact to rename-track against.
+ * platform Artifact to track against.
  */
 public final class ArtifactReferenceRefresher {
 
@@ -39,22 +43,29 @@ public final class ArtifactReferenceRefresher {
     private ArtifactReferenceRefresher() {}
 
     /**
-     * One {@link DeploymentArtifact} that was updated. {@code newPath} matches
-     * {@code oldPath} when only the name drifted, and vice versa.
+     * One deployment entry that was updated: path and/or packaging drift
+     * against the live artifact.
      */
-    public record RefreshAction(@NotNull String oldName, @NotNull String oldPath,
-                                @NotNull String newName, @NotNull String newPath) {
+    public record RefreshAction(@NotNull String name,
+                                @NotNull String oldPath, @NotNull String newPath,
+                                boolean oldExploded, boolean newExploded) {
 
         @Override
         public String toString() {
-            boolean nameChanged = !oldName.equals(newName);
             boolean pathChanged = !oldPath.equals(newPath);
-            if (nameChanged && pathChanged) {
-                return "renamed '" + oldName + "' (" + oldPath + ") → '"
-                        + newName + "' (" + newPath + ")";
+            boolean packagingChanged = oldExploded != newExploded;
+            StringBuilder sb = new StringBuilder("refreshed '").append(name).append("':");
+            if (pathChanged) sb.append(" path ").append(oldPath).append(" → ").append(newPath);
+            if (packagingChanged) {
+                if (pathChanged) sb.append(',');
+                sb.append(" packaging ").append(packaging(oldExploded))
+                        .append(" → ").append(packaging(newExploded));
             }
-            if (nameChanged) return "renamed '" + oldName + "' → '" + newName + "'";
-            return "path drift '" + oldName + "': " + oldPath + " → " + newPath;
+            return sb.toString();
+        }
+
+        private static String packaging(boolean exploded) {
+            return exploded ? "exploded" : "war";
         }
     }
 
@@ -78,81 +89,51 @@ public final class ArtifactReferenceRefresher {
     @NotNull
     public static RefreshResult refresh(@NotNull TomcatRunConfiguration config) {
         return TomcatReadActions.compute(() ->
-                refreshInternal(config.getProject(),
-                        config.getConfigData().getDeploymentConfig().getArtifacts(),
-                        config.getConfigData().getDeploymentConfig()));
+                refreshInternal(config.getConfigData().getDeploymentConfig()));
     }
 
     /**
-     * Refreshes a live deployment-artifact list against the current model.
-     * The list elements are mutated in place — same object references as the
-     * UI table holds, so the caller doesn't need to reload.
+     * Core walk over the stored list. For each artifact-backed deployment
+     * whose pointer resolves, query the live artifact's output path and
+     * packaging; if either differs from the persisted last-known values,
+     * replace that entry (and only it) with a fresh
+     * {@link ArtifactBackedDeployment} on the same pointer.
+     *
+     * <p><b>Must be called under a read action.</b> The list is only written
+     * back through {@link DeploymentConfig#setDeployments} when at least one
+     * entry drifted, so a clean pass never churns storage; untouched entries
+     * persist unchanged.
      */
     @NotNull
-    public static RefreshResult refreshInPlace(@NotNull Project project,
-                                               @NotNull List<DeploymentArtifact> artifacts) {
-        if (artifacts.isEmpty()) return RefreshResult.EMPTY;
-        return TomcatReadActions.compute(() -> refreshInternal(project, artifacts, null));
-    }
+    static RefreshResult refreshInternal(@NotNull DeploymentConfig config) {
+        List<Deployment> deployments = config.getDeployments();
+        if (deployments.isEmpty()) return RefreshResult.EMPTY;
 
-    /**
-     * Core walk. For each stored entry whose source is INTELLIJ_ARTIFACT, build
-     * the typed pointer, query its current name/path, and patch the legacy
-     * entry if they differ.
-     *
-     * <p><b>Must be called under a read action.</b>
-     *
-     * @param config when non-null, the result list is pushed back via
-     *               {@link DeploymentConfig#setArtifacts} so a future change
-     *               to legacy storage semantics (e.g. defensive-copy on read)
-     *               doesn't lose the mutations.
-     */
-    @NotNull
-    private static RefreshResult refreshInternal(@NotNull Project project,
-                                                 @NotNull List<DeploymentArtifact> artifacts,
-                                                 @Nullable DeploymentConfig config) {
         List<RefreshAction> actions = new ArrayList<>();
-        for (DeploymentArtifact stale : artifacts) {
-            if (stale == null) continue;
-            if (stale.getSource() != DeploymentArtifact.Source.INTELLIJ_ARTIFACT) continue;
+        for (int i = 0; i < deployments.size(); i++) {
+            if (!(deployments.get(i) instanceof ArtifactBackedDeployment stale)) continue;
 
-            Deployment typed;
-            try {
-                typed = DeploymentAdapter.toTyped(project, stale);
-            } catch (Throwable t) {
-                LOG.debug("ArtifactReferenceRefresher: toTyped failed for '"
-                        + stale.getName() + "': " + t.getMessage());
-                continue;
-            }
-            if (!(typed instanceof ArtifactBackedDeployment a)) continue;
+            Artifact platformArtifact = stale.getArtifactPointer().getArtifact();
+            if (platformArtifact == null) continue; // dangling — leave the stored entry untouched
 
-            Artifact platformArtifact = a.getArtifactPointer().getArtifact();
-            if (platformArtifact == null) continue; // truly orphaned — leave the stale entry
-
-            String storedName = stale.getName();
-            String storedPath = stale.getPath();
-            String currentName = a.getArtifactName();
+            String storedPath = stale.getLastKnownPath() == null ? "" : stale.getLastKnownPath();
             String currentPath = platformArtifact.getOutputFilePath();
             if (currentPath == null) currentPath = storedPath;
+            boolean storedExploded = stale.getLastKnownExploded();
+            boolean currentExploded = stale.isExploded(); // live — the pointer resolves
 
-            // Sync name and path only. The 'type' field (exploded vs. WAR) is
-            // deliberately NOT re-synced here — DeploymentAdapter.toTyped() reads
-            // it live from the current Artifact on every conversion, so a type
-            // change in Project Structure takes effect on the next typed read
-            // without mutating the stored DeploymentArtifact.
-            boolean nameChanged = !currentName.equals(storedName);
             boolean pathChanged = !currentPath.equals(storedPath);
-            if (!nameChanged && !pathChanged) continue;
+            boolean packagingChanged = currentExploded != storedExploded;
+            if (!pathChanged && !packagingChanged) continue;
 
-            if (nameChanged) stale.setName(currentName);
-            if (pathChanged) stale.setPath(currentPath);
-            actions.add(new RefreshAction(storedName, storedPath, currentName, currentPath));
+            deployments.set(i, new ArtifactBackedDeployment(
+                    stale.getArtifactPointer(), stale.getContextPath(), currentPath, currentExploded));
+            actions.add(new RefreshAction(stale.getArtifactName(),
+                    storedPath, currentPath, storedExploded, currentExploded));
         }
 
-        if (!actions.isEmpty() && config != null) {
-            // Push back so callers see the mutations even if getArtifacts() ever
-            // starts returning deep copies.
-            config.setArtifacts(artifacts);
+        if (!actions.isEmpty()) {
+            config.setDeployments(deployments);
             LOG.info("ArtifactReferenceRefresher: " + actions.size() + " artifact reference(s) refreshed");
         }
         return new RefreshResult(actions);

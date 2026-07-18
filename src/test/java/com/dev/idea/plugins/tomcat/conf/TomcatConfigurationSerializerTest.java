@@ -3,10 +3,18 @@ package com.dev.idea.plugins.tomcat.conf;
 import com.dev.idea.plugins.tomcat.model.*;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
+import com.intellij.packaging.artifacts.Artifact;
+import com.intellij.packaging.artifacts.ArtifactModel;
+import com.intellij.packaging.artifacts.ArtifactPointer;
+import org.jdom.Attribute;
 import org.jdom.Element;
+import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -95,15 +103,14 @@ class TomcatConfigurationSerializerTest {
     }
 
     @Test
-    @DisplayName("round-trip preserves deployment artifacts")
+    @DisplayName("round-trip preserves deployment name and context path")
     void roundTripArtifacts() {
         TomcatConfigurationData original = new TomcatConfigurationData();
-        DeploymentArtifact art1 = new DeploymentArtifact("myapp", "/path/to/myapp.war", "war");
-        art1.setContextPath("/myapp");
-        DeploymentArtifact art2 = new DeploymentArtifact("api", "/path/to/api.war", "war");
-        art2.setContextPath("/api");
-        original.getDeploymentConfig().addArtifact(art1);
-        original.getDeploymentConfig().addArtifact(art2);
+        original.getDeploymentConfig().setDeployments(List.of(
+                new ArtifactBackedDeployment(
+                        DeploymentPointers.detachedArtifactPointer("myapp"), "/myapp", "/path/to/myapp.war", false),
+                new ArtifactBackedDeployment(
+                        DeploymentPointers.detachedArtifactPointer("api"), "/api", "/path/to/api.war", false)));
 
         Element element = new Element("configuration");
         TomcatConfigurationSerializer.write(original, element);
@@ -111,29 +118,25 @@ class TomcatConfigurationSerializerTest {
         TomcatConfigurationData restored = new TomcatConfigurationData();
         TomcatConfigurationSerializer.read(restored, element);
 
-        List<DeploymentArtifact> artifacts = restored.getDeploymentConfig().getArtifacts();
-        assertEquals(2, artifacts.size());
-        assertEquals("myapp", artifacts.get(0).getName());
-        assertEquals("/myapp", artifacts.get(0).getContextPath());
-        assertEquals("api", artifacts.get(1).getName());
-        assertEquals("/api", artifacts.get(1).getContextPath());
+        List<Deployment> deployments = restored.getDeploymentConfig().getDeployments();
+        assertEquals(2, deployments.size());
+        assertEquals("myapp", deployments.get(0).getDisplayName());
+        assertEquals("/myapp", deployments.get(0).getContextPath());
+        assertEquals("api", deployments.get(1).getDisplayName());
+        assertEquals("/api", deployments.get(1).getContextPath());
     }
 
     @Test
-    @DisplayName("round-trip preserves DeploymentArtifact.Source")
-    void roundTripArtifactSource() {
+    @DisplayName("round-trip preserves deployment provenance (artifact / module / external)")
+    void roundTripDeploymentKinds() {
         TomcatConfigurationData original = new TomcatConfigurationData();
-
-        DeploymentArtifact ij = new DeploymentArtifact("app-war", "/out/app.war", "war");
-        ij.setSource(DeploymentArtifact.Source.INTELLIJ_ARTIFACT);
-        DeploymentArtifact auto = new DeploymentArtifact("detected", "/build/detected", "exploded");
-        auto.setSource(DeploymentArtifact.Source.AUTO_DETECTED);
-        DeploymentArtifact ext = new DeploymentArtifact("my.war", "/tmp/my.war", "war");
-        ext.setSource(DeploymentArtifact.Source.EXTERNAL);
-
-        original.getDeploymentConfig().addArtifact(ij);
-        original.getDeploymentConfig().addArtifact(auto);
-        original.getDeploymentConfig().addArtifact(ext);
+        original.getDeploymentConfig().setDeployments(List.of(
+                new ArtifactBackedDeployment(
+                        DeploymentPointers.detachedArtifactPointer("app-war"), "/a", "/out/app.war", false),
+                new ModuleBackedDeployment(
+                        DeploymentPointers.detachedModulePointer("detected"),
+                        Path.of("/build/detected"), "/b", true),
+                new ExternalFileDeployment(Path.of("/tmp/my.war"), "/c", false)));
 
         Element element = new Element("configuration");
         TomcatConfigurationSerializer.write(original, element);
@@ -141,21 +144,21 @@ class TomcatConfigurationSerializerTest {
         TomcatConfigurationData restored = new TomcatConfigurationData();
         TomcatConfigurationSerializer.read(restored, element);
 
-        List<DeploymentArtifact> artifacts = restored.getDeploymentConfig().getArtifacts();
-        assertEquals(3, artifacts.size());
-        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, artifacts.get(0).getSource());
-        assertEquals(DeploymentArtifact.Source.AUTO_DETECTED,    artifacts.get(1).getSource());
-        assertEquals(DeploymentArtifact.Source.EXTERNAL,         artifacts.get(2).getSource());
+        List<Deployment> deployments = restored.getDeploymentConfig().getDeployments();
+        assertEquals(3, deployments.size());
+        assertEquals(DeploymentKind.ARTIFACT, deployments.get(0).getKind());
+        assertEquals(DeploymentKind.MODULE,   deployments.get(1).getKind());
+        assertEquals(DeploymentKind.EXTERNAL, deployments.get(2).getKind());
     }
 
     @Test
-    @DisplayName("legacy config with type='external' deserializes to source=EXTERNAL + type=WAR")
+    @DisplayName("legacy config with type='external' deserializes to an external, war-packaged deployment")
     void legacyTypeExternalMigrates() {
         // Simulates a config written by an older plugin version that only knew
         // about type and treated 'external' as a packaging value. The new reader
-        // must route that to source=EXTERNAL so the validator and refresher
-        // skip it, and the packaging falls back to WAR so downstream deployment
-        // code has a sensible default.
+        // must route that to an external deployment (so the validator and
+        // refresher skip it), and the packaging falls back to WAR so downstream
+        // deployment code has a sensible default.
         Element element = new Element("configuration");
         Element deployments = new Element("deployments");
         Element art = new Element("artifact");
@@ -169,17 +172,17 @@ class TomcatConfigurationSerializerTest {
         TomcatConfigurationData restored = new TomcatConfigurationData();
         TomcatConfigurationSerializer.read(restored, element);
 
-        List<DeploymentArtifact> artifacts = restored.getDeploymentConfig().getArtifacts();
-        assertEquals(1, artifacts.size());
-        DeploymentArtifact a = artifacts.get(0);
-        assertEquals(DeploymentArtifact.Source.EXTERNAL, a.getSource(),
-                "legacy type='external' must map to source=EXTERNAL on read");
-        assertEquals(DeploymentArtifact.TYPE_WAR, a.getType(),
-                "packaging must default to WAR when the legacy config gave no real packaging");
+        List<Deployment> restoredDeployments = restored.getDeploymentConfig().getDeployments();
+        assertEquals(1, restoredDeployments.size());
+        Deployment only = restoredDeployments.get(0);
+        assertEquals(DeploymentKind.EXTERNAL, only.getKind(),
+                "legacy type='external' must map to an external deployment on read");
+        assertFalse(only.isExploded(),
+                "packaging must default to WAR (not exploded) when the legacy config gave no real packaging");
     }
 
     @Test
-    @DisplayName("legacy config without source attribute defaults to INTELLIJ_ARTIFACT")
+    @DisplayName("legacy config without source attribute defaults to an artifact-backed deployment")
     void legacyMissingSourceDefaultsIntelliJArtifact() {
         Element element = new Element("configuration");
         Element deployments = new Element("deployments");
@@ -195,10 +198,10 @@ class TomcatConfigurationSerializerTest {
         TomcatConfigurationData restored = new TomcatConfigurationData();
         TomcatConfigurationSerializer.read(restored, element);
 
-        DeploymentArtifact a = restored.getDeploymentConfig().getArtifacts().get(0);
-        assertEquals(DeploymentArtifact.Source.INTELLIJ_ARTIFACT, a.getSource(),
-                "absent source attribute must default to INTELLIJ_ARTIFACT so legacy "
-                + "configs keep their pre-split behaviour (validator still enforces "
+        Deployment only = restored.getDeploymentConfig().getDeployments().get(0);
+        assertEquals(DeploymentKind.ARTIFACT, only.getKind(),
+                "absent source attribute must default to INTELLIJ_ARTIFACT (artifact-backed) so "
+                + "legacy configs keep their pre-split behaviour (validator still enforces "
                 + "IntelliJ-artifact presence, refresher still rename-tracks them).");
     }
 
@@ -250,7 +253,7 @@ class TomcatConfigurationSerializerTest {
         // Should have defaults, not crash
         assertEquals("/", data.getContextPath());
         assertNull(data.getTomcatInfo());
-        assertEquals(0, data.getDeploymentConfig().getArtifacts().size());
+        assertEquals(0, data.getDeploymentConfig().getDeployments().size());
     }
 
     @Test
@@ -370,6 +373,339 @@ class TomcatConfigurationSerializerTest {
 
         assertEquals("/my-app_v2.0", restored.getContextPath());
         assertEquals("-Dfoo=\"bar & baz\"", restored.getVmConfig().getVmOptions());
+    }
+
+    @Nested
+    @DisplayName("typed deployment persistence")
+    class TypedDeploymentPersistence {
+
+        // ------------------------------------------------------------------
+        // a. Legacy XML (no kind attribute) → typed subclasses
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("legacy full attrs without source maps to ArtifactBackedDeployment")
+        void legacyFullAttrsToArtifactBacked() {
+            Element element = configWith(legacyArtifact(
+                    "app-1.0.0", "/projects/X/out/app-1.0.0.war", "war", "/app", null));
+
+            List<Deployment> deployments = read(element);
+
+            assertEquals(1, deployments.size());
+            ArtifactBackedDeployment a = assertInstanceOf(ArtifactBackedDeployment.class, deployments.get(0));
+            assertEquals("app-1.0.0", a.getArtifactName());
+            assertEquals("/projects/X/out/app-1.0.0.war", a.getLastKnownPath());
+            assertEquals("/app", a.getContextPath());
+            assertFalse(a.isExploded());
+        }
+
+        @Test
+        @DisplayName("legacy type='external' maps to ExternalFileDeployment with war packaging")
+        void legacyTypeExternalToExternal() {
+            Element element = configWith(legacyArtifact(
+                    "app-1.0.0.war", "/projects/X/app-1.0.0.war", "external", "/app", null));
+
+            List<Deployment> deployments = read(element);
+
+            ExternalFileDeployment e = assertInstanceOf(ExternalFileDeployment.class, deployments.get(0));
+            assertEquals(Path.of("/projects/X/app-1.0.0.war"), e.getExternalPath());
+            assertEquals("/app", e.getContextPath());
+            assertFalse(e.isExploded(), "lost legacy packaging must recover as war");
+        }
+
+        @Test
+        @DisplayName("legacy source attribute drives the typed subclass for each enum value")
+        void legacySourcePerEnumValue() {
+            Element element = configWith(
+                    legacyArtifact("app-1.0.0", "/projects/X/out/app-1.0.0.war", "war", "/a", "INTELLIJ_ARTIFACT"),
+                    legacyArtifact("web-module.war", "/projects/X/target/web-module", "exploded", "/b", "AUTO_DETECTED"),
+                    legacyArtifact("app-1.0.0.war", "/projects/Y/app-1.0.0.war", "war", "/c", "EXTERNAL"));
+
+            List<Deployment> deployments = read(element);
+
+            assertEquals(3, deployments.size());
+            assertInstanceOf(ArtifactBackedDeployment.class, deployments.get(0));
+
+            ModuleBackedDeployment m = assertInstanceOf(ModuleBackedDeployment.class, deployments.get(1));
+            assertEquals("web-module.war", m.getLegacyName(), "stored name becomes the legacy name");
+            assertEquals(Path.of("/projects/X/target/web-module"), m.getOutputPath());
+            assertTrue(m.isExploded());
+
+            assertInstanceOf(ExternalFileDeployment.class, deployments.get(2));
+        }
+
+        @Test
+        @DisplayName("legacy missing type defaults to war, missing contextPath defaults to /")
+        void legacyMissingTypeAndContextDefaults() {
+            Element element = configWith(legacyArtifact(
+                    "app-1.0.0", "/projects/X/out/app-1.0.0.war", null, null, null));
+
+            List<Deployment> deployments = read(element);
+
+            ArtifactBackedDeployment a = assertInstanceOf(ArtifactBackedDeployment.class, deployments.get(0));
+            assertFalse(a.isExploded());
+            assertEquals("/", a.getContextPath());
+        }
+
+        // ------------------------------------------------------------------
+        // b. New-shape round trip is attribute-stable
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("write -> read -> write keeps every attribute stable (new + legacy)")
+        void newShapeRoundTripAttributeStable() {
+            TomcatConfigurationData original = typedConfig();
+
+            Element first = new Element("configuration");
+            TomcatConfigurationSerializer.write(original, first);
+
+            TomcatConfigurationData reread = new TomcatConfigurationData();
+            TomcatConfigurationSerializer.read(reread, first);
+            Element second = new Element("configuration");
+            TomcatConfigurationSerializer.write(reread, second);
+
+            List<Element> a = first.getChild("deployments").getChildren("artifact");
+            List<Element> b = second.getChild("deployments").getChildren("artifact");
+            assertEquals(a.size(), b.size());
+            for (int i = 0; i < a.size(); i++) {
+                assertEquals(attrsOf(a.get(i)), attrsOf(b.get(i)),
+                        "entry " + i + " must round-trip attribute-identical");
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // c. Upgrade: legacy in, kind-tagged + legacy attrs out, idempotent
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("upgrade emits kind (+module) plus correct legacy attrs, and re-reading is idempotent")
+        void upgradeEmitsKindAndStaysIdempotent() {
+            Element legacyXml = configWith(
+                    legacyArtifact("app-1.0.0", "/projects/X/out/app-1.0.0.war", "war", "/a", null),
+                    legacyArtifact("web-module.war", "/projects/X/target/web-module", "exploded", "/b", "AUTO_DETECTED"),
+                    legacyArtifact("app-1.0.0.war", "/projects/Y/app-1.0.0.war", "war", "/c", "EXTERNAL"));
+
+            TomcatConfigurationData upgraded = new TomcatConfigurationData();
+            TomcatConfigurationSerializer.read(upgraded, legacyXml);
+            Element written = new Element("configuration");
+            TomcatConfigurationSerializer.write(upgraded, written);
+
+            List<Element> arts = written.getChild("deployments").getChildren("artifact");
+            assertEquals(3, arts.size());
+
+            Element artifactBacked = arts.get(0);
+            assertEquals("artifact", artifactBacked.getAttributeValue("kind"));
+            assertNull(artifactBacked.getAttributeValue("module"));
+            assertEquals("app-1.0.0", artifactBacked.getAttributeValue("name"));
+            assertEquals("/projects/X/out/app-1.0.0.war", artifactBacked.getAttributeValue("path"));
+            assertEquals("war", artifactBacked.getAttributeValue("type"));
+            assertEquals("/a", artifactBacked.getAttributeValue("contextPath"));
+            assertEquals("INTELLIJ_ARTIFACT", artifactBacked.getAttributeValue("source"));
+
+            Element moduleBacked = arts.get(1);
+            assertEquals("module", moduleBacked.getAttributeValue("kind"));
+            assertEquals("web-module.war", moduleBacked.getAttributeValue("module"));
+            assertEquals("web-module.war", moduleBacked.getAttributeValue("name"));
+            assertEquals("/projects/X/target/web-module", moduleBacked.getAttributeValue("path"));
+            assertEquals("exploded", moduleBacked.getAttributeValue("type"));
+            assertEquals("/b", moduleBacked.getAttributeValue("contextPath"));
+            assertEquals("AUTO_DETECTED", moduleBacked.getAttributeValue("source"));
+
+            Element external = arts.get(2);
+            assertEquals("external", external.getAttributeValue("kind"));
+            assertNull(external.getAttributeValue("module"));
+            assertEquals("app-1.0.0.war", external.getAttributeValue("name"));
+            assertEquals("/projects/Y/app-1.0.0.war", external.getAttributeValue("path"));
+            assertEquals("war", external.getAttributeValue("type"));
+            assertEquals("/c", external.getAttributeValue("contextPath"));
+            assertEquals("EXTERNAL", external.getAttributeValue("source"));
+
+            // Idempotence: reading the upgraded XML yields an equal typed list.
+            assertEquals(read(legacyXml), read(written));
+        }
+
+        // ------------------------------------------------------------------
+        // d. Downgrade simulation: old reader ignores kind/module
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("stripping kind and module from new-shape XML lands each entry on the same subtype and fields")
+        void downgradeViaLegacyAttrsIsLossless() {
+            Element written = new Element("configuration");
+            TomcatConfigurationSerializer.write(typedConfig(), written);
+
+            for (Element art : written.getChild("deployments").getChildren("artifact")) {
+                art.removeAttribute("kind");
+                art.removeAttribute("module");
+            }
+
+            List<Deployment> typed = typedConfig().getDeploymentConfig().getDeployments();
+            List<Deployment> downgraded = read(written);
+            assertEquals(typed.size(), downgraded.size());
+            for (int i = 0; i < typed.size(); i++) {
+                Deployment expected = typed.get(i);
+                Deployment actual = downgraded.get(i);
+                assertEquals(expected.getClass(), actual.getClass(), "entry " + i + " subtype");
+                assertEquals(expected.getContextPath(), actual.getContextPath(), "entry " + i + " context");
+                assertEquals(expected.isExploded(), actual.isExploded(), "entry " + i + " packaging");
+            }
+            ArtifactBackedDeployment a = (ArtifactBackedDeployment) downgraded.get(0);
+            assertEquals("/projects/X/out/app-1.0.0.war", a.getLastKnownPath());
+            ModuleBackedDeployment m = (ModuleBackedDeployment) downgraded.get(1);
+            assertEquals(Path.of("/projects/X/target/web-module"), m.getOutputPath());
+            ExternalFileDeployment e = (ExternalFileDeployment) downgraded.get(2);
+            assertEquals(Path.of("/projects/Y/app-1.0.0.war"), e.getExternalPath());
+        }
+
+        // ------------------------------------------------------------------
+        // e. Macro behaviour without a project
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("null project passes macro-carrying paths through unchanged in both directions")
+        void nullProjectPassesMacrosThrough() {
+            String raw = "$PROJECT_DIR$/target/web-module";
+            TomcatConfigurationData data = new TomcatConfigurationData();
+            data.getDeploymentConfig().setDeployments(List.of(new ModuleBackedDeployment(
+                    DeploymentPointers.detachedModulePointer("web-module"),
+                    Path.of(raw), "/app", true)));
+
+            Element element = new Element("configuration");
+            TomcatConfigurationSerializer.write(data, element);
+            Element art = element.getChild("deployments").getChildren("artifact").get(0);
+            assertEquals(raw, art.getAttributeValue("path"), "write must not touch the raw path");
+
+            ModuleBackedDeployment reread =
+                    assertInstanceOf(ModuleBackedDeployment.class, read(element).get(0));
+            assertEquals(Path.of(raw), reread.getOutputPath(), "read must not touch the raw path");
+        }
+
+        // ------------------------------------------------------------------
+        // f. Forward compatibility: unknown kind uses the legacy attrs
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("unknown kind value falls through to the source-based legacy mapping")
+        void unknownKindFallsBackToLegacyMapping() {
+            Element artifactShaped = legacyArtifact(
+                    "app-1.0.0", "/projects/X/out/app-1.0.0.war", "war", "/a", "INTELLIJ_ARTIFACT");
+            artifactShaped.setAttribute("kind", "something-else");
+            Element moduleShaped = legacyArtifact(
+                    "web-module.war", "/projects/X/target/web-module", "exploded", "/b", "AUTO_DETECTED");
+            moduleShaped.setAttribute("kind", "something-else");
+
+            List<Deployment> deployments = read(configWith(artifactShaped, moduleShaped));
+
+            assertEquals(2, deployments.size());
+            ArtifactBackedDeployment a = assertInstanceOf(ArtifactBackedDeployment.class, deployments.get(0));
+            assertEquals("app-1.0.0", a.getArtifactName());
+            assertEquals("/projects/X/out/app-1.0.0.war", a.getLastKnownPath());
+            assertEquals("/a", a.getContextPath());
+            assertFalse(a.isExploded());
+            ModuleBackedDeployment m = assertInstanceOf(ModuleBackedDeployment.class, deployments.get(1));
+            assertEquals(Path.of("/projects/X/target/web-module"), m.getOutputPath());
+            assertEquals("/b", m.getContextPath());
+            assertTrue(m.isExploded());
+        }
+
+        @Test
+        @DisplayName("kind=module without (or with empty) module attr falls back to the name attr for the pointer")
+        void moduleKindMissingOrEmptyModuleAttrFallsBackToName() {
+            Element missingModuleAttr = legacyArtifact(
+                    "web-module", "/projects/X/target/web-module", "exploded", "/a", "AUTO_DETECTED");
+            missingModuleAttr.setAttribute("kind", "module");
+            Element emptyModuleAttr = legacyArtifact(
+                    "web-module-2", "/projects/X/target/web-module-2", "exploded", "/b", "AUTO_DETECTED");
+            emptyModuleAttr.setAttribute("kind", "module");
+            emptyModuleAttr.setAttribute("module", "");
+
+            List<Deployment> deployments = read(configWith(missingModuleAttr, emptyModuleAttr));
+
+            ModuleBackedDeployment m1 = assertInstanceOf(ModuleBackedDeployment.class, deployments.get(0));
+            assertEquals("web-module", m1.getModuleName(), "missing module attr must fall back to name");
+            ModuleBackedDeployment m2 = assertInstanceOf(ModuleBackedDeployment.class, deployments.get(1));
+            assertEquals("web-module-2", m2.getModuleName(), "empty module attr must fall back to name");
+        }
+
+        // ------------------------------------------------------------------
+        // g. Write path never dereferences the artifact pointer
+        // ------------------------------------------------------------------
+
+        @Test
+        @DisplayName("artifact-backed write uses lastKnownExploded — a pointer that throws on deref still serializes")
+        void writeDoesNotDereferenceArtifactPointer() {
+            ArtifactPointer explosive = new ArtifactPointer() {
+                @Override public @NotNull String getArtifactName() { return "app-1.0.0"; }
+                @Override public Artifact getArtifact() {
+                    throw new AssertionError("write path must not resolve the pointer");
+                }
+                @Override public @NotNull String getArtifactName(@NotNull ArtifactModel model) { return "app-1.0.0"; }
+                @Override public Artifact findArtifact(@NotNull ArtifactModel model) {
+                    throw new AssertionError("write path must not resolve the pointer");
+                }
+            };
+            TomcatConfigurationData data = new TomcatConfigurationData();
+            data.getDeploymentConfig().setDeployments(List.of(new ArtifactBackedDeployment(
+                    explosive, "/app", "/projects/X/out", true)));
+
+            Element element = new Element("configuration");
+            TomcatConfigurationSerializer.write(data, element);
+
+            Element art = element.getChild("deployments").getChildren("artifact").get(0);
+            assertEquals("exploded", art.getAttributeValue("type"), "type must come from lastKnownExploded");
+            assertEquals("/projects/X/out", art.getAttributeValue("path"));
+            assertEquals("app-1.0.0", art.getAttributeValue("name"));
+        }
+
+        // ------------------------------------------------------------------
+        // helpers
+        // ------------------------------------------------------------------
+
+        private TomcatConfigurationData typedConfig() {
+            TomcatConfigurationData data = new TomcatConfigurationData();
+            data.getDeploymentConfig().setDeployments(List.of(
+                    new ArtifactBackedDeployment(
+                            DeploymentPointers.detachedArtifactPointer("app-1.0.0"),
+                            "/a", "/projects/X/out/app-1.0.0.war", false),
+                    new ModuleBackedDeployment(
+                            DeploymentPointers.detachedModulePointer("web-module"),
+                            Path.of("/projects/X/target/web-module"), "/b", true, "web-module.war"),
+                    new ExternalFileDeployment(
+                            Path.of("/projects/Y/app-1.0.0.war"), "/c", false)));
+            return data;
+        }
+
+        private List<Deployment> read(Element element) {
+            TomcatConfigurationData data = new TomcatConfigurationData();
+            TomcatConfigurationSerializer.read(data, element);
+            return data.getDeploymentConfig().getDeployments();
+        }
+
+        private Element configWith(Element... artifacts) {
+            Element element = new Element("configuration");
+            Element deployments = new Element("deployments");
+            for (Element art : artifacts) deployments.addContent(art);
+            element.addContent(deployments);
+            return element;
+        }
+
+        private Element legacyArtifact(String name, String path, String type, String context, String source) {
+            Element art = new Element("artifact");
+            art.setAttribute("name", name);
+            art.setAttribute("path", path);
+            if (type != null) art.setAttribute("type", type);
+            if (context != null) art.setAttribute("contextPath", context);
+            if (source != null) art.setAttribute("source", source);
+            return art;
+        }
+
+        private Map<String, String> attrsOf(Element element) {
+            Map<String, String> out = new HashMap<>();
+            for (Attribute attribute : element.getAttributes()) {
+                out.put(attribute.getName(), attribute.getValue());
+            }
+            return out;
+        }
     }
 
     private TomcatConfigurationData createFullConfig() {

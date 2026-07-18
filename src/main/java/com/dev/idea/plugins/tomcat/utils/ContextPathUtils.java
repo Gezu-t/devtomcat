@@ -10,9 +10,9 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
 public final class ContextPathUtils {
 
-    /** Artifact-type strings. Match {@link com.dev.idea.plugins.tomcat.model.DeploymentArtifact#TYPE_WAR}/{@code TYPE_EXPLODED} at the persistence layer; {@code TYPE_EAR} is local-only — the persistence layer does not currently model EAR. */
-    private static final String TYPE_EXPLODED = "exploded";
-    private static final String TYPE_WAR = "war";
+    /** Canonical packaging-type strings, shared with the persistence layer (the XML serializer references these). {@code TYPE_EAR} is local-only — the persistence layer does not currently model EAR. */
+    public static final String TYPE_EXPLODED = "exploded";
+    public static final String TYPE_WAR = "war";
     private static final String TYPE_EAR = "ear";
 
     /** Artifact-name literal that signals an already-resolved ROOT context — short-circuits {@link #generateContextPath}. */
@@ -167,6 +167,12 @@ public final class ContextPathUtils {
 
         String displaySuffix = displaySuffixForType(resolvedType);
         return displaySuffix == null ? name : baseName + displaySuffix;
+    }
+
+    /** Typed-model overload: maps the exploded flag to the war/exploded type string. */
+    @NotNull
+    public static String formatArtifactDisplayName(@NotNull String name, boolean exploded) {
+        return formatArtifactDisplayName(name, exploded ? TYPE_EXPLODED : TYPE_WAR);
     }
 
     /** Maps an artifact type back to its colon-notation display suffix, or {@code null} for unknown / unmatched types. */

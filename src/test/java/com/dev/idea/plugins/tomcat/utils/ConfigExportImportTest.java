@@ -96,6 +96,65 @@ class ConfigExportImportTest {
             assertEquals("/", imported.getContextPath());
             assertEquals("Local", imported.getServerMode());
         }
+
+        @Test
+        @DisplayName("deployment kind, path, context, and packaging survive the round trip")
+        void deploymentProvenanceRoundTrips() throws Exception {
+            // The old export shape dropped provenance (everything re-imported as
+            // an IntelliJ-artifact reference). The kind attribute pins the fix.
+            data.getDeploymentConfig().setDeployments(java.util.List.of(
+                    new ModuleBackedDeployment(
+                            DeploymentPointers.detachedModulePointer("web-module"),
+                            java.nio.file.Path.of("/projects/X/target/web-module"),
+                            "/web-module", true),
+                    new ExternalFileDeployment(
+                            java.nio.file.Path.of("/opt/apps/app-1.0.0.war"), "/app", false)));
+
+            String xml = ConfigExportImport.exportToXml(data);
+            TomcatConfigurationData imported = ConfigExportImport.importFromXml(xml);
+
+            java.util.List<Deployment> deployments =
+                    imported.getDeploymentConfig().getDeployments();
+            assertEquals(2, deployments.size());
+
+            Deployment module = deployments.get(0);
+            assertEquals(DeploymentKind.MODULE, module.getKind());
+            assertEquals("web-module", module.getDisplayName());
+            assertEquals("/projects/X/target/web-module",
+                    String.valueOf(module.getResolvedPath()));
+            assertEquals("/web-module", module.getContextPath());
+            assertTrue(module.isExploded());
+
+            Deployment external = deployments.get(1);
+            assertEquals(DeploymentKind.EXTERNAL, external.getKind());
+            assertEquals("/opt/apps/app-1.0.0.war",
+                    String.valueOf(external.getResolvedPath()));
+            assertEquals("/app", external.getContextPath());
+            assertFalse(external.isExploded());
+        }
+
+        @Test
+        @DisplayName("old export without kind maps external type to ExternalFileDeployment, rest to artifact-backed")
+        void importWithoutKindUsesLegacyMapping() throws Exception {
+            String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                    "<devtomcat-config version=\"1.0\" exportedAt=\"2025-01-01T00:00:00\">" +
+                    "<deployment>" +
+                    "<artifact><name>app-1.0.0.war</name><sourcePath>/opt/apps/app-1.0.0.war</sourcePath>" +
+                    "<contextPath>/app</contextPath><type>external</type></artifact>" +
+                    "<artifact><name>web-module</name><sourcePath>/projects/X/out/web-module</sourcePath>" +
+                    "<contextPath>/web-module</contextPath><type>exploded</type></artifact>" +
+                    "</deployment>" +
+                    "</devtomcat-config>";
+            TomcatConfigurationData imported = ConfigExportImport.importFromXml(xml);
+
+            java.util.List<Deployment> deployments =
+                    imported.getDeploymentConfig().getDeployments();
+            assertEquals(2, deployments.size());
+            assertEquals(DeploymentKind.EXTERNAL, deployments.get(0).getKind());
+            assertEquals(DeploymentKind.ARTIFACT, deployments.get(1).getKind());
+            assertEquals("web-module", deployments.get(1).getDisplayName());
+            assertTrue(deployments.get(1).isExploded());
+        }
     }
 
     // =========================================================================
