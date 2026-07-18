@@ -46,36 +46,8 @@ public final class DeploymentModuleResolver {
      */
     @Nullable
     public static Module resolve(@NotNull Deployment deployment, @NotNull Project project) {
-        try {
-            if (deployment instanceof ArtifactBackedDeployment a) {
-                Artifact artifact = a.getArtifactPointer().getArtifact();
-                if (artifact == null) return null;
-                ArtifactManager mgr;
-                try {
-                    mgr = ArtifactManager.getInstance(project);
-                } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                    throw pce;
-                } catch (NoClassDefFoundError | Exception ignored) {
-                    return null;
-                }
-                if (mgr == null) return null;
-                return DeployedClassesSync.walkPackagingTreeForModule(
-                        artifact.getRootElement(), mgr.getResolvingContext());
-            }
-            if (deployment instanceof ModuleBackedDeployment m) {
-                return m.getModule();
-            }
-            return null; // ExternalFileDeployment — no project module
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            // Cancellation must propagate before the generic handler — the
-            // packaging-tree walk / artifact resolution can hit
-            // ProgressManager.checkCanceled() under the launch-prep indicator.
-            throw pce;
-        } catch (Exception e) {
-            LOG.warn("Failed to resolve module for '" + deployment.getDisplayName()
-                    + "': " + e.getMessage());
-            return null;
-        }
+        return dispatch(deployment, project, null, m -> m,
+                DeployedClassesSync::walkPackagingTreeForModule, "module");
     }
 
     /**
@@ -96,33 +68,64 @@ public final class DeploymentModuleResolver {
      */
     @NotNull
     public static Set<Module> resolveAll(@NotNull Deployment deployment, @NotNull Project project) {
+        Set<Module> result = dispatch(deployment, project, Set.of(), Set::of,
+                DeployedClassesSync::collectPackagedModules, "packaged modules");
+        return result != null ? result : Set.of();
+    }
+
+    /** The artifact-arm walk over a packaging tree, typed so both resolvers share one dispatcher. */
+    @FunctionalInterface
+    private interface PackagingTreeWalk<T> {
+        T walk(@NotNull com.intellij.packaging.elements.PackagingElement<?> root,
+               @NotNull com.intellij.packaging.elements.PackagingElementResolvingContext ctx);
+    }
+
+    /**
+     * Single dispatch shared by {@link #resolve} and {@link #resolveAll}: the
+     * typed-deployment arms, the artifact/ArtifactManager availability checks,
+     * and the exception policy live here exactly once. {@code empty} is the
+     * per-caller "nothing resolved" value ({@code null} / {@code Set.of()});
+     * {@code fromModule} maps a non-null module-backed module to the result;
+     * {@code artifactWalk} is the packaging-tree traversal for artifact-backed
+     * deployments.
+     */
+    @Nullable
+    private static <T> T dispatch(@NotNull Deployment deployment,
+                                  @NotNull Project project,
+                                  @Nullable T empty,
+                                  @NotNull java.util.function.Function<Module, T> fromModule,
+                                  @NotNull PackagingTreeWalk<T> artifactWalk,
+                                  @NotNull String failureNoun) {
         try {
             if (deployment instanceof ArtifactBackedDeployment a) {
                 Artifact artifact = a.getArtifactPointer().getArtifact();
-                if (artifact == null) return Set.of();
+                if (artifact == null) return empty;
                 ArtifactManager mgr;
                 try {
                     mgr = ArtifactManager.getInstance(project);
                 } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
                     throw pce;
                 } catch (NoClassDefFoundError | Exception ignored) {
-                    return Set.of();
+                    // Packaging plugin unavailable on this IDE/edition.
+                    return empty;
                 }
-                if (mgr == null) return Set.of();
-                return DeployedClassesSync.collectPackagedModules(
-                        artifact.getRootElement(), mgr.getResolvingContext());
+                if (mgr == null) return empty;
+                return artifactWalk.walk(artifact.getRootElement(), mgr.getResolvingContext());
             }
             if (deployment instanceof ModuleBackedDeployment m) {
                 Module mod = m.getModule();
-                return mod != null ? Set.of(mod) : Set.of();
+                return mod != null ? fromModule.apply(mod) : empty;
             }
-            return Set.of(); // ExternalFileDeployment — no project module
+            return empty; // ExternalFileDeployment — no project module
         } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+            // Cancellation must propagate before the generic handler — the
+            // packaging-tree walk / artifact resolution can hit
+            // ProgressManager.checkCanceled() under the launch-prep indicator.
             throw pce;
         } catch (Exception e) {
-            LOG.warn("Failed to resolve packaged modules for '" + deployment.getDisplayName()
+            LOG.warn("Failed to resolve " + failureNoun + " for '" + deployment.getDisplayName()
                     + "': " + e.getMessage());
-            return Set.of();
+            return empty;
         }
     }
 }

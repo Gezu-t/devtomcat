@@ -2,8 +2,6 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
-import com.dev.idea.plugins.tomcat.model.DeploymentAdapter;
-import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.TomcatModuleUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
@@ -313,10 +311,12 @@ public final class WebResourcesSync {
     }
 
     /**
-     * Resolves a {@link DeploymentArtifact} to every applicable webapp
-     * source directory. The returned list is ordered so that LATER entries
-     * overlay earlier ones on shared relative paths (matching Maven's own
-     * {@code webResources} overlay semantics):
+     * Resolves a deployment to every applicable webapp source directory, using
+     * the same {@link DeployedClassesSync#resolveTyped} dispatch as class sync
+     * so both pipelines pick the same module for any given deployment. The
+     * returned list is ordered so that LATER entries overlay earlier ones on
+     * shared relative paths (matching Maven's own {@code webResources} overlay
+     * semantics):
      * <ol>
      *   <li><b>{@code WebFacet.getWebRoots()}</b> when present (requires the
      *       platform's JavaEE plugin) — authoritative because the user has
@@ -340,24 +340,12 @@ public final class WebResourcesSync {
      * <p>Returns an empty list when the owning module cannot be determined
      * or no source at all matched. Never {@code null}.
      *
-     * <p><b>Must be called inside a read action</b> — touches
-     * {@link ModuleManager}, {@code ModuleRootManager}, and {@code FacetManager}.
-     */
-    @NotNull
-    static List<Path> findWebappSourceRoots(@NotNull Project project,
-                                            @NotNull DeploymentArtifact artifact) {
-        return findWebappSourceRootsForTyped(project,
-                DeploymentAdapter.toTyped(project, artifact));
-    }
-
-    /**
-     * Typed entry point. Uses the same {@link DeployedClassesSync#resolveTyped}
-     * dispatch as class sync so both pipelines pick the same module for any
-     * given deployment.
-     *
      * <p>Public because the deployment-strategy context-XML builder reuses the
      * same resolver to mount these roots as a read-only overlay (so the
      * overlay covers exactly the directories this pipeline mirrors).
+     *
+     * <p><b>Must be called inside a read action</b> — touches
+     * {@link ModuleManager}, {@code ModuleRootManager}, and {@code FacetManager}.
      */
     @NotNull
     public static List<Path> findWebappSourceRootsForTyped(@NotNull Project project,

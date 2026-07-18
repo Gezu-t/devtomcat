@@ -77,7 +77,14 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  * classes and resources" path triggers a context reload (touch context.xml) so
  * any cached references are dropped and the next lookup hits the fresh bytes.
  */
-final class LocalDeploymentStrategy implements DeploymentStrategy {
+public final class LocalDeploymentStrategy {
+
+    // Originally split into Local and Remote implementations behind a
+    // DeploymentStrategy interface, but remote-mode launches no longer fork a
+    // local Tomcat JVM (they route through RemoteDeploymentRunProfileState and
+    // call the Tomcat Manager API directly), which left this as the single
+    // deployment strategy — the interface was folded in. Reintroduce the seam
+    // only when a second JVM-launching deployment mode actually exists.
 
     private static final Logger LOG = Logger.getInstance(LocalDeploymentStrategy.class);
 
@@ -208,7 +215,18 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
      */
     private static final int MAX_LISTED_STALE_FILES = 5;
 
-    @Override
+    /**
+     * Configures deployment artifacts in the JavaParameters (VM properties,
+     * filesystem setup). Called during {@code TomcatJavaParametersBuilder.build()}
+     * before process launch.
+     *
+     * @param params        the Java parameters being built
+     * @param catalinaBase  the CATALINA_BASE directory
+     * @param configuration the run configuration
+     * @param project       the current project
+     * @param logger        deployment logger (may be null in headless/test contexts)
+     * @throws ExecutionException if deployment setup fails
+     */
     public void configureDeployment(@NotNull JavaParameters params,
                                     @NotNull Path catalinaBase,
                                     @NotNull TomcatRunConfiguration configuration,
@@ -519,8 +537,36 @@ final class LocalDeploymentStrategy implements DeploymentStrategy {
         logger.logServerWarning(msg.toString());
     }
 
+    /**
+     * Synchronously resolves credentials needed for deployment. A no-op: the
+     * local JVM does not need PasswordSafe lookups (remote-mode launches route
+     * through {@code RemoteDeploymentRunProfileState} and resolve their own).
+     */
+    public void resolveCredentials(@NotNull TomcatRunConfiguration configuration) {}
+
+    /**
+     * Generates a context XML descriptor for an exploded artifact. The
+     * descriptor mounts the module's runtime production classpath onto
+     * Tomcat's webapp classloader so freshly compiled bytes from the IDE's
+     * compile output are visible without copying into the deployed
+     * {@code WEB-INF/classes/}:
+     *
+     * <ul>
+     *   <li>Webapp source directories → {@code <PreResources>} at {@code /}</li>
+     *   <li>Library JARs not already in {@code WEB-INF/lib/} →
+     *       {@code <PostResources>} at {@code /WEB-INF/lib/<jar-name>}</li>
+     * </ul>
+     *
+     * <p>Used by both initial deployment and redeploy so the context
+     * configuration stays consistent. The {@code tomcatInfo} parameter gates
+     * the {@code <Resources>} block: Tomcat 7's Digester has no rules for
+     * {@code <PreResources>}/{@code <PostResources>} (added in Tomcat 8), so
+     * the block is omitted when {@code tomcatInfo.getMajorVersion() < 8}.
+     * Callers that don't yet know the version may pass {@code null}; emission
+     * then falls back to the modern shape.
+     */
     @NotNull
-    static String buildContextXml(@NotNull Deployment deployment,
+    public static String buildContextXml(@NotNull Deployment deployment,
                                   @NotNull Path artifactPath,
                                   boolean preserveSessions,
                                   @NotNull Project project,

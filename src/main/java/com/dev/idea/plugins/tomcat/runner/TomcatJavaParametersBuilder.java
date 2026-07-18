@@ -511,10 +511,10 @@ public class TomcatJavaParametersBuilder {
         com.dev.idea.plugins.tomcat.update.WebResourcesSync.syncDeployments(
                 project, deployments, deploymentLogger);
 
-        // Only one strategy now — remote-mode launches bypass this whole path
+        // Only one strategy — remote-mode launches bypass this whole path
         // (they go through RemoteDeploymentRunProfileState and never build
-        // JavaParameters). The interface stays as a future-proofing seam; see
-        // DeploymentStrategy javadoc.
+        // JavaParameters); the former DeploymentStrategy interface was folded
+        // into LocalDeploymentStrategy when it became the sole implementation.
         new LocalDeploymentStrategy()
                 .configureDeployment(params, catalinaBase, configuration, project, deploymentLogger);
     }

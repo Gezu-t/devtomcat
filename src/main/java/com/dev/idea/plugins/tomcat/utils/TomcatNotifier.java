@@ -67,16 +67,28 @@ public final class TomcatNotifier {
                                @NotNull String title,
                                @NotNull String content,
                                @NotNull NotificationType type) {
-        // Posting to a disposed project produces an AssertionError on some 2025.x
-        // builds — not actionable, just noise on shutdown paths that race the close.
+        postOnEdt(project, title, () -> NotificationGroupManager.getInstance()
+                .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                .createNotification(title, content, type)
+                .notify(project));
+    }
+
+    /**
+     * Shared posting scaffold: skip when the project is disposed (posting to a
+     * disposed project produces an AssertionError on some 2025.x builds — not
+     * actionable, just noise on shutdown paths that race the close), hop to the
+     * EDT, re-check disposal there (the window between {@code invokeLater} and
+     * EDT pickup), rethrow PCE unchanged, and debug-log any other failure —
+     * a balloon that could not be shown must never break its caller.
+     */
+    private static void postOnEdt(@NotNull Project project,
+                                  @NotNull String title,
+                                  @NotNull Runnable post) {
         if (project.isDisposed()) return;
         ApplicationManager.getApplication().invokeLater(() -> {
             if (project.isDisposed()) return;
             try {
-                NotificationGroupManager.getInstance()
-                        .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
-                        .createNotification(title, content, type)
-                        .notify(project);
+                post.run();
             } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
                 throw pce;
             } catch (Exception e) {
@@ -111,29 +123,21 @@ public final class TomcatNotifier {
                                         @NotNull NotificationType type,
                                         @NotNull String actionLabel,
                                         @NotNull Runnable action) {
-        if (project.isDisposed()) return;
-        ApplicationManager.getApplication().invokeLater(() -> {
-            if (project.isDisposed()) return;
-            try {
-                Notification notification = NotificationGroupManager.getInstance()
-                        .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
-                        .createNotification(title, content, type);
-                notification.addAction(new NotificationAction(actionLabel) {
-                    @Override
-                    public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
-                        try {
-                            action.run();
-                        } finally {
-                            n.expire();
-                        }
+        postOnEdt(project, title, () -> {
+            Notification notification = NotificationGroupManager.getInstance()
+                    .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
+                    .createNotification(title, content, type);
+            notification.addAction(new NotificationAction(actionLabel) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
+                    try {
+                        action.run();
+                    } finally {
+                        n.expire();
                     }
-                });
-                notification.notify(project);
-            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                throw pce;
-            } catch (Exception e) {
-                LOG.debug("Could not show notification with action '" + title + "': " + e.getMessage());
-            }
+                }
+            });
+            notification.notify(project);
         });
     }
 }

@@ -5,7 +5,6 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentArtifact;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
-import com.dev.idea.plugins.tomcat.runner.DeploymentStrategy;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
@@ -162,22 +161,34 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
                     logger.logServerInfo("Resources synced" + warningSuffix(warnings));
-                    // Mirror module output (which includes resource roots — Maven
-                    // puts src/main/resources/* into target/classes/, Gradle puts
-                    // them into build/resources/main/) into each exploded
-                    // deployment's WEB-INF/classes/. Without this hook the Make
-                    // task above produces fresh resource files in target/classes/
-                    // but Tomcat keeps serving the previous mvn-package'd copy
-                    // from target/<war>/WEB-INF/classes/ — exactly the
-                    // ".properties files sometimes stale" symptom.
-                    DeployedClassesSync.syncDeployments(project, deployments, logger);
-                    // Mirror webapp source files (JSP, JS, CSS, HTML, images,
-                    // taglibs) into the exploded artifact root. IntelliJ's Make
-                    // task doesn't copy src/main/webapp/ — only Maven's
-                    // prepare-package does, which Make never triggers — so
-                    // without this step JSP edits silently never reach Tomcat.
-                    WebResourcesSync.syncDeployments(project, deployments, logger);
+                    syncBothPipelines(deployments, logger);
                 });
+    }
+
+    /**
+     * Runs both mirror pipelines over {@code deployments}, classes first.
+     *
+     * <p>Class sync mirrors module output (which includes resource roots —
+     * Maven puts {@code src/main/resources/*} into {@code target/classes/},
+     * Gradle into {@code build/resources/main/}) into each exploded
+     * deployment's {@code WEB-INF/classes/}; without it the Make task produces
+     * fresh files in {@code target/classes/} but Tomcat keeps serving the
+     * previous {@code mvn package}'d copy — the ".properties sometimes stale"
+     * symptom. Web-resources sync then mirrors webapp source files (JSP, JS,
+     * CSS, HTML, images, taglibs) into the exploded artifact root — IntelliJ's
+     * Make never copies {@code src/main/webapp/}; only Maven's
+     * {@code prepare-package} does, which Update never triggers — so without
+     * it JSP edits silently never reach Tomcat.
+     *
+     * @return the class-sync report (callers use {@code didAnything()} to
+     *         choose hot-swap vs context restart)
+     */
+    private DeployedClassesSync.SyncReport syncBothPipelines(@NotNull List<Deployment> deployments,
+                                                             @NotNull TomcatDeploymentLogger logger) {
+        DeployedClassesSync.SyncReport classReport =
+                DeployedClassesSync.syncDeployments(project, deployments, logger);
+        WebResourcesSync.syncDeployments(project, deployments, logger);
+        return classReport;
     }
 
     /**
@@ -200,16 +211,10 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings));
-                    // Mirror fresh class output into each exploded deployment's
-                    // WEB-INF/classes/ BEFORE touching context.xml — the deployer's
+                    // Both syncs run BEFORE touching context.xml — the deployer's
                     // reload trigger should see the new bytes already in place.
-                    // See DeployedClassesSync javadoc for the Maven target/ rationale.
                     DeployedClassesSync.SyncReport classReport =
-                            DeployedClassesSync.syncDeployments(project, deployments, logger);
-                    // See doUpdateResourcesOnly above for why this is needed
-                    // alongside the class sync — JSP/JS/CSS edits otherwise
-                    // would not reach the exploded artifact.
-                    WebResourcesSync.syncDeployments(project, deployments, logger);
+                            syncBothPipelines(deployments, logger);
                     redeployWarArtifacts(logger);
 
                     // When Tomcat is running under the IDE debugger, redefine the
@@ -245,11 +250,9 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 DeploymentCompileScope.resolve(project, deployments, logger),
                 warnings -> {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings) + ", redeploying artifacts...");
-                    // Mirror fresh classes into each exploded deployment so the
-                    // forced redeploy (context.xml rewrite below) lands a fresh
-                    // classloader on top of fresh bytes, not the previous build's.
-                    DeployedClassesSync.syncDeployments(project, deployments, logger);
-                    WebResourcesSync.syncDeployments(project, deployments, logger);
+                    // Fresh bytes land before the forced redeploy (context.xml
+                    // rewrite below) hands them a fresh classloader.
+                    syncBothPipelines(deployments, logger);
                     redeployAllArtifacts(logger);
                 });
     }
@@ -433,7 +436,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // the <Resources> block on Tomcat 7 (PostResources is a
                     // Tomcat 8 element).
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
-                    String contextXml = DeploymentStrategy.buildContextXml(
+                    String contextXml = com.dev.idea.plugins.tomcat.runner.LocalDeploymentStrategy.buildContextXml(
                             deployment, artifactPath, preserveSessions, project,
                             configuration.getTomcatInfo(), logger);
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
@@ -509,40 +512,32 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * exploded in the Deployment tab). Public + static so the launch path
      * ({@code TomcatJavaParametersBuilder}) can call it too.
      *
-     * <p>This overload is kept for backward compatibility and pure-console
-     * use; the {@link #warnAboutWarDeploymentsIfPresent(TomcatRunConfiguration, TomcatDeploymentLogger)}
-     * overload also pops a balloon with a one-click "Switch to exploded"
-     * action when the sibling directory is on disk.
-     */
-    public static void warnAboutWarDeploymentsIfPresent(@NotNull List<Deployment> deployments,
-                                                        @NotNull TomcatDeploymentLogger logger) {
-        java.util.List<String> warNames = new java.util.ArrayList<>();
-        for (Deployment d : deployments) {
-            if (!d.isExploded()) warNames.add(d.getDisplayName());
-        }
-        emitWarArtifactsWarning(warNames, logger);
-    }
-
-    /**
-     * Same console warning as the {@link #warnAboutWarDeploymentsIfPresent(List, TomcatDeploymentLogger)}
-     * overload, plus a balloon with a one-click "Switch to exploded" action
-     * for every WAR deployment whose sibling exploded directory exists on disk.
-     *
-     * <p>Maven's {@code maven-war-plugin} produces both {@code target/<finalName>.war}
-     * and {@code target/<finalName>/} during {@code mvn package}; Gradle's
-     * {@code war} task likewise. So almost every WAR deployment a user can
-     * accidentally pick during auto-detection has a sibling that would work
-     * for hot reload — this overload closes that loop instead of leaving the
-     * user to delete-and-re-add by hand.
-     *
-     * <p>The balloon does not fire when no fixable candidates exist (e.g. the
-     * user genuinely has only {@code .war} files with no sibling directories),
-     * so users who can't benefit from the fix don't see a misleading prompt.
+     * <p>Additionally pops a balloon with a one-click "Switch to exploded"
+     * action for every WAR deployment whose sibling exploded directory exists
+     * on disk: Maven's {@code maven-war-plugin} produces both
+     * {@code target/<finalName>.war} and {@code target/<finalName>/} during
+     * {@code mvn package} (Gradle's {@code war} task likewise), so almost every
+     * accidentally-picked WAR deployment has a sibling that would work for hot
+     * reload. The balloon does not fire when no fixable candidates exist, so
+     * users who can't benefit from the fix don't see a misleading prompt.
      */
     public static void warnAboutWarDeploymentsIfPresent(@NotNull TomcatRunConfiguration configuration,
                                                         @NotNull TomcatDeploymentLogger logger) {
-        java.util.List<Deployment> deployments = configuration.getDeployments();
-        warnAboutWarDeploymentsIfPresent(deployments, logger);
+        java.util.List<String> warNames = new java.util.ArrayList<>();
+        for (Deployment d : configuration.getDeployments()) {
+            if (!d.isExploded()) warNames.add(d.getDisplayName());
+        }
+        if (!warNames.isEmpty()) {
+            String plural = warNames.size() == 1 ? "artifact is" : "artifacts are";
+            logger.logServerWarning(
+                    warNames.size() + " WAR " + plural + " in this run config: "
+                            + String.join(", ", warNames)
+                            + ". Hot class/resource sync (Ctrl+F10) only applies to exploded deployments,"
+                            + " so changes to these won't take effect until you rebuild the WAR with"
+                            + " 'mvn package' / 'gradle war' — or change the artifact type to 'exploded'"
+                            + " in the Deployment tab (the exploded directory lives at"
+                            + " target/<finalName>/ for Maven, build/libs/exploded/ for Gradle).");
+        }
         offerWarToExplodedFix(configuration, logger);
     }
 
@@ -599,20 +594,6 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                 + " deployment(s) as module-owned — Ctrl+F10 will now pick up changes without rebuilding.");
                     }
                 });
-    }
-
-    private static void emitWarArtifactsWarning(@NotNull List<String> warNames,
-                                                @NotNull TomcatDeploymentLogger logger) {
-        if (warNames.isEmpty()) return;
-        String plural = warNames.size() == 1 ? "artifact is" : "artifacts are";
-        logger.logServerWarning(
-                warNames.size() + " WAR " + plural + " in this run config: "
-                        + String.join(", ", warNames)
-                        + ". Hot class/resource sync (Ctrl+F10) only applies to exploded deployments,"
-                        + " so changes to these won't take effect until you rebuild the WAR with"
-                        + " 'mvn package' / 'gradle war' — or change the artifact type to 'exploded'"
-                        + " in the Deployment tab (the exploded directory lives at"
-                        + " target/<finalName>/ for Maven, build/libs/exploded/ for Gradle).");
     }
 
     /** Maps an {@link UpdateConfig} action constant to a user-visible display string; unrecognised actions echo back. */

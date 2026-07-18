@@ -13,8 +13,6 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactType;
 
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.util.Computable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,7 +55,7 @@ public final class ProjectArtifactDetector {
      */
     @NotNull
     public static List<Deployment> detectWebModules(@NotNull Project project) {
-        return ApplicationManager.getApplication().runReadAction((Computable<List<Deployment>>) () -> {
+        return TomcatReadActions.compute(() -> {
             List<Deployment> results = new ArrayList<>();
 
             try {
@@ -116,7 +114,7 @@ public final class ProjectArtifactDetector {
         scanWarDirectory(new File(basePath, "out/artifacts"), results);
 
         try {
-            List<String> modulePaths = ApplicationManager.getApplication().runReadAction((Computable<List<String>>) () -> {
+            List<String> modulePaths = TomcatReadActions.compute(() -> {
                 List<String> paths = new ArrayList<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
                     for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
