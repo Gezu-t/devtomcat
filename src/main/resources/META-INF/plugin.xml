@@ -270,6 +270,11 @@
                     description="Build and redeploy artifacts to the running Tomcat"
                     icon="AllIcons.Nodes.Deploy"/>
             <separator/>
+            <action id="DevTomcat.Service.DeploymentFreshness"
+                    class="com.dev.idea.plugins.tomcat.action.ServiceDeploymentFreshnessAction"
+                    text="Show Deployment Freshness"
+                    description="Per packaged module: how it reaches Tomcat and whether the served copy is current or stale"
+                    icon="AllIcons.Actions.Preview"/>
             <action id="DevTomcat.Service.DeploymentHistory"
                     class="com.dev.idea.plugins.tomcat.action.ServiceDeploymentHistoryAction"
                     text="Run History"

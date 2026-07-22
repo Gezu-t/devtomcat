@@ -9,6 +9,9 @@
 - JVM hot-swap ceiling noted in docs and console.
 - Redeploy tooltip states the as-last-built contract.
 
+### Added
+- Deployment Freshness view: per module, how it's delivered and whether it's current.
+
 ### Fixed
 - Web resources sync no longer deletes build-produced webapp files.
 - Class sync covers every module a multi-module artifact packages.

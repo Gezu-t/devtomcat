@@ -1066,25 +1066,7 @@ public final class DeployedClassesSync {
             Module dep = moduleEntry.getModule();
             if (dep == null) continue;
 
-            // Build-agnostic dependency identity, in order of precision:
-            //   1. Maven artifactId — exact when the module is a Maven project.
-            //   2. External-system (Gradle) project name — the build's OWN name for
-            //      the module, which lines up with the JAR it packages far better
-            //      than the IntelliJ module name does. A Gradle subproject's module
-            //      is "app.sub.main", not "sub", so the old module-name-stem
-            //      fallback mis-keyed it and mirrored its resources full-content
-            //      even when they already shipped in sub.jar (duplicate classpath).
-            //   3. Module-name stem — final fallback for plain / JPS projects.
-            // All three are reduced to a version-independent key downstream.
-            String artifactName = MavenModelProvider.artifactId(dep);
-            if (artifactName == null) {
-                artifactName = externalSystemArtifactName(dep);
-            }
-            if (artifactName == null) {
-                String moduleName = dep.getName();
-                int dot = moduleName.lastIndexOf('.');
-                artifactName = dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
-            }
+            String artifactName = libraryArtifactNameFor(dep);
 
             // withoutDepModules(): map ONLY dep's own output under dep's
             // artifact identity. Without it, orderEntries(dep) also returns
@@ -1198,6 +1180,66 @@ public final class DeployedClassesSync {
      * covered dependency root can be tied to the concrete JAR that covers it
      * (for the covering-JAR mtime floor and the manifest's JAR records).
      */
+    /**
+     * The production module dependencies whose output this module's deployment
+     * also carries — the same closure {@link #collectProductionRoots} mirrors,
+     * as modules rather than roots. The freshness view needs them because a
+     * module-backed deployment resolves to one module while its {@code
+     * WEB-INF/lib} carries every dependency's JAR. <strong>Read action
+     * required.</strong>
+     */
+    @NotNull
+    static Set<Module> productionDependencyModules(@NotNull Module module) {
+        Set<Module> deps = new java.util.LinkedHashSet<>();
+        collectProductionDependencyModules(module, deps, new HashSet<>());
+        return deps;
+    }
+
+    private static void collectProductionDependencyModules(@NotNull Module module,
+                                                           @NotNull Set<Module> out,
+                                                           @NotNull Set<String> visited) {
+        if (!visited.add(module.getName())) return;
+        for (OrderEntry entry : ModuleRootManager.getInstance(module).getOrderEntries()) {
+            if (!(entry instanceof ModuleOrderEntry moduleEntry)) continue;
+            Module dep = moduleEntry.getModule();
+            if (dep == null) continue;
+            out.add(dep);
+            collectProductionDependencyModules(dep, out, visited);
+        }
+    }
+
+    /**
+     * The build-agnostic artifact identity for a module, in order of precision:
+     * <ol>
+     *   <li>Maven artifactId — exact when the module is a Maven project.</li>
+     *   <li>External-system (Gradle) project name — the build's OWN name for the
+     *       module, which lines up with the JAR it packages far better than the
+     *       IntelliJ module name does. A Gradle subproject's module is
+     *       {@code app.sub.main}, not {@code sub}, so the module-name-stem
+     *       fallback alone mis-keyed it and mirrored its resources full-content
+     *       even when they already shipped in {@code sub.jar} (duplicate
+     *       classpath).</li>
+     *   <li>Module-name stem — final fallback for plain / JPS projects.</li>
+     * </ol>
+     * All three are reduced to a version-independent key downstream. Package-
+     * visible because module→deployed-JAR matching must use ONE basis: the
+     * freshness view keying on the raw module name instead reported a
+     * jar-covered module as loose classes. <strong>Read action required.</strong>
+     */
+    @NotNull
+    static String libraryArtifactNameFor(@NotNull Module module) {
+        String artifactName = MavenModelProvider.artifactId(module);
+        if (artifactName == null) {
+            artifactName = externalSystemArtifactName(module);
+        }
+        if (artifactName == null) {
+            String moduleName = module.getName();
+            int dot = moduleName.lastIndexOf('.');
+            artifactName = dot >= 0 ? moduleName.substring(dot + 1) : moduleName;
+        }
+        return artifactName;
+    }
+
     @NotNull
     static Map<String, String> scanDeployedLibraryJars(@NotNull Path artifactRoot) {
         Map<String, String> jars = new HashMap<>();
