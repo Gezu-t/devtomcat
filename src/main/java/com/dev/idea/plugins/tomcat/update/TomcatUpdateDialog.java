@@ -33,6 +33,16 @@ public class TomcatUpdateDialog extends DialogWrapper {
     private final JBRadioButton rbRedeploy               = new JBRadioButton("Redeploy");
     private final JBRadioButton rbRestartServer          = new JBRadioButton("Restart server");
 
+    {
+        // Explicit contract — "Redeploy" does not rebuild packed WARs unless the
+        // per-configuration rebuild option is on; without it the artifact
+        // deploys as last built by the build tool.
+        rbRedeploy.setToolTipText(
+                "Deploys artifacts as last built and forces a context reload."
+                + " Packed WARs are rebuilt first only when 'Run build-tool package"
+                + " before redeploy' is enabled in the run configuration.");
+    }
+
     /** Full constructor — pass {@code showRestartOption=false} for remote configurations. */
     public TomcatUpdateDialog(@Nullable Project project,
                                @NotNull String configName,

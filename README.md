@@ -388,6 +388,14 @@ Place a `context.xml` in `webapp/META-INF/` for custom resources:
 3. Set breakpoints in servlets, filters, listeners, or any server-side code
 4. Hot-reload changes using the **Update** action (`Ctrl+F10`)
 
+**Hot-swap ceiling.** Under the debugger, changed classes are redefined live in the running JVM.
+Plain JVM hot-swap covers **method-body changes only** — adding/removing methods or fields,
+changing signatures or annotations, and introducing new classes/beans cannot be redefined in
+place. DevTomcat detects those cases and falls back to a context reload automatically (the
+console says which happened), so a change is never silently dropped — but if you expected "no
+restart" and got one, a structural change is why, not a plugin failure. Without the debugger,
+Update always applies changes via a context reload.
+
 ---
 
 ## Port Conflict Resolution

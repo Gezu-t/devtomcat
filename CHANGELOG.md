@@ -5,6 +5,9 @@
 ### Changed
 - Warn when an artifact packages modules the class sync can't cover.
 - Opt-in: run Maven package before Redeploy.
+- Sync skips surface as notifications with the fix.
+- JVM hot-swap ceiling noted in docs and console.
+- Redeploy tooltip states the as-last-built contract.
 
 ### Fixed
 - Web resources sync no longer deletes build-produced webapp files.

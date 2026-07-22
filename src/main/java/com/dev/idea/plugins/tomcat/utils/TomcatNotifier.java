@@ -85,7 +85,14 @@ public final class TomcatNotifier {
                                   @NotNull String title,
                                   @NotNull Runnable post) {
         if (project.isDisposed()) return;
-        ApplicationManager.getApplication().invokeLater(() -> {
+        com.intellij.openapi.application.Application app = ApplicationManager.getApplication();
+        if (app == null) {
+            // No platform (unit test / teardown race) — a balloon that cannot
+            // be shown must never break its caller.
+            LOG.debug("No Application; notification '" + title + "' dropped");
+            return;
+        }
+        app.invokeLater(() -> {
             if (project.isDisposed()) return;
             try {
                 post.run();

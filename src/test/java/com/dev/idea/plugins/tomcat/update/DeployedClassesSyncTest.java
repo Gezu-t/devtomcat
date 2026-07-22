@@ -824,6 +824,61 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
+    @DisplayName("warnSkippedDeployments — loud sync skips, once per session")
+    class WarnSkippedDeployments {
+
+        private static DeployedClassesSync.SyncSkip skip(String name, String reason) {
+            return new DeployedClassesSync.SyncSkip(name, reason, "remedy for " + reason);
+        }
+
+        @Test
+        @DisplayName("skips balloon once per session; identical set stays quiet")
+        void balloonOncePerSession() {
+            SessionNotificationGate gate = new SessionNotificationGate();
+            java.util.List<String> balloons = new java.util.ArrayList<>();
+
+            DeployedClassesSync.warnSkippedDeployments(
+                    List.of(skip("web-module", "war-type"), skip("app-1.0.0", "no-compile-output")),
+                    gate, "scope-1", (t, c) -> balloons.add(t + "|" + c));
+            DeployedClassesSync.warnSkippedDeployments(
+                    List.of(skip("web-module", "war-type"), skip("app-1.0.0", "no-compile-output")),
+                    gate, "scope-1", (t, c) -> balloons.add(t + "|" + c));
+
+            assertEquals(1, balloons.size());
+            assertTrue(balloons.get(0).contains("2 deployments"));
+            assertTrue(balloons.get(0).contains("web-module"), "every skip is named");
+            assertTrue(balloons.get(0).contains("remedy for no-compile-output"),
+                    "every skip carries its remedy");
+        }
+
+        @Test
+        @DisplayName("a changed skip set re-arms the balloon; a REASON change alone re-arms too")
+        void changedSetReArms() {
+            SessionNotificationGate gate = new SessionNotificationGate();
+            java.util.concurrent.atomic.AtomicInteger balloons =
+                    new java.util.concurrent.atomic.AtomicInteger();
+
+            DeployedClassesSync.warnSkippedDeployments(
+                    List.of(skip("web-module", "war-type")),
+                    gate, "scope-1", (t, c) -> balloons.incrementAndGet());
+            DeployedClassesSync.warnSkippedDeployments(
+                    List.of(skip("web-module", "no-compile-output")),
+                    gate, "scope-1", (t, c) -> balloons.incrementAndGet());
+
+            assertEquals(2, balloons.get(),
+                    "same deployment, different reason = a different situation worth telling");
+        }
+
+        @Test
+        @DisplayName("no skips → no balloon")
+        void emptySilent() {
+            DeployedClassesSync.warnSkippedDeployments(List.of(),
+                    new SessionNotificationGate(), "scope-1",
+                    (t, c) -> org.junit.jupiter.api.Assertions.fail("no balloon expected"));
+        }
+    }
+
+    @Nested
     @DisplayName("gradleArtifactNameFromLinkedId")
     class GradleArtifactNameFromLinkedId {
 

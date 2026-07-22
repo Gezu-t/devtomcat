@@ -201,6 +201,7 @@ public final class DeployedClassesSync {
         int syncedArtifacts = 0;
         int totalCopied = 0;
         int skipped = 0;
+        List<SyncSkip> skipReports = new ArrayList<>();
 
         for (Deployment deployment : deployments) {
             String name = deployment.getDisplayName();
@@ -212,6 +213,9 @@ public final class DeployedClassesSync {
                 logger.logServerInfo("Class sync skipped '" + name
                         + "': deployment path missing or invalid"
                         + (artifactRoot != null ? " (" + artifactRoot + ")" : ""));
+                skipReports.add(new SyncSkip(name, "invalid-path",
+                        "deployment path missing or invalid — build the project or re-add the"
+                        + " deployment in the Deployment tab"));
                 skipped++;
                 continue;
             }
@@ -220,6 +224,10 @@ public final class DeployedClassesSync {
                 logger.logServerInfo("Class sync skipped '" + name
                         + "': type is war"
                         + " (only exploded deployments can be hot-mirrored; run mvn package or gradle war for WAR types)");
+                skipReports.add(new SyncSkip(name, "war-type",
+                        "packed WAR — only exploded deployments hot-reload; switch to the"
+                        + " exploded output in the Deployment tab, or rebuild with"
+                        + " 'mvn package' / 'gradle war' and Redeploy"));
                 skipped++;
                 continue;
             }
@@ -237,6 +245,9 @@ public final class DeployedClassesSync {
                         + "DevTomcat will not write compiled classes into your sources. "
                         + "Point this deployment at the exploded build output instead "
                         + "(e.g. target/<finalName> for Maven, the exploded war output for Gradle).");
+                skipReports.add(new SyncSkip(name, "source-tree",
+                        "deployment path is inside the project source tree — point it at the"
+                        + " exploded build output (target/<finalName> for Maven) instead"));
                 skipped++;
                 continue;
             }
@@ -252,6 +263,9 @@ public final class DeployedClassesSync {
                 LOG.debug("Could not create " + webInfClasses + " for " + name + ": " + e.getMessage());
                 logger.logServerWarning("Class sync skipped '" + name
                         + "': cannot create WEB-INF/classes (" + e.getMessage() + ")");
+                skipReports.add(new SyncSkip(name, "webinf-unwritable",
+                        "cannot create WEB-INF/classes under the deployment — check the"
+                        + " directory's permissions"));
                 skipped++;
                 continue;
             }
@@ -278,6 +292,8 @@ public final class DeployedClassesSync {
                 LOG.debug("Could not resolve module output for '" + name + "': " + t.getMessage());
                 logger.logServerWarning("Class sync skipped '" + name
                         + "': module resolution threw (" + t.getMessage() + ")");
+                skipReports.add(new SyncSkip(name, "resolution-error",
+                        "module resolution failed — see the run console for the error"));
                 skipped++;
                 continue;
             }
@@ -285,6 +301,14 @@ public final class DeployedClassesSync {
             if (resolution.moduleName() == null) {
                 logger.logServerWarning("Class sync skipped '" + name
                         + "': could not resolve owning module — " + resolution.diagnostic());
+                // External-path deployments already get their own dedicated
+                // balloon (with the reclaim offer when fixable) — don't repeat
+                // them here with a weaker remedy.
+                if (!(deployment instanceof ExternalFileDeployment)) {
+                    skipReports.add(new SyncSkip(name, "no-module",
+                            "no owning module — re-add the deployment via the Deployment tab"
+                            + " so it links to a project module"));
+                }
                 skipped++;
                 continue;
             }
@@ -293,6 +317,9 @@ public final class DeployedClassesSync {
                         + "': module '" + resolution.moduleName()
                         + "' resolved but no production class output found (Make may not have run yet,"
                         + " or the module has no compilation output — check Build > Build Project first)");
+                skipReports.add(new SyncSkip(name, "no-compile-output",
+                        "module '" + resolution.moduleName() + "' has no production compile output"
+                        + " yet — run Build > Build Project first"));
                 skipped++;
                 continue;
             }
@@ -359,7 +386,44 @@ public final class DeployedClassesSync {
         logger.logServerInfo("Class sync: scan complete — " + totalCopied
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
                 + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
+        warnSkippedDeployments(skipReports, SessionNotificationGate.INSTANCE,
+                String.valueOf(project.getLocationHash()),
+                (title, content) -> TomcatNotifier.warning(project, title, content));
         return new SyncReport(syncedArtifacts, totalCopied, skipped);
+    }
+
+    /**
+     * One skipped deployment in a sync pass: a stable reason key (for the
+     * session gate) plus the human reason-with-remedy line the balloon shows.
+     * The console already logged the full diagnostic at the skip site.
+     */
+    record SyncSkip(@NotNull String deploymentName, @NotNull String reasonKey,
+                    @NotNull String remedy) {}
+
+    /**
+     * Loud-skip notification: balloon once per (project, deployment+reason set)
+     * per IDE session listing every skipped deployment WITH its remedy —
+     * console lines scroll away; a hot reload that silently does nothing is
+     * this plugin's worst failure mode. A changed skip set re-notifies; a
+     * resolved one goes quiet. Collaborators injected so tests pin the wiring.
+     */
+    static void warnSkippedDeployments(@NotNull List<SyncSkip> skips,
+                                       @NotNull SessionNotificationGate gate,
+                                       @NotNull String scopeId,
+                                       @NotNull BiConsumer<String, String> balloon) {
+        if (skips.isEmpty()) return;
+        Set<String> key = new HashSet<>();
+        StringBuilder lines = new StringBuilder();
+        for (SyncSkip s : skips) {
+            if (lines.length() > 0) lines.append("\n");
+            lines.append("• ").append(s.deploymentName()).append(": ").append(s.remedy());
+            key.add(s.deploymentName() + "|" + s.reasonKey());
+        }
+        if (!gate.shouldNotify("sync-skips|" + scopeId, key)) return;
+        balloon.accept(skips.size() == 1
+                        ? "Hot reload is off for a deployment"
+                        : "Hot reload is off for " + skips.size() + " deployments",
+                lines.toString());
     }
 
     /**

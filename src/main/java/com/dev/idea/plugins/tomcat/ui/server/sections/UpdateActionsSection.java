@@ -37,6 +37,9 @@ public class UpdateActionsSection implements ConfigurationSection {
             GridBagConstraints gbc = new GridBagConstraints();
 
             updateActionCombo = new ComboBox<>();
+            updateActionCombo.setToolTipText(
+                    "'Redeploy' deploys artifacts as last built (packed WARs are rebuilt first "
+                            + "only when the rebuild option below is enabled).");
             ConfigurationSection.addLabelAndField(panel, gbc, 0,
                     new JBLabel("On 'Update' action:"), updateActionCombo);
             gbc.gridx = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;

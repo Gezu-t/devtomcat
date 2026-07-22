@@ -153,7 +153,9 @@ public final class DebugHotSwap {
                 FollowUp followUp = decideFollowUp(outcome, classpathChanged);
                 switch (followUp) {
                     case NONE -> logger.logServerInfo(outcome == Outcome.SUCCESS
-                            ? "Hot reload: changed classes redefined live in the running JVM — no restart, session preserved."
+                            ? "Hot reload: changed classes redefined live in the running JVM — no restart,"
+                              + " session preserved. (JVM hot-swap covers method-body changes; signature,"
+                              + " field, annotation, or new-class changes restart the context automatically.)"
                             : "Hot reload: nothing to reload — running JVM already current.");
                     case RESTART -> {
                         logger.logServerInfo(outcome == Outcome.FAILURE
