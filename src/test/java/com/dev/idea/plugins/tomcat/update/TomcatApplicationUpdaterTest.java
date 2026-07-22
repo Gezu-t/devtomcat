@@ -16,6 +16,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.contains;
@@ -36,6 +37,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
  */
 @DisplayName("TomcatApplicationUpdater")
 class TomcatApplicationUpdaterTest {
+
+    /** Every deployment fresh — for tests where staleness is not the subject. */
+    private static final Function<Deployment, DeploymentStaleness.Verdict> FRESH =
+            d -> DeploymentStaleness.Verdict.fresh();
 
     @Nested
     @DisplayName("mapActionToDisplay")
@@ -148,7 +153,7 @@ class TomcatApplicationUpdaterTest {
             Files.setLastModifiedTime(target, FileTime.fromMillis(200_000L));
 
             TomcatApplicationUpdater.redeployWarArtifactsInto(
-                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger);
+                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger, FRESH);
 
             assertEquals("same-size-B", Files.readString(target),
                     "an up-to-date deployed WAR must not be overwritten");
@@ -169,7 +174,7 @@ class TomcatApplicationUpdaterTest {
             Files.setLastModifiedTime(source, FileTime.fromMillis(200_000L));
 
             TomcatApplicationUpdater.redeployWarArtifactsInto(
-                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger);
+                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger, FRESH);
 
             assertEquals("new-war-bytes", Files.readString(target));
             verify(logger).logServerInfo(contains("Re-deployed WAR"));
@@ -183,7 +188,7 @@ class TomcatApplicationUpdaterTest {
             Files.writeString(source, "new-war-bytes");
 
             TomcatApplicationUpdater.redeployWarArtifactsInto(
-                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger);
+                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger, FRESH);
 
             assertEquals("new-war-bytes", Files.readString(webapps.resolve("app.war")));
         }
@@ -195,7 +200,7 @@ class TomcatApplicationUpdaterTest {
             Path exploded = Files.createDirectories(tmp.resolve("app-1.0.0"));
 
             TomcatApplicationUpdater.redeployWarArtifactsInto(
-                    List.of(new ExternalFileDeployment(exploded, "/app", true)), webapps, logger);
+                    List.of(new ExternalFileDeployment(exploded, "/app", true)), webapps, logger, FRESH);
 
             assertFalse(Files.exists(webapps.resolve("app.war")));
             verifyNoInteractions(logger);
@@ -220,7 +225,7 @@ class TomcatApplicationUpdaterTest {
             Files.setLastModifiedTime(target, FileTime.fromMillis(200_000L));
             Deployment dep = new ExternalFileDeployment(source, "/app", false);
 
-            TomcatApplicationUpdater.redeployWarDeployment(dep, source, webapps, logger);
+            TomcatApplicationUpdater.redeployWarDeployment(dep, source, webapps, logger, FRESH);
 
             assertEquals("same-size-B", Files.readString(target));
             assertEquals(200_000L, Files.getLastModifiedTime(target).toMillis());
@@ -239,10 +244,174 @@ class TomcatApplicationUpdaterTest {
             Files.setLastModifiedTime(source, FileTime.fromMillis(200_000L));
             Deployment dep = new ExternalFileDeployment(source, "/app", false);
 
-            TomcatApplicationUpdater.redeployWarDeployment(dep, source, webapps, logger);
+            TomcatApplicationUpdater.redeployWarDeployment(dep, source, webapps, logger, FRESH);
 
             assertEquals("rebuilt-war-bytes", Files.readString(target));
             verify(logger).logServerInfo(contains("Redeployed WAR"));
+        }
+    }
+
+    @Nested
+    @DisplayName("stale-WAR blocking — a stale WAR is never deployed silently")
+    class StaleWarBlocking {
+
+        private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
+
+        private static DeploymentStaleness.Verdict staleVerdict(Path tmp) {
+            return DeploymentStaleness.Verdict.stale(
+                    "web-module", tmp.resolve("out/classes/A.class"), 60_000L);
+        }
+
+        @Test
+        @DisplayName("a stale WAR is blocked: not copied, warned, and reported to the caller")
+        void staleWarBlockedInUpdateLoop(@TempDir Path tmp) throws Exception {
+            Path webapps = Files.createDirectories(tmp.resolve("webapps"));
+            Path source = tmp.resolve("app-1.0.0.war");
+            Files.writeString(source, "stale-war-bytes");
+            Deployment dep = new ExternalFileDeployment(source, "/app", false);
+
+            List<Deployment> blocked = TomcatApplicationUpdater.redeployWarArtifactsInto(
+                    List.of(dep), webapps, logger, d -> staleVerdict(tmp));
+
+            assertEquals(List.of(dep), blocked);
+            assertFalse(Files.exists(webapps.resolve("app.war")),
+                    "a stale WAR must not reach webapps");
+            verify(logger).logServerWarning(contains("Stale WAR not deployed"));
+        }
+
+        @Test
+        @DisplayName("the verdict is not evaluated for a WAR that would not be copied anyway")
+        void unchangedWarNeverEvaluated(@TempDir Path tmp) throws Exception {
+            Path webapps = Files.createDirectories(tmp.resolve("webapps"));
+            Path source = tmp.resolve("app-1.0.0.war");
+            Files.writeString(source, "same-size-A");
+            Path target = webapps.resolve("app.war");
+            Files.writeString(target, "same-size-B");
+            Files.setLastModifiedTime(source, FileTime.fromMillis(100_000L));
+            Files.setLastModifiedTime(target, FileTime.fromMillis(200_000L));
+
+            List<Deployment> blocked = TomcatApplicationUpdater.redeployWarArtifactsInto(
+                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger,
+                    d -> fail("up-to-date check must run BEFORE the staleness verdict"));
+
+            assertTrue(blocked.isEmpty());
+        }
+
+        @Test
+        @DisplayName("Deploy Anyway semantics: re-running the blocked set with fresh verdicts copies it")
+        void deployAnywayCopiesBlockedSet(@TempDir Path tmp) throws Exception {
+            Path webapps = Files.createDirectories(tmp.resolve("webapps"));
+            Path source = tmp.resolve("app-1.0.0.war");
+            Files.writeString(source, "stale-war-bytes");
+            Deployment dep = new ExternalFileDeployment(source, "/app", false);
+
+            List<Deployment> blocked = TomcatApplicationUpdater.redeployWarArtifactsInto(
+                    List.of(dep), webapps, logger, d -> staleVerdict(tmp));
+            List<Deployment> secondRound = TomcatApplicationUpdater.redeployWarArtifactsInto(
+                    blocked, webapps, logger, FRESH);
+
+            assertTrue(secondRound.isEmpty());
+            assertEquals("stale-war-bytes", Files.readString(webapps.resolve("app.war")),
+                    "the override deploys the WAR as last built");
+        }
+
+        @Test
+        @DisplayName("explicit Redeploy blocks a stale WAR the same way")
+        void redeployWarDeploymentBlocksStale(@TempDir Path tmp) throws Exception {
+            Path webapps = Files.createDirectories(tmp.resolve("webapps"));
+            Path source = tmp.resolve("app-1.0.0.war");
+            Files.writeString(source, "stale-war-bytes");
+            Deployment dep = new ExternalFileDeployment(source, "/app", false);
+
+            boolean blocked = TomcatApplicationUpdater.redeployWarDeployment(
+                    dep, source, webapps, logger, d -> staleVerdict(tmp));
+
+            assertTrue(blocked);
+            assertFalse(Files.exists(webapps.resolve("app.war")));
+            verify(logger).logServerWarning(contains("Stale WAR not deployed"));
+        }
+
+        @Test
+        @DisplayName("an UNKNOWN verdict never blocks — what cannot be judged deploys as before")
+        void unknownVerdictDeploys(@TempDir Path tmp) throws Exception {
+            Path webapps = Files.createDirectories(tmp.resolve("webapps"));
+            Path source = tmp.resolve("app-1.0.0.war");
+            Files.writeString(source, "war-bytes");
+
+            List<Deployment> blocked = TomcatApplicationUpdater.redeployWarArtifactsInto(
+                    List.of(new ExternalFileDeployment(source, "/app", false)), webapps, logger,
+                    d -> DeploymentStaleness.Verdict.unknown());
+
+            assertTrue(blocked.isEmpty());
+            assertEquals("war-bytes", Files.readString(webapps.resolve("app.war")));
+        }
+    }
+
+    @Nested
+    @DisplayName("notifyBlockedStaleWarDeployments — session-gated Deploy Anyway balloon")
+    class NotifyBlockedStaleWars {
+
+        private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
+
+        private static final class RecordingNotifier implements TomcatApplicationUpdater.UpdateNotifier {
+            final List<String> actionLabels = new ArrayList<>();
+            Runnable lastAction;
+
+            @Override
+            public void infoWithAction(@NotNull String title, @NotNull String content,
+                                       @NotNull String actionLabel, @NotNull Runnable action) {
+                actionLabels.add(actionLabel);
+                lastAction = action;
+            }
+
+            @Override
+            public void warning(@NotNull String title, @NotNull String content) {
+                fail("blocked-stale-WAR notification must carry the Deploy Anyway action");
+            }
+        }
+
+        @Test
+        @DisplayName("balloon fires once per session with Deploy Anyway wired through")
+        void balloonOncePerSessionWithAction(@TempDir Path tmp) {
+            Deployment dep = new ExternalFileDeployment(tmp.resolve("app-1.0.0.war"), "/app", false);
+            SessionNotificationGate gate = new SessionNotificationGate();
+            RecordingNotifier notifier = new RecordingNotifier();
+            AtomicBoolean overrideRan = new AtomicBoolean();
+
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(dep), logger, gate, "scope-1", notifier, () -> overrideRan.set(true));
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(dep), logger, gate, "scope-1", notifier, () -> overrideRan.set(true));
+
+            assertEquals(List.of("Deploy Anyway"), notifier.actionLabels,
+                    "one balloon per (scope, blocked set) per session");
+            notifier.lastAction.run();
+            assertTrue(overrideRan.get(), "the balloon action must invoke the injected override");
+        }
+
+        @Test
+        @DisplayName("a changed blocked set re-arms the balloon")
+        void changedSetReArms(@TempDir Path tmp) {
+            SessionNotificationGate gate = new SessionNotificationGate();
+            RecordingNotifier notifier = new RecordingNotifier();
+
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(new ExternalFileDeployment(tmp.resolve("app-1.0.0.war"), "/app", false)),
+                    logger, gate, "scope-1", notifier, () -> {});
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(new ExternalFileDeployment(tmp.resolve("other-2.0.0.war"), "/other", false)),
+                    logger, gate, "scope-1", notifier, () -> {});
+
+            assertEquals(2, notifier.actionLabels.size());
+        }
+
+        @Test
+        @DisplayName("nothing blocked → no balloon")
+        void emptySilent() {
+            RecordingNotifier notifier = new RecordingNotifier();
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(), logger, new SessionNotificationGate(), "scope-1", notifier, () -> {});
+            assertTrue(notifier.actionLabels.isEmpty());
         }
     }
 

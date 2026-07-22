@@ -35,7 +35,9 @@ import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.Path;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -356,18 +358,32 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             logger.logServerWarning("Cannot locate webapps directory; WAR update skipped");
             return;
         }
-        redeployWarArtifactsInto(configuration.getDeployments(), webappsDir, logger);
+        List<Deployment> blocked = redeployWarArtifactsInto(configuration.getDeployments(),
+                webappsDir, logger, d -> DeploymentStaleness.evaluate(project, d));
+        notifyBlockedStaleWars(blocked, webappsDir, logger);
     }
 
     /**
      * The WAR re-copy loop of {@link #redeployWarArtifacts}, over an explicit
      * deployment list and webapps directory. Package-visible and platform-free
-     * so tests can pin the up-to-date skip: an unchanged WAR must NOT be
-     * re-copied (Tomcat restarts the context on any mtime advance).
+     * (verdicts injected) so tests can pin both skips: an unchanged WAR must
+     * NOT be re-copied (Tomcat restarts the context on any mtime advance), and
+     * a {@linkplain DeploymentStaleness stale} WAR must NOT be deployed
+     * silently — it is blocked and reported to the caller for the
+     * "Deploy Anyway" offer.
+     *
+     * <p>Order matters: the up-to-date check runs BEFORE the verdict, so a WAR
+     * that would not be copied anyway is never "blocked" (and costs no
+     * staleness evaluation).
+     *
+     * @return the STALE deployments whose copy was blocked
      */
-    static void redeployWarArtifactsInto(@NotNull List<Deployment> deployments,
-                                         @NotNull Path webappsDir,
-                                         @NotNull TomcatDeploymentLogger logger) {
+    @NotNull
+    static List<Deployment> redeployWarArtifactsInto(@NotNull List<Deployment> deployments,
+                                                     @NotNull Path webappsDir,
+                                                     @NotNull TomcatDeploymentLogger logger,
+                                                     @NotNull Function<Deployment, DeploymentStaleness.Verdict> verdicts) {
+        List<Deployment> blocked = new ArrayList<>();
         for (Deployment deployment : deployments) {
             if (!deployment.isValid() || deployment.isExploded()) continue;
             Path source = deployment.getResolvedPath();
@@ -381,6 +397,12 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                             + " (no context restart): " + deployment.getDisplayName());
                     continue;
                 }
+                DeploymentStaleness.Verdict verdict = verdicts.apply(deployment);
+                if (verdict.isStale()) {
+                    logStaleWarBlocked(deployment.getDisplayName(), verdict, logger);
+                    blocked.add(deployment);
+                    continue;
+                }
                 TomcatProjectUtils.atomicCopy(source, target);
                 logger.logServerInfo("Re-deployed WAR: " + deployment.getDisplayName());
             } catch (IOException e) {
@@ -389,6 +411,90 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                         deployment.getDisplayName() + "': " + e.getMessage());
             }
         }
+        return blocked;
+    }
+
+    /** Console evidence line for a blocked stale-WAR copy — fired on every action, never gated. */
+    private static void logStaleWarBlocked(@NotNull String name,
+                                           @NotNull DeploymentStaleness.Verdict verdict,
+                                           @NotNull TomcatDeploymentLogger logger) {
+        logger.logServerWarning("Stale WAR not deployed: '" + name
+                + "' predates the compiled output of module '" + verdict.moduleName()
+                + "' (" + verdict.newerOutput() + " is "
+                + DeploymentStaleness.describeAge(verdict.newerByMillis())
+                + " newer). Deploying it would ship old code. Rebuild the WAR with"
+                + " 'mvn package' / 'gradle war', then update again — or click"
+                + " 'Deploy Anyway' in the notification to deploy it as-is.");
+    }
+
+    /**
+     * Once-per-session balloon for blocked stale WARs with the explicit
+     * "Deploy Anyway" override. Platform glue — the testable wiring lives in
+     * {@link #notifyBlockedStaleWarDeployments}.
+     */
+    private void notifyBlockedStaleWars(@NotNull List<Deployment> blocked,
+                                        @NotNull Path webappsDir,
+                                        @NotNull TomcatDeploymentLogger logger) {
+        if (blocked.isEmpty() || project == null || project.isDisposed()) return;
+        notifyBlockedStaleWarDeployments(blocked, logger,
+                SessionNotificationGate.INSTANCE,
+                project.getLocationHash() + "|" + configuration.getName(),
+                new UpdateNotifier() {
+                    @Override
+                    public void infoWithAction(@NotNull String title, @NotNull String content,
+                                               @NotNull String actionLabel, @NotNull Runnable action) {
+                        TomcatNotifier.notifyWithAction(project, title, content,
+                                com.intellij.notification.NotificationType.WARNING,
+                                actionLabel, action);
+                    }
+
+                    @Override
+                    public void warning(@NotNull String title, @NotNull String content) {
+                        TomcatNotifier.warning(project, title, content);
+                    }
+                },
+                () -> com.intellij.openapi.application.ApplicationManager.getApplication()
+                        .executeOnPooledThread(() -> {
+                            // Explicit override: copy exactly the blocked set, verdicts
+                            // bypassed. The up-to-date skip still applies — re-copying
+                            // bytes already deployed would only restart the context.
+                            redeployWarArtifactsInto(blocked, webappsDir, logger,
+                                    d -> DeploymentStaleness.Verdict.fresh());
+                            logger.logServerInfo("Deploy Anyway: deployed "
+                                    + blocked.size() + " stale WAR(s) as last built.");
+                        }));
+    }
+
+    /**
+     * The blocked-stale-WAR notification wiring: balloon once per
+     * (run configuration, blocked set) per IDE session, "Deploy Anyway" action
+     * passed through. Collaborators injected — package-visible so tests pin
+     * the gating and the action plumbing without the platform. Console
+     * evidence is already logged per-deployment by the copy loop.
+     */
+    static void notifyBlockedStaleWarDeployments(@NotNull List<Deployment> blocked,
+                                                 @NotNull TomcatDeploymentLogger logger,
+                                                 @NotNull SessionNotificationGate gate,
+                                                 @NotNull String scopeId,
+                                                 @NotNull UpdateNotifier notifier,
+                                                 @NotNull Runnable deployAnyway) {
+        if (blocked.isEmpty()) return;
+        java.util.Set<String> key = new java.util.HashSet<>();
+        StringBuilder names = new StringBuilder();
+        for (Deployment d : blocked) {
+            if (names.length() > 0) names.append(", ");
+            names.append(d.getDisplayName());
+            key.add(d.getDisplayName());
+        }
+        if (!gate.shouldNotify("stale-war-blocked|" + scopeId, key)) return;
+
+        String plural = blocked.size() == 1 ? "WAR is" : "WARs are";
+        notifier.infoWithAction(
+                blocked.size() == 1 ? "Stale WAR not deployed" : blocked.size() + " stale WARs not deployed",
+                names + ": the " + plural + " older than the modules' compiled output —"
+                        + " deploying would ship old code. Rebuild with 'mvn package' /"
+                        + " 'gradle war' and update again, or deploy the old WAR as-is.",
+                "Deploy Anyway", deployAnyway);
     }
 
     /**
@@ -448,6 +554,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
         boolean preserveSessions = configuration.getConfigData()
                 .getDeploymentConfig().isPreserveSessions();
+        List<Deployment> blockedStale = new ArrayList<>();
 
         for (Deployment deployment : configuration.getDeployments()) {
             if (!deployment.isValid()) continue;
@@ -471,7 +578,9 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     logger.logServerInfo("Redeployed (context rewrite): " + deployment.getDisplayName());
                 } else {
-                    redeployWarDeployment(deployment, artifactPath, webappsDir, logger);
+                    boolean staleBlocked = redeployWarDeployment(deployment, artifactPath,
+                            webappsDir, logger, d -> DeploymentStaleness.evaluate(project, d));
+                    if (staleBlocked) blockedStale.add(deployment);
                 }
             } catch (IOException e) {
                 LOG.warn("Failed to redeploy: " + artifactPath, e);
@@ -479,18 +588,25 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                         deployment.getDisplayName() + "': " + e.getMessage());
             }
         }
+        notifyBlockedStaleWars(blockedStale, webappsDir, logger);
     }
 
     /**
      * The WAR branch of {@link #redeployAllArtifacts}: copies the WAR into
      * webapps unless the deployed copy is already up to date (the deliberate
-     * no-restart semantics documented there). Package-visible and platform-free
-     * so tests can pin the skip.
+     * no-restart semantics documented there) or the WAR is
+     * {@linkplain DeploymentStaleness stale} — an explicit Redeploy of a stale
+     * WAR is blocked exactly like the update path; "Deploy Anyway" is the
+     * intentional-override door. Package-visible, verdicts injected, so tests
+     * pin both skips.
+     *
+     * @return {@code true} when the copy was blocked as stale
      */
-    static void redeployWarDeployment(@NotNull Deployment deployment,
-                                      @NotNull Path artifactPath,
-                                      @NotNull Path webappsDir,
-                                      @NotNull TomcatDeploymentLogger logger) throws IOException {
+    static boolean redeployWarDeployment(@NotNull Deployment deployment,
+                                         @NotNull Path artifactPath,
+                                         @NotNull Path webappsDir,
+                                         @NotNull TomcatDeploymentLogger logger,
+                                         @NotNull Function<Deployment, DeploymentStaleness.Verdict> verdicts) throws IOException {
         String contextName = resolveContextName(deployment.getContextPath());
         Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
         if (TomcatProjectUtils.isUpToDateCopy(artifactPath, target)) {
@@ -498,10 +614,16 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     + " (no context restart): " + deployment.getDisplayName()
                     + ". Rebuild it with the build tool ('mvn package' /"
                     + " 'gradle war') to produce a new WAR to redeploy.");
-        } else {
-            TomcatProjectUtils.atomicCopy(artifactPath, target);
-            logger.logServerInfo("Redeployed WAR: " + deployment.getDisplayName());
+            return false;
         }
+        DeploymentStaleness.Verdict verdict = verdicts.apply(deployment);
+        if (verdict.isStale()) {
+            logStaleWarBlocked(deployment.getDisplayName(), verdict, logger);
+            return true;
+        }
+        TomcatProjectUtils.atomicCopy(artifactPath, target);
+        logger.logServerInfo("Redeployed WAR: " + deployment.getDisplayName());
+        return false;
     }
 
     @NotNull

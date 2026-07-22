@@ -455,6 +455,10 @@ public final class LocalDeploymentStrategy {
                     Path targetWar = TomcatDeploymentPaths.warFile(webappsDir, contextName);
                     TomcatProjectUtils.atomicCopy(artifactPath, targetWar);
                     LOG.info("Deployed WAR artifact: " + targetWar);
+                    // Non-blocking by design: refusing the launch copy would
+                    // start Tomcat with no webapp at all — worse than stale.
+                    com.dev.idea.plugins.tomcat.update.DeploymentStaleness.warnIfStaleWarAtLaunch(
+                            project, deployment, logger, configuration.getName());
                 }
                 deployedCount++;
             } catch (IOException e) {

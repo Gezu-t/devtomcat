@@ -710,6 +710,120 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
+    @DisplayName("findOutdatedUncoveredJars — uncovered module output vs deployed WEB-INF/lib JAR")
+    class FindOutdatedUncoveredJars {
+
+        private Path artifactRoot;
+        private Path jar;
+        private Path outRoot;
+
+        private void scaffold(Path tmp, long jarMtime, long outputMtime) throws Exception {
+            artifactRoot = tmp.resolve("app-1.0.0");
+            jar = artifactRoot.resolve("WEB-INF/lib/common-1.0.0.jar");
+            Files.createDirectories(jar.getParent());
+            Files.writeString(jar, "jar-bytes");
+            Files.setLastModifiedTime(jar, FileTime.fromMillis(jarMtime));
+            outRoot = tmp.resolve("out/common");
+            Path cls = outRoot.resolve("A.class");
+            Files.createDirectories(cls.getParent());
+            Files.writeString(cls, "class-bytes");
+            Files.setLastModifiedTime(cls, FileTime.fromMillis(outputMtime));
+        }
+
+        @Test
+        @DisplayName("uncovered module with output newer than its deployed JAR → reported")
+        void uncoveredNewerOutputReported(@TempDir Path tmp) throws Exception {
+            scaffold(tmp, 100_000L, 300_000L);
+
+            List<DeployedClassesSync.OutdatedJar> outdated =
+                    DeployedClassesSync.findOutdatedUncoveredJars(
+                            java.util.Map.of("common", List.of(outRoot)),
+                            java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot);
+
+            assertEquals(1, outdated.size());
+            assertEquals("common", outdated.get(0).moduleName());
+            assertEquals("common-1.0.0.jar", outdated.get(0).jarFileName());
+            assertEquals(200_000L, outdated.get(0).newerByMillis());
+        }
+
+        @Test
+        @DisplayName("JAR newer than the output → silent")
+        void jarNewerSilent(@TempDir Path tmp) throws Exception {
+            scaffold(tmp, 300_000L, 100_000L);
+            assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
+                    java.util.Map.of("common", List.of(outRoot)),
+                    java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot).isEmpty());
+        }
+
+        @Test
+        @DisplayName("module with no matching deployed JAR → silent (not this diagnostic's case)")
+        void noMatchingJarSilent(@TempDir Path tmp) throws Exception {
+            scaffold(tmp, 100_000L, 300_000L);
+            assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
+                    java.util.Map.of("common", List.of(outRoot)),
+                    java.util.Map.of(), artifactRoot).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a recorded JAR missing on disk → silent, never an alarm")
+        void missingJarSilent(@TempDir Path tmp) throws Exception {
+            scaffold(tmp, 100_000L, 300_000L);
+            Files.delete(jar);
+            assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
+                    java.util.Map.of("common", List.of(outRoot)),
+                    java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot).isEmpty());
+        }
+
+        @Test
+        @DisplayName("covered modules are excluded by construction — an empty uncovered map is silent")
+        void emptyUncoveredMapSilent(@TempDir Path tmp) throws Exception {
+            scaffold(tmp, 100_000L, 300_000L);
+            assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
+                    java.util.Map.of(),
+                    java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot).isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("warnOutdatedUncoveredJars — console every action, balloon once per session")
+    class WarnOutdatedUncoveredJars {
+
+        private final TomcatDeploymentLogger logger =
+                org.mockito.Mockito.mock(TomcatDeploymentLogger.class);
+
+        private static DeployedClassesSync.OutdatedJar outdated() {
+            return new DeployedClassesSync.OutdatedJar(
+                    "common", "common-1.0.0.jar", Path.of("/projects/X/out/A.class"), 60_000L);
+        }
+
+        @Test
+        @DisplayName("console warns on every action; the balloon fires once per session")
+        void consoleEveryActionBalloonOnce() {
+            SessionNotificationGate gate = new SessionNotificationGate();
+            java.util.concurrent.atomic.AtomicInteger balloons =
+                    new java.util.concurrent.atomic.AtomicInteger();
+
+            DeployedClassesSync.warnOutdatedUncoveredJars("app-1.0.0", List.of(outdated()),
+                    logger, gate, "scope-1", (t, c) -> balloons.incrementAndGet());
+            DeployedClassesSync.warnOutdatedUncoveredJars("app-1.0.0", List.of(outdated()),
+                    logger, gate, "scope-1", (t, c) -> balloons.incrementAndGet());
+
+            assertEquals(1, balloons.get());
+            org.mockito.Mockito.verify(logger, org.mockito.Mockito.times(2))
+                    .logServerWarning(org.mockito.ArgumentMatchers.contains("Outdated dependency JAR"));
+        }
+
+        @Test
+        @DisplayName("no outdated jars → fully silent")
+        void emptySilent() {
+            DeployedClassesSync.warnOutdatedUncoveredJars("app-1.0.0", List.of(),
+                    logger, new SessionNotificationGate(), "scope-1",
+                    (t, c) -> org.junit.jupiter.api.Assertions.fail("no balloon expected"));
+            org.mockito.Mockito.verifyNoInteractions(logger);
+        }
+    }
+
+    @Nested
     @DisplayName("gradleArtifactNameFromLinkedId")
     class GradleArtifactNameFromLinkedId {
 

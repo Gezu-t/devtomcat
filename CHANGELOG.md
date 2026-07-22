@@ -22,6 +22,8 @@
 - Unchanged WARs aren't re-copied; no needless context restart.
 - Stale class overlay yields to a rebuilt jar.
 - Hot-reload-off external paths get a visible warning.
+- Stale WAR deploys blocked; Deploy Anyway to override.
+- Outdated dependency jars called out.
 
 ## [1.4.2]
 

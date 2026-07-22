@@ -7,11 +7,13 @@ import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
+import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleOrderEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
@@ -32,6 +34,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -41,6 +44,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.BiConsumer;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.EXT_CLASS;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.EXT_JAR;
@@ -311,6 +316,28 @@ public final class DeployedClassesSync {
                         + "'. The incremental sync does not mirror them — their classes are"
                         + " deployed only by a full artifact build. If a class from them is"
                         + " missing at startup, run Build > Rebuild Project.");
+
+                // An uncovered module deployed as a WEB-INF/lib JAR is invisible
+                // to the overlay machinery entirely — when its compiled output
+                // outruns the deployed JAR, Tomcat serves old code with zero
+                // signal. Detect and say so explicitly (the invisible failure
+                // behind "I did a clean install three times").
+                Map<String, Set<Path>> uncoveredRoots = TomcatReadActions.compute(() -> {
+                    // TreeMap: deterministic order for stable messages.
+                    Map<String, Set<Path>> byModule = new TreeMap<>();
+                    ModuleManager mm = ModuleManager.getInstance(project);
+                    for (String moduleName : resolution.uncoveredPackagedModules()) {
+                        Module m = mm.findModuleByName(moduleName);
+                        if (m != null) byModule.put(moduleName, moduleOwnOutputPaths(m));
+                    }
+                    return byModule;
+                });
+                warnOutdatedUncoveredJars(name,
+                        findOutdatedUncoveredJars(uncoveredRoots,
+                                scanDeployedLibraryJars(artifactRoot), artifactRoot),
+                        logger, SessionNotificationGate.INSTANCE,
+                        project.getLocationHash() + "|" + name,
+                        (title, content) -> TomcatNotifier.warning(project, title, content));
             }
 
             ArtifactSyncOutcome outcome = syncArtifactTree(
@@ -638,9 +665,13 @@ public final class DeployedClassesSync {
         return uncovered;
     }
 
-    /** The module's OWN production class-output paths (dependency modules excluded). */
+    /**
+     * The module's OWN production class-output paths (dependency modules
+     * excluded). Package-visible: {@link DeploymentStaleness} compares these
+     * against deployed WAR / JAR mtimes. Call under a read action.
+     */
     @NotNull
-    private static Set<Path> moduleOwnOutputPaths(@NotNull Module module) {
+    static Set<Path> moduleOwnOutputPaths(@NotNull Module module) {
         return collectRootPaths(OrderEnumerator.orderEntries(module)
                 .withoutDepModules()
                 .productionOnly()
@@ -1132,6 +1163,90 @@ public final class DeployedClassesSync {
         if (!root.classesOnly() || root.artifactName() == null) return null;
         return deployedLibraryJars.get(
                 LibraryArtifactNames.libraryArtifactKey(root.artifactName() + EXT_JAR));
+    }
+
+    /**
+     * An uncovered packaged module whose deployed {@code WEB-INF/lib} JAR is
+     * older than the module's own compiled output — the sync cannot overlay it
+     * (uncovered), so Tomcat serves the old JAR until a build-tool
+     * install/package refreshes it.
+     */
+    record OutdatedJar(@NotNull String moduleName, @NotNull String jarFileName,
+                       @NotNull Path newerOutput, long newerByMillis) {}
+
+    /**
+     * Detects {@link OutdatedJar}s among the UNCOVERED packaged modules only —
+     * modules the overlay mirrors are excluded by construction (their staleness
+     * is already handled by the covering-JAR floor + drop pass, in both
+     * directions). A module with no matching deployed JAR, or an unreadable
+     * JAR, contributes nothing: absence of evidence is never an alarm.
+     * Platform-free; short-circuits per module at the first newer output file.
+     */
+    @NotNull
+    static List<OutdatedJar> findOutdatedUncoveredJars(
+            @NotNull Map<String, ? extends Collection<Path>> outputRootsByUncoveredModule,
+            @NotNull Map<String, String> deployedLibraryJars,
+            @NotNull Path artifactRoot) {
+        List<OutdatedJar> outdated = new ArrayList<>();
+        for (Map.Entry<String, ? extends Collection<Path>> e : outputRootsByUncoveredModule.entrySet()) {
+            TomcatProgress.checkCanceled();
+            String jarFile = deployedLibraryJars.get(
+                    LibraryArtifactNames.libraryArtifactKey(e.getKey() + EXT_JAR));
+            if (jarFile == null) continue;
+            Path jar = artifactRoot.resolve(WEB_INF_LIB_PATH).resolve(jarFile);
+            long jarMtime;
+            try {
+                jarMtime = Files.getLastModifiedTime(jar).toMillis();
+            } catch (IOException ex) {
+                continue;
+            }
+            DeploymentStaleness.NewerFile newer =
+                    DeploymentStaleness.findOutputNewerThan(jarMtime, e.getValue());
+            if (newer != null) {
+                outdated.add(new OutdatedJar(e.getKey(), jarFile,
+                        newer.file(), newer.mtimeMillis() - jarMtime));
+            }
+        }
+        return outdated;
+    }
+
+    /**
+     * Outdated-JAR notification wiring: console warning on EVERY action (the
+     * console is the authoritative surface), balloon once per (deployment,
+     * module+JAR set) per IDE session. Deliberately NO action button — nothing
+     * is auto-fixable until a build-tool integration exists; a fake action
+     * would train users to distrust the balloon. Collaborators injected so
+     * tests pin the wiring without the platform.
+     */
+    static void warnOutdatedUncoveredJars(@NotNull String artifactName,
+                                          @NotNull List<OutdatedJar> outdated,
+                                          @NotNull TomcatDeploymentLogger logger,
+                                          @NotNull SessionNotificationGate gate,
+                                          @NotNull String scopeId,
+                                          @NotNull BiConsumer<String, String> balloon) {
+        if (outdated.isEmpty()) return;
+        Set<String> key = new HashSet<>();
+        StringBuilder pairs = new StringBuilder();
+        for (OutdatedJar o : outdated) {
+            if (pairs.length() > 0) pairs.append(", ");
+            pairs.append("'").append(o.jarFileName())
+                 .append("' (module '").append(o.moduleName()).append("')");
+            key.add(o.moduleName() + "|" + o.jarFileName());
+        }
+        boolean one = outdated.size() == 1;
+        logger.logServerWarning("Outdated dependency JAR" + (one ? "" : "s") + " in '"
+                + artifactName + "': " + pairs + " — the deployed JAR is older than the"
+                + " module's compiled output, and the class sync does not cover"
+                + (one ? " that module" : " those modules") + " (not a production dependency"
+                + " of the deployment's module). Tomcat keeps serving the old JAR."
+                + " Run 'mvn install' / 'gradle build' to refresh it.");
+        if (!gate.shouldNotify("outdated-jar|" + scopeId, key)) return;
+        balloon.accept(one ? "Outdated dependency JAR deployed"
+                        : outdated.size() + " outdated dependency JARs deployed",
+                artifactName + ": " + pairs + (one ? " is" : " are") + " older than the"
+                        + " compiled output, and the class sync cannot cover"
+                        + (one ? " it" : " them")
+                        + ". Run 'mvn install' / 'gradle build' to refresh.");
     }
 
     /**
