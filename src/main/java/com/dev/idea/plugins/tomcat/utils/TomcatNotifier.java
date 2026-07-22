@@ -123,21 +123,47 @@ public final class TomcatNotifier {
                                         @NotNull NotificationType type,
                                         @NotNull String actionLabel,
                                         @NotNull Runnable action) {
+        notifyWithActions(project, title, content, type, actionLabel, action, null, null);
+    }
+
+    /**
+     * Pops a balloon with one or two clickable action buttons, in declaration
+     * order. The second pair may be {@code null} to show a single action.
+     * Clicking either button expires the notification — the two actions are
+     * alternative resolutions of the same condition, so once one runs the
+     * other's prompt is stale.
+     */
+    public static void notifyWithActions(@NotNull Project project,
+                                         @NotNull String title,
+                                         @NotNull String content,
+                                         @NotNull NotificationType type,
+                                         @NotNull String actionLabel,
+                                         @NotNull Runnable action,
+                                         @Nullable String secondActionLabel,
+                                         @Nullable Runnable secondAction) {
         postOnEdt(project, title, () -> {
             Notification notification = NotificationGroupManager.getInstance()
                     .getNotificationGroup(TomcatConstants.NOTIFICATION_GROUP_ID)
                     .createNotification(title, content, type);
-            notification.addAction(new NotificationAction(actionLabel) {
-                @Override
-                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
-                    try {
-                        action.run();
-                    } finally {
-                        n.expire();
-                    }
-                }
-            });
+            notification.addAction(expiringAction(actionLabel, action));
+            if (secondActionLabel != null && secondAction != null) {
+                notification.addAction(expiringAction(secondActionLabel, secondAction));
+            }
             notification.notify(project);
         });
+    }
+
+    @NotNull
+    private static NotificationAction expiringAction(@NotNull String label, @NotNull Runnable action) {
+        return new NotificationAction(label) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification n) {
+                try {
+                    action.run();
+                } finally {
+                    n.expire();
+                }
+            }
+        };
     }
 }

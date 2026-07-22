@@ -29,12 +29,14 @@ public class UpdateConfig implements Serializable, Cloneable {
     public static final boolean DEFAULT_SHOW_UPDATE_DIALOG = true;
     public static final boolean DEFAULT_SHOW_FRAME_DEACTIVATION_DIALOG = true;
     public static final boolean DEFAULT_UPDATE_ON_SAVE = false;
+    public static final boolean DEFAULT_REBUILD_BEFORE_REDEPLOY = false;
 
     @NotNull private String onUpdate;
     @NotNull private String onFrameDeactivation;
     private boolean showUpdateDialog;
     private boolean showFrameDeactivationDialog;
     private boolean updateOnSave;
+    private boolean rebuildBeforeRedeploy;
 
     public UpdateConfig() {
         this.onUpdate = DEFAULT_ON_UPDATE;
@@ -42,6 +44,7 @@ public class UpdateConfig implements Serializable, Cloneable {
         this.showUpdateDialog = DEFAULT_SHOW_UPDATE_DIALOG;
         this.showFrameDeactivationDialog = DEFAULT_SHOW_FRAME_DEACTIVATION_DIALOG;
         this.updateOnSave = DEFAULT_UPDATE_ON_SAVE;
+        this.rebuildBeforeRedeploy = DEFAULT_REBUILD_BEFORE_REDEPLOY;
     }
 
     public UpdateConfig(@NotNull UpdateConfig other) {
@@ -51,6 +54,7 @@ public class UpdateConfig implements Serializable, Cloneable {
         this.showUpdateDialog = other.showUpdateDialog;
         this.showFrameDeactivationDialog = other.showFrameDeactivationDialog;
         this.updateOnSave = other.updateOnSave;
+        this.rebuildBeforeRedeploy = other.rebuildBeforeRedeploy;
     }
 
     @NotNull
@@ -83,6 +87,15 @@ public class UpdateConfig implements Serializable, Cloneable {
     public boolean isUpdateOnSave() { return updateOnSave; }
     public void setUpdateOnSave(boolean updateOnSave) { this.updateOnSave = updateOnSave; }
 
+    /**
+     * When {@code true}, the Redeploy action runs the build tool's package step
+     * (via the IDE's Maven integration) for the modules behind WAR deployments
+     * before copying WARs. Off by default; opt-in per run configuration. No
+     * effect when the Maven integration is unavailable.
+     */
+    public boolean isRebuildBeforeRedeploy() { return rebuildBeforeRedeploy; }
+    public void setRebuildBeforeRedeploy(boolean rebuildBeforeRedeploy) { this.rebuildBeforeRedeploy = rebuildBeforeRedeploy; }
+
     @NotNull
     private String validateUpdateAction(@NotNull String action) {
         return switch (action) {
@@ -104,6 +117,7 @@ public class UpdateConfig implements Serializable, Cloneable {
         this.showUpdateDialog = DEFAULT_SHOW_UPDATE_DIALOG;
         this.showFrameDeactivationDialog = DEFAULT_SHOW_FRAME_DEACTIVATION_DIALOG;
         this.updateOnSave = DEFAULT_UPDATE_ON_SAVE;
+        this.rebuildBeforeRedeploy = DEFAULT_REBUILD_BEFORE_REDEPLOY;
     }
 
     @NotNull
@@ -124,13 +138,15 @@ public class UpdateConfig implements Serializable, Cloneable {
         return showUpdateDialog == that.showUpdateDialog &&
                 showFrameDeactivationDialog == that.showFrameDeactivationDialog &&
                 updateOnSave == that.updateOnSave &&
+                rebuildBeforeRedeploy == that.rebuildBeforeRedeploy &&
                 Objects.equals(onUpdate, that.onUpdate) &&
                 Objects.equals(onFrameDeactivation, that.onFrameDeactivation);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(onUpdate, onFrameDeactivation, showUpdateDialog, showFrameDeactivationDialog, updateOnSave);
+        return Objects.hash(onUpdate, onFrameDeactivation, showUpdateDialog, showFrameDeactivationDialog,
+                updateOnSave, rebuildBeforeRedeploy);
     }
 
     @NotNull
@@ -138,6 +154,6 @@ public class UpdateConfig implements Serializable, Cloneable {
     public String toString() {
         return "UpdateConfig{onUpdate='" + onUpdate + "', onFrameDeactivation='" + onFrameDeactivation +
                 "', showUpdateDialog=" + showUpdateDialog + ", showFrameDeactivationDialog=" + showFrameDeactivationDialog +
-                ", updateOnSave=" + updateOnSave + '}';
+                ", updateOnSave=" + updateOnSave + ", rebuildBeforeRedeploy=" + rebuildBeforeRedeploy + '}';
     }
 }

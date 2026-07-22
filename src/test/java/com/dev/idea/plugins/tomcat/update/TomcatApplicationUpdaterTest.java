@@ -416,6 +416,300 @@ class TomcatApplicationUpdaterTest {
     }
 
     @Nested
+    @DisplayName("rebuildThenContinue — opt-in build-tool package gate")
+    class RebuildThenContinue {
+
+        private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
+
+        private static UpdateConfig configWithRebuild(boolean enabled) {
+            UpdateConfig config = new UpdateConfig();
+            config.setRebuildBeforeRedeploy(enabled);
+            return config;
+        }
+
+        /** Records rebuild order; modules in {@code failing} report a failed build. */
+        private static final class FakeRebuilder implements TomcatApplicationUpdater.RebuildInvoker<String> {
+            final List<String> rebuilt = new ArrayList<>();
+            final java.util.Set<String> failing = new java.util.HashSet<>();
+
+            @Override
+            public void rebuild(@NotNull String module, @NotNull Runnable onSuccess,
+                                @NotNull java.util.function.Consumer<String> onFailure) {
+                rebuilt.add(module);
+                if (failing.contains(module)) {
+                    onFailure.accept("package failed for " + module);
+                } else {
+                    onSuccess.run();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("enabled with a WAR module: rebuild runs BEFORE the deploy continuation")
+        void rebuildBeforeContinuation() {
+            List<String> order = new ArrayList<>();
+            TomcatApplicationUpdater.rebuildThenContinue(configWithRebuild(true), () -> List.of("web-module"),
+                    (module, onSuccess, onFailure) -> { order.add("rebuild:" + module); onSuccess.run(); },
+                    logger, () -> order.add("deploy"));
+
+            assertEquals(List.of("rebuild:web-module", "deploy"), order);
+        }
+
+        @Test
+        @DisplayName("rebuild failure: continuation NOT invoked, abort error logged")
+        void failureStopsDeploy() {
+            FakeRebuilder rebuilder = new FakeRebuilder();
+            rebuilder.failing.add("web-module");
+            AtomicBoolean deployed = new AtomicBoolean();
+
+            TomcatApplicationUpdater.rebuildThenContinue(configWithRebuild(true), () -> List.of("web-module"),
+                    rebuilder, logger, () -> deployed.set(true));
+
+            assertFalse(deployed.get(), "nothing may deploy after a failed build");
+            verify(logger).logServerError(contains("nothing deployed"));
+        }
+
+        @Test
+        @DisplayName("disabled (the config default): continuation direct, module resolution never runs")
+        void disabledBypasses() {
+            FakeRebuilder rebuilder = new FakeRebuilder();
+            AtomicBoolean deployed = new AtomicBoolean();
+
+            TomcatApplicationUpdater.rebuildThenContinue(new UpdateConfig(),
+                    () -> fail("module resolution must be lazy — never evaluated when the option is off"),
+                    rebuilder, logger, () -> deployed.set(true));
+
+            assertTrue(deployed.get());
+            assertTrue(rebuilder.rebuilt.isEmpty());
+            verifyNoInteractions(logger);
+        }
+
+        @Test
+        @DisplayName("no modules resolved: continuation direct, no warning")
+        void noModulesBypasses() {
+            FakeRebuilder rebuilder = new FakeRebuilder();
+            AtomicBoolean deployed = new AtomicBoolean();
+
+            TomcatApplicationUpdater.rebuildThenContinue(configWithRebuild(true), List::of,
+                    rebuilder, logger, () -> deployed.set(true));
+
+            assertTrue(deployed.get());
+            assertTrue(rebuilder.rebuilt.isEmpty());
+            verifyNoInteractions(logger);
+        }
+
+        @Test
+        @DisplayName("enabled but no rebuilder: warning logged, continuation direct")
+        void noRebuilderWarnsAndContinues() {
+            AtomicBoolean deployed = new AtomicBoolean();
+
+            TomcatApplicationUpdater.rebuildThenContinue(configWithRebuild(true), () -> List.of("web-module"),
+                    null, logger, () -> deployed.set(true));
+
+            assertTrue(deployed.get(), "missing integration must not block the redeploy");
+            verify(logger).logServerWarning(contains("Maven integration is unavailable"));
+        }
+
+        @Test
+        @DisplayName("multiple deployments of the same module: one rebuild")
+        void duplicatesDeduped() {
+            FakeRebuilder rebuilder = new FakeRebuilder();
+            AtomicBoolean deployed = new AtomicBoolean();
+
+            TomcatApplicationUpdater.rebuildThenContinue(configWithRebuild(true),
+                    () -> List.of("web-module", "web-module", "app-module"),
+                    rebuilder, logger, () -> deployed.set(true));
+
+            assertEquals(List.of("web-module", "app-module"), rebuilder.rebuilt,
+                    "each module is packaged exactly once, in first-seen order");
+            assertTrue(deployed.get());
+        }
+
+        @Test
+        @DisplayName("first failure stops the chain — later modules are not built")
+        void failureStopsChain() {
+            FakeRebuilder rebuilder = new FakeRebuilder();
+            rebuilder.failing.add("web-module");
+            AtomicBoolean deployed = new AtomicBoolean();
+
+            TomcatApplicationUpdater.rebuildThenContinue(configWithRebuild(true),
+                    () -> List.of("web-module", "app-module"),
+                    rebuilder, logger, () -> deployed.set(true));
+
+            assertEquals(List.of("web-module"), rebuilder.rebuilt);
+            assertFalse(deployed.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("notifyBlockedStaleWarDeployments — Rebuild and Deploy remedy")
+    class NotifyBlockedStaleWarsRebuildRemedy {
+
+        private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
+
+        /** Records both balloon shapes so the offered-actions set is assertable. */
+        private static final class RecordingNotifier implements TomcatApplicationUpdater.UpdateNotifier {
+            final List<List<String>> offeredActionSets = new ArrayList<>();
+            Runnable firstAction;
+            Runnable secondAction;
+
+            @Override
+            public void infoWithAction(@NotNull String title, @NotNull String content,
+                                       @NotNull String actionLabel, @NotNull Runnable action) {
+                offeredActionSets.add(List.of(actionLabel));
+                firstAction = action;
+                secondAction = null;
+            }
+
+            @Override
+            public void infoWithActions(@NotNull String title, @NotNull String content,
+                                        @NotNull String actionLabel, @NotNull Runnable action,
+                                        @NotNull String secondActionLabel, @NotNull Runnable second) {
+                offeredActionSets.add(List.of(actionLabel, secondActionLabel));
+                firstAction = action;
+                secondAction = second;
+            }
+
+            @Override
+            public void warning(@NotNull String title, @NotNull String content) {
+                fail("blocked-stale-WAR notification must carry actions");
+            }
+        }
+
+        @Test
+        @DisplayName("rebuilder available: both actions offered, remedy first")
+        void bothActionsOffered(@TempDir Path tmp) {
+            Deployment dep = new ExternalFileDeployment(tmp.resolve("app-1.0.0.war"), "/app", false);
+            RecordingNotifier notifier = new RecordingNotifier();
+
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(dep), logger, new SessionNotificationGate(), "scope-1",
+                    notifier, () -> {}, () -> {});
+
+            assertEquals(List.of(List.of("Rebuild and Deploy", "Deploy Anyway")),
+                    notifier.offeredActionSets);
+        }
+
+        @Test
+        @DisplayName("no rebuilder (null remedy): only Deploy Anyway")
+        void deployAnywayOnlyWithoutRebuilder(@TempDir Path tmp) {
+            Deployment dep = new ExternalFileDeployment(tmp.resolve("app-1.0.0.war"), "/app", false);
+            RecordingNotifier notifier = new RecordingNotifier();
+
+            TomcatApplicationUpdater.notifyBlockedStaleWarDeployments(
+                    List.of(dep), logger, new SessionNotificationGate(), "scope-1",
+                    notifier, () -> {}, null);
+
+            assertEquals(List.of(List.of("Deploy Anyway")), notifier.offeredActionSets);
+        }
+
+        @Test
+        @DisplayName("buildRebuildAndDeployRemedy: no invoker → no second button")
+        void noInvokerNoRemedy() {
+            assertNull(TomcatApplicationUpdater.buildRebuildAndDeployRemedy(
+                    null, List.of("web-module"), logger, () -> fail("must not run")));
+        }
+
+        @Test
+        @DisplayName("buildRebuildAndDeployRemedy: nothing rebuildable → no second button")
+        void noModulesNoRemedy() {
+            assertNull(TomcatApplicationUpdater.buildRebuildAndDeployRemedy(
+                    (m, ok, err) -> fail("must not run"), List.of(), logger,
+                    () -> fail("must not run")));
+        }
+
+        @Test
+        @DisplayName("buildRebuildAndDeployRemedy: rebuild chain completes, THEN the re-verdict deploy runs")
+        void remedyRebuildsThenDeploys() {
+            List<String> order = new ArrayList<>();
+
+            Runnable remedy = TomcatApplicationUpdater.buildRebuildAndDeployRemedy(
+                    (module, onSuccess, onFailure) -> { order.add("rebuild:" + module); onSuccess.run(); },
+                    List.of("web-module", "app-module"), logger,
+                    () -> order.add("re-verdict-deploy"));
+
+            assertNotNull(remedy);
+            remedy.run();
+            assertEquals(List.of("rebuild:web-module", "rebuild:app-module", "re-verdict-deploy"), order);
+        }
+
+        @Test
+        @DisplayName("buildRebuildAndDeployRemedy: a failed rebuild never reaches the deploy step")
+        void remedyFailureStopsBeforeDeploy() {
+            Runnable remedy = TomcatApplicationUpdater.buildRebuildAndDeployRemedy(
+                    (module, onSuccess, onFailure) -> onFailure.accept("package failed"),
+                    List.of("web-module"), logger,
+                    () -> fail("nothing may deploy after a failed build"));
+
+            assertNotNull(remedy);
+            remedy.run();
+            verify(logger).logServerError(contains("nothing deployed"));
+        }
+    }
+
+    @Nested
+    @DisplayName("rebuildableWarModules — deployment→module selection for the rebuild chain")
+    class RebuildableWarModules {
+
+        private final TomcatDeploymentLogger logger = mock(TomcatDeploymentLogger.class);
+
+        private static com.intellij.openapi.module.Module module(String name) {
+            com.intellij.openapi.module.Module m = mock(com.intellij.openapi.module.Module.class);
+            org.mockito.Mockito.when(m.getName()).thenReturn(name);
+            return m;
+        }
+
+        @Test
+        @DisplayName("exploded deployments never enter the rebuild set")
+        void explodedSkipped(@TempDir Path tmp) throws Exception {
+            Deployment exploded = new ExternalFileDeployment(
+                    Files.createDirectories(tmp.resolve("app-1.0.0")), "/app", true);
+
+            assertTrue(TomcatApplicationUpdater.rebuildableWarModules(
+                    List.of(exploded),
+                    d -> fail("an exploded deployment must not be resolved"),
+                    m -> true, logger).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a WAR deployment that resolves to no module is skipped")
+        void unresolvedSkipped(@TempDir Path tmp) throws Exception {
+            Deployment war = new ExternalFileDeployment(
+                    Files.writeString(tmp.resolve("app-1.0.0.war"), "war"), "/app", false);
+
+            assertTrue(TomcatApplicationUpdater.rebuildableWarModules(
+                    List.of(war), d -> null, m -> true, logger).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a module the build tool cannot package is warned about and excluded")
+        void unpackageableWarnedAndExcluded(@TempDir Path tmp) throws Exception {
+            Deployment war = new ExternalFileDeployment(
+                    Files.writeString(tmp.resolve("app-1.0.0.war"), "war"), "/app", false);
+            com.intellij.openapi.module.Module m = module("web-module");
+
+            List<com.intellij.openapi.module.Module> out =
+                    TomcatApplicationUpdater.rebuildableWarModules(
+                            List.of(war), d -> m, mod -> false, logger);
+
+            assertTrue(out.isEmpty());
+            verify(logger).logServerWarning(contains("web-module"));
+        }
+
+        @Test
+        @DisplayName("no rebuilder (null capability): raw modules returned so the gate can name the gap")
+        void nullCapabilityReturnsRaw(@TempDir Path tmp) throws Exception {
+            Deployment war = new ExternalFileDeployment(
+                    Files.writeString(tmp.resolve("app-1.0.0.war"), "war"), "/app", false);
+            com.intellij.openapi.module.Module m = module("web-module");
+
+            assertEquals(List.of(m), TomcatApplicationUpdater.rebuildableWarModules(
+                    List.of(war), d -> m, null, logger));
+            verifyNoInteractions(logger);
+        }
+    }
+
+    @Nested
     @DisplayName("notifySyncGaps — console + session-gated balloon wiring")
     class NotifySyncGaps {
 

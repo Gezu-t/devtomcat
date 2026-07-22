@@ -25,6 +25,7 @@ public class UpdateActionsSection implements ConfigurationSection {
     private JBCheckBox showDialogCheckBox;
     private ComboBox<String> frameDeactivationCombo;
     private JBCheckBox updateOnSaveCheckBox;
+    private JBCheckBox rebuildBeforeRedeployCheckBox;
     private JPanel panel;
 
     @Override
@@ -58,6 +59,15 @@ public class UpdateActionsSection implements ConfigurationSection {
             gbc.fill = GridBagConstraints.HORIZONTAL; gbc.anchor = GridBagConstraints.WEST;
             gbc.insets = JBUI.insets(2, 4, 2, 8);
             panel.add(updateOnSaveCheckBox, gbc);
+
+            rebuildBeforeRedeployCheckBox = new JBCheckBox("Run build-tool package before redeploy");
+            rebuildBeforeRedeployCheckBox.setToolTipText(
+                    "On Redeploy, runs the Maven 'package' goal for each WAR deployment's module "
+                            + "through the IDE's Maven integration (project Maven settings and profiles "
+                            + "are respected) before copying the WAR. No effect when the Maven "
+                            + "integration is unavailable.");
+            gbc.gridx = 1; gbc.gridy = 3;
+            panel.add(rebuildBeforeRedeployCheckBox, gbc);
         }
         return panel;
     }
@@ -80,6 +90,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         frameDeactivationCombo.setSelectedItem(TomcatConstants.ACTION_DO_NOTHING);
 
         updateOnSaveCheckBox.setSelected(UpdateConfig.DEFAULT_UPDATE_ON_SAVE);
+        rebuildBeforeRedeployCheckBox.setSelected(UpdateConfig.DEFAULT_REBUILD_BEFORE_REDEPLOY);
     }
 
     @Override
@@ -91,6 +102,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         // intent of any config (legacy or imported) that had either flag enabled.
         showDialogCheckBox.setSelected(uc.isShowUpdateDialog() || uc.isShowFrameDeactivationDialog());
         updateOnSaveCheckBox.setSelected(uc.isUpdateOnSave());
+        rebuildBeforeRedeployCheckBox.setSelected(uc.isRebuildBeforeRedeploy());
     }
 
     @Override
@@ -105,6 +117,7 @@ public class UpdateActionsSection implements ConfigurationSection {
         uc.setShowUpdateDialog(show);
         uc.setShowFrameDeactivationDialog(show);
         uc.setUpdateOnSave(updateOnSaveCheckBox.isSelected());
+        uc.setRebuildBeforeRedeploy(rebuildBeforeRedeployCheckBox.isSelected());
     }
 
     @Override
@@ -117,7 +130,8 @@ public class UpdateActionsSection implements ConfigurationSection {
         // that re-syncs them, even when they were out-of-sync in storage (legacy/imported).
         boolean show = isShowDialogEnabled();
         if (uc.isShowUpdateDialog() != show || uc.isShowFrameDeactivationDialog() != show) return true;
-        return uc.isUpdateOnSave() != updateOnSaveCheckBox.isSelected();
+        if (uc.isUpdateOnSave() != updateOnSaveCheckBox.isSelected()) return true;
+        return uc.isRebuildBeforeRedeploy() != rebuildBeforeRedeployCheckBox.isSelected();
     }
 
     @Override

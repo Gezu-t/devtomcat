@@ -775,4 +775,48 @@ class TomcatConfigurationSerializerTest {
 
         return data;
     }
+
+    @Nested
+    @DisplayName("rebuildBeforeRedeploy persistence")
+    class RebuildBeforeRedeployPersistence {
+
+        @Test
+        @DisplayName("true survives the round trip")
+        void truePersists() {
+            TomcatConfigurationData original = new TomcatConfigurationData();
+            original.getUpdateConfig().setRebuildBeforeRedeploy(true);
+            Element element = new Element("configuration");
+            TomcatConfigurationSerializer.write(original, element);
+
+            assertEquals("true", element.getAttributeValue("rebuildBeforeRedeploy"),
+                    "attribute must be written explicitly");
+
+            TomcatConfigurationData restored = new TomcatConfigurationData();
+            TomcatConfigurationSerializer.read(restored, element);
+            assertTrue(restored.getUpdateConfig().isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("false survives the round trip")
+        void falsePersists() {
+            TomcatConfigurationData original = new TomcatConfigurationData();
+            Element element = new Element("configuration");
+            TomcatConfigurationSerializer.write(original, element);
+
+            TomcatConfigurationData restored = new TomcatConfigurationData();
+            TomcatConfigurationSerializer.read(restored, element);
+            assertFalse(restored.getUpdateConfig().isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("absent attribute (config from an older version) reads as false")
+        void absentReadsFalse() {
+            // Downgrade/upgrade safety: an element written before the option
+            // existed has no attribute — the default (off) must apply.
+            Element legacy = new Element("configuration");
+            TomcatConfigurationData fresh = new TomcatConfigurationData();
+            TomcatConfigurationSerializer.read(fresh, legacy);
+            assertFalse(fresh.getUpdateConfig().isRebuildBeforeRedeploy());
+        }
+    }
 }

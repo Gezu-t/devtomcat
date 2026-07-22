@@ -77,6 +77,7 @@ public class TomcatConfigurationSerializer {
     private static final String ATTR_SHOW_UPDATE_DIALOG = "showUpdateDialog";
     private static final String ATTR_SHOW_FRAME_DEACTIVATION_DIALOG = "showFrameDeactivationDialog";
     private static final String ATTR_UPDATE_ON_SAVE = "updateOnSave";
+    private static final String ATTR_REBUILD_BEFORE_REDEPLOY = "rebuildBeforeRedeploy";
     private static final String ATTR_UPDATE_ACTION_OLD = "updateAction";
     private static final String ATTR_SHOW_DIALOG_OLD = "showDialog";
 
@@ -201,6 +202,7 @@ public class TomcatConfigurationSerializer {
         element.setAttribute(ATTR_SHOW_UPDATE_DIALOG, String.valueOf(updateConfig.isShowUpdateDialog()));
         element.setAttribute(ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, String.valueOf(updateConfig.isShowFrameDeactivationDialog()));
         element.setAttribute(ATTR_UPDATE_ON_SAVE, String.valueOf(updateConfig.isUpdateOnSave()));
+        element.setAttribute(ATTR_REBUILD_BEFORE_REDEPLOY, String.valueOf(updateConfig.isRebuildBeforeRedeploy()));
         var uiConfig = data.getUiConfig();
         element.setAttribute(ATTR_ACTIVATE_TOOL_WINDOW, String.valueOf(uiConfig.isActivateToolWindow()));
 
@@ -467,6 +469,7 @@ public class TomcatConfigurationSerializer {
 
         readBool(element, ATTR_SHOW_FRAME_DEACTIVATION_DIALOG, updateConfig::setShowFrameDeactivationDialog);
         readBool(element, ATTR_UPDATE_ON_SAVE, updateConfig::setUpdateOnSave);
+        readBool(element, ATTR_REBUILD_BEFORE_REDEPLOY, updateConfig::setRebuildBeforeRedeploy);
         var uiConfig = data.getUiConfig();
         readBool(element, ATTR_ACTIVATE_TOOL_WINDOW, uiConfig::setActivateToolWindow);
 

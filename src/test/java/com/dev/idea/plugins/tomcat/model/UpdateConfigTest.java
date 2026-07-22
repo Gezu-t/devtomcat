@@ -228,4 +228,54 @@ class UpdateConfigTest {
             assertNotEquals(a, b);
         }
     }
+
+    @Nested
+    @DisplayName("rebuildBeforeRedeploy")
+    class RebuildBeforeRedeploy {
+
+        @Test
+        @DisplayName("defaults to false (opt-in)")
+        void defaultFalse() {
+            assertFalse(UpdateConfig.DEFAULT_REBUILD_BEFORE_REDEPLOY);
+            assertFalse(new UpdateConfig().isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("set true is readable back")
+        void setTrue() {
+            UpdateConfig config = new UpdateConfig();
+            config.setRebuildBeforeRedeploy(true);
+            assertTrue(config.isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("copy constructor and clone carry the flag")
+        void copyAndClone() {
+            UpdateConfig original = new UpdateConfig();
+            original.setRebuildBeforeRedeploy(true);
+            assertTrue(new UpdateConfig(original).isRebuildBeforeRedeploy());
+            assertTrue(original.clone().isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("flag participates in equals/hashCode")
+        void equalsHashCode() {
+            UpdateConfig a = new UpdateConfig();
+            UpdateConfig b = new UpdateConfig();
+            b.setRebuildBeforeRedeploy(true);
+            assertNotEquals(a, b);
+            b.setRebuildBeforeRedeploy(false);
+            assertEquals(a, b);
+            assertEquals(a.hashCode(), b.hashCode());
+        }
+
+        @Test
+        @DisplayName("resetToDefaults clears the flag")
+        void resetClears() {
+            UpdateConfig config = new UpdateConfig();
+            config.setRebuildBeforeRedeploy(true);
+            config.resetToDefaults();
+            assertFalse(config.isRebuildBeforeRedeploy());
+        }
+    }
 }

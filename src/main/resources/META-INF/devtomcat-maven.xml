@@ -9,5 +9,7 @@
     <extensions defaultExtensionNs="com.dev.idea.plugins.tomcat">
         <mavenModelProvider
                 implementation="com.dev.idea.plugins.tomcat.utils.IdeaMavenModelProvider"/>
+        <deploymentRebuilder
+                implementation="com.dev.idea.plugins.tomcat.utils.IdeaMavenDeploymentRebuilder"/>
     </extensions>
 </idea-plugin>

@@ -89,6 +89,12 @@
         <extensionPoint name="mavenModelProvider"
                         interface="com.dev.idea.plugins.tomcat.utils.MavenModelProvider"
                         dynamic="true"/>
+        <!-- Build-tool package step for rebuild-before-redeploy. Maven impl
+             registered in devtomcat-maven.xml; a Gradle impl can register here
+             identically later. -->
+        <extensionPoint name="deploymentRebuilder"
+                        interface="com.dev.idea.plugins.tomcat.utils.DeploymentRebuilder"
+                        dynamic="true"/>
     </extensionPoints>
 
     <extensions defaultExtensionNs="com.intellij">

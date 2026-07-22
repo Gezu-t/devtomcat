@@ -21,6 +21,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.dev.idea.plugins.tomcat.utils.CompilerSupport;
+import com.dev.idea.plugins.tomcat.utils.DeploymentRebuilder;
 import com.dev.idea.plugins.tomcat.utils.ProcessStopSupport;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -245,7 +246,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     private void doRedeploy(@NotNull TomcatDeploymentLogger logger) {
         List<Deployment> deployments = configuration.getDeployments();
         warnAboutWarDeploymentsIfPresent(configuration, logger);
-        CompilerSupport.compileAndThen(project, logger,
+        Runnable compileAndDeploy = () -> CompilerSupport.compileAndThen(project, logger,
                 "Compiling and redeploying...",
                 "Compilation aborted",
                 "Compilation failed",
@@ -257,6 +258,142 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     syncBothPipelines(deployments, logger);
                     redeployAllArtifacts(logger);
                 });
+
+        // The opt-in gate lives INSIDE rebuildThenContinue (it reads the
+        // UpdateConfig itself) so the flag-to-behavior connection is pinned by
+        // tests; the module resolution is a lazy supplier, evaluated only when
+        // the option is on. Rebuild completion arrives async (EDT-delivered by
+        // the rebuilder), so nothing here blocks.
+        DeploymentRebuilder rebuilder = DeploymentRebuilder.getInstance();
+        rebuildThenContinue(configuration.getConfigData().getUpdateConfig(),
+                () -> rebuildableWarModules(deployments,
+                        d -> com.intellij.openapi.application.ReadAction.compute(
+                                () -> DeploymentModuleResolver.resolve(d, project)),
+                        rebuilder == null ? null : m -> rebuilder.canRebuild(project, m),
+                        logger),
+                rebuilder != null ? moduleInvoker(rebuilder, logger) : null,
+                logger, compileAndDeploy);
+    }
+
+    /**
+     * The modules behind valid WAR (non-exploded) deployments, in deployment
+     * order — filtered through {@code canRebuild} when a rebuilder is present
+     * (a WAR module the build tool cannot package gets a console warning, not a
+     * doomed build attempt). With {@code canRebuild == null} (no rebuilder) the
+     * raw modules are returned so {@link #rebuildThenContinue} can name the
+     * missing integration. Duplicates are left in; the chain dedupes.
+     * Package-visible with resolution and capability injected so tests pin the
+     * exploded-skip, the unresolved-skip, and the filter-with-warning.
+     */
+    @NotNull
+    static List<com.intellij.openapi.module.Module> rebuildableWarModules(
+            @NotNull List<Deployment> deployments,
+            @NotNull Function<Deployment, com.intellij.openapi.module.Module> resolve,
+            @Nullable java.util.function.Predicate<com.intellij.openapi.module.Module> canRebuild,
+            @NotNull TomcatDeploymentLogger logger) {
+        List<com.intellij.openapi.module.Module> modules = new ArrayList<>();
+        for (Deployment d : deployments) {
+            if (!d.isValid() || d.isExploded()) continue;
+            com.intellij.openapi.module.Module m = resolve.apply(d);
+            if (m != null) modules.add(m);
+        }
+        if (canRebuild == null || modules.isEmpty()) return modules;
+        List<com.intellij.openapi.module.Module> rebuildable = new ArrayList<>();
+        for (com.intellij.openapi.module.Module m : modules) {
+            if (canRebuild.test(m)) {
+                rebuildable.add(m);
+            } else {
+                logger.logServerWarning("Rebuild before redeploy: module '" + m.getName()
+                        + "' is not a resolved Maven module — package step skipped for it.");
+            }
+        }
+        return rebuildable;
+    }
+
+    /** Adapts the platform rebuilder to the platform-free chain seam, with a per-module console line. */
+    @NotNull
+    private RebuildInvoker<com.intellij.openapi.module.Module> moduleInvoker(
+            @NotNull com.dev.idea.plugins.tomcat.utils.DeploymentRebuilder rebuilder,
+            @NotNull TomcatDeploymentLogger logger) {
+        return (module, onSuccess, onFailure) -> {
+            logger.logServerInfo("Rebuilding module '" + module.getName()
+                    + "' (build-tool package via the IDE's Maven integration)...");
+            rebuilder.rebuild(project, module, onSuccess, onFailure);
+        };
+    }
+
+    /** Rebuild seam: packages one module, then calls exactly one callback. Platform-free for tests. */
+    interface RebuildInvoker<M> {
+        void rebuild(@NotNull M module, @NotNull Runnable onSuccess,
+                     @NotNull java.util.function.Consumer<String> onFailure);
+    }
+
+    /**
+     * The rebuild-before-redeploy gate. Reads the opt-in flag off the
+     * {@code UpdateConfig} ITSELF (so the flag-to-behavior connection is
+     * test-pinned, not glue) and evaluates {@code warModules} lazily — the
+     * (read-action) module resolution never runs for the default-off case.
+     * When disabled, no modules resolved, or nothing rebuildable: runs
+     * {@code continuation} directly — exactly today's behavior. When enabled
+     * with modules but no {@code rebuilder}: warns on the console (Maven
+     * integration absent) and continues. Otherwise rebuilds the deduped
+     * modules sequentially and runs {@code continuation} only after ALL
+     * succeed; the first failure logs a console error and stops — nothing is
+     * deployed after a failed build. Package-visible and platform-free
+     * (modules generic, invoker injected) so tests pin the gate, the laziness,
+     * the ordering, the failure stop, and the dedupe.
+     */
+    static <M> void rebuildThenContinue(@NotNull UpdateConfig updateConfig,
+                                        @NotNull java.util.function.Supplier<List<M>> warModules,
+                                        @Nullable RebuildInvoker<M> rebuilder,
+                                        @NotNull TomcatDeploymentLogger logger,
+                                        @NotNull Runnable continuation) {
+        if (!updateConfig.isRebuildBeforeRedeploy()) {
+            continuation.run();
+            return;
+        }
+        List<M> modules = warModules.get();
+        if (modules.isEmpty()) {
+            continuation.run();
+            return;
+        }
+        if (rebuilder == null) {
+            logger.logServerWarning("Rebuild before redeploy is enabled, but the IDE's Maven"
+                    + " integration is unavailable — package step skipped, redeploying as-is.");
+            continuation.run();
+            return;
+        }
+        runRebuildChain(modules, rebuilder, logger, continuation);
+    }
+
+    /**
+     * The shared rebuild chain: dedupes (first occurrence wins), rebuilds
+     * sequentially, runs {@code onAllSucceeded} only after every module
+     * packaged; the first failure logs the abort error and stops. Used by the
+     * redeploy gate and the "Rebuild and Deploy" balloon remedy.
+     */
+    static <M> void runRebuildChain(@NotNull List<M> modules,
+                                    @NotNull RebuildInvoker<M> rebuilder,
+                                    @NotNull TomcatDeploymentLogger logger,
+                                    @NotNull Runnable onAllSucceeded) {
+        List<M> deduped = new ArrayList<>(new java.util.LinkedHashSet<>(modules));
+        rebuildModulesSequentially(deduped, 0, rebuilder, onAllSucceeded,
+                message -> logger.logServerError(
+                        "Build-tool package failed — redeploy aborted, nothing deployed: " + message));
+    }
+
+    /** Sequential rebuild chain: index {@code i} onward, success-continues, first failure stops. */
+    private static <M> void rebuildModulesSequentially(@NotNull List<M> modules, int i,
+                                                       @NotNull RebuildInvoker<M> rebuilder,
+                                                       @NotNull Runnable onAllSucceeded,
+                                                       @NotNull java.util.function.Consumer<String> onFailure) {
+        if (i >= modules.size()) {
+            onAllSucceeded.run();
+            return;
+        }
+        rebuilder.rebuild(modules.get(i),
+                () -> rebuildModulesSequentially(modules, i + 1, rebuilder, onAllSucceeded, onFailure),
+                onFailure);
     }
 
     /**
@@ -449,6 +586,15 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     }
 
                     @Override
+                    public void infoWithActions(@NotNull String title, @NotNull String content,
+                                                @NotNull String actionLabel, @NotNull Runnable action,
+                                                @NotNull String secondActionLabel, @NotNull Runnable secondAction) {
+                        TomcatNotifier.notifyWithActions(project, title, content,
+                                com.intellij.notification.NotificationType.WARNING,
+                                actionLabel, action, secondActionLabel, secondAction);
+                    }
+
+                    @Override
                     public void warning(@NotNull String title, @NotNull String content) {
                         TomcatNotifier.warning(project, title, content);
                     }
@@ -462,7 +608,75 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                     d -> DeploymentStaleness.Verdict.fresh());
                             logger.logServerInfo("Deploy Anyway: deployed "
                                     + blocked.size() + " stale WAR(s) as last built.");
-                        }));
+                        }),
+                rebuildAndDeployAction(blocked, webappsDir, logger));
+    }
+
+    /**
+     * The "Rebuild and Deploy" balloon remedy: packages the blocked WARs'
+     * modules through the build-tool integration, then re-runs the blocked copy
+     * through {@link #redeployBlockedWithReVerdict}. {@code null} — no second
+     * button — when no rebuilder is available or no blocked deployment
+     * resolves to a rebuildable module (platform glue; the decision itself is
+     * the test-pinned {@link #buildRebuildAndDeployRemedy}).
+     */
+    @Nullable
+    private Runnable rebuildAndDeployAction(@NotNull List<Deployment> blocked,
+                                            @NotNull Path webappsDir,
+                                            @NotNull TomcatDeploymentLogger logger) {
+        com.dev.idea.plugins.tomcat.utils.DeploymentRebuilder rebuilder =
+                com.dev.idea.plugins.tomcat.utils.DeploymentRebuilder.getInstance();
+        List<com.intellij.openapi.module.Module> modules = rebuilder == null ? List.of()
+                : rebuildableWarModules(blocked,
+                        d -> com.intellij.openapi.application.ReadAction.compute(
+                                () -> DeploymentModuleResolver.resolve(d, project)),
+                        m -> rebuilder.canRebuild(project, m), logger);
+        return buildRebuildAndDeployRemedy(
+                rebuilder != null ? moduleInvoker(rebuilder, logger) : null, modules, logger,
+                () -> com.intellij.openapi.application.ApplicationManager.getApplication()
+                        .executeOnPooledThread(() ->
+                                redeployBlockedWithReVerdict(project, blocked, webappsDir, logger)));
+    }
+
+    /**
+     * The remedy-availability decision + wiring: a runnable that rebuilds
+     * {@code modules} and, only after the whole chain succeeds, runs
+     * {@code reVerdictDeploy}; {@code null} (no second balloon button) when no
+     * invoker is available or nothing is rebuildable. Package-visible and
+     * platform-free so tests pin both null-guards and the chain-then-deploy
+     * ordering.
+     */
+    @Nullable
+    static <M> Runnable buildRebuildAndDeployRemedy(@Nullable RebuildInvoker<M> invoker,
+                                                    @NotNull List<M> modules,
+                                                    @NotNull TomcatDeploymentLogger logger,
+                                                    @NotNull Runnable reVerdictDeploy) {
+        if (invoker == null || modules.isEmpty()) return null;
+        return () -> runRebuildChain(modules, invoker, logger, reVerdictDeploy);
+    }
+
+    /**
+     * Re-runs the blocked copy WITH verdicts re-evaluated against the live
+     * project model — after a real rebuild the WAR is fresh and deploys; a
+     * somehow-still-stale WAR stays blocked. This path NEVER bypasses
+     * verdicts; "Deploy Anyway" is the only bypass. Package-visible (called
+     * off the EDT) so a platform test can pin the re-evaluation itself —
+     * swapping the evaluator for a constant would ship stale code silently.
+     */
+    static void redeployBlockedWithReVerdict(@NotNull Project project,
+                                             @NotNull List<Deployment> blocked,
+                                             @NotNull Path webappsDir,
+                                             @NotNull TomcatDeploymentLogger logger) {
+        List<Deployment> stillBlocked = redeployWarArtifactsInto(blocked, webappsDir, logger,
+                d -> DeploymentStaleness.evaluate(project, d));
+        if (stillBlocked.isEmpty()) {
+            logger.logServerInfo("Rebuild and Deploy: rebuilt and redeployed "
+                    + blocked.size() + " WAR(s).");
+        } else {
+            logger.logServerWarning("Rebuild and Deploy: " + stillBlocked.size()
+                    + " WAR(s) still predate their module's compiled output"
+                    + " after the rebuild — left blocked.");
+        }
     }
 
     /**
@@ -478,6 +692,23 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                                                  @NotNull String scopeId,
                                                  @NotNull UpdateNotifier notifier,
                                                  @NotNull Runnable deployAnyway) {
+        notifyBlockedStaleWarDeployments(blocked, logger, gate, scopeId, notifier, deployAnyway, null);
+    }
+
+    /**
+     * Overload with the optional "Rebuild and Deploy" remedy: when
+     * {@code rebuildAndDeploy} is non-null (a build-tool rebuilder can package
+     * the blocked WARs' modules) the balloon offers it FIRST, alongside
+     * "Deploy Anyway" — rebuild-then-redeploy is the correct fix; deploying old
+     * bytes is the fallback. Gating and console evidence unchanged.
+     */
+    static void notifyBlockedStaleWarDeployments(@NotNull List<Deployment> blocked,
+                                                 @NotNull TomcatDeploymentLogger logger,
+                                                 @NotNull SessionNotificationGate gate,
+                                                 @NotNull String scopeId,
+                                                 @NotNull UpdateNotifier notifier,
+                                                 @NotNull Runnable deployAnyway,
+                                                 @Nullable Runnable rebuildAndDeploy) {
         if (blocked.isEmpty()) return;
         java.util.Set<String> key = new java.util.HashSet<>();
         StringBuilder names = new StringBuilder();
@@ -489,12 +720,22 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         if (!gate.shouldNotify("stale-war-blocked|" + scopeId, key)) return;
 
         String plural = blocked.size() == 1 ? "WAR is" : "WARs are";
-        notifier.infoWithAction(
-                blocked.size() == 1 ? "Stale WAR not deployed" : blocked.size() + " stale WARs not deployed",
-                names + ": the " + plural + " older than the modules' compiled output —"
-                        + " deploying would ship old code. Rebuild with 'mvn package' /"
-                        + " 'gradle war' and update again, or deploy the old WAR as-is.",
-                "Deploy Anyway", deployAnyway);
+        String title = blocked.size() == 1
+                ? "Stale WAR not deployed" : blocked.size() + " stale WARs not deployed";
+        if (rebuildAndDeploy != null) {
+            notifier.infoWithActions(title,
+                    names + ": the " + plural + " older than the modules' compiled output —"
+                            + " deploying would ship old code. Rebuild the WAR and deploy it,"
+                            + " or deploy the old WAR as-is.",
+                    "Rebuild and Deploy", rebuildAndDeploy,
+                    "Deploy Anyway", deployAnyway);
+        } else {
+            notifier.infoWithAction(title,
+                    names + ": the " + plural + " older than the modules' compiled output —"
+                            + " deploying would ship old code. Rebuild with 'mvn package' /"
+                            + " 'gradle war' and update again, or deploy the old WAR as-is.",
+                    "Deploy Anyway", deployAnyway);
+        }
     }
 
     /**
@@ -722,6 +963,17 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         void infoWithAction(@NotNull String title, @NotNull String content,
                             @NotNull String actionLabel, @NotNull Runnable action);
         void warning(@NotNull String title, @NotNull String content);
+
+        /**
+         * Balloon with two alternative resolutions. Default keeps existing
+         * implementors compiling; the production notifier overrides it with a
+         * real two-button balloon.
+         */
+        default void infoWithActions(@NotNull String title, @NotNull String content,
+                                     @NotNull String actionLabel, @NotNull Runnable action,
+                                     @NotNull String secondActionLabel, @NotNull Runnable secondAction) {
+            infoWithAction(title, content, actionLabel, action);
+        }
     }
 
     private static void offerWarToExplodedFix(@NotNull TomcatRunConfiguration configuration,

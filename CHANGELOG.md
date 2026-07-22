@@ -4,6 +4,7 @@
 
 ### Changed
 - Warn when an artifact packages modules the class sync can't cover.
+- Opt-in: run Maven package before Redeploy.
 
 ### Fixed
 - Web resources sync no longer deletes build-produced webapp files.

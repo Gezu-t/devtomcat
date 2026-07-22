@@ -222,4 +222,37 @@ class ConfigExportImportTest {
             assertEquals(8080, imported.getPortConfig().getHttp());
         }
     }
+
+    @Nested
+    @DisplayName("rebuildBeforeRedeploy export/import")
+    class RebuildBeforeRedeployExportImport {
+
+        @Test
+        @DisplayName("true survives export then import")
+        void trueRoundTrips() throws Exception {
+            data.getUpdateConfig().setRebuildBeforeRedeploy(true);
+            String xml = ConfigExportImport.exportToXml(data);
+            assertTrue(ConfigExportImport.importFromXml(xml)
+                    .getUpdateConfig().isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("default false survives export then import")
+        void falseRoundTrips() throws Exception {
+            String xml = ConfigExportImport.exportToXml(data);
+            assertFalse(ConfigExportImport.importFromXml(xml)
+                    .getUpdateConfig().isRebuildBeforeRedeploy());
+        }
+
+        @Test
+        @DisplayName("old export without the element imports as false")
+        void absentImportsFalse() throws Exception {
+            String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                    "<devtomcat-config version=\"1.0\" exportedAt=\"2025-01-01T00:00:00\">" +
+                    "<updateActions><onUpdate>redeploy</onUpdate></updateActions>" +
+                    "</devtomcat-config>";
+            TomcatConfigurationData imported = ConfigExportImport.importFromXml(xml);
+            assertFalse(imported.getUpdateConfig().isRebuildBeforeRedeploy());
+        }
+    }
 }
