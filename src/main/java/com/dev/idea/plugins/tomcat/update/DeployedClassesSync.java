@@ -313,110 +313,19 @@ public final class DeployedClassesSync {
                         + " missing at startup, run Build > Rebuild Project.");
             }
 
-            int copiedForThisArtifact = 0;
-            int brokenForThisArtifact = 0;
-            // Library JARs actually packaged into this deployment's WEB-INF/lib/.
-            // A dependency module's resource policy is decided against this:
-            // jarred dependency → .class-only (its resources come from the JAR);
-            // dependency NOT packaged here → full content (so its resources
-            // still reach Tomcat). Scanned once per artifact off the model.
-            Set<String> deployedLibraryKeys = scanDeployedLibraryKeys(artifactRoot);
-            // Union of every source root's contributed paths — what this run's
-            // sync claims to have covered. The stale-file reconcile below
-            // records it as the new manifest and deletes ONLY classes a prior
-            // manifest recorded (stamp-verified) that are no longer contributed
-            // (removed from source). With PreResources gone, the deployed copy
-            // is the sole authority for what Tomcat loads, so a stale class
-            // would keep getting resolved by the classloader and the user sees
-            // "I deleted that class, why is it still here" behaviour.
-            java.util.Set<String> contributedPaths = new java.util.HashSet<>();
-            // Tracks whether EVERY source root's walk fully enumerated its
-            // contribution. If any root's walk failed (vanished source, nesting
-            // refusal, unreadable subtree, aborted walk), contributedPaths is an
-            // incomplete union and the orphan pass below is deferred — deleting
-            // a file the failed root legitimately owns but never visited would
-            // strip a working deployment (silent staleness or NoClassDefFound).
-            boolean allRootsWalkedCleanly = true;
-            for (SourceRoot src : resolution.sourceRoots()) {
-                boolean classesOnly = shouldMirrorClassesOnly(src, deployedLibraryKeys);
-                TreeMirror.MirrorResult mr = mirrorTree(src.path(), webInfClasses, classesOnly);
-                copiedForThisArtifact += mr.copied();
-                brokenForThisArtifact += mr.brokenSkipped();
-                contributedPaths.addAll(mr.contributedPaths());
-                if (mr.walkFailed()) {
-                    allRootsWalkedCleanly = false;
-                    logger.logServerWarning("Class sync: source root " + src.path()
-                            + " for '" + name + "' could not be fully read;"
-                            + " orphan cleanup deferred to avoid deleting deployed files.");
-                }
-                if (mr.copied() > 0) {
-                    logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src.path()
-                            + (classesOnly ? " (.class only)" : ""));
-                }
-            }
-            // Orphan-reconcile only when at least one source root actually
-            // contributed (the FAILED MirrorResult from a non-existent src
-            // returns no paths) AND every root's walk completed cleanly. Two
-            // failure modes are guarded here:
-            //   - Empty contributedPaths could mean "every source root was
-            //     unreadable today"; deleting everything in WEB-INF/classes/ on
-            //     that failure mode would destroy a working deployment.
-            //   - A PARTIAL failure — one root walks fine while another (e.g. a
-            //     dependency module) fails mid-walk — leaves contributedPaths
-            //     non-empty but missing the failed root's paths; running the
-            //     orphan pass then would delete every file that failed root
-            //     previously mirrored. allRootsWalkedCleanly defers the pass in
-            //     that case, leaving stale files rather than risking live ones.
-            int orphansRemovedForThisArtifact = 0;
-            if (!contributedPaths.isEmpty() && allRootsWalkedCleanly) {
-                // Reconcile against the manifest of what WE synced last run: delete
-                // only classes we previously wrote and no longer do (removed from
-                // source). A class this sync never wrote — e.g. one the artifact
-                // build assembles from a root the module resolver doesn't enumerate
-                // — is NOT in the manifest and is never deleted, so we can't strip a
-                // legitimately-deployed class and cause ClassNotFoundException.
-                Path syncManifest = classSyncManifestFor(webInfClasses);
-                orphansRemovedForThisArtifact =
-                        SyncManifest.reconcile(webInfClasses, syncManifest, contributedPaths);
-                if (orphansRemovedForThisArtifact > 0) {
-                    logger.logServerInfo("Class sync: removed " + orphansRemovedForThisArtifact
-                            + " stale class file(s) from '" + name
-                            + "' (previously synced, now removed from source)");
-                }
-            } else if (!contributedPaths.isEmpty()) {
-                // Deferred run: not safe to delete, but the mirror may have just
-                // overwritten deployed files — refresh their recorded stamps or
-                // a class edited during a deferred run could never be cleaned
-                // once removed from source (stale stamp = a permanently
-                // loadable stale class, the exact bug this manifest fixes).
-                SyncManifest.refresh(
-                        webInfClasses, classSyncManifestFor(webInfClasses), contributedPaths);
-            }
-            if (brokenForThisArtifact > 0) {
-                // CRITICAL warning — this is the symptom that caused the user-
-                // reported Tomcat startup failure with "Unresolved compilation
-                // problems" Errors. Don't bury it. Point the user at the
-                // actionable root cause (IDE project model out of sync with
-                // Maven). Without this they'd be staring at a Tomcat stack
-                // trace and have no idea their IDE's compile is the source.
-                logger.logServerWarning("Class sync: " + brokenForThisArtifact
-                        + " file(s) in '" + name + "' were NOT mirrored because the IDE compiled them"
-                        + " with unresolved imports (ECJ proceed-on-error). Tomcat would fail at"
-                        + " class init if these replaced the working deployed copies. To fix the"
-                        + " compile: File > Invalidate Caches, or in the Maven tool window click"
-                        + " Reload All Maven Projects, or run 'mvn install' on the command line.");
-            }
+            ArtifactSyncOutcome outcome = syncArtifactTree(
+                    name, artifactRoot, webInfClasses, resolution.sourceRoots(), logger);
             long artifactMs = (System.nanoTime() - artifactStart) / 1_000_000;
-            if (copiedForThisArtifact > 0) {
-                logger.logServerInfo("Class sync: " + copiedForThisArtifact +
-                        " file(s) refreshed in '" + name + "' (" + contributedPaths.size()
+            if (outcome.copied() > 0) {
+                logger.logServerInfo("Class sync: " + outcome.copied() +
+                        " file(s) refreshed in '" + name + "' (" + outcome.contributedCount()
                         + " source path(s) scanned, " + artifactMs + " ms)");
                 syncedArtifacts++;
-                totalCopied += copiedForThisArtifact;
-            } else if (brokenForThisArtifact == 0) {
+                totalCopied += outcome.copied();
+            } else if (outcome.brokenSkipped() == 0) {
                 logger.logServerInfo("Class sync: '" + name
                         + "' already up to date (source files match deployed WEB-INF/classes mtime/size; "
-                        + contributedPaths.size() + " source path(s) scanned, " + artifactMs + " ms)");
+                        + outcome.contributedCount() + " source path(s) scanned, " + artifactMs + " ms)");
             }
         }
 
@@ -424,6 +333,174 @@ public final class DeployedClassesSync {
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
                 + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
         return new SyncReport(syncedArtifacts, totalCopied, skipped);
+    }
+
+    /**
+     * Per-artifact outcome of {@link #syncArtifactTree}: files copied, ECJ
+     * broken-stub copies refused, and the number of source paths this pass
+     * claimed (for the summary log lines).
+     */
+    record ArtifactSyncOutcome(int copied, int brokenSkipped, int contributedCount) {}
+
+    /**
+     * The complete per-artifact tree-sync sequence for one exploded deployment,
+     * exactly as {@link #syncDeployments} runs it after module resolution:
+     * deployed {@code WEB-INF/lib} scan, stale-overlay drop pass, covering-JAR-
+     * floored mirror per source root with JAR-coverage recording, then the
+     * manifest reconcile (or stamp refresh when a walk failed). Pure file I/O,
+     * package-visible: tests drive the production sequence end to end without a
+     * Project/ModuleManager fixture, so reordering or dropping a pass here is
+     * test-visible.
+     */
+    @NotNull
+    static ArtifactSyncOutcome syncArtifactTree(@NotNull String name,
+                                                @NotNull Path artifactRoot,
+                                                @NotNull Path webInfClasses,
+                                                @NotNull List<SourceRoot> sourceRoots,
+                                                @NotNull TomcatDeploymentLogger logger) {
+        int copiedForThisArtifact = 0;
+        int brokenForThisArtifact = 0;
+        // Library JARs actually packaged into this deployment's WEB-INF/lib/.
+        // A dependency module's resource policy is decided against this:
+        // jarred dependency → .class-only (its resources come from the JAR);
+        // dependency NOT packaged here → full content (so its resources
+        // still reach Tomcat). Scanned once per artifact off the model.
+        Map<String, String> deployedLibraryJars = scanDeployedLibraryJars(artifactRoot);
+        Set<String> deployedLibraryKeys = deployedLibraryJars.keySet();
+
+        // Overlay-staleness pass BEFORE mirroring: overlay classes mirrored
+        // while an older WEB-INF/lib JAR covered their dependency shadow a
+        // build-tool-rebuilt JAR (WEB-INF/classes loads first). Drop them
+        // (stamp-verified, per the manifest's covering-JAR records) so the
+        // newer JAR serves; the mirror below re-creates an overlay entry
+        // only where the IDE output is newer than the JAR again.
+        Path syncManifest = classSyncManifestFor(webInfClasses);
+        int overlaysDropped = SyncManifest.dropStaleJarOverlays(
+                webInfClasses, syncManifest, artifactRoot);
+        if (overlaysDropped > 0) {
+            logger.logServerInfo("Class sync: removed " + overlaysDropped
+                    + " stale overlay class file(s) from '" + name
+                    + "' — their WEB-INF/lib JAR was rebuilt more recently,"
+                    + " so the newer JAR now serves those classes");
+        }
+        // This pass's covering-JAR coverage, recorded into the manifest at
+        // the reconcile/refresh below so the NEXT pass can detect a rebuilt
+        // JAR and drop the overlay entries mirrored under its cover.
+        Map<String, SyncManifest.JarCoverage> jarCoverage = new LinkedHashMap<>();
+        // Union of every source root's contributed paths — what this run's
+        // sync claims to have covered. The stale-file reconcile below
+        // records it as the new manifest and deletes ONLY classes a prior
+        // manifest recorded (stamp-verified) that are no longer contributed
+        // (removed from source). With PreResources gone, the deployed copy
+        // is the sole authority for what Tomcat loads, so a stale class
+        // would keep getting resolved by the classloader and the user sees
+        // "I deleted that class, why is it still here" behaviour.
+        java.util.Set<String> contributedPaths = new java.util.HashSet<>();
+        // Tracks whether EVERY source root's walk fully enumerated its
+        // contribution. If any root's walk failed (vanished source, nesting
+        // refusal, unreadable subtree, aborted walk), contributedPaths is an
+        // incomplete union and the orphan pass below is deferred — deleting
+        // a file the failed root legitimately owns but never visited would
+        // strip a working deployment (silent staleness or NoClassDefFound).
+        boolean allRootsWalkedCleanly = true;
+        for (SourceRoot src : sourceRoots) {
+            boolean classesOnly = shouldMirrorClassesOnly(src, deployedLibraryKeys);
+            // Covering-JAR gate: when a deployed JAR covers this dependency
+            // root, only IDE output NEWER than the JAR may overlay it —
+            // otherwise the JAR's copy is the freshest and mirroring (or
+            // keeping) loose classes would shadow it. Files at/below the
+            // floor are not contributed, so the reconcile below also drops
+            // their previously-mirrored copies.
+            String coveringJar = coveringJarFor(src, deployedLibraryJars);
+            long jarMtimeFloor = Long.MIN_VALUE;
+            SyncManifest.Stamp coveringJarStamp = null;
+            if (coveringJar != null) {
+                coveringJarStamp = SyncManifest.stampOf(
+                        artifactRoot.resolve(WEB_INF_LIB_PATH).resolve(coveringJar));
+                if (!coveringJarStamp.isUnknown()) {
+                    jarMtimeFloor = coveringJarStamp.mtimeMillis();
+                }
+            }
+            TreeMirror.MirrorResult mr =
+                    mirrorTree(src.path(), webInfClasses, classesOnly, jarMtimeFloor);
+            if (coveringJar != null && !coveringJarStamp.isUnknown()
+                    && !mr.contributedPaths().isEmpty()) {
+                String jarRel = WEB_INF_LIB_PATH + "/" + coveringJar;
+                jarCoverage.merge(jarRel,
+                        new SyncManifest.JarCoverage(coveringJarStamp, mr.contributedPaths()),
+                        (a, b) -> {
+                            Set<String> union = new HashSet<>(a.coveredPaths());
+                            union.addAll(b.coveredPaths());
+                            return new SyncManifest.JarCoverage(a.stamp(), union);
+                        });
+            }
+            copiedForThisArtifact += mr.copied();
+            brokenForThisArtifact += mr.brokenSkipped();
+            contributedPaths.addAll(mr.contributedPaths());
+            if (mr.walkFailed()) {
+                allRootsWalkedCleanly = false;
+                logger.logServerWarning("Class sync: source root " + src.path()
+                        + " for '" + name + "' could not be fully read;"
+                        + " orphan cleanup deferred to avoid deleting deployed files.");
+            }
+            if (mr.copied() > 0) {
+                logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src.path()
+                        + (classesOnly ? " (.class only)" : ""));
+            }
+        }
+        // Orphan-reconcile only when at least one source root actually
+        // contributed (the FAILED MirrorResult from a non-existent src
+        // returns no paths) AND every root's walk completed cleanly. Two
+        // failure modes are guarded here:
+        //   - Empty contributedPaths could mean "every source root was
+        //     unreadable today"; deleting everything in WEB-INF/classes/ on
+        //     that failure mode would destroy a working deployment.
+        //   - A PARTIAL failure — one root walks fine while another (e.g. a
+        //     dependency module) fails mid-walk — leaves contributedPaths
+        //     non-empty but missing the failed root's paths; running the
+        //     orphan pass then would delete every file that failed root
+        //     previously mirrored. allRootsWalkedCleanly defers the pass in
+        //     that case, leaving stale files rather than risking live ones.
+        int orphansRemovedForThisArtifact = 0;
+        if (!contributedPaths.isEmpty() && allRootsWalkedCleanly) {
+            // Reconcile against the manifest of what WE synced last run: delete
+            // only classes we previously wrote and no longer do (removed from
+            // source). A class this sync never wrote — e.g. one the artifact
+            // build assembles from a root the module resolver doesn't enumerate
+            // — is NOT in the manifest and is never deleted, so we can't strip a
+            // legitimately-deployed class and cause ClassNotFoundException.
+            orphansRemovedForThisArtifact = SyncManifest.reconcile(
+                    webInfClasses, syncManifest, contributedPaths, jarCoverage);
+            if (orphansRemovedForThisArtifact > 0) {
+                logger.logServerInfo("Class sync: removed " + orphansRemovedForThisArtifact
+                        + " stale class file(s) from '" + name
+                        + "' (previously synced, now removed from source)");
+            }
+        } else if (!contributedPaths.isEmpty()) {
+            // Deferred run: not safe to delete, but the mirror may have just
+            // overwritten deployed files — refresh their recorded stamps or
+            // a class edited during a deferred run could never be cleaned
+            // once removed from source (stale stamp = a permanently
+            // loadable stale class, the exact bug this manifest fixes).
+            SyncManifest.refresh(
+                    webInfClasses, syncManifest, contributedPaths, jarCoverage);
+        }
+        if (brokenForThisArtifact > 0) {
+            // CRITICAL warning — this is the symptom that caused the user-
+            // reported Tomcat startup failure with "Unresolved compilation
+            // problems" Errors. Don't bury it. Point the user at the
+            // actionable root cause (IDE project model out of sync with
+            // Maven). Without this they'd be staring at a Tomcat stack
+            // trace and have no idea their IDE's compile is the source.
+            logger.logServerWarning("Class sync: " + brokenForThisArtifact
+                    + " file(s) in '" + name + "' were NOT mirrored because the IDE compiled them"
+                    + " with unresolved imports (ECJ proceed-on-error). Tomcat would fail at"
+                    + " class init if these replaced the working deployed copies. To fix the"
+                    + " compile: File > Invalidate Caches, or in the Maven tool window click"
+                    + " Reload All Maven Projects, or run 'mvn install' on the command line.");
+        }
+        return new ArtifactSyncOutcome(
+                copiedForThisArtifact, brokenForThisArtifact, contributedPaths.size());
     }
 
     @NotNull
@@ -1017,18 +1094,44 @@ public final class DeployedClassesSync {
      */
     @NotNull
     static Set<String> scanDeployedLibraryKeys(@NotNull Path artifactRoot) {
-        Set<String> keys = new HashSet<>();
+        return scanDeployedLibraryJars(artifactRoot).keySet();
+    }
+
+    /**
+     * Like {@link #scanDeployedLibraryKeys} but keeps the mapping from each
+     * version-independent artifact key to the deployed JAR's file name, so a
+     * covered dependency root can be tied to the concrete JAR that covers it
+     * (for the covering-JAR mtime floor and the manifest's JAR records).
+     */
+    @NotNull
+    static Map<String, String> scanDeployedLibraryJars(@NotNull Path artifactRoot) {
+        Map<String, String> jars = new HashMap<>();
         Path webInfLib = artifactRoot.resolve(WEB_INF_LIB_PATH);
-        if (!Files.isDirectory(webInfLib)) return keys;
+        if (!Files.isDirectory(webInfLib)) return jars;
         try (var stream = Files.list(webInfLib)) {
-            stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
-                  .forEach(p -> keys.add(
-                          LibraryArtifactNames.libraryArtifactKey(p.getFileName().toString())));
+            stream.map(p -> p.getFileName().toString())
+                  .filter(n -> n.endsWith(EXT_JAR))
+                  .forEach(n -> jars.put(LibraryArtifactNames.libraryArtifactKey(n), n));
         } catch (IOException e) {
             LOG.debug("Class sync: could not list WEB-INF/lib at " + webInfLib
                     + ": " + e.getMessage());
         }
-        return keys;
+        return jars;
+    }
+
+    /**
+     * The file name of the deployed {@code WEB-INF/lib} JAR covering
+     * {@code root}, or {@code null} when the root is the module's own output,
+     * has no resolved identity, or no matching JAR is deployed. Non-null
+     * exactly when {@link #shouldMirrorClassesOnly} returned {@code true}
+     * because of an actual JAR (not the unresolved-identity default).
+     */
+    @Nullable
+    static String coveringJarFor(@NotNull SourceRoot root,
+                                 @NotNull Map<String, String> deployedLibraryJars) {
+        if (!root.classesOnly() || root.artifactName() == null) return null;
+        return deployedLibraryJars.get(
+                LibraryArtifactNames.libraryArtifactKey(root.artifactName() + EXT_JAR));
     }
 
     /**
@@ -1061,6 +1164,20 @@ public final class DeployedClassesSync {
      * {@code false} and mirrors full content.
      */
     static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst, boolean classesOnly) {
+        return mirrorTree(src, dst, classesOnly, Long.MIN_VALUE);
+    }
+
+    /**
+     * {@link #mirrorTree(Path, Path, boolean)} plus a covering-JAR mtime floor:
+     * source files not strictly newer than {@code sourceMtimeFloorMillis} are
+     * skipped without contributing. Used for dependency roots whose classes are
+     * also deployed as a {@code WEB-INF/lib} JAR — only IDE output newer than
+     * that JAR may overlay it, or a stale loose class would shadow a
+     * build-tool-rebuilt JAR (Tomcat searches {@code WEB-INF/classes} first).
+     * {@link Long#MIN_VALUE} = no floor.
+     */
+    static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst,
+                                              boolean classesOnly, long sourceMtimeFloorMillis) {
         return TreeMirror.mirrorTree(src, dst, new TreeMirror.Policy(
                 "Class sync",
                 Set.of(),
@@ -1073,7 +1190,8 @@ public final class DeployedClassesSync {
                 DeployedClassesSync::isBrokenEcjClass,
                 // Generic failure stat-ing the destination: copy anyway
                 // (safer than leaving stale code).
-                true));
+                true,
+                sourceMtimeFloorMillis));
     }
 
     /**

@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -1120,6 +1121,150 @@ class DeployedClassesSyncScenariosTest {
         assertTrue(Files.exists(dst.resolve("config/app.properties")),
                 "the web module's own resources belong in WEB-INF/classes (not duplicated in any lib JAR)");
         assertTrue(Files.exists(dst.resolve("descriptors/registry.xml")));
+    }
+
+    // ===========================================================================
+    // Covering-JAR gate: a dependency root whose classes are also deployed as a
+    // WEB-INF/lib JAR may overlay that JAR ONLY with IDE output strictly newer
+    // than the JAR — otherwise a stale loose class in WEB-INF/classes shadows a
+    // freshly-rebuilt JAR forever (Tomcat searches WEB-INF/classes first).
+    // The floor excludes at/below-floor files from contribution, so the
+    // reconcile drops their previously-mirrored copies — "newest wins" in both
+    // directions.
+    // ===========================================================================
+
+    @Test
+    @DisplayName("covering-JAR floor — only sources newer than the JAR are mirrored or contributed")
+    void jarFloor01_gateExcludesOlderSources(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path dst = Files.createDirectories(tmp.resolve("web/target/app/WEB-INF/classes"));
+
+        writeClass(src, "com/example/dep/Old.class", "compiled-before-the-jar");
+        writeClass(src, "com/example/dep/Fresh.class", "compiled-after-the-jar");
+        long jarMtime = 100_000L;
+        Files.setLastModifiedTime(src.resolve("com/example/dep/Old.class"),
+                FileTime.fromMillis(jarMtime - 10_000));
+        Files.setLastModifiedTime(src.resolve("com/example/dep/Fresh.class"),
+                FileTime.fromMillis(jarMtime + 10_000));
+
+        TreeMirror.MirrorResult mr = DeployedClassesSync.mirrorTree(src, dst, true, jarMtime);
+
+        assertEquals(1, mr.copied(), "only the source newer than the JAR may overlay it");
+        assertTrue(Files.exists(dst.resolve("com/example/dep/Fresh.class")));
+        assertFalse(Files.exists(dst.resolve("com/example/dep/Old.class")),
+                "an at/below-floor source must not create a shadowing overlay");
+        assertTrue(mr.contributedPaths().contains("com/example/dep/Fresh.class"));
+        assertFalse(mr.contributedPaths().contains("com/example/dep/Old.class"),
+                "below-floor sources are unclaimed so the reconcile can drop stale copies");
+        assertFalse(mr.walkFailed());
+    }
+
+    @Test
+    @DisplayName("covering-JAR cycle — rebuilt JAR drops the overlay; a newer recompile restores it (newest wins)")
+    void jarFloor02_newestWinsAcrossRebuilds(@TempDir Path tmp) throws Exception {
+        // Full per-deployment sequence syncDeployments runs: drop pass, gated
+        // mirror, reconcile with JAR coverage — across three user actions.
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path artifactRoot = Files.createDirectories(tmp.resolve("web/target/app"));
+        Path dst = Files.createDirectories(artifactRoot.resolve("WEB-INF/classes"));
+        Path jar = artifactRoot.resolve("WEB-INF/lib/web-module-lib.jar");
+        Files.createDirectories(jar.getParent());
+        Files.writeString(jar, "jar-v1");
+        String jarRel = "WEB-INF/lib/web-module-lib.jar";
+        String depClass = "com/example/dep/Util.class";
+        Path manifest = tmp.resolve("m.manifest");
+
+        // ---- Pass 1: IDE output newer than the JAR -> overlay is created. ----
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
+        writeClass(src, depClass, "ide-output-v1");
+        Files.setLastModifiedTime(src.resolve(depClass), FileTime.fromMillis(110_000L));
+
+        assertEquals(0, SyncManifest.dropStaleJarOverlays(dst, manifest, artifactRoot));
+        TreeMirror.MirrorResult pass1 = DeployedClassesSync.mirrorTree(src, dst, true, 100_000L);
+        assertEquals(1, pass1.copied());
+        SyncManifest.reconcile(dst, manifest, pass1.contributedPaths(),
+                Map.of(jarRel, new SyncManifest.JarCoverage(
+                        SyncManifest.stampOf(jar), pass1.contributedPaths())));
+        assertFileContent(dst.resolve(depClass), "ide-output-v1");
+
+        // ---- Pass 2: build tool rebuilds the JAR (newer than the overlay). ----
+        Files.writeString(jar, "jar-v2-rebuilt");
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(200_000L));
+
+        int dropped = SyncManifest.dropStaleJarOverlays(dst, manifest, artifactRoot);
+        assertEquals(1, dropped, "the stale overlay shadowing the rebuilt JAR must be dropped");
+        assertFalse(Files.exists(dst.resolve(depClass)), "the newer JAR serves now");
+        TreeMirror.MirrorResult pass2 = DeployedClassesSync.mirrorTree(src, dst, true, 200_000L);
+        assertEquals(0, pass2.copied(),
+                "the gate must not resurrect the below-floor IDE output the drop just removed");
+        assertFalse(Files.exists(dst.resolve(depClass)));
+        SyncManifest.reconcile(dst, manifest, pass2.contributedPaths(),
+                Map.of(jarRel, new SyncManifest.JarCoverage(
+                        SyncManifest.stampOf(jar), pass2.contributedPaths())));
+
+        // ---- Pass 3: the user edits and the IDE recompiles past the JAR. ----
+        writeClass(src, depClass, "ide-output-v2-newer-than-jar");
+        Files.setLastModifiedTime(src.resolve(depClass), FileTime.fromMillis(210_000L));
+
+        assertEquals(0, SyncManifest.dropStaleJarOverlays(dst, manifest, artifactRoot),
+                "an unchanged JAR triggers no drop");
+        TreeMirror.MirrorResult pass3 = DeployedClassesSync.mirrorTree(src, dst, true, 200_000L);
+        assertEquals(1, pass3.copied(), "IDE output newer than the JAR overlays it again");
+        assertFileContent(dst.resolve(depClass), "ide-output-v2-newer-than-jar");
+    }
+
+    @Test
+    @DisplayName("production sequence — syncArtifactTree itself drops, floors, and restores the overlay")
+    void jarFloor03_productionSequenceNewestWins(@TempDir Path tmp) throws Exception {
+        // Same story as jarFloor02, but driven through the seam syncDeployments
+        // actually runs per artifact: the WEB-INF/lib scan, the drop pass, the
+        // covering-JAR floor, the coverage recording, and the reconcile are the
+        // PRODUCTION wiring here — reordering or dropping any pass in
+        // syncArtifactTree fails this test.
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path artifactRoot = Files.createDirectories(tmp.resolve("web/target/app"));
+        Path webInfClasses = Files.createDirectories(artifactRoot.resolve("WEB-INF/classes"));
+        Path jar = artifactRoot.resolve("WEB-INF/lib/common-1.0.0.jar");
+        Files.createDirectories(jar.getParent());
+        String depClass = "com/example/dep/Util.class";
+        var logger = org.mockito.Mockito.mock(
+                com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+        // The dependency root resolves under the version-independent identity
+        // "common"; the deployed JAR carries a versioned file name — the floor
+        // only works if the scan ties the identity back to the real file.
+        List<DeployedClassesSync.SourceRoot> roots =
+                List.of(new DeployedClassesSync.SourceRoot(src, true, "common"));
+
+        // ---- Pass 1: IDE output newer than the deployed JAR -> overlay created. ----
+        Files.writeString(jar, "jar-v1");
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
+        writeClass(src, depClass, "ide-output-v1");
+        Files.setLastModifiedTime(src.resolve(depClass), FileTime.fromMillis(110_000L));
+
+        DeployedClassesSync.ArtifactSyncOutcome pass1 = DeployedClassesSync.syncArtifactTree(
+                "web-module", artifactRoot, webInfClasses, roots, logger);
+        assertEquals(1, pass1.copied());
+        assertFileContent(webInfClasses.resolve(depClass), "ide-output-v1");
+
+        // ---- Pass 2: build tool rebuilds the JAR newer than the overlay. ----
+        Files.writeString(jar, "jar-v2-rebuilt");
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(200_000L));
+
+        DeployedClassesSync.ArtifactSyncOutcome pass2 = DeployedClassesSync.syncArtifactTree(
+                "web-module", artifactRoot, webInfClasses, roots, logger);
+        assertEquals(0, pass2.copied(),
+                "the floor must not resurrect below-floor IDE output the drop removed");
+        assertFalse(Files.exists(webInfClasses.resolve(depClass)),
+                "the rebuilt JAR serves now — the stale overlay must be dropped by the production sequence");
+
+        // ---- Pass 3: the user edits and the IDE recompiles past the JAR. ----
+        writeClass(src, depClass, "ide-output-v2-newer-than-jar");
+        Files.setLastModifiedTime(src.resolve(depClass), FileTime.fromMillis(210_000L));
+
+        DeployedClassesSync.ArtifactSyncOutcome pass3 = DeployedClassesSync.syncArtifactTree(
+                "web-module", artifactRoot, webInfClasses, roots, logger);
+        assertEquals(1, pass3.copied(), "IDE output newer than the JAR overlays it again");
+        assertFileContent(webInfClasses.resolve(depClass), "ide-output-v2-newer-than-jar");
     }
 
     // ===========================================================================

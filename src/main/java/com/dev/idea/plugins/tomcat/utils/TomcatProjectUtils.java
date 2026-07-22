@@ -12,7 +12,9 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -277,6 +279,36 @@ public final class TomcatProjectUtils {
         } catch (IOException e) {
             safeDelete(tempFile, LOG);
             throw e;
+        }
+    }
+
+    /**
+     * Returns {@code true} when {@code target} already holds an up-to-date copy
+     * of {@code source} as produced by {@link #atomicCopy}: the target exists,
+     * sizes match, and the target's mtime is not older than the source's.
+     *
+     * <p>Sound because {@code atomicCopy} does NOT preserve the source's
+     * attributes — the target's mtime is the copy time, which is always &ge;
+     * the source's mtime at that moment. Any later rebuild of the source
+     * advances its mtime past the target's and fails the check; the equal-size
+     * guard covers a rebuild landing within the filesystem's mtime resolution
+     * that changed the byte count. Any stat failure returns {@code false}
+     * (cannot prove freshness — copy).
+     */
+    public static boolean isUpToDateCopy(@NotNull Path source, @NotNull Path target) {
+        try {
+            BasicFileAttributes targetAttrs;
+            try {
+                targetAttrs = Files.readAttributes(target, BasicFileAttributes.class);
+            } catch (NoSuchFileException missing) {
+                return false;
+            }
+            if (!targetAttrs.isRegularFile()) return false;
+            BasicFileAttributes sourceAttrs = Files.readAttributes(source, BasicFileAttributes.class);
+            return targetAttrs.size() == sourceAttrs.size()
+                    && targetAttrs.lastModifiedTime().compareTo(sourceAttrs.lastModifiedTime()) >= 0;
+        } catch (IOException e) {
+            return false;
         }
     }
 

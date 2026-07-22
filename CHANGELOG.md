@@ -19,6 +19,9 @@
 - No false "artifact not found" warning before the first build.
 - Artifact-based configs from older versions deploy on Community.
 - No DevTomcat metadata files inside your webapp; leftovers cleaned up.
+- Unchanged WARs aren't re-copied; no needless context restart.
+- Stale class overlay yields to a rebuilt jar.
+- Hot-reload-off external paths get a visible warning.
 
 ## [1.4.2]
 

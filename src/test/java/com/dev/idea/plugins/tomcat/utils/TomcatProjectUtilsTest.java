@@ -3,11 +3,14 @@ package com.dev.idea.plugins.tomcat.utils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -165,6 +168,88 @@ class TomcatProjectUtilsTest {
             Path a = TomcatProjectUtils.resolveConfOverlayPath("/proj", "my-tomcat");
             Path b = TomcatProjectUtils.resolveConfOverlayPath("/proj", "my_tomcat");
             assertNotEquals(a, b, "Different config names must not collide on the same path");
+        }
+    }
+
+    @Nested
+    @DisplayName("isUpToDateCopy — atomicCopy freshness gate")
+    class IsUpToDateCopy {
+
+        private Path write(Path dir, String name, String content, long mtimeMillis) throws Exception {
+            Path f = dir.resolve(name);
+            Files.writeString(f, content);
+            Files.setLastModifiedTime(f, FileTime.fromMillis(mtimeMillis));
+            return f;
+        }
+
+        @Test
+        @DisplayName("absent target → not up to date (copy)")
+        void absentTarget(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "app.war", "bytes", 10_000L);
+            assertFalse(TomcatProjectUtils.isUpToDateCopy(source, tmp.resolve("missing.war")));
+        }
+
+        @Test
+        @DisplayName("smaller target → not up to date (copy)")
+        void smallerTarget(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "longer-bytes", 10_000L);
+            Path target = write(tmp, "dst.war", "short", 20_000L);
+            assertFalse(TomcatProjectUtils.isUpToDateCopy(source, target));
+        }
+
+        @Test
+        @DisplayName("larger target → not up to date (copy)")
+        void largerTarget(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "short", 10_000L);
+            Path target = write(tmp, "dst.war", "longer-bytes", 20_000L);
+            assertFalse(TomcatProjectUtils.isUpToDateCopy(source, target));
+        }
+
+        @Test
+        @DisplayName("target older than source → not up to date (source was rebuilt)")
+        void olderTarget(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "bytes", 20_000L);
+            Path target = write(tmp, "dst.war", "bytes", 10_000L);
+            assertFalse(TomcatProjectUtils.isUpToDateCopy(source, target));
+        }
+
+        @Test
+        @DisplayName("target newer than source, same size → up to date (skip)")
+        void newerTarget(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "bytes", 10_000L);
+            Path target = write(tmp, "dst.war", "bytes", 20_000L);
+            assertTrue(TomcatProjectUtils.isUpToDateCopy(source, target));
+        }
+
+        @Test
+        @DisplayName("equal mtime and equal size → up to date (skip)")
+        void equalTimeEqualSize(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "bytes", 10_000L);
+            Path target = write(tmp, "dst.war", "bytes", 10_000L);
+            assertTrue(TomcatProjectUtils.isUpToDateCopy(source, target));
+        }
+
+        @Test
+        @DisplayName("equal mtime but different size → not up to date (copy)")
+        void equalTimeDifferentSize(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "rebuilt-different-size", 10_000L);
+            Path target = write(tmp, "dst.war", "bytes", 10_000L);
+            assertFalse(TomcatProjectUtils.isUpToDateCopy(source, target));
+        }
+
+        @Test
+        @DisplayName("after atomicCopy the copy reads up to date until the source is rebuilt")
+        void roundTripWithAtomicCopy(@TempDir Path tmp) throws Exception {
+            Path source = write(tmp, "src.war", "war-bytes", System.currentTimeMillis() - 60_000);
+            Path target = tmp.resolve("dst.war");
+            TomcatProjectUtils.atomicCopy(source, target);
+            assertTrue(TomcatProjectUtils.isUpToDateCopy(source, target),
+                    "a fresh atomicCopy must read as up to date");
+
+            // "Rebuild" the source after the copy — mtime advances past the target's.
+            Files.setLastModifiedTime(source, FileTime.fromMillis(System.currentTimeMillis() + 60_000));
+            assertFalse(TomcatProjectUtils.isUpToDateCopy(source, target),
+                    "a source rebuilt after the copy must trigger a re-copy");
         }
     }
 }

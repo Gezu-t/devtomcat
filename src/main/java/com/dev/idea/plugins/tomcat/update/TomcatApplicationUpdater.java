@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
@@ -341,6 +342,12 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     /**
      * Re-copies WAR artifacts to the webapps directory after compilation.
      * Exploded artifacts are skipped — Tomcat handles their reload automatically.
+     *
+     * <p>A WAR whose deployed copy is already up to date (same size, target
+     * mtime not older — see {@link TomcatProjectUtils#isUpToDateCopy}) is NOT
+     * re-copied: Tomcat redeploys a context whenever the WAR's timestamp
+     * advances, so an unconditional copy of identical bytes restarted the
+     * context (dropping sessions) for nothing.
      */
     private void redeployWarArtifacts(@NotNull TomcatDeploymentLogger logger) {
         Path webappsDir = TomcatProjectUtils.getWebappsDirectory(configuration, processHandler.getRunId());
@@ -349,8 +356,19 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             logger.logServerWarning("Cannot locate webapps directory; WAR update skipped");
             return;
         }
+        redeployWarArtifactsInto(configuration.getDeployments(), webappsDir, logger);
+    }
 
-        for (Deployment deployment : configuration.getDeployments()) {
+    /**
+     * The WAR re-copy loop of {@link #redeployWarArtifacts}, over an explicit
+     * deployment list and webapps directory. Package-visible and platform-free
+     * so tests can pin the up-to-date skip: an unchanged WAR must NOT be
+     * re-copied (Tomcat restarts the context on any mtime advance).
+     */
+    static void redeployWarArtifactsInto(@NotNull List<Deployment> deployments,
+                                         @NotNull Path webappsDir,
+                                         @NotNull TomcatDeploymentLogger logger) {
+        for (Deployment deployment : deployments) {
             if (!deployment.isValid() || deployment.isExploded()) continue;
             Path source = deployment.getResolvedPath();
             if (source == null) continue;
@@ -358,6 +376,11 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             try {
                 String contextName = resolveContextName(deployment.getContextPath());
                 Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
+                if (TomcatProjectUtils.isUpToDateCopy(source, target)) {
+                    logger.logServerInfo("WAR unchanged since last deploy — copy skipped"
+                            + " (no context restart): " + deployment.getDisplayName());
+                    continue;
+                }
                 TomcatProjectUtils.atomicCopy(source, target);
                 logger.logServerInfo("Re-deployed WAR: " + deployment.getDisplayName());
             } catch (IOException e) {
@@ -406,6 +429,13 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      *   <li>Exploded: rewrites context.xml to force Tomcat undeploy + redeploy</li>
      *   <li>WAR: re-copies the WAR file to webapps</li>
      * </ul>
+     *
+     * <p><b>Deliberate semantics:</b> a WAR whose deployed copy is already up
+     * to date is NOT re-copied, so an explicit Redeploy of an unchanged WAR no
+     * longer forces a context restart — re-copying identical bytes only
+     * dropped live sessions to redeploy the same old code. A new WAR only
+     * comes from the build tool ({@code mvn package} / {@code gradle war});
+     * once it exists, Redeploy picks it up.
      */
     private void redeployAllArtifacts(@NotNull TomcatDeploymentLogger logger) {
         Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration, processHandler.getRunId());
@@ -441,15 +471,36 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     logger.logServerInfo("Redeployed (context rewrite): " + deployment.getDisplayName());
                 } else {
-                    Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
-                    TomcatProjectUtils.atomicCopy(artifactPath, target);
-                    logger.logServerInfo("Redeployed WAR: " + deployment.getDisplayName());
+                    redeployWarDeployment(deployment, artifactPath, webappsDir, logger);
                 }
             } catch (IOException e) {
                 LOG.warn("Failed to redeploy: " + artifactPath, e);
                 logger.logServerError("Failed to redeploy '" +
                         deployment.getDisplayName() + "': " + e.getMessage());
             }
+        }
+    }
+
+    /**
+     * The WAR branch of {@link #redeployAllArtifacts}: copies the WAR into
+     * webapps unless the deployed copy is already up to date (the deliberate
+     * no-restart semantics documented there). Package-visible and platform-free
+     * so tests can pin the skip.
+     */
+    static void redeployWarDeployment(@NotNull Deployment deployment,
+                                      @NotNull Path artifactPath,
+                                      @NotNull Path webappsDir,
+                                      @NotNull TomcatDeploymentLogger logger) throws IOException {
+        String contextName = resolveContextName(deployment.getContextPath());
+        Path target = TomcatDeploymentPaths.warFile(webappsDir, contextName);
+        if (TomcatProjectUtils.isUpToDateCopy(artifactPath, target)) {
+            logger.logServerInfo("WAR unchanged since last deploy — copy skipped"
+                    + " (no context restart): " + deployment.getDisplayName()
+                    + ". Rebuild it with the build tool ('mvn package' /"
+                    + " 'gradle war') to produce a new WAR to redeploy.");
+        } else {
+            TomcatProjectUtils.atomicCopy(artifactPath, target);
+            logger.logServerInfo("Redeployed WAR: " + deployment.getDisplayName());
         }
     }
 
@@ -540,6 +591,17 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         offerWarToExplodedFix(configuration, logger);
     }
 
+    /**
+     * Balloon-surface seam: the platform balloons the sync-gap notifications
+     * fire through. Package-visible so tests can record fired balloons and pin
+     * the wiring (call order, session gating, titles) without the platform.
+     */
+    interface UpdateNotifier {
+        void infoWithAction(@NotNull String title, @NotNull String content,
+                            @NotNull String actionLabel, @NotNull Runnable action);
+        void warning(@NotNull String title, @NotNull String content);
+    }
+
     private static void offerWarToExplodedFix(@NotNull TomcatRunConfiguration configuration,
                                               @NotNull TomcatDeploymentLogger logger) {
         Project project = configuration.getProject();
@@ -549,20 +611,66 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 configuration.getConfigData().getDeploymentConfig().getDeployments(project);
         java.util.List<WarToExplodedQuickFix.FixCandidate> candidates =
                 WarToExplodedQuickFix.findFixableArtifacts(project, deployments);
+        notifySyncGaps(deployments, candidates, logger,
+                SessionNotificationGate.INSTANCE,
+                project.getLocationHash() + "|" + configuration.getName(),
+                new UpdateNotifier() {
+                    @Override
+                    public void infoWithAction(@NotNull String title, @NotNull String content,
+                                               @NotNull String actionLabel, @NotNull Runnable action) {
+                        TomcatNotifier.notifyWithAction(project, title, content,
+                                com.intellij.notification.NotificationType.INFORMATION,
+                                actionLabel, action);
+                    }
+
+                    @Override
+                    public void warning(@NotNull String title, @NotNull String content) {
+                        TomcatNotifier.warning(project, title, content);
+                    }
+                },
+                () -> {
+                    int applied = WarToExplodedQuickFix.applyAll(configuration, candidates);
+                    if (applied > 0) {
+                        logger.logServerInfo("Reclaimed " + applied
+                                + " deployment(s) as module-owned — Ctrl+F10 will now pick up changes without rebuilding.");
+                    }
+                });
+    }
+
+    /**
+     * The complete sync-gap notification sequence: unsyncable-external warning
+     * (console + gated balloon) first, then the reclaim offer (console + gated
+     * balloon with the fix action). All collaborators injected — package-visible
+     * so tests pin the wiring itself, not just the pure selectors: removing the
+     * unsyncable pass, either session gate, or a balloon fire fails the tests.
+     */
+    static void notifySyncGaps(@NotNull java.util.List<Deployment> deployments,
+                               @NotNull java.util.List<WarToExplodedQuickFix.FixCandidate> candidates,
+                               @NotNull TomcatDeploymentLogger logger,
+                               @NotNull SessionNotificationGate gate,
+                               @NotNull String scopeId,
+                               @NotNull UpdateNotifier notifier,
+                               @NotNull Runnable reclaimAction) {
+        notifyUnsyncableExternalDeployments(deployments, candidates, logger, gate, scopeId, notifier);
         if (candidates.isEmpty()) return;
 
         // Log every candidate to the console BEFORE popping the balloon. The
         // run console is the authoritative diagnostic surface — balloons can be
         // dismissed, hidden, or arrive after the user has moved on. Naming each
         // artifact + its target module makes it possible for the user to act
-        // even if the balloon never gets clicked.
+        // even if the balloon never gets clicked. Deliberately NOT gated: the
+        // console line repeats on every action; only the balloon is
+        // once-per-session below.
         StringBuilder mapping = new StringBuilder();
+        java.util.Set<String> candidateKey = new java.util.HashSet<>();
         for (WarToExplodedQuickFix.FixCandidate c : candidates) {
             if (mapping.length() > 0) mapping.append(", ");
             mapping.append(c.deployment().getDisplayName())
                    .append(" → module '")
                    .append(c.moduleName())
                    .append("'");
+            candidateKey.add(c.deployment().getDisplayName()
+                    + "|" + c.explodedDirectory() + "|" + c.moduleName());
         }
         logger.logServerWarning(
                 "Hot-reload reclaim available for " + candidates.size()
@@ -571,6 +679,12 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                         + (candidates.size() == 1 ? "Deployment" : "All")
                         + "' in the notification to fix in place — or delete + re-add the"
                         + " deployments in the Deployment tab.");
+
+        // Balloon once per (run configuration, candidate set) per IDE session —
+        // a changed set re-notifies; an unchanged one stays console-only.
+        if (!gate.shouldNotify("reclaim|" + scopeId, candidateKey)) {
+            return;
+        }
 
         String title = candidates.size() == 1
                 ? "Deployment can be reclaimed as module-owned"
@@ -583,16 +697,82 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 + "the module they already live in.";
         String actionLabel = candidates.size() == 1 ? "Reclaim Deployment" : "Reclaim All";
 
-        TomcatNotifier.notifyWithAction(project, title, content,
-                com.intellij.notification.NotificationType.INFORMATION,
-                actionLabel,
-                () -> {
-                    int applied = WarToExplodedQuickFix.applyAll(configuration, candidates);
-                    if (applied > 0) {
-                        logger.logServerInfo("Reclaimed " + applied
-                                + " deployment(s) as module-owned — Ctrl+F10 will now pick up changes without rebuilding.");
-                    }
-                });
+        notifier.infoWithAction(title, content, actionLabel, reclaimAction);
+    }
+
+    /**
+     * External-path deployments that no auto-fix applies to: class sync cannot
+     * mirror into them (an {@link ExternalFileDeployment} has no module link)
+     * and {@code findFixableArtifacts} produced no reclaim candidate for them.
+     * Pure and package-visible for tests. Identity comparison on purpose —
+     * candidates hold the same instances the deployment list yielded.
+     */
+    @NotNull
+    static java.util.List<Deployment> findUnsyncableExternalDeployments(
+            @NotNull java.util.List<Deployment> deployments,
+            @NotNull java.util.List<WarToExplodedQuickFix.FixCandidate> candidates) {
+        java.util.Set<Deployment> fixable =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (WarToExplodedQuickFix.FixCandidate c : candidates) {
+            fixable.add(c.deployment());
+        }
+        java.util.List<Deployment> out = new java.util.ArrayList<>();
+        for (Deployment d : deployments) {
+            if (d instanceof ExternalFileDeployment && !fixable.contains(d)) {
+                out.add(d);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Surfaces external-path deployments for which hot reload is silently OFF:
+     * class/resource sync needs an owning module to pull output from, and a
+     * plain external path has none — previously the only trace was low-key
+     * per-artifact skip lines in the class-sync console output. Console line on
+     * every action (authoritative surface); balloon once per (run
+     * configuration, deployment set) per IDE session, same gating as the
+     * reclaim balloon. No action button on purpose: nothing here is
+     * auto-fixable (those cases get the reclaim balloon instead), and a button
+     * that cannot deliver would be dishonest — the remedy is pointing the
+     * deployment at a module's build output (or re-adding it in the Deployment
+     * tab so it resolves module-owned).
+     */
+    private static void notifyUnsyncableExternalDeployments(
+            @NotNull java.util.List<Deployment> deployments,
+            @NotNull java.util.List<WarToExplodedQuickFix.FixCandidate> candidates,
+            @NotNull TomcatDeploymentLogger logger,
+            @NotNull SessionNotificationGate gate,
+            @NotNull String scopeId,
+            @NotNull UpdateNotifier notifier) {
+        java.util.List<Deployment> unsyncable =
+                findUnsyncableExternalDeployments(deployments, candidates);
+        if (unsyncable.isEmpty()) return;
+
+        java.util.List<String> names = new java.util.ArrayList<>();
+        java.util.Set<String> candidateKey = new java.util.HashSet<>();
+        for (Deployment d : unsyncable) {
+            names.add(d.getDisplayName());
+            candidateKey.add(d.getDisplayName() + "|" + d.getResolvedPath());
+        }
+        String joined = String.join(", ", names);
+        logger.logServerWarning("Hot reload (class/resource sync) is OFF for "
+                + unsyncable.size() + " deployment(s): " + joined
+                + " — they point at a plain external path with no owning module,"
+                + " so there is no module output to sync from. Point each at a module's"
+                + " build output, or re-add it via the Deployment tab so it resolves"
+                + " module-owned.");
+
+        if (!gate.shouldNotify("external-no-sync|" + scopeId, candidateKey)) {
+            return;
+        }
+        String title = unsyncable.size() == 1
+                ? "Hot reload is off for an external-path deployment"
+                : "Hot reload is off for " + unsyncable.size() + " external-path deployments";
+        notifier.warning(title,
+                joined + ": external paths have no owning module, so class/resource"
+                + " sync cannot update them. Point the deployment at a module's build"
+                + " output, or re-add it via the Deployment tab.");
     }
 
     /** Maps an {@link UpdateConfig} action constant to a user-visible display string; unrecognised actions echo back. */

@@ -643,6 +643,22 @@ class DeployedClassesSyncTest {
         }
 
         @Test
+        @DisplayName("scanDeployedLibraryJars maps each key to the deployed JAR's actual file name")
+        void jarsMapKeepsActualFileNames(@TempDir Path tmp) throws Exception {
+            writeLibFile(tmp, "common-1.2.3.jar");
+            writeLibFile(tmp, "log4j-api-2.20.0.jar");
+            writeLibFile(tmp, "notes.txt");
+            // The VALUE must be the on-disk file name, not the key: the
+            // covering-JAR floor stats WEB-INF/lib/<value>, and the manifest's
+            // JAR records are written under it — a wrong value silently disarms
+            // both (unknown stamp -> no floor, no record).
+            assertEquals(java.util.Map.of(
+                            "common", "common-1.2.3.jar",
+                            "log4j-api", "log4j-api-2.20.0.jar"),
+                    DeployedClassesSync.scanDeployedLibraryJars(tmp));
+        }
+
+        @Test
         @DisplayName("version drift: a packaged dependency is .class-only even when versions differ")
         void versionDriftStillMatches(@TempDir Path tmp) throws Exception {
             // The build packaged the dependency at one version; the IDE classpath
@@ -657,6 +673,39 @@ class DeployedClassesSyncTest {
             assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dep, deployed),
                     "a packaged dependency must mirror .class-only even when the deployed "
                             + "JAR version differs from the classpath module");
+        }
+    }
+
+    @Nested
+    @DisplayName("coveringJarFor — ties a covered dependency root to its deployed JAR")
+    class CoveringJarFor {
+
+        private final java.util.Map<String, String> jars =
+                java.util.Map.of("common", "common-1.0.0.jar", "shared", "shared-2.0.jar");
+
+        @Test
+        @DisplayName("covered dependency root → the deployed JAR's file name (version-independent match)")
+        void coveredDependency() {
+            DeployedClassesSync.SourceRoot dep =
+                    new DeployedClassesSync.SourceRoot(Path.of("/out/common"), true, "common");
+            assertEquals("common-1.0.0.jar", DeployedClassesSync.coveringJarFor(dep, jars));
+        }
+
+        @Test
+        @DisplayName("own root is never covered")
+        void ownRootNeverCovered() {
+            DeployedClassesSync.SourceRoot own =
+                    new DeployedClassesSync.SourceRoot(Path.of("/out/web"), false, null);
+            assertNull(DeployedClassesSync.coveringJarFor(own, jars));
+        }
+
+        @Test
+        @DisplayName("unresolved identity or no matching JAR → no cover")
+        void unresolvedOrUnmatched() {
+            assertNull(DeployedClassesSync.coveringJarFor(
+                    new DeployedClassesSync.SourceRoot(Path.of("/out/x"), true, null), jars));
+            assertNull(DeployedClassesSync.coveringJarFor(
+                    new DeployedClassesSync.SourceRoot(Path.of("/out/x"), true, "unpackaged"), jars));
         }
     }
 

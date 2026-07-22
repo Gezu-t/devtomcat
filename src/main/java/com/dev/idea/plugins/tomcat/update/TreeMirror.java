@@ -74,12 +74,32 @@ final class TreeMirror {
      *                            policy), {@code false} = propagate, so the
      *                            engine's per-file catch skips the file (it stays
      *                            contributed — web-resources policy).
+     * @param sourceMtimeFloorMillis source files whose mtime is not strictly
+     *                            newer than this are skipped WITHOUT contributing
+     *                            (same semantics as {@code fileExclude}) — the
+     *                            class sync's covering-JAR gate: a dependency's
+     *                            loose classes may overlay its deployed
+     *                            {@code WEB-INF/lib} JAR only when the IDE output
+     *                            is newer than the JAR, or stale overlay classes
+     *                            would shadow a freshly-rebuilt JAR forever.
+     *                            {@link Long#MIN_VALUE} = no floor.
      */
     record Policy(@NotNull String logPrefix,
                   @NotNull Set<String> subtreeSkips,
                   @Nullable Predicate<Path> fileExclude,
                   @Nullable Predicate<Path> copyVeto,
-                  boolean copyOnDstStatError) {}
+                  boolean copyOnDstStatError,
+                  long sourceMtimeFloorMillis) {
+
+        /** No-floor convenience — the shape every pre-floor caller used. */
+        Policy(@NotNull String logPrefix,
+               @NotNull Set<String> subtreeSkips,
+               @Nullable Predicate<Path> fileExclude,
+               @Nullable Predicate<Path> copyVeto,
+               boolean copyOnDstStatError) {
+            this(logPrefix, subtreeSkips, fileExclude, copyVeto, copyOnDstStatError, Long.MIN_VALUE);
+        }
+    }
 
     /**
      * Result of mirroring one source root.
@@ -214,6 +234,14 @@ final class TreeMirror {
                         // caller's Policy construction for the rationale of
                         // its exclusions.
                         if (p.fileExclude() != null && p.fileExclude().test(file)) {
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        // Covering-JAR floor: a source file not strictly newer
+                        // than the floor is skipped without contributing, so the
+                        // caller's reconcile drops any previously-mirrored copy
+                        // — the newer JAR serves instead of a stale overlay.
+                        if (attrs.lastModifiedTime().toMillis() <= p.sourceMtimeFloorMillis()) {
                             return FileVisitResult.CONTINUE;
                         }
 
