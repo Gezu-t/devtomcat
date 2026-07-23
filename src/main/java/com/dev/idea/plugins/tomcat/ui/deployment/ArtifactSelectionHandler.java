@@ -505,7 +505,7 @@ public class ArtifactSelectionHandler {
             return TomcatReadActions.compute(() -> {
                 Set<String> names = new HashSet<>();
                 for (Module module : ModuleManager.getInstance(project).getModules()) {
-                    names.add(module.getName().toLowerCase(Locale.ROOT));
+                    names.addAll(activeNameSpellings(module));
                 }
                 return names;
             });
@@ -518,6 +518,39 @@ public class ArtifactSelectionHandler {
     }
 
     /**
+     * Every spelling a module legitimately answers to, lowercased. The artifact
+     * side of the liveness check is a STRIPPED base name
+     * ({@code web:war exploded} → {@code web}), so an active set holding only
+     * the raw module name never matches in a project with qualified module
+     * names — Gradle's default ({@code myapp.web}) and Maven with "use
+     * qualified names". Every artifact would then look orphaned and the
+     * Deployment tab would report "no deployable artifacts found" while the
+     * build output sits on disk. Including the build-tool identity
+     * ({@link DeployedClassesSync#libraryArtifactNameFor}) and the dotted stem
+     * keeps both sides comparable. <strong>Read action required.</strong>
+     */
+    @NotNull
+    static Set<String> activeNameSpellings(@NotNull Module module) {
+        Set<String> spellings = new HashSet<>();
+        String raw = module.getName();
+        spellings.add(raw.toLowerCase(Locale.ROOT));
+        try {
+            spellings.add(com.dev.idea.plugins.tomcat.update.DeployedClassesSync
+                    .libraryArtifactNameFor(module).toLowerCase(Locale.ROOT));
+        } catch (ProcessCanceledException pce) {
+            throw pce;
+        } catch (Exception e) {
+            LOG.debug("Could not resolve build-tool name for module " + raw, e);
+        }
+        int dot = raw.lastIndexOf('.');
+        if (dot >= 0 && dot < raw.length() - 1) {
+            spellings.add(raw.substring(dot + 1).toLowerCase(Locale.ROOT));
+        }
+        spellings.remove("");
+        return spellings;
+    }
+
+    /**
      * Checks whether an artifact's base module name corresponds to a module that
      * currently exists in the project. Returns {@code true} (keep) when:
      * <ul>
@@ -527,7 +560,7 @@ public class ArtifactSelectionHandler {
      * Returns {@code false} (filter out) when the base name resolves to a module
      * that no longer exists — i.e. the artifact is orphaned from a rename/delete.
      */
-    private static boolean hasActiveSourceModule(@NotNull String artifactName,
+    static boolean hasActiveSourceModule(@NotNull String artifactName,
                                                  @NotNull Set<String> activeModuleNames) {
         String baseName = extractBaseModuleName(artifactName).toLowerCase(Locale.ROOT);
         return baseName.isEmpty() || activeModuleNames.contains(baseName);

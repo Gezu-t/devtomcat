@@ -478,6 +478,16 @@ public final class CatalinaHomeMirror {
             counters.linked++;
         } catch (UnsupportedOperationException | FileSystemException e) {
             Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+            // Carry the source mtime across: a hardlink keeps it for free, but a
+            // plain copy is stamped NOW, so every launch would look like a newer
+            // WAR to Tomcat's deployer and re-explode bundled apps forever on
+            // filesystems without hardlinks. Best-effort — mtime is an
+            // optimization gate here, never correctness.
+            try {
+                Files.setLastModifiedTime(target, Files.getLastModifiedTime(source));
+            } catch (IOException ignored) {
+                LOG.debug("Could not carry mtime onto mirrored copy " + target);
+            }
             counters.copied++;
         }
     }

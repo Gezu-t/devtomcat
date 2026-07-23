@@ -31,7 +31,9 @@
 - Hot-reload-off external paths get a visible warning.
 - Stale WAR deploys blocked; Deploy Anyway to override.
 - Outdated dependency jars called out.
+- Deployment tab finds artifacts in qualified-name projects.
 - Freshness view separates "not rebuilt" from "not redeployed".
+- Freshness view names the build tool when the sync can't help.
 - Outdated-jar warning matches Gradle and renamed modules.
 - Same-named configs in two projects no longer steal each other's ports.
 

@@ -132,7 +132,19 @@ public final class DeploymentFreshnessReport {
      * "the copy contains your change" are different facts, and only asking
      * both can avoid reporting a stale deployment as current.
      */
-    public enum StaleReason { OUTPUTS_NEWER, NOT_REDEPLOYED }
+    public enum StaleReason {
+        OUTPUTS_NEWER,
+        NOT_REDEPLOYED,
+        /**
+         * The stale file sits under a JAR-covered dependency root and is not a
+         * {@code .class} — the class sync mirrors those roots .class-only, so
+         * no sync run can ever refresh it. Only a build-tool rebuild of the JAR
+         * will. Without this the view prescribes "Update classes and
+         * resources", the user runs it, nothing changes, and the row repeats
+         * the same impossible instruction forever.
+         */
+        NOT_OVERLAYABLE
+    }
 
     /** One packaged module's line in the view. */
     public record ModuleRow(@NotNull String moduleName,
@@ -436,7 +448,17 @@ public final class DeploymentFreshnessReport {
                             if (jarMtimeMillis != NO_JAR) {
                                 // No overlay copy — the covering JAR serves it.
                                 if (outMtime > jarMtimeMillis) {
-                                    stale[0] = Freshness.stale(outMtime);
+                                    // The sync mirrors a JAR-covered dependency
+                                    // root .class-only, so a stale NON-.class file
+                                    // here can never be refreshed by the sync —
+                                    // only a build-tool rebuild of the JAR fixes
+                                    // it. Tag it so the remedy says so instead of
+                                    // looping the user through Update.
+                                    boolean overlayable = file.getFileName().toString()
+                                            .endsWith(com.dev.idea.plugins.tomcat.TomcatConstants.EXT_CLASS);
+                                    stale[0] = Freshness.stale(outMtime, overlayable
+                                            ? StaleReason.OUTPUTS_NEWER
+                                            : StaleReason.NOT_OVERLAYABLE);
                                     return FileVisitResult.TERMINATE;
                                 }
                             } else {
@@ -524,6 +546,11 @@ public final class DeploymentFreshnessReport {
     static String remedy(@NotNull Delivery delivery, @Nullable StaleReason reason) {
         if (reason == StaleReason.NOT_REDEPLOYED) {
             return "redeploy: the built WAR has not been deployed";
+        }
+        // The sync mirrors JAR-covered dependency roots .class-only, so no
+        // Update run can refresh this file — only rebuilding the JAR can.
+        if (reason == StaleReason.NOT_OVERLAYABLE) {
+            return "rebuild: mvn install / gradle build (the sync cannot overlay this file)";
         }
         return switch (delivery) {
             // Only a build-tool install refreshes a JAR the sync cannot overlay.

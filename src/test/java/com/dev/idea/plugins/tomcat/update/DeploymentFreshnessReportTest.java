@@ -453,6 +453,58 @@ class DeploymentFreshnessReportTest {
         }
 
         @Test
+        @DisplayName("a JAR-covered resource the sync cannot overlay prescribes a rebuild, not Update")
+        void notOverlayableResourcePrescribesRebuild(@TempDir Path tmp) throws Exception {
+            // The sync mirrors JAR-covered dependency roots .class-only, so a
+            // stale non-.class file there can NEVER be fixed by "Update classes
+            // and resources" — prescribing it loops the user forever.
+            Path artifactRoot = tmp.resolve("app-1.0.0");
+            Path jar = artifactRoot.resolve("WEB-INF/lib/web-lib-1.0.0.jar");
+            Files.createDirectories(jar.getParent());
+            write(jar, 100_000L);
+            Path out = tmp.resolve("out/web-lib");
+            write(out.resolve("messages.properties"), 300_000L);   // resource, no overlay copy
+
+            Report r = DeploymentFreshnessReport.forExploded("app-1.0.0", artifactRoot,
+                    Map.of("web-lib", List.of(out)),
+                    Map.of("web-lib", "web-lib"), Set.of("web-lib"),
+                    Map.of("web-lib", "web-lib-1.0.0.jar"), Set.of());
+
+            ModuleRow row = r.rows().get(0);
+            assertTrue(row.freshness().stale());
+            assertEquals(DeploymentFreshnessReport.StaleReason.NOT_OVERLAYABLE,
+                    row.freshness().reason());
+            String label = DeploymentFreshnessReport.freshnessLabel(row);
+            assertTrue(label.contains("rebuild"),
+                    "must name the build tool: the sync provably cannot deliver this file");
+            assertFalse(label.contains("Update classes and resources"),
+                    "prescribing an action that cannot work is the defect");
+        }
+
+        @Test
+        @DisplayName("a JAR-covered .class file still prescribes the sync — it CAN overlay that")
+        void overlayableClassStillPrescribesUpdate(@TempDir Path tmp) throws Exception {
+            Path artifactRoot = tmp.resolve("app-1.0.0");
+            Path jar = artifactRoot.resolve("WEB-INF/lib/web-lib-1.0.0.jar");
+            Files.createDirectories(jar.getParent());
+            write(jar, 100_000L);
+            Path out = tmp.resolve("out/web-lib");
+            write(out.resolve("A.class"), 300_000L);
+
+            Report r = DeploymentFreshnessReport.forExploded("app-1.0.0", artifactRoot,
+                    Map.of("web-lib", List.of(out)),
+                    Map.of("web-lib", "web-lib"), Set.of("web-lib"),
+                    Map.of("web-lib", "web-lib-1.0.0.jar"), Set.of());
+
+            ModuleRow row = r.rows().get(0);
+            assertTrue(row.freshness().stale());
+            assertEquals(DeploymentFreshnessReport.StaleReason.OUTPUTS_NEWER,
+                    row.freshness().reason());
+            assertTrue(DeploymentFreshnessReport.freshnessLabel(row)
+                    .contains("Update classes and resources"));
+        }
+
+        @Test
         @DisplayName("PACKED_WAR: no served copy (server down) never claims a verified verdict")
         void noServedCopyIsUnverified(@TempDir Path tmp) throws Exception {
             Path out = tmp.resolve("out");

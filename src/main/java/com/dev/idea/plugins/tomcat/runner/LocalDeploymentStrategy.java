@@ -457,8 +457,14 @@ public final class LocalDeploymentStrategy {
                     LOG.info("Deployed WAR artifact: " + targetWar);
                     // Non-blocking by design: refusing the launch copy would
                     // start Tomcat with no webapp at all — worse than stale.
+                    // Scope the once-per-session gate by PROJECT too: the gate is
+                    // process-wide, so a bare config name lets two checkouts of
+                    // one repo share a key and the second window's warning is
+                    // silently swallowed.
                     com.dev.idea.plugins.tomcat.update.DeploymentStaleness.warnIfStaleWarAtLaunch(
-                            project, deployment, logger, configuration.getName());
+                            project, deployment, logger,
+                            (project == null ? "?" : project.getLocationHash())
+                                    + "|" + configuration.getName());
                 }
                 deployedCount++;
             } catch (IOException e) {

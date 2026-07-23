@@ -1237,7 +1237,7 @@ public final class DeployedClassesSync {
      * jar-covered module as loose classes. <strong>Read action required.</strong>
      */
     @NotNull
-    static String libraryArtifactNameFor(@NotNull Module module) {
+    public static String libraryArtifactNameFor(@NotNull Module module) {
         String artifactName = MavenModelProvider.artifactId(module);
         if (artifactName == null) {
             artifactName = externalSystemArtifactName(module);
