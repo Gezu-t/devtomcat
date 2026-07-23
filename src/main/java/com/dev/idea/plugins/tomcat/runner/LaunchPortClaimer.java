@@ -87,7 +87,10 @@ final class LaunchPortClaimer {
      */
     @NotNull
     Resolution claim() {
-        String configName = configuration.getName();
+        // App-level registry: scope the owner by project so a same-named config
+        // in another open project can never release or collide with these claims.
+        String configName = com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                configuration.getProject(), configuration.getName());
         TomcatPortRegistry registry = TomcatPortRegistry.getInstance();
         PortConfig originalPorts = configuration.getConfigData().getPortConfig();
 

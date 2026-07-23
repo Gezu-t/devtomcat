@@ -423,7 +423,8 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
         // Release all ports claimed by this configuration so they become available
         // to the next launch without waiting for the OS to reclaim them
         TomcatPortRegistry.getInstance()
-                .releaseAllFor(configurationName);
+                .releaseAllFor(com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                        configuration.getProject(), configurationName));
 
         // Cancel the midnight-rollover alarm: this run is done, no balloon
         // should fire after the user stopped Tomcat.

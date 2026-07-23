@@ -95,8 +95,12 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
                     .renameConfiguration(oldName, newName);
             // App-level registry — without migration, ports claimed under the old
             // name are released by no one and leak until the IDE restarts.
+            // Both keys are project-scoped: an unscoped rename here would
+            // re-own a same-named OTHER project's live claims.
             com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
-                    .renameConfiguration(oldName, newName);
+                    .renameConfiguration(
+                            com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(project, oldName),
+                            com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(project, newName));
 
             if (!project.isDisposed()) {
                 RunDashboardManager.getInstance(project).updateDashboard(true);
@@ -135,7 +139,8 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
         // (e.g. renamed, then deleted while still running) leaks its ports until
         // the IDE restarts. Idempotent: a no-op when the name owns nothing.
         com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.getInstance()
-                .releaseAllFor(configName);
+                .releaseAllFor(com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                        project, configName));
 
         // Force the Services tool window to refresh so the stale node disappears
         if (!project.isDisposed()) {

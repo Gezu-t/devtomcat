@@ -411,6 +411,48 @@ class DeploymentFreshnessReportTest {
         }
 
         @Test
+        @DisplayName("PACKED_WAR: a stale WAR deployed AFTER the change is stale — copy time is not content time")
+        void staleWarDeployedLaterIsStale(@TempDir Path tmp) throws Exception {
+            // The anchor trap: the served copy's mtime is its COPY time, so it
+            // is younger than the change it does NOT contain. Judging outputs
+            // against the copy's stamp alone reports this as Current.
+            Path builtWar = write(tmp.resolve("target/app.war"), 100_000L); // built BEFORE the edit
+            Path out = tmp.resolve("out");
+            write(out.resolve("App.class"), 300_000L);                     // the edit
+            Path servedWar = write(tmp.resolve("webapps/app.war"), 500_000L); // copied AFTER it
+
+            Report r = DeploymentFreshnessReport.forWar("web-module", builtWar, servedWar,
+                    Map.of("web-module", List.of(out)));
+
+            Freshness f = r.rows().get(0).freshness();
+            assertTrue(f.stale(),
+                    "the deployed WAR predates the change; a copy-time anchor would call this Current");
+            assertEquals(300_000L, f.staleSinceMillis());
+            assertEquals(DeploymentFreshnessReport.StaleReason.OUTPUTS_NEWER, f.reason(),
+                    "the build itself is behind — rebuild, not redeploy");
+        }
+
+        @Test
+        @DisplayName("PACKED_WAR: current build never deployed → NOT_REDEPLOYED, remedy is redeploy")
+        void currentBuildNotDeployedAsksForRedeploy(@TempDir Path tmp) throws Exception {
+            Path servedWar = write(tmp.resolve("webapps/app.war"), 100_000L);
+            Path out = tmp.resolve("out");
+            write(out.resolve("App.class"), 300_000L);
+            Path builtWar = write(tmp.resolve("target/app.war"), 500_000L);
+
+            Report r = DeploymentFreshnessReport.forWar("web-module", builtWar, servedWar,
+                    Map.of("web-module", List.of(out)));
+
+            Freshness f = r.rows().get(0).freshness();
+            assertTrue(f.stale());
+            assertEquals(DeploymentFreshnessReport.StaleReason.NOT_REDEPLOYED, f.reason());
+            assertTrue(DeploymentFreshnessReport.remedy(
+                            DeploymentFreshnessReport.Delivery.PACKED_WAR, f.reason())
+                            .contains("redeploy"),
+                    "telling the user to rebuild an already-current WAR sends them in a circle");
+        }
+
+        @Test
         @DisplayName("PACKED_WAR: no served copy (server down) never claims a verified verdict")
         void noServedCopyIsUnverified(@TempDir Path tmp) throws Exception {
             Path out = tmp.resolve("out");

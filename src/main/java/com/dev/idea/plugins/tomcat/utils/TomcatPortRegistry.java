@@ -4,6 +4,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +41,7 @@ public final class TomcatPortRegistry {
     private static final int MAX_SEARCH_RANGE = 100;
 
     /**
-     * Maps claimed port → configuration name that owns it.
+     * Maps claimed port → owner key that holds it (see {@link #ownerKey}).
      * ConcurrentHashMap for visibility, but all claim/release mutations
      * are guarded by {@code synchronized(this)} for atomicity.
      */
@@ -48,6 +49,24 @@ public final class TomcatPortRegistry {
 
     public static TomcatPortRegistry getInstance() {
         return ApplicationManager.getApplication().getService(TomcatPortRegistry.class);
+    }
+
+    /**
+     * The owner key for a run configuration — <strong>always use this</strong>
+     * rather than a bare configuration name.
+     *
+     * <p>This service is application-level, so it is shared by every open
+     * project. A bare name makes two projects that both have a "Tomcat"
+     * configuration the same owner: one project's launch would then
+     * {@link #releaseAllFor} the other's live claims, and the second JVM would
+     * be handed a port the first has reserved but not yet bound — exactly the
+     * claim-before-bind race this registry exists to close. Scoping by the
+     * project's location hash keeps same-named configurations independent.
+     */
+    @NotNull
+    public static String ownerKey(@Nullable com.intellij.openapi.project.Project project,
+                                  @NotNull String configName) {
+        return (project == null ? "?" : project.getLocationHash()) + "|" + configName;
     }
 
     /**

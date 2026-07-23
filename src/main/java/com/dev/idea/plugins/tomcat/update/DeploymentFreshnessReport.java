@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
+import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
@@ -100,16 +101,38 @@ public final class DeploymentFreshnessReport {
      * evidence (unreadable file, no serving copy found) — reported honestly,
      * never escalated to STALE.
      */
-    public record Freshness(boolean stale, long staleSinceMillis, boolean verified) {
+    public record Freshness(boolean stale, long staleSinceMillis, boolean verified,
+                            @Nullable StaleReason reason) {
 
-        @NotNull public static Freshness current() { return new Freshness(false, 0, true); }
+        @NotNull public static Freshness current() { return new Freshness(false, 0, true, null); }
 
-        @NotNull public static Freshness currentUnverified() { return new Freshness(false, 0, false); }
+        @NotNull public static Freshness currentUnverified() { return new Freshness(false, 0, false, null); }
 
         @NotNull public static Freshness stale(long staleSinceMillis) {
-            return new Freshness(true, staleSinceMillis, true);
+            return stale(staleSinceMillis, StaleReason.OUTPUTS_NEWER);
+        }
+
+        @NotNull public static Freshness stale(long staleSinceMillis, @NotNull StaleReason reason) {
+            return new Freshness(true, staleSinceMillis, true, reason);
         }
     }
+
+    /**
+     * Why a row is stale — the two independently-failable questions behind a
+     * packed WAR (and the single one behind loose/overlay delivery):
+     * <ul>
+     *   <li>{@link #OUTPUTS_NEWER} — the compiled output is newer than the
+     *       artifact that carries it: the build itself is behind. Remedy is a
+     *       build-tool rebuild (or the class sync, for loose/overlay).</li>
+     *   <li>{@link #NOT_REDEPLOYED} — the artifact is current but the copy
+     *       Tomcat serves is not it. Remedy is a redeploy, NOT a rebuild.</li>
+     * </ul>
+     * The distinction matters because a deployed copy's mtime is its
+     * <em>copy</em> time, never its content time: "the copy is recent" and
+     * "the copy contains your change" are different facts, and only asking
+     * both can avoid reporting a stale deployment as current.
+     */
+    public enum StaleReason { OUTPUTS_NEWER, NOT_REDEPLOYED }
 
     /** One packaged module's line in the view. */
     public record ModuleRow(@NotNull String moduleName,
@@ -308,24 +331,53 @@ public final class DeploymentFreshnessReport {
                          @Nullable Path servedWarPath,
                          @NotNull Map<String, ? extends Collection<Path>> outputRootsByModule) {
         if (outputRootsByModule.isEmpty()) return unresolved(deploymentName, Shape.PACKED_WAR);
+        Long builtMtime = mtimeOrNull(builtWarPath);
+        // TWO independent questions — a deployed copy's mtime is its COPY time,
+        // so it can only answer "is the served copy the current build", never
+        // "does it contain your change". Asking only the second (against the
+        // copy's stamp) reports a stale deployment as Current whenever the copy
+        // is younger than the outputs it lacks.
         Long servedMtime = servedWarPath == null ? null : mtimeOrNull(servedWarPath);
-        // Not-yet-deployed (or unknown webapps): fall back to the build output
-        // but never claim verification — see javadoc.
-        boolean unverified = servedMtime == null;
-        Long anchor = servedMtime != null ? servedMtime : mtimeOrNull(builtWarPath);
+        boolean deployedIsCurrentBuild = servedMtime != null
+                && TomcatProjectUtils.isUpToDateCopy(builtWarPath, servedWarPath);
         List<ModuleRow> rows = new ArrayList<>(outputRootsByModule.size());
         for (Map.Entry<String, ? extends Collection<Path>> e : outputRootsByModule.entrySet()) {
             TomcatProgress.checkCanceled();
-            Freshness freshness;
-            if (anchor == null) {
-                freshness = Freshness.currentUnverified();
-            } else {
-                freshness = againstMtime(anchor, e.getValue());
-                if (unverified && !freshness.stale()) freshness = Freshness.currentUnverified();
-            }
-            rows.add(new ModuleRow(e.getKey(), Delivery.PACKED_WAR, freshness));
+            rows.add(new ModuleRow(e.getKey(), Delivery.PACKED_WAR,
+                    warFreshness(builtMtime, servedMtime, deployedIsCurrentBuild, e.getValue())));
         }
         return new Report(deploymentName, Shape.PACKED_WAR, List.copyOf(rows));
+    }
+
+    /**
+     * Q1 — does the BUILD carry the outputs? (the war's own mtime IS its
+     * content time, so outputs newer than it are simply not inside it.)
+     * Q2 — is the copy Tomcat serves that build? ({@code isUpToDateCopy}: a
+     * copy's mtime is copy time, so only comparing it back to the source can
+     * answer this.) Q1 losing wins the report — rebuild before redeploy.
+     * When only Q2 fails, staleness is dated from the first output the SERVED
+     * copy predates (how long Tomcat has been missing the change), falling
+     * back to the build time when the divergence is not in the outputs.
+     * An unknown served copy is never claimed as verified.
+     */
+    @NotNull
+    private static Freshness warFreshness(@Nullable Long builtMtime,
+                                          @Nullable Long servedMtime,
+                                          boolean deployedIsCurrentBuild,
+                                          @NotNull Collection<Path> outputRoots) {
+        if (builtMtime == null) return Freshness.currentUnverified();
+        DeploymentStaleness.NewerFile newerThanBuild =
+                DeploymentStaleness.findOutputNewerThan(builtMtime, outputRoots);
+        if (newerThanBuild != null) {
+            return Freshness.stale(newerThanBuild.mtimeMillis(), StaleReason.OUTPUTS_NEWER);
+        }
+        if (servedMtime == null) return Freshness.currentUnverified();
+        if (deployedIsCurrentBuild) return Freshness.current();
+        DeploymentStaleness.NewerFile newerThanServed =
+                DeploymentStaleness.findOutputNewerThan(servedMtime, outputRoots);
+        return Freshness.stale(
+                newerThanServed != null ? newerThanServed.mtimeMillis() : builtMtime,
+                StaleReason.NOT_REDEPLOYED);
     }
 
     /** Report for a deployment with no resolvable project module. */
@@ -453,12 +505,26 @@ public final class DeploymentFreshnessReport {
             return f.verified() ? "Current" : "Current (not fully verified)";
         }
         String age = DeploymentStaleness.describeAge(nowMillis - f.staleSinceMillis());
-        return "Stale for " + age + " — " + remedy(row.delivery());
+        return "Stale for " + age + " — " + remedy(row.delivery(), f.reason());
     }
 
     /** The action that actually refreshes each delivery kind — never a generic one. */
     @NotNull
     static String remedy(@NotNull Delivery delivery) {
+        return remedy(delivery, StaleReason.OUTPUTS_NEWER);
+    }
+
+    /**
+     * {@link #remedy(Delivery)} refined by WHY the row is stale: a build that
+     * is current but never reached webapps needs a redeploy, not a rebuild —
+     * telling the user to rebuild something already correct sends them in a
+     * circle (the exact loop this view exists to end).
+     */
+    @NotNull
+    static String remedy(@NotNull Delivery delivery, @Nullable StaleReason reason) {
+        if (reason == StaleReason.NOT_REDEPLOYED) {
+            return "redeploy: the built WAR has not been deployed";
+        }
         return switch (delivery) {
             // Only a build-tool install refreshes a JAR the sync cannot overlay.
             case JAR_ONLY   -> "rebuild: mvn install / gradle build";

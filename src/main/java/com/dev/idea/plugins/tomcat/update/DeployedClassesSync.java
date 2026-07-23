@@ -349,18 +349,28 @@ public final class DeployedClassesSync {
                 // outruns the deployed JAR, Tomcat serves old code with zero
                 // signal. Detect and say so explicitly (the invisible failure
                 // behind "I did a clean install three times").
-                Map<String, Set<Path>> uncoveredRoots = TomcatReadActions.compute(() -> {
+                // Two maps, both keyed by module name: the output roots to probe
+                // and the module's JAR identity. The identity MUST come from
+                // libraryArtifactNameFor — a raw module name does not match the
+                // deployed JAR for Gradle subprojects ("app.sub.main" vs
+                // sub-1.0.jar) or any module whose IDE name differs from its
+                // artifactId, and the mismatch silently disables this warning.
+                record UncoveredView(Map<String, Set<Path>> roots, Map<String, String> artifactNames) {}
+                UncoveredView uncovered = TomcatReadActions.compute(() -> {
                     // TreeMap: deterministic order for stable messages.
                     Map<String, Set<Path>> byModule = new TreeMap<>();
+                    Map<String, String> identities = new HashMap<>();
                     ModuleManager mm = ModuleManager.getInstance(project);
                     for (String moduleName : resolution.uncoveredPackagedModules()) {
                         Module m = mm.findModuleByName(moduleName);
-                        if (m != null) byModule.put(moduleName, moduleOwnOutputPaths(m));
+                        if (m == null) continue;
+                        byModule.put(moduleName, moduleOwnOutputPaths(m));
+                        identities.put(moduleName, libraryArtifactNameFor(m));
                     }
-                    return byModule;
+                    return new UncoveredView(byModule, identities);
                 });
                 warnOutdatedUncoveredJars(name,
-                        findOutdatedUncoveredJars(uncoveredRoots,
+                        findOutdatedUncoveredJars(uncovered.roots(), uncovered.artifactNames(),
                                 scanDeployedLibraryJars(artifactRoot), artifactRoot),
                         logger, SessionNotificationGate.INSTANCE,
                         project.getLocationHash() + "|" + name,
@@ -1291,13 +1301,19 @@ public final class DeployedClassesSync {
     @NotNull
     static List<OutdatedJar> findOutdatedUncoveredJars(
             @NotNull Map<String, ? extends Collection<Path>> outputRootsByUncoveredModule,
+            @NotNull Map<String, String> artifactNameByModule,
             @NotNull Map<String, String> deployedLibraryJars,
             @NotNull Path artifactRoot) {
         List<OutdatedJar> outdated = new ArrayList<>();
         for (Map.Entry<String, ? extends Collection<Path>> e : outputRootsByUncoveredModule.entrySet()) {
             TomcatProgress.checkCanceled();
+            // Match on the module's JAR identity (libraryArtifactNameFor), NOT
+            // its IDE module name: the two differ for Gradle subprojects and
+            // any module renamed away from its artifactId, and a mismatch here
+            // silently disables the warning instead of raising a false one.
+            String artifactName = artifactNameByModule.getOrDefault(e.getKey(), e.getKey());
             String jarFile = deployedLibraryJars.get(
-                    LibraryArtifactNames.libraryArtifactKey(e.getKey() + EXT_JAR));
+                    LibraryArtifactNames.libraryArtifactKey(artifactName + EXT_JAR));
             if (jarFile == null) continue;
             Path jar = artifactRoot.resolve(WEB_INF_LIB_PATH).resolve(jarFile);
             long jarMtime;

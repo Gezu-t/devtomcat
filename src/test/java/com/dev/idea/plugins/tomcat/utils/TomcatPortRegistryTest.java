@@ -152,6 +152,28 @@ class TomcatPortRegistryTest {
             registry.releaseAllFor("nonExistent");
             assertEquals(1, registry.claimedCount());
         }
+
+        @Test
+        @DisplayName("same-named configs in different projects are independent owners")
+        void ownerKeyIsolatesProjects() {
+            // This registry is application-level: two open projects both holding
+            // a default-named "Tomcat" config must not share an owner, or one
+            // project's launch releases the other's live claims and both JVMs
+            // get handed the same port.
+            String projectA = TomcatPortRegistry.ownerKey(null, "Tomcat").replace("?", "projA");
+            String projectB = TomcatPortRegistry.ownerKey(null, "Tomcat").replace("?", "projB");
+            assertNotEquals(projectA, projectB,
+                    "the owner key must carry the project, not just the config name");
+
+            int a = registry.claimPort(59520, projectA);
+            int b = registry.claimPort(59521, projectB);
+            assertTrue(a > 0 && b > 0);
+
+            registry.releaseAllFor(projectA);
+
+            assertEquals(1, registry.claimedCount(),
+                    "project B's live claim must survive project A's release");
+        }
     }
 
     // =========================================================================

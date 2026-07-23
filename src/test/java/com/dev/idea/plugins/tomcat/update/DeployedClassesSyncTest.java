@@ -738,6 +738,7 @@ class DeployedClassesSyncTest {
             List<DeployedClassesSync.OutdatedJar> outdated =
                     DeployedClassesSync.findOutdatedUncoveredJars(
                             java.util.Map.of("common", List.of(outRoot)),
+                            java.util.Map.of("common", "common"),
                             java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot);
 
             assertEquals(1, outdated.size());
@@ -747,11 +748,40 @@ class DeployedClassesSyncTest {
         }
 
         @Test
+        @DisplayName("module whose IDE name differs from its JAR identity is still matched")
+        void identityNotRawModuleName(@TempDir Path tmp) throws Exception {
+            // Gradle subproject shape: IDE module "app.sub.main", jar "sub-1.0.jar".
+            // Keying by the raw module name finds no jar and silently drops the
+            // warning — the failure mode this detection exists to end.
+            Path artifactRoot = tmp.resolve("app-1.0.0");
+            Path jar = artifactRoot.resolve("WEB-INF/lib/sub-1.0.jar");
+            Files.createDirectories(jar.getParent());
+            Files.writeString(jar, "jar-bytes");
+            Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
+            Path out = tmp.resolve("out/sub");
+            Path cls = out.resolve("A.class");
+            Files.createDirectories(cls.getParent());
+            Files.writeString(cls, "class-bytes");
+            Files.setLastModifiedTime(cls, FileTime.fromMillis(300_000L));
+
+            List<DeployedClassesSync.OutdatedJar> outdated =
+                    DeployedClassesSync.findOutdatedUncoveredJars(
+                            java.util.Map.of("app.sub.main", List.of(out)),
+                            java.util.Map.of("app.sub.main", "sub"),   // identity from the shared seam
+                            java.util.Map.of("sub", "sub-1.0.jar"), artifactRoot);
+
+            assertEquals(1, outdated.size(),
+                    "the JAR identity, not the IDE module name, must drive the match");
+            assertEquals("sub-1.0.jar", outdated.get(0).jarFileName());
+        }
+
+        @Test
         @DisplayName("JAR newer than the output → silent")
         void jarNewerSilent(@TempDir Path tmp) throws Exception {
             scaffold(tmp, 300_000L, 100_000L);
             assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
                     java.util.Map.of("common", List.of(outRoot)),
+                    java.util.Map.of("common", "common"),
                     java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot).isEmpty());
         }
 
@@ -761,6 +791,7 @@ class DeployedClassesSyncTest {
             scaffold(tmp, 100_000L, 300_000L);
             assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
                     java.util.Map.of("common", List.of(outRoot)),
+                    java.util.Map.of("common", "common"),
                     java.util.Map.of(), artifactRoot).isEmpty());
         }
 
@@ -771,6 +802,7 @@ class DeployedClassesSyncTest {
             Files.delete(jar);
             assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
                     java.util.Map.of("common", List.of(outRoot)),
+                    java.util.Map.of("common", "common"),
                     java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot).isEmpty());
         }
 
@@ -779,7 +811,7 @@ class DeployedClassesSyncTest {
         void emptyUncoveredMapSilent(@TempDir Path tmp) throws Exception {
             scaffold(tmp, 100_000L, 300_000L);
             assertTrue(DeployedClassesSync.findOutdatedUncoveredJars(
-                    java.util.Map.of(),
+                    java.util.Map.of(), java.util.Map.of(),
                     java.util.Map.of("common", "common-1.0.0.jar"), artifactRoot).isEmpty());
         }
     }

@@ -115,14 +115,16 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             // wrapping it below would turn a deliberate cancel into an error
             // dialog.
             TomcatPortRegistry.getInstance()
-                    .releaseAllFor(configuration.getName());
+                    .releaseAllFor(com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                            configuration.getProject(), configuration.getName()));
             throw e;
         } catch (ExecutionException | RuntimeException e) {
             // Release ports claimed by ensurePreLaunchSetup() since the process
             // will never start and processTerminated() will never fire.
             // releaseAllFor() is idempotent, so double-release from startProcess() is safe.
             TomcatPortRegistry.getInstance()
-                    .releaseAllFor(configuration.getName());
+                    .releaseAllFor(com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                            configuration.getProject(), configuration.getName()));
             if (e instanceof ExecutionException) throw (ExecutionException) e;
             // Wrap with phase + exception class so the user sees WHERE the
             // failure occurred even when the cause's message is null (common
@@ -497,13 +499,15 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         } catch (ProcessCanceledException e) {
             // Same cancel-passthrough rationale as createJavaParameters above.
             TomcatPortRegistry.getInstance()
-                    .releaseAllFor(configuration.getName());
+                    .releaseAllFor(com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                            configuration.getProject(), configuration.getName()));
             throw e;
         } catch (ExecutionException | RuntimeException e) {
             // Release any ports claimed during resolvePortConflicts() since
             // processTerminated() will never be called if we don't return a handler.
             TomcatPortRegistry.getInstance()
-                    .releaseAllFor(configuration.getName());
+                    .releaseAllFor(com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry.ownerKey(
+                            configuration.getProject(), configuration.getName()));
             if (e instanceof ExecutionException) throw (ExecutionException) e;
             // Same wrap-with-phase rationale as createJavaParameters above.
             throw new ExecutionException(
