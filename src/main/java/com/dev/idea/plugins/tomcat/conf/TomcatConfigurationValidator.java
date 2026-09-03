@@ -152,6 +152,14 @@ public final class TomcatConfigurationValidator {
         if (StringUtil.isEmpty(tomcatInfo.getPath())) {
             throw new RuntimeConfigurationException("Tomcat server path is not configured for: " + tomcatInfo.getName());
         }
+        // A WSL UNC home ('\\wsl$\...' / '\\wsl.localhost\...') passes the
+        // File.isDirectory() check below on Windows (the 9P mount is reachable),
+        // so intercept it first with an honest message — DevTomcat runs Tomcat
+        // as a local host process and cannot yet launch one inside WSL.
+        if (com.dev.idea.plugins.tomcat.utils.WslPathDetector.isWslPath(tomcatInfo.getPath())) {
+            throw new RuntimeConfigurationException(
+                    com.dev.idea.plugins.tomcat.utils.WslPathDetector.unsupportedMessage(tomcatInfo.getPath()));
+        }
         File tomcatDir = new File(tomcatInfo.getPath());
         if (!tomcatDir.isDirectory()) {
             // Matches the UI validator (ApplicationServerSection) and the runtime

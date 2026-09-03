@@ -302,6 +302,12 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     + ", path=" + resolved.getPath() + ")");
             configuration.getConfigData().setTomcatInfo(resolved);
         }
+        // Fail loudly and honestly on a WSL-hosted home rather than emit a
+        // Linux command that a Windows process cannot exec ("os error 2").
+        if (com.dev.idea.plugins.tomcat.utils.WslPathDetector.isWslPath(resolved.getPath())) {
+            throw new ExecutionException(
+                    com.dev.idea.plugins.tomcat.utils.WslPathDetector.unsupportedMessage(resolved.getPath()));
+        }
     }
 
     /**

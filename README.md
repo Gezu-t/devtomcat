@@ -36,6 +36,15 @@ Run, debug, and deploy web applications with categorized error analysis, live st
 | Apache Tomcat | 7+ (legacy installs covered by auto-shims) |
 | Java (JDK)    | 17+                                        |
 
+> **WSL is not yet supported.** DevTomcat launches Tomcat as a local host
+> process, so a Tomcat or JDK installed **inside a WSL distribution** (a home
+> path like `\\wsl$\<distro>\...` or `\\wsl.localhost\<distro>\...`) cannot run —
+> the Linux paths and binaries would be handed to a Windows process and fail.
+> DevTomcat detects such a path and refuses it up front with a clear message
+> instead of a cryptic launch error. For now, use a Windows-side Tomcat + JDK,
+> or IntelliJ IDEA Ultimate's WSL application-server support. Native WSL support
+> is a planned enhancement.
+
 ## Installation
 
 1. Open **Settings** > **Plugins** > **Marketplace**
