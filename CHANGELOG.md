@@ -5,13 +5,13 @@
 ### Changed
 - Warn when an artifact packages modules the class sync can't cover.
 - Opt-in: run Maven package before Redeploy.
-- WSL-hosted Tomcat refused up front with a clear message.
 - Sync skips surface as notifications with the fix.
 - JVM hot-swap ceiling noted in docs and console.
 - Redeploy tooltip states the as-last-built contract.
 
 ### Added
 - Deployment Freshness view: per module, how it's delivered and whether it's current.
+- Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
 - Web resources sync no longer deletes build-produced webapp files.

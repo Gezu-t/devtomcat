@@ -8,6 +8,7 @@ import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
@@ -54,6 +55,8 @@ public class TomcatJavaParametersBuilder {
     private PortConfig resolvedPorts;
     private TomcatDeploymentLogger deploymentLogger;
     @Nullable private String runId;
+    /** Host→target path seam; identity unless the launch runs inside WSL. */
+    @NotNull private LaunchPathMapper pathMapper = LaunchPathMapper.IDENTITY;
 
     public TomcatJavaParametersBuilder(@NotNull TomcatRunConfiguration configuration,
                                        @NotNull ExecutionEnvironment environment) {
@@ -64,6 +67,12 @@ public class TomcatJavaParametersBuilder {
 
     public TomcatJavaParametersBuilder setDebugMode(boolean debugMode) {
         this.debugMode = debugMode;
+        return this;
+    }
+
+    /** Routes every emitted path (VM properties, classpath, descriptors) through {@code mapper}. */
+    public TomcatJavaParametersBuilder setPathMapper(@NotNull LaunchPathMapper mapper) {
+        this.pathMapper = mapper;
         return this;
     }
 
@@ -287,7 +296,8 @@ public class TomcatJavaParametersBuilder {
                 overlayActive ? confOverlay : null,
                 hotDeployEnabled,
                 reservedContextStems,
-                ideManagedBase);
+                ideManagedBase,
+                pathMapper);
 
         if (deploymentLogger != null) {
             if (overlayActive) {
@@ -415,10 +425,31 @@ public class TomcatJavaParametersBuilder {
                     ". Verify that the configured Tomcat home directory is a valid Tomcat installation.");
         }
 
-        // add(String) — the add(File) overload is deprecated for removal; Path.toString()
-        // yields the same path string the deprecated overload derived via File.getPath().
-        params.getClassPath().add(bootstrap.toString());
-        params.getClassPath().add(tomcatJuli.toString());
+        emitClasspath(params, List.of(bootstrap, tomcatJuli), pathMapper);
+    }
+
+    /**
+     * Pure classpath emission. With the host separator the entries go into the
+     * platform-joined classpath (add(String) — the add(File) overload is deprecated
+     * for removal; Path.toString() yields the same string it derived). A mapper
+     * with a foreign separator (WSL: {@code :}) instead emits an explicit
+     * {@code -classpath} VM parameter, which the platform honours over its own.
+     */
+    static void emitClasspath(@NotNull JavaParameters params,
+                              @NotNull List<Path> jars,
+                              @NotNull LaunchPathMapper mapper) {
+        if (mapper.classpathSeparator().equals(java.io.File.pathSeparator)) {
+            for (Path jar : jars) {
+                params.getClassPath().add(mapper.toTarget(jar.toString()));
+            }
+            return;
+        }
+        List<String> hostEntries = new java.util.ArrayList<>(jars.size());
+        for (Path jar : jars) {
+            hostEntries.add(jar.toString());
+        }
+        params.getVMParametersList().add("-classpath");
+        params.getVMParametersList().add(mapper.joinClasspath(hostEntries));
     }
 
     private void setupEnvironment(@NotNull JavaParameters params) {
@@ -477,7 +508,8 @@ public class TomcatJavaParametersBuilder {
                 configuration.isJmxEnabled(),
                 catalinaBase,
                 catalinaHome,
-                jdk
+                jdk,
+                pathMapper
         );
     }
 
@@ -515,7 +547,7 @@ public class TomcatJavaParametersBuilder {
         // (they go through RemoteDeploymentRunProfileState and never build
         // JavaParameters); the former DeploymentStrategy interface was folded
         // into LocalDeploymentStrategy when it became the sole implementation.
-        new LocalDeploymentStrategy()
+        new LocalDeploymentStrategy(pathMapper)
                 .configureDeployment(params, catalinaBase, configuration, project, deploymentLogger);
     }
 

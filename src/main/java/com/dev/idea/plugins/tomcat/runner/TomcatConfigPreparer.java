@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.TomcatLogFile;
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
@@ -133,6 +134,25 @@ public final class TomcatConfigPreparer {
                                        boolean hotDeploymentEnabled,
                                        @NotNull Set<String> reservedContextStems,
                                        boolean ideManagedBase) throws IOException {
+        return prepare(catalinaBase, catalinaHome, httpPort, shutdownPort, httpsPort, httpsEnabled,
+                ajpPort, ajpEnabled, confOverlay, hotDeploymentEnabled, reservedContextStems,
+                ideManagedBase, LaunchPathMapper.IDENTITY);
+    }
+
+    /**
+     * As {@link #prepare(Path, Path, int, int, int, boolean, int, boolean, Path, boolean, Set, boolean)};
+     * {@code mapper} rewrites the paths the mirror writes into descriptors for the launch target.
+     */
+    @NotNull
+    public static List<String> prepare(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
+                                       int httpPort, int shutdownPort,
+                                       int httpsPort, boolean httpsEnabled,
+                                       int ajpPort, boolean ajpEnabled,
+                                       @Nullable Path confOverlay,
+                                       boolean hotDeploymentEnabled,
+                                       @NotNull Set<String> reservedContextStems,
+                                       boolean ideManagedBase,
+                                       @NotNull LaunchPathMapper mapper) throws IOException {
         List<String> warnings = new ArrayList<>();
 
         // Refuse base == home up front, before ANY destructive step. The conf-copy
@@ -170,7 +190,7 @@ public final class TomcatConfigPreparer {
         // Mirror Tomcat's bundled webapps into the per-run base when the user opted in.
         // When disabled, this cleans up any entries left by a prior enabled run.
         CatalinaHomeMirror.Result mirror = CatalinaHomeMirror.apply(
-                hotDeploymentEnabled, catalinaHome, catalinaBase, reservedContextStems);
+                hotDeploymentEnabled, catalinaHome, catalinaBase, reservedContextStems, mapper);
         warnings.addAll(mirror.warnings);
 
         warnings.addAll(validateConf(catalinaBase));

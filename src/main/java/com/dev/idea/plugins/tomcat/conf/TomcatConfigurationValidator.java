@@ -76,6 +76,25 @@ public final class TomcatConfigurationValidator {
         validatePortConfiguration(data);
         validateContextPath(data);
         validateDeploymentArtifacts(data);
+        warnIfWslMode(data);
+    }
+
+    /**
+     * Non-blocking notice that a WSL-hosted Tomcat launches in the experimental
+     * WSL mode. Runs after every error-level check so it never masks one.
+     */
+    private static void warnIfWslMode(@NotNull TomcatConfigurationData data) throws RuntimeConfigurationWarning {
+        TomcatInfo tomcatInfo = data.getTomcatInfo();
+        if (tomcatInfo == null
+                || !com.dev.idea.plugins.tomcat.utils.WslPathDetector.isWslPath(tomcatInfo.getPath())) {
+            return;
+        }
+        String distro = com.dev.idea.plugins.tomcat.utils.WslPathDetector.distroOf(tomcatInfo.getPath());
+        throw new RuntimeConfigurationWarning(
+                "WSL mode (experimental) will be used for this Tomcat"
+                        + (distro != null ? " (distribution '" + distro + "')" : "")
+                        + ": it runs inside the distribution via wsl.exe and needs a WSL-side JDK."
+                        + " Debugging and port-conflict detection across the WSL2 boundary are not yet verified.");
     }
 
     private static void validateConfigurationName(@NotNull TomcatRunConfiguration config) {
@@ -152,13 +171,13 @@ public final class TomcatConfigurationValidator {
         if (StringUtil.isEmpty(tomcatInfo.getPath())) {
             throw new RuntimeConfigurationException("Tomcat server path is not configured for: " + tomcatInfo.getName());
         }
-        // A WSL UNC home ('\\wsl$\...' / '\\wsl.localhost\...') passes the
-        // File.isDirectory() check below on Windows (the 9P mount is reachable),
-        // so intercept it first with an honest message — DevTomcat runs Tomcat
-        // as a local host process and cannot yet launch one inside WSL.
+        // A WSL UNC home ('\\wsl$\...' / '\\wsl.localhost\...') may or may not
+        // pass File.isDirectory() on Windows (the 9P mount answers only while the
+        // distro runs) — never let that block WSL mode. The launch itself is the
+        // hard gate when the distribution cannot be resolved; the validator only
+        // adds the non-blocking warning in warnIfWslMode.
         if (com.dev.idea.plugins.tomcat.utils.WslPathDetector.isWslPath(tomcatInfo.getPath())) {
-            throw new RuntimeConfigurationException(
-                    com.dev.idea.plugins.tomcat.utils.WslPathDetector.unsupportedMessage(tomcatInfo.getPath()));
+            return;
         }
         File tomcatDir = new File(tomcatInfo.getPath());
         if (!tomcatDir.isDirectory()) {

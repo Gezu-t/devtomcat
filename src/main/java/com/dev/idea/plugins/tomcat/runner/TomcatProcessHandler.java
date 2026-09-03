@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.intellij.ide.browsers.BrowserLauncher;
 import com.intellij.ide.browsers.WebBrowser;
 import com.intellij.ide.browsers.WebBrowserManager;
@@ -118,6 +119,12 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     private final boolean activateToolWindow;
     private final boolean showConsoleOnStdout;
     private final boolean showConsoleOnStderr;
+    /**
+     * The path seam this run launched with. Carried on the handler so a later
+     * redeploy rewrites descriptors exactly as the launch did, without
+     * re-resolving the launch target from the UI thread.
+     */
+    private volatile @NotNull LaunchPathMapper launchPathMapper = LaunchPathMapper.IDENTITY;
     private final AtomicLong lastConsoleActivation = new AtomicLong(0);
     private static final long CONSOLE_ACTIVATION_DEBOUNCE_MS = 500;
 
@@ -920,6 +927,17 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
     @NotNull
     public TomcatDeploymentLogger getDeploymentLogger() {
         return deploymentLogger;
+    }
+
+    /** Set once by the launch; identity for an ordinary host run. */
+    void setLaunchPathMapper(@NotNull LaunchPathMapper mapper) {
+        this.launchPathMapper = mapper;
+    }
+
+    /** The seam a redeploy must reuse so its descriptors match the running server. */
+    @NotNull
+    public LaunchPathMapper getLaunchPathMapper() {
+        return launchPathMapper;
     }
 
     @NotNull

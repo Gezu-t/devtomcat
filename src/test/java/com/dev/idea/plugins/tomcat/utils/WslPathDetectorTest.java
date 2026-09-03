@@ -99,15 +99,15 @@ class WslPathDetectorTest {
     class UnsupportedMessage {
 
         @Test
-        @DisplayName("names the distro and stays honest about the limitation")
+        @DisplayName("names the distro and says why the launch was refused")
         void namesDistroAndLimitation() {
             String msg = WslPathDetector.unsupportedMessage("\\\\wsl$\\Ubuntu\\opt\\apache-tomcat");
             assertTrue(msg.contains("Ubuntu"), "should name the distribution");
             assertTrue(msg.contains("WSL"));
+            assertTrue(msg.toLowerCase().contains("could not resolve"),
+                    "should say the distribution could not be resolved");
             assertTrue(msg.toLowerCase().contains("local host process"),
-                    "should explain WHY it can't run");
-            assertTrue(msg.toLowerCase().contains("planned"),
-                    "should set the expectation that support is planned");
+                    "should explain why a host launch is not an option");
         }
     }
 }

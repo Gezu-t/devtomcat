@@ -10,19 +10,17 @@ import java.util.Locale;
  * Linux) distribution, reached from Windows through the distro's UNC mount
  * ({@code \\wsl$\<distro>\...} or the newer {@code \\wsl.localhost\<distro>\...}).
  *
- * <p>DevTomcat launches Tomcat as a <em>local host</em> process, so a WSL-hosted
- * server cannot run: the Linux binaries, classpath and {@code -D} paths are
- * handed to a Windows process and fail (the reported {@code os error 2 — No such
- * file or directory}). Worse, such a UNC path often <em>passes</em> a plain
- * {@code File.isDirectory()} check on Windows (the 9P mount is reachable), so
- * without this guard the config looks valid and dies with a cryptic downstream
- * error. This detector lets both the pre-launch gate and the config validator
- * refuse the path with an honest, specific message instead.
+ * <p>Such a home selects the experimental WSL launch mode (see
+ * {@code runner.WslLaunchMode}): paths are translated by {@link WslPathTranslator}
+ * and the JVM runs inside the distribution. A UNC path often <em>passes</em> a
+ * plain {@code File.isDirectory()} check on Windows (the 9P mount is reachable),
+ * so this detector — not the filesystem — is the signal both the pre-launch gate
+ * and the config validator key on. When the distribution cannot be resolved the
+ * launch refuses with {@link #unsupportedMessage} instead of emitting a Linux
+ * command a Windows process cannot exec ({@code os error 2}).
  *
  * <p>Pure string logic — no platform dependency — so the only signal it uses is
- * the unambiguous WSL UNC prefix. Running the JVM inside the distro is a planned
- * enhancement (see LOCAL_NOTES / the WSL support assessment); until then, this is
- * a fail-loud guard, not WSL support.
+ * the unambiguous WSL UNC prefix.
  */
 public final class WslPathDetector {
 
@@ -54,19 +52,21 @@ public final class WslPathDetector {
     }
 
     /**
-     * The user-facing explanation for refusing a WSL-hosted home. Shared by the
-     * pre-launch gate and the validator so both say the same thing. Names the
-     * distribution when it can be parsed.
+     * The user-facing explanation for refusing a WSL-hosted home whose
+     * distribution cannot be resolved (not Windows, not installed, or the UNC
+     * names a distribution WSL does not list). Names the distribution when it
+     * can be parsed.
      */
     @NotNull
     public static String unsupportedMessage(@NotNull String path) {
         String distro = distroOf(path);
         return "This Tomcat is installed inside WSL"
                 + (distro != null ? " (distribution '" + distro + "')" : "")
-                + " at '" + path + "'. DevTomcat launches Tomcat as a local host process and"
-                + " cannot yet run a server or JDK located inside a WSL distribution — the Linux"
-                + " paths and binaries are handed to a Windows process and fail. Use a Windows-side"
-                + " Tomcat and JDK, or IntelliJ Ultimate's WSL application-server support."
-                + " Native WSL support is a planned enhancement.";
+                + " at '" + path + "', but DevTomcat could not resolve that WSL distribution"
+                + " on this machine, so it cannot run Tomcat inside it. WSL mode (experimental)"
+                + " needs Windows with the distribution installed and wsl.exe available;"
+                + " a WSL-hosted Tomcat cannot run as a local host process (its Linux paths and"
+                + " binaries would be handed to a Windows process and fail). Use a Windows-side"
+                + " Tomcat and JDK, or IntelliJ Ultimate's WSL application-server support.";
     }
 }

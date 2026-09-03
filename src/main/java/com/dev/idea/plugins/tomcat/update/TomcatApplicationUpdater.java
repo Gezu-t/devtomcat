@@ -813,9 +813,14 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     // the <Resources> block on Tomcat 7 (PostResources is a
                     // Tomcat 8 element).
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
+                    // Reuse the seam this run launched with, so the rewritten
+                    // descriptor matches what the running server already reads.
+                    // Taken from the handler — resolving it here would block the
+                    // UI thread this update runs on.
                     String contextXml = com.dev.idea.plugins.tomcat.runner.LocalDeploymentStrategy.buildContextXml(
                             deployment, artifactPath, preserveSessions, project,
-                            configuration.getTomcatInfo(), logger);
+                            configuration.getTomcatInfo(), logger,
+                            processHandler.getLaunchPathMapper());
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
                     logger.logServerInfo("Redeployed (context rewrite): " + deployment.getDisplayName());
                 } else {

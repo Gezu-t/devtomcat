@@ -447,6 +447,60 @@ class TomcatConfigurationValidatorTest {
     }
 
     // =========================================================================
+    // WSL-hosted Tomcat (experimental WSL mode)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("WSL-hosted Tomcat")
+    class WslHome {
+
+        @Test
+        @DisplayName("a WSL UNC home yields a non-blocking warning, not an exception")
+        void wslHomeWarns() {
+            data.setTomcatInfo(new TomcatInfo("Tomcat 10", "10.1.20", "\\\\wsl$\\Ubuntu\\opt\\apache-tomcat"));
+
+            RuntimeConfigurationException ex = assertThrows(
+                    RuntimeConfigurationException.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+
+            assertTrue(ex instanceof RuntimeConfigurationWarning,
+                    "WSL mode must be runnable — expected the warning subclass, got " + ex.getClass());
+            assertTrue(ex.getLocalizedMessage().contains("WSL mode"), ex.getLocalizedMessage());
+            assertTrue(ex.getLocalizedMessage().contains("Ubuntu"), ex.getLocalizedMessage());
+        }
+
+        @Test
+        @DisplayName("the directory-existence check is bypassed for a WSL home")
+        void directoryCheckBypassed() {
+            // The UNC does not exist on this machine; a plain File.isDirectory()
+            // would reject it as 'does not exist'. Only the warning may surface.
+            data.setTomcatInfo(new TomcatInfo("Tomcat 10", "10.1.20", "\\\\wsl.localhost\\Debian\\opt\\apache-tomcat"));
+
+            RuntimeConfigurationException ex = assertThrows(
+                    RuntimeConfigurationException.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+
+            assertTrue(ex instanceof RuntimeConfigurationWarning, ex.getClass().getName());
+            assertFalse(ex.getLocalizedMessage().contains("does not exist"), ex.getLocalizedMessage());
+        }
+
+        @Test
+        @DisplayName("blocking errors still take precedence over the WSL warning")
+        void errorsBeforeWarning() {
+            data.setTomcatInfo(new TomcatInfo("Tomcat 10", "10.1.20", "\\\\wsl$\\Ubuntu\\opt\\apache-tomcat"));
+            data.getDeploymentConfig().setDeployments(java.util.Collections.emptyList());
+
+            RuntimeConfigurationException ex = assertThrows(
+                    RuntimeConfigurationException.class,
+                    () -> TomcatConfigurationValidator.validate(data));
+
+            assertFalse(ex instanceof RuntimeConfigurationWarning,
+                    "an empty deployment list is a blocking error and must not be downgraded");
+            assertTrue(ex.getLocalizedMessage().contains("No deployments"), ex.getLocalizedMessage());
+        }
+    }
+
+    // =========================================================================
     // Null data
     // =========================================================================
 

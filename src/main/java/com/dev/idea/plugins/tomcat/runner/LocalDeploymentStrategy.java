@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.update.DeploymentModuleResolver;
 import com.dev.idea.plugins.tomcat.update.WebResourcesSync;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
@@ -87,6 +88,17 @@ public final class LocalDeploymentStrategy {
     // only when a second JVM-launching deployment mode actually exists.
 
     private static final Logger LOG = Logger.getInstance(LocalDeploymentStrategy.class);
+
+    /** Rewrites every descriptor path for the launch target; identity for a host launch. */
+    private final LaunchPathMapper mapper;
+
+    public LocalDeploymentStrategy() {
+        this(LaunchPathMapper.IDENTITY);
+    }
+
+    public LocalDeploymentStrategy(@NotNull LaunchPathMapper mapper) {
+        this.mapper = mapper;
+    }
 
     // --- Tomcat extra resources (context.xml overlay) ---
     private static final String RESOURCE_CLASS_DIR = "org.apache.catalina.webresources.DirResourceSet";
@@ -439,7 +451,7 @@ public final class LocalDeploymentStrategy {
             try {
                 if (deployment.isExploded() || Files.isDirectory(artifactPath)) {
                     String contextXml = buildContextXml(deployment, artifactPath, preserveSessions,
-                            project, configuration.getTomcatInfo(), logger);
+                            project, configuration.getTomcatInfo(), logger, mapper);
                     Path contextFile = TomcatDeploymentPaths.contextDescriptor(
                             confCatalinaLocalhost, contextName);
                     TomcatProjectUtils.atomicWriteString(contextFile, contextXml);
@@ -582,12 +594,29 @@ public final class LocalDeploymentStrategy {
                                   @NotNull Project project,
                                   @Nullable TomcatInfo tomcatInfo,
                                   @Nullable TomcatDeploymentLogger logger) {
-        String extraResources = buildExtraResourcesXml(deployment, artifactPath, project, tomcatInfo, logger);
+        return buildContextXml(deployment, artifactPath, preserveSessions, project, tomcatInfo, logger,
+                LaunchPathMapper.IDENTITY);
+    }
+
+    /**
+     * As {@link #buildContextXml(Deployment, Path, boolean, Project, TomcatInfo, TomcatDeploymentLogger)};
+     * {@code docBase} and every {@code <PreResources>}/{@code <PostResources>} base go
+     * through {@code mapper}, since Catalina may read the descriptor from inside WSL.
+     */
+    @NotNull
+    public static String buildContextXml(@NotNull Deployment deployment,
+                                  @NotNull Path artifactPath,
+                                  boolean preserveSessions,
+                                  @NotNull Project project,
+                                  @Nullable TomcatInfo tomcatInfo,
+                                  @Nullable TomcatDeploymentLogger logger,
+                                  @NotNull LaunchPathMapper mapper) {
+        String extraResources = buildExtraResourcesXml(deployment, artifactPath, project, tomcatInfo, logger, mapper);
         String jarScanFilter = buildJarScanFilter(artifactPath, tomcatInfo, logger);
 
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.append("<Context docBase=\"").append(escapeXmlAttribute(artifactPath.toString()));
+        xml.append("<Context docBase=\"").append(escapeXmlAttribute(mapper.toTarget(artifactPath.toString())));
         // Always set reloadable="false". Tomcat's background class-modification scanner
         // (WebappLoader.backgroundProcess) runs every 10 seconds when reloadable="true" and
         // throws NoSuchFileException for any JARs removed from ~/.m2/repository (e.g. after
@@ -1105,7 +1134,8 @@ public final class LocalDeploymentStrategy {
                                           @NotNull Path artifactPath,
                                           @NotNull Project project,
                                           @Nullable TomcatInfo tomcatInfo,
-                                          @Nullable TomcatDeploymentLogger logger) {
+                                          @Nullable TomcatDeploymentLogger logger,
+                                          @NotNull LaunchPathMapper mapper) {
         // PreResources / PostResources are Tomcat 8+; Tomcat 7's Digester emits
         // 'No rules found matching Context/Resources/PreResources' and drops them.
         // Major version 0 = unknown — treat as modern (don't accidentally regress modern users).
@@ -1223,7 +1253,7 @@ public final class LocalDeploymentStrategy {
         // PreResources and PostResources go into separate Tomcat lists by element
         // type, so appending the split PreResources after the wholesale+JAR block is
         // functionally correct (all PreResources still precede docBase; JARs remain PostResources).
-        return renderExtraResourcesXml(wholesaleDirs, extraJars) + renderPreMounts(splitMounts);
+        return renderExtraResourcesXml(wholesaleDirs, extraJars, mapper) + renderPreMounts(splitMounts, mapper);
     }
 
     /**
@@ -1249,10 +1279,18 @@ public final class LocalDeploymentStrategy {
     @NotNull
     static String renderExtraResourcesXml(@NotNull List<String> webappDirs,
                                           @NotNull List<String> libJars) {
+        return renderExtraResourcesXml(webappDirs, libJars, LaunchPathMapper.IDENTITY);
+    }
+
+    /** As the two-argument form; every {@code base=} attribute goes through {@code mapper}. */
+    @NotNull
+    static String renderExtraResourcesXml(@NotNull List<String> webappDirs,
+                                          @NotNull List<String> libJars,
+                                          @NotNull LaunchPathMapper mapper) {
         StringBuilder sb = new StringBuilder();
         for (String webappDir : webappDirs) {
             sb.append(String.format(PRE_RESOURCE_TEMPLATE,
-                    RESOURCE_CLASS_DIR, escapeXmlAttribute(webappDir), WEBAPP_MOUNT_ROOT));
+                    RESOURCE_CLASS_DIR, escapeXmlAttribute(mapper.toTarget(webappDir)), WEBAPP_MOUNT_ROOT));
         }
         // Each JAR mounts at /WEB-INF/lib/<filename>. Two distinct classpath
         // JARs can share a filename (e.g. same artifactId+version from different
@@ -1264,12 +1302,19 @@ public final class LocalDeploymentStrategy {
         // so both libraries stay loadable; only the virtual mount name differs.
         Set<String> usedMounts = new HashSet<>();
         for (String jar : libJars) {
-            String mountName = uniqueMountName(new File(jar).getName(), usedMounts);
+            String mountName = uniqueMountName(fileName(jar), usedMounts);
             sb.append(String.format(POST_RESOURCE_TEMPLATE,
-                    RESOURCE_CLASS_FILE, escapeXmlAttribute(jar),
+                    RESOURCE_CLASS_FILE, escapeXmlAttribute(mapper.toTarget(jar)),
                     WEBAPP_MOUNT_LIB + escapeXmlAttribute(mountName)));
         }
         return sb.toString();
+    }
+
+    /** Last segment of a path in either separator convention (a host path may be Windows-form). */
+    @NotNull
+    static String fileName(@NotNull String path) {
+        int cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return cut < 0 ? path : path.substring(cut + 1);
     }
 
     /** A single {@code <PreResources>} overlay: a source path exposed at a web-app path. */
@@ -1350,11 +1395,17 @@ public final class LocalDeploymentStrategy {
      */
     @NotNull
     static String renderPreMounts(@NotNull List<PreMount> mounts) {
+        return renderPreMounts(mounts, LaunchPathMapper.IDENTITY);
+    }
+
+    /** As the one-argument form; every {@code base=} attribute goes through {@code mapper}. */
+    @NotNull
+    static String renderPreMounts(@NotNull List<PreMount> mounts, @NotNull LaunchPathMapper mapper) {
         StringBuilder sb = new StringBuilder();
         for (PreMount m : mounts) {
             String className = m.isDirectory() ? RESOURCE_CLASS_DIR : RESOURCE_CLASS_FILE;
             sb.append(String.format(PRE_RESOURCE_TEMPLATE,
-                    className, escapeXmlAttribute(m.base()), escapeXmlAttribute(m.webAppMount())));
+                    className, escapeXmlAttribute(mapper.toTarget(m.base())), escapeXmlAttribute(m.webAppMount())));
         }
         return sb.toString();
     }

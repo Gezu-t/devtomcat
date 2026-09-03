@@ -8,6 +8,7 @@ import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.execution.ExecutionException;
@@ -68,6 +69,8 @@ public class TomcatCommandLineState extends JavaCommandLineState {
      */
     private final RunIdAssigner runIdAssigner;
     private final AtomicBoolean preLaunchDone = new AtomicBoolean(false);
+    /** Decided once in pre-launch setup; {@code null} for an ordinary host launch. */
+    private volatile WslLaunchMode wslMode;
 
     public TomcatCommandLineState(@NotNull ExecutionEnvironment environment,
                                   @NotNull TomcatRunConfiguration configuration) {
@@ -89,10 +92,12 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             long prepStart = System.nanoTime();
             ensurePreLaunchSetup();
 
+            WslLaunchMode wsl = wslMode;
             TomcatJavaParametersBuilder builder = new TomcatJavaParametersBuilder(configuration, getEnvironment())
                     .setDebugMode(isDebug)
                     .setDeploymentLogger(deploymentLogger)
-                    .setRunId(resolveRunId());
+                    .setRunId(resolveRunId())
+                    .setPathMapper(wsl != null ? wsl.mapper() : LaunchPathMapper.IDENTITY);
             if (resolvedPorts != null) {
                 builder.setResolvedPorts(resolvedPorts);
             }
@@ -100,6 +105,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 builder.setResolvedDebugPort(resolvedDebugPort);
             }
             JavaParameters params = builder.build();
+            if (wsl != null && params.getWorkingDirectory() != null) {
+                // Once per launch: the parameters are built exactly once.
+                deploymentLogger.logServerWarning(wsl.consoleMessage(params.getWorkingDirectory()));
+            }
             // One-line launch-prep total: this is the time spent under the
             // runner's pre-launch modal (port claim, catalina.base prep,
             // class/web sync, artifact deployment), so slow launches are
@@ -176,6 +185,9 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // isRemoteMode() guards in this method are therefore unreachable and
         // have been removed.
         requireRegisteredTomcatServer();
+        // WSL mode is decided here, before any side effect, so its guards fail
+        // the launch without leaving claimed ports or balloons behind.
+        resolveWslMode();
         // Kill any orphan Tomcats left over from prior runs of THIS config so
         // their ports free up before the port-conflict detector sees them.
         // Without this, a zombie on the seed port pushes us onto the next free
@@ -302,12 +314,27 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     + ", path=" + resolved.getPath() + ")");
             configuration.getConfigData().setTomcatInfo(resolved);
         }
-        // Fail loudly and honestly on a WSL-hosted home rather than emit a
-        // Linux command that a Windows process cannot exec ("os error 2").
-        if (com.dev.idea.plugins.tomcat.utils.WslPathDetector.isWslPath(resolved.getPath())) {
-            throw new ExecutionException(
-                    com.dev.idea.plugins.tomcat.utils.WslPathDetector.unsupportedMessage(resolved.getPath()));
-        }
+    }
+
+    /**
+     * Decides the experimental WSL launch mode once. A WSL-hosted home whose
+     * distribution cannot be resolved fails loudly here (never a Linux command
+     * exec'd by a Windows process — "os error 2"); a resolved mode enforces a
+     * WSL-side JDK, the default startup and a non-coverage executor, all of
+     * which the {@code wsl.exe} wrapping cannot honour otherwise.
+     */
+    private void resolveWslMode() throws ExecutionException {
+        TomcatInfo info = configuration.getTomcatInfo();
+        WslLaunchMode mode = info == null ? null : WslLaunchMode.resolve(info.getPath());
+        if (mode == null) return;
+
+        mode.requireWslSideJdk(resolveJdk());
+
+        String executorId = getEnvironment().getExecutor().getId();
+        RunnerSettings rs = configuration.getConfigData().getRunnerSettings(executorId);
+        WslLaunchMode.requireSupportedLaunchShape(rs.isUseDefaultStartup(), rs.getStartupScript(), executorId);
+        this.wslMode = mode;
+        LOG.info("WSL mode: Tomcat runs inside distribution '" + mode.distroName() + "'");
     }
 
     /**
@@ -418,12 +445,16 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // is only called if we successfully return a handler — if we throw, it never fires.
         try {
         ensurePreLaunchSetup();
+        WslLaunchMode wsl = wslMode;
 
         String executorId = getEnvironment().getExecutor().getId();
         RunnerSettings runnerSettings = configuration.getConfigData().getRunnerSettings(executorId);
 
         GeneralCommandLine commandLine;
         if (!runnerSettings.isUseDefaultStartup() && !StringUtil.isEmptyOrSpaces(runnerSettings.getStartupScript())) {
+            // Never reached in WSL mode: resolveWslMode() refuses a custom
+            // startup script before any side effect (shell scripts are not
+            // wrapped for the distribution in this iteration).
             List<String> tokens = ParametersListUtil.parse(
                     runnerSettings.getStartupScript());
             boolean isDebug = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
@@ -469,7 +500,25 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             if (!runnerSettings.isUseDefaultStartup()) {
                 LOG.warn("Custom startup enabled but no script configured, falling back to default startup");
             }
-            commandLine = getJavaParameters().toCommandLine();
+            JavaParameters params = getJavaParameters();
+            if (wsl != null) {
+                // The runner's launcher hook was added after build(); it carries
+                // host-only paths the distribution cannot exec.
+                WslLaunchMode.neutralizeHostLauncherProxy(params);
+            }
+            commandLine = params.toCommandLine();
+            if (wsl != null) {
+                Sdk jdk = params.getJdk();
+                String jdkHome = jdk != null ? jdk.getHomePath() : null;
+                if (jdkHome == null) {
+                    throw new ExecutionException(WslLaunchMode.jdkMessage(wsl.distroName()));
+                }
+                String workingDir = params.getWorkingDirectory();
+                if (workingDir == null) {
+                    throw new ExecutionException("Unable to determine catalina.base directory");
+                }
+                commandLine = wsl.patchCommandLine(commandLine, configuration.getProject(), workingDir, jdkHome);
+            }
         }
         
         // Re-sync log files after catalina.base is prepared (log files now exist on disk)
@@ -501,6 +550,10 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 resolveRunId()
         );
         ProcessTerminatedListener.attach(handler);
+        if (wsl != null) {
+            handler.setLaunchPathMapper(wsl.mapper());
+            wsl.patchProcessHandler(commandLine, handler);
+        }
         return handler;
         } catch (ProcessCanceledException e) {
             // Same cancel-passthrough rationale as createJavaParameters above.

@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
@@ -125,6 +126,19 @@ public final class CatalinaHomeMirror {
                                @NotNull Path catalinaHome,
                                @NotNull Path catalinaBase,
                                @NotNull Set<String> reservedContextStems) {
+        return apply(enabled, catalinaHome, catalinaBase, reservedContextStems, LaunchPathMapper.IDENTITY);
+    }
+
+    /**
+     * As {@link #apply(boolean, Path, Path, Set)}; {@code mapper} rewrites the
+     * {@code docBase} of every synthesized descriptor for the launch target.
+     */
+    @NotNull
+    public static Result apply(boolean enabled,
+                               @NotNull Path catalinaHome,
+                               @NotNull Path catalinaBase,
+                               @NotNull Set<String> reservedContextStems,
+                               @NotNull LaunchPathMapper mapper) {
         int cleanedUp = cleanupPreviousMirror(catalinaBase);
         if (!enabled) {
             if (cleanedUp > 0) {
@@ -147,7 +161,7 @@ public final class CatalinaHomeMirror {
         Set<String> ctxStemsPlaced = mirrorAuthorContexts(
                 catalinaHome, catalinaBase, reserved, manifestEntries, counters, warnings);
         mirrorWebapps(
-                catalinaHome, catalinaBase, reserved, ctxStemsPlaced, manifestEntries, counters, warnings);
+                catalinaHome, catalinaBase, reserved, ctxStemsPlaced, manifestEntries, counters, warnings, mapper);
 
         try {
             writeManifest(catalinaBase, catalinaHome, manifestEntries);
@@ -327,7 +341,8 @@ public final class CatalinaHomeMirror {
                                       @NotNull Set<String> ctxStemsPlaced,
                                       @NotNull Set<String> manifestEntries,
                                       @NotNull Counters counters,
-                                      @NotNull List<String> warnings) {
+                                      @NotNull List<String> warnings,
+                                      @NotNull LaunchPathMapper mapper) {
         Path source = catalinaHome.resolve(DIR_WEBAPPS);
         if (!Files.isDirectory(source)) {
             warnings.add("CATALINA_HOME/" + DIR_WEBAPPS + " not found at " + source);
@@ -403,7 +418,7 @@ public final class CatalinaHomeMirror {
                 String ctxFile = sanitizeStem(name) + ".xml";
                 Path ctxPath = ctxTarget.resolve(ctxFile);
                 try {
-                    TomcatConfigPreparer.atomicWriteString(ctxPath, buildSharedContextXml(entry));
+                    TomcatConfigPreparer.atomicWriteString(ctxPath, buildSharedContextXml(entry, mapper));
                     manifestEntries.add(CATALINA_LOCALHOST + "/" + ctxFile);
                     counters.synthesized++;
                 } catch (IOException e) {
@@ -440,7 +455,13 @@ public final class CatalinaHomeMirror {
      */
     @NotNull
     static String buildSharedContextXml(@NotNull Path sourceDir) {
-        String absolute = sourceDir.toAbsolutePath().toString();
+        return buildSharedContextXml(sourceDir, LaunchPathMapper.IDENTITY);
+    }
+
+    /** {@code docBase} is emitted through {@code mapper} — Catalina may read it from inside WSL. */
+    @NotNull
+    static String buildSharedContextXml(@NotNull Path sourceDir, @NotNull LaunchPathMapper mapper) {
+        String absolute = mapper.toTarget(sourceDir.toAbsolutePath().toString());
         // XML 1.0 forbids "--" inside comments; a dir named e.g. 'my--app' would
         // otherwise produce a malformed comment that Tomcat's Digester rejects.
         String safeName = sourceDir.getFileName().toString().replace("--", "- -");

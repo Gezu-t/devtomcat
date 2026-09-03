@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.model.PortConfig;
+import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -83,6 +84,23 @@ final class TomcatVmOptionsConfigurator {
                           @NotNull Path catalinaBase,
                           @NotNull Path catalinaHome,
                           @NotNull Sdk jdk) {
+        configure(vmParams, userVmOptions, ports, jmxEnabled, catalinaBase, catalinaHome, jdk,
+                LaunchPathMapper.IDENTITY);
+    }
+
+    /**
+     * As {@link #configure(ParametersList, String, PortConfig, boolean, Path, Path, Sdk)};
+     * {@code mapper} rewrites every path-valued property for the launch target
+     * (identity for a host launch, the WSL translator in WSL mode).
+     */
+    static void configure(@NotNull ParametersList vmParams,
+                          @Nullable String userVmOptions,
+                          @NotNull PortConfig ports,
+                          boolean jmxEnabled,
+                          @NotNull Path catalinaBase,
+                          @NotNull Path catalinaHome,
+                          @NotNull Sdk jdk,
+                          @NotNull LaunchPathMapper mapper) {
         if (StringUtil.isNotEmpty(userVmOptions)) {
             vmParams.addParametersString(userVmOptions);
         }
@@ -92,7 +110,7 @@ final class TomcatVmOptionsConfigurator {
         }
 
         configureModuleOpens(vmParams, jdk);
-        configureCatalinaProperties(vmParams, catalinaBase, catalinaHome);
+        configureCatalinaProperties(vmParams, catalinaBase, catalinaHome, mapper);
     }
 
     private static void configureModuleOpens(@NotNull ParametersList vmParams, @NotNull Sdk jdk) {
@@ -131,11 +149,15 @@ final class TomcatVmOptionsConfigurator {
 
     private static void configureCatalinaProperties(@NotNull ParametersList vmParams,
                                                     @NotNull Path catalinaBase,
-                                                    @NotNull Path catalinaHome) {
-        vmParams.defineProperty(PARAM_CATALINA_HOME, catalinaHome.toString());
-        vmParams.defineProperty(PARAM_CATALINA_BASE, catalinaBase.toString());
-        vmParams.defineProperty(PARAM_CATALINA_TMPDIR, catalinaBase.resolve(DIR_TEMP).toString());
-        vmParams.defineProperty(PARAM_LOGGING_CONFIG, catalinaBase.resolve(CONFIG_LOGGING_PROPERTIES).toString());
+                                                    @NotNull Path catalinaHome,
+                                                    @NotNull LaunchPathMapper mapper) {
+        // Every path-valued property goes through the mapper — the JVM may run
+        // inside a WSL distribution that sees these host paths differently.
+        vmParams.defineProperty(PARAM_CATALINA_HOME, mapper.toTarget(catalinaHome.toString()));
+        vmParams.defineProperty(PARAM_CATALINA_BASE, mapper.toTarget(catalinaBase.toString()));
+        vmParams.defineProperty(PARAM_CATALINA_TMPDIR, mapper.toTarget(catalinaBase.resolve(DIR_TEMP).toString()));
+        vmParams.defineProperty(PARAM_LOGGING_CONFIG,
+                mapper.toTarget(catalinaBase.resolve(CONFIG_LOGGING_PROPERTIES).toString()));
         vmParams.defineProperty(PARAM_LOGGING_MANAGER, PARAM_LOGGING_MANAGER_VALUE);
     }
 }
