@@ -620,7 +620,7 @@ public class TomcatConfigurationSerializer {
                     String moduleAttr = art.getAttributeValue(ATTR_ARTIFACT_MODULE);
                     String pointerName = StringUtil.isEmpty(moduleAttr) ? name : moduleAttr;
                     return new ModuleBackedDeployment(
-                            DeploymentPointers.modulePointer(project, pointerName), Path.of(path), context, exploded, name);
+                            DeploymentPointers.moduleRef(project, pointerName), Path.of(path), context, exploded, name);
                 }
                 case KIND_EXTERNAL:
                     return new ExternalFileDeployment(Path.of(path), context, exploded);
@@ -652,7 +652,7 @@ public class TomcatConfigurationSerializer {
             case INTELLIJ_ARTIFACT -> new ArtifactBackedDeployment(
                     DeploymentPointers.artifactPointer(project, name), normalizedContext, path, exploded);
             case AUTO_DETECTED -> new ModuleBackedDeployment(
-                    DeploymentPointers.modulePointer(project, name), Path.of(path),
+                    DeploymentPointers.moduleRef(project, name), Path.of(path),
                     normalizedContext, exploded, name);
             case EXTERNAL -> new ExternalFileDeployment(
                     Path.of(path), normalizedContext, exploded);

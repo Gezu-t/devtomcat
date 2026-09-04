@@ -3,7 +3,7 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
-import com.intellij.openapi.module.ModulePointerManager;
+import com.dev.idea.plugins.tomcat.model.ModuleRef;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -61,7 +61,7 @@ public class TomcatApplicationUpdaterPlatformTest extends BasePlatformTestCase {
         Files.setLastModifiedTime(war, FileTime.fromMillis(100_000L));
 
         Deployment blocked = new ModuleBackedDeployment(
-                ModulePointerManager.getInstance(getProject()).create(getModule()),
+                ModuleRef.of(getProject(), getModule()),
                 war, "/app", false);
         Path webapps = deployDir.toPath();
         TomcatDeploymentLogger logger = new TomcatDeploymentLogger(getProject());

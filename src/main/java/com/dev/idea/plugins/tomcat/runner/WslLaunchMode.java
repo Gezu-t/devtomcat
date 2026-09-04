@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
 /**
@@ -42,7 +43,10 @@ import java.util.function.Function;
  * orphan-process reclaim cannot see sockets or JVMs inside the distribution
  * (WSL2 localhost forwarding usually bridges the ports); the debugger attaches
  * to {@code 127.0.0.1} through that same forwarding — unverified; class/web
- * sync operates on the host filesystem and is unaffected.
+ * sync operates on the host filesystem and is unaffected. Termination is
+ * host-side only: Stop destroys the {@code wsl.exe} process on Windows, and
+ * nothing signals the JVM running inside the distribution — a shutdown-port or
+ * {@code wsl.exe --terminate} path is still owed.
  */
 public final class WslLaunchMode {
 
@@ -57,10 +61,14 @@ public final class WslLaunchMode {
 
     private final WSLDistribution distribution;
     private final WslPathTranslator mapper;
+    /** Cross-distribution references seen while translating, for the run console. */
+    private final List<String> crossDistroWarnings;
 
-    private WslLaunchMode(@NotNull WSLDistribution distribution, @NotNull WslPathTranslator mapper) {
+    private WslLaunchMode(@NotNull WSLDistribution distribution, @NotNull WslPathTranslator mapper,
+                          @NotNull List<String> crossDistroWarnings) {
         this.distribution = distribution;
         this.mapper = mapper;
+        this.crossDistroWarnings = crossDistroWarnings;
     }
 
     // ---------------------------------------------------------------------
@@ -92,9 +100,18 @@ public final class WslLaunchMode {
             throw new ExecutionException(WslPathDetector.unsupportedMessage(tomcatHome));
         }
         String mntRoot = mntRootLookup.apply(distribution);
-        return new WslLaunchMode(distribution,
-                new WslPathTranslator(distribution.getMsId(),
-                        mntRoot == null || mntRoot.isEmpty() ? WslPathTranslator.DEFAULT_MNT_ROOT : mntRoot));
+        // The sink feeds the run console as well as idea.log: a path that names
+        // another distribution is translated as if it were ours, and the user is
+        // the only one who can tell whether that is what they meant.
+        List<String> warnings = new CopyOnWriteArrayList<>();
+        WslPathTranslator translator = new WslPathTranslator(
+                distribution.getMsId(),
+                mntRoot == null || mntRoot.isEmpty() ? WslPathTranslator.DEFAULT_MNT_ROOT : mntRoot,
+                w -> {
+                    LOG.warn(w);
+                    if (!warnings.contains(w)) warnings.add(w);
+                });
+        return new WslLaunchMode(distribution, translator, warnings);
     }
 
     /** Case-insensitive match on the Microsoft id, then the platform id. */
@@ -137,24 +154,47 @@ public final class WslLaunchMode {
     // Guards
     // ---------------------------------------------------------------------
 
-    /** The JDK must live in the distribution — a Windows java.exe cannot run there. */
+    /** The JDK must live in the launch distribution — a Windows java.exe cannot run there. */
     void requireWslSideJdk(@Nullable Sdk jdk) throws ExecutionException {
-        if (jdk != null && !isWslSideJdkHome(jdk.getHomePath())) {
-            throw new ExecutionException(jdkMessage(distroName()));
-        }
+        if (jdk == null) return;
+        String home = jdk.getHomePath();
+        if (isWslSideJdkHome(home, distroName())) return;
+        String owner = WslPathDetector.distroOf(home);
+        throw new ExecutionException(owner != null && !owner.equalsIgnoreCase(distroName())
+                ? foreignJdkMessage(home, owner, distroName())
+                : jdkMessage(distroName()));
     }
 
-    /** A WSL UNC home or a Linux-form home is inside the distribution. */
-    static boolean isWslSideJdkHome(@Nullable String home) {
+    /**
+     * A Linux-form home, or a WSL UNC naming the launch distribution itself, is
+     * inside that distribution. A UNC naming a <em>different</em> distribution is
+     * not: that tree is unreachable from the launch distro, and translating it
+     * only strips the distro segment — re-rooting the home onto whatever happens
+     * to occupy the same absolute path here, or onto nothing at all.
+     */
+    static boolean isWslSideJdkHome(@Nullable String home, @NotNull String distro) {
         if (home == null) return false;
         String h = home.trim();
-        return WslPathDetector.isWslPath(h) || h.startsWith("/");
+        String owner = WslPathDetector.distroOf(h);
+        if (owner != null) return owner.equalsIgnoreCase(distro);
+        // A WSL UNC with no distro segment names no distribution at all.
+        if (WslPathDetector.isWslPath(h)) return false;
+        return h.startsWith("/");
     }
 
     @NotNull
     static String jdkMessage(@NotNull String distro) {
         return "In WSL mode the JDK must be installed inside the WSL distribution '" + distro
                 + "'. Select a WSL-side JDK for this run configuration.";
+    }
+
+    @NotNull
+    static String foreignJdkMessage(@NotNull String home, @NotNull String jdkDistro,
+                                    @NotNull String launchDistro) {
+        return "The selected JDK '" + home + "' lives in WSL distribution '" + jdkDistro
+                + "', but Tomcat runs inside '" + launchDistro + "'. One distribution cannot"
+                + " execute another's files, and the path would silently resolve against '"
+                + launchDistro + "' instead. Select a JDK installed in '" + launchDistro + "'.";
     }
 
     /**
@@ -169,6 +209,19 @@ public final class WslLaunchMode {
             throw new ExecutionException(customStartupMessage());
         }
         if (com.dev.idea.plugins.tomcat.TomcatConstants.COVERAGE_MODE.equals(executorId)) {
+            throw new ExecutionException(coverageMessage());
+        }
+    }
+
+    /**
+     * The Coverage refusal restated for the one caller that must decide it before
+     * touching a running process. Keyed on the registered home alone — no
+     * distribution lookup — because {@code handleCrossExecutorConflict} stops the
+     * current session, and a refusal raised after that leaves the user with
+     * nothing running and a server to restart by hand.
+     */
+    static void requireCoverageCapableHost(@Nullable String tomcatHome) throws ExecutionException {
+        if (WslPathDetector.isWslPath(tomcatHome)) {
             throw new ExecutionException(coverageMessage());
         }
     }
@@ -223,12 +276,51 @@ public final class WslLaunchMode {
                                         @NotNull String hostWorkingDir,
                                         @NotNull String jdkHome) throws ExecutionException {
         commandLine.setExePath(javaExecutable(jdkHome, mapper));
+        String remoteWorkingDir = mapper.toTarget(hostWorkingDir);
+        requireDistroSidePath(remoteWorkingDir, hostWorkingDir, distroName());
         WSLCommandLineOptions options = new WSLCommandLineOptions()
-                .setRemoteWorkingDirectory(mapper.toTarget(hostWorkingDir));
+                .setRemoteWorkingDirectory(remoteWorkingDir);
         return distribution.patchCommandLine(commandLine, project, options);
     }
 
-    /** Lets the platform propagate handler termination into the distribution. */
+    /**
+     * The platform asserts a {@code /}-rooted remote working directory and raises
+     * {@link AssertionError} otherwise. That is an {@code Error}, so the launch's
+     * own {@code catch (ExecutionException | RuntimeException)} would not run:
+     * ports claimed for this configuration would leak and the user would get a
+     * raw IDE internal error instead of a DevTomcat message. Anything the
+     * translator could not map to a distro-side path — a non-drive UNC base, a
+     * relative pinned base — is refused here, on the path that does release ports.
+     */
+    static void requireDistroSidePath(@NotNull String targetPath, @NotNull String hostPath,
+                                      @NotNull String distro) throws ExecutionException {
+        if (!targetPath.startsWith("/")) {
+            throw new ExecutionException(workingDirectoryMessage(hostPath, distro));
+        }
+    }
+
+    @NotNull
+    static String workingDirectoryMessage(@NotNull String hostPath, @NotNull String distro) {
+        return "WSL mode cannot map the working directory '" + hostPath + "' into distribution '"
+                + distro + "': only local drive paths (C:\\...) and paths inside the distribution"
+                + " can be reached from it. Pin CATALINA_BASE to a local drive path.";
+    }
+
+    /** Drains cross-distribution warnings collected while translating paths. */
+    @NotNull
+    List<String> drainCrossDistroWarnings() {
+        if (crossDistroWarnings.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>(crossDistroWarnings);
+        crossDistroWarnings.clear();
+        return out;
+    }
+
+    /**
+     * Carries the platform's sudo listener onto the handler; a no-op unless the
+     * command line was built with sudo enabled, which DevTomcat never does. Kept
+     * so the wrapping stays whatever the platform defines it to be — it does not
+     * propagate termination into the distribution (see the class javadoc).
+     */
     @NotNull
     <T extends ProcessHandler> T patchProcessHandler(@NotNull GeneralCommandLine commandLine,
                                                      @NotNull T handler) {

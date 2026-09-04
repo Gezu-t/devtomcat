@@ -68,6 +68,12 @@ public class TomcatCoverageRunner extends DefaultJavaProgramRunner {
 
         TomcatRunConfiguration config = (TomcatRunConfiguration) env.getRunProfile();
 
+        // Before the conflict handler, which stops whatever is already running:
+        // this refusal depends only on the configuration, so deciding it later
+        // would destroy a working Run session to start nothing.
+        WslLaunchMode.requireCoverageCapableHost(config.getTomcatInfo() == null
+                ? null : config.getTomcatInfo().getPath());
+
         if (delegate.handleCrossExecutorConflict(config, env)) return null;
 
         LOG.info("Starting Tomcat with coverage: " + config.getName());

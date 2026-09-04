@@ -1,8 +1,6 @@
 package com.dev.idea.plugins.tomcat.model;
 
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModulePointer;
-import com.intellij.openapi.module.ModulePointerManager;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -18,7 +16,7 @@ import java.util.Objects;
  */
 public final class ModuleBackedDeployment implements Deployment {
 
-    private final @NotNull ModulePointer modulePointer;
+    private final @NotNull ModuleRef moduleRef;
     private final @NotNull String contextPath;
     private final @NotNull Path outputPath;
     private final boolean exploded;
@@ -34,19 +32,19 @@ public final class ModuleBackedDeployment implements Deployment {
      */
     private final @Nullable String legacyName;
 
-    public ModuleBackedDeployment(@NotNull ModulePointer modulePointer,
+    public ModuleBackedDeployment(@NotNull ModuleRef moduleRef,
                                   @NotNull Path outputPath,
                                   @NotNull String contextPath,
                                   boolean exploded) {
-        this(modulePointer, outputPath, contextPath, exploded, null);
+        this(moduleRef, outputPath, contextPath, exploded, null);
     }
 
-    public ModuleBackedDeployment(@NotNull ModulePointer modulePointer,
+    public ModuleBackedDeployment(@NotNull ModuleRef moduleRef,
                                   @NotNull Path outputPath,
                                   @NotNull String contextPath,
                                   boolean exploded,
                                   @Nullable String legacyName) {
-        this.modulePointer = modulePointer;
+        this.moduleRef = moduleRef;
         this.outputPath = outputPath;
         this.contextPath = normaliseContextPath(contextPath);
         this.exploded = exploded;
@@ -59,7 +57,7 @@ public final class ModuleBackedDeployment implements Deployment {
                                                          @NotNull String contextPath,
                                                          boolean exploded) {
         return new ModuleBackedDeployment(
-                ModulePointerManager.getInstance(project).create(moduleName),
+                ModuleRef.of(project, moduleName),
                 outputPath,
                 contextPath,
                 exploded);
@@ -70,10 +68,10 @@ public final class ModuleBackedDeployment implements Deployment {
         return DeploymentKind.MODULE;
     }
 
-    /** Copy with a different context path; pointer, output path, packaging and legacy name carry over. */
+    /** Copy with a different context path; module ref, output path, packaging and legacy name carry over. */
     @Override
     public @NotNull ModuleBackedDeployment withContextPath(@NotNull String contextPath) {
-        return new ModuleBackedDeployment(modulePointer, outputPath, contextPath, exploded, legacyName);
+        return new ModuleBackedDeployment(moduleRef, outputPath, contextPath, exploded, legacyName);
     }
 
     @Override
@@ -83,7 +81,7 @@ public final class ModuleBackedDeployment implements Deployment {
 
     @Override
     public @NotNull String getDisplayName() {
-        return modulePointer.getModuleName();
+        return moduleRef.getModuleName();
     }
 
     @Override
@@ -100,7 +98,7 @@ public final class ModuleBackedDeployment implements Deployment {
     public boolean isValid() {
         // Both module and output dir must be present — they go stale independently
         // (module deletion vs. mvn clean).
-        return modulePointer.getModule() != null && Files.exists(outputPath);
+        return moduleRef.getModule() != null && Files.exists(outputPath);
     }
 
     /**
@@ -108,15 +106,15 @@ public final class ModuleBackedDeployment implements Deployment {
      * resolved module name when no distinct stored name was captured.
      */
     public @NotNull String getLegacyName() {
-        return legacyName != null ? legacyName : modulePointer.getModuleName();
+        return legacyName != null ? legacyName : moduleRef.getModuleName();
     }
 
     public @Nullable Module getModule() {
-        return modulePointer.getModule();
+        return moduleRef.getModule();
     }
 
     public @NotNull String getModuleName() {
-        return modulePointer.getModuleName();
+        return moduleRef.getModuleName();
     }
 
     public @NotNull Path getOutputPath() {
@@ -134,19 +132,19 @@ public final class ModuleBackedDeployment implements Deployment {
         if (this == o) return true;
         if (!(o instanceof ModuleBackedDeployment that)) return false;
         return exploded == that.exploded
-                && modulePointer.getModuleName().equals(that.modulePointer.getModuleName())
+                && moduleRef.getModuleName().equals(that.moduleRef.getModuleName())
                 && outputPath.equals(that.outputPath)
                 && contextPath.equals(that.contextPath);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(modulePointer.getModuleName(), outputPath, contextPath, exploded);
+        return Objects.hash(moduleRef.getModuleName(), outputPath, contextPath, exploded);
     }
 
     @Override
     public String toString() {
-        return "ModuleBackedDeployment{module=" + modulePointer.getModuleName()
+        return "ModuleBackedDeployment{module=" + moduleRef.getModuleName()
                 + ", output=" + outputPath
                 + ", context=" + contextPath
                 + ", exploded=" + exploded + '}';

@@ -105,9 +105,12 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                 builder.setResolvedDebugPort(resolvedDebugPort);
             }
             JavaParameters params = builder.build();
-            if (wsl != null && params.getWorkingDirectory() != null) {
+            if (wsl != null) {
                 // Once per launch: the parameters are built exactly once.
-                deploymentLogger.logServerWarning(wsl.consoleMessage(params.getWorkingDirectory()));
+                if (params.getWorkingDirectory() != null) {
+                    deploymentLogger.logServerWarning(wsl.consoleMessage(params.getWorkingDirectory()));
+                }
+                logCrossDistroWarnings(wsl);
             }
             // One-line launch-prep total: this is the time spent under the
             // runner's pre-launch modal (port claim, catalina.base prep,
@@ -338,13 +341,27 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     }
 
     /**
+     * A path that named a different distribution was still translated, with the
+     * distro segment stripped — it now resolves against the launch distribution.
+     * Only the user can tell whether that was intended, so the warning belongs in
+     * the run console, not just {@code idea.log}.
+     */
+    private void logCrossDistroWarnings(@NotNull WslLaunchMode wsl) {
+        for (String warning : wsl.drainCrossDistroWarnings()) {
+            deploymentLogger.logServerWarning(warning);
+        }
+    }
+
+    /**
      * Runs preflight validation to catch common failures before Tomcat starts:
      * missing path-based system properties, duplicate JARs in deployed artifacts,
      * and locked cache/temp directories.
      */
     private void runPreflightValidation() throws ExecutionException {
+        // In WSL mode the JVM's own paths are distro-side; resolving them against
+        // the Windows filesystem would report a correct value as missing.
         TomcatPreflightValidator.PreflightResult result =
-                TomcatPreflightValidator.validate(configuration);
+                TomcatPreflightValidator.validate(configuration, wslMode == null);
 
         if (!result.hasIssues()) return;
 
@@ -518,6 +535,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
                     throw new ExecutionException("Unable to determine catalina.base directory");
                 }
                 commandLine = wsl.patchCommandLine(commandLine, configuration.getProject(), workingDir, jdkHome);
+                logCrossDistroWarnings(wsl);
             }
         }
         

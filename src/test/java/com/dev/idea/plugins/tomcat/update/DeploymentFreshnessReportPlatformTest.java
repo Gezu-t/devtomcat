@@ -2,10 +2,10 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
+import com.dev.idea.plugins.tomcat.model.ModuleRef;
 import com.dev.idea.plugins.tomcat.update.DeploymentFreshnessReport.Delivery;
 import com.dev.idea.plugins.tomcat.update.DeploymentFreshnessReport.Report;
 import com.dev.idea.plugins.tomcat.update.DeploymentFreshnessReport.Shape;
-import com.intellij.openapi.module.ModulePointerManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -61,7 +61,7 @@ public class DeploymentFreshnessReportPlatformTest extends BasePlatformTestCase 
         Files.setLastModifiedTime(served, FileTime.fromMillis(100_000L));
 
         Deployment deployment = new ModuleBackedDeployment(
-                ModulePointerManager.getInstance(getProject()).create(getModule()),
+                ModuleRef.of(getProject(), getModule()),
                 deployDir.toPath(), "/app", true);
 
         // Phase 1 — the served copy predates the compiled output: STALE, with
@@ -105,7 +105,7 @@ public class DeploymentFreshnessReportPlatformTest extends BasePlatformTestCase 
         Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
 
         Deployment deployment = new ModuleBackedDeployment(
-                ModulePointerManager.getInstance(getProject()).create(getModule()),
+                ModuleRef.of(getProject(), getModule()),
                 deployDir.toPath(), "/app", true);
 
         Report report = DeploymentFreshnessReport.build(getProject(), deployment, null);

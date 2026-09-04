@@ -114,12 +114,27 @@ public final class TomcatPreflightValidator {
      */
     @NotNull
     public static PreflightResult validate(@NotNull TomcatRunConfiguration configuration) {
+        return validate(configuration, true);
+    }
+
+    /**
+     * @param hostFilesystem {@code true} when the JVM will run on this machine, so
+     *                       a path in the configuration names a path here. When the
+     *                       JVM runs elsewhere (WSL mode), path-existence checks are
+     *                       skipped rather than answered against the wrong filesystem:
+     *                       a distro-side {@code -Djava.io.tmpdir=/tmp} is correct,
+     *                       but resolves on Windows to a {@code C:\tmp} that does not
+     *                       exist, and blocking the launch for it inverts the truth.
+     */
+    @NotNull
+    public static PreflightResult validate(@NotNull TomcatRunConfiguration configuration,
+                                           boolean hostFilesystem) {
         List<PreflightIssue> issues = new ArrayList<>();
 
         String vmOptions = configuration.getConfigData().getVmConfig().getVmOptions();
         Map<String, String> parsedProperties = parseSystemProperties(vmOptions);
 
-        checkRequiredSystemProperties(parsedProperties, issues);
+        checkRequiredSystemProperties(parsedProperties, issues, hostFilesystem);
         List<Deployment> deployments = configuration.getDeployments();
         checkDuplicateDeployments(deployments, issues);
         checkDuplicateJars(deployments, issues);
@@ -257,6 +272,22 @@ public final class TomcatPreflightValidator {
      */
     static void checkRequiredSystemProperties(@NotNull Map<String, String> properties,
                                               @NotNull List<PreflightIssue> issues) {
+        checkRequiredSystemProperties(properties, issues, true);
+    }
+
+    /**
+     * @param hostFilesystem {@code false} when the JVM will run somewhere whose
+     *                       filesystem is not this one (WSL mode). The check is
+     *                       then skipped rather than answered against the wrong
+     *                       machine: a distro-side {@code -Djava.io.tmpdir=/tmp}
+     *                       is correct, but resolves here to a {@code C:\tmp}
+     *                       that does not exist — blocking the launch for it
+     *                       would state the opposite of the truth.
+     */
+    static void checkRequiredSystemProperties(@NotNull Map<String, String> properties,
+                                              @NotNull List<PreflightIssue> issues,
+                                              boolean hostFilesystem) {
+        if (!hostFilesystem) return;
         for (Map.Entry<String, String> entry : properties.entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();

@@ -411,7 +411,7 @@ public final class ConfigExportImport {
                     case ARTIFACT -> new ArtifactBackedDeployment(
                             DeploymentPointers.artifactPointer(project, name), contextPath, path, exploded);
                     case MODULE -> new ModuleBackedDeployment(
-                            DeploymentPointers.modulePointer(project, name),
+                            DeploymentPointers.moduleRef(project, name),
                             java.nio.file.Path.of(path), contextPath, exploded);
                     case EXTERNAL -> new ExternalFileDeployment(
                             java.nio.file.Path.of(path), contextPath, exploded);

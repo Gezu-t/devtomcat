@@ -1,8 +1,5 @@
 package com.dev.idea.plugins.tomcat.model;
 
-import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModulePointer;
-import com.intellij.openapi.module.ModulePointerManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactModel;
@@ -12,10 +9,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * By-name pointer factories shared by the run-config serializer and config
- * export/import. A live pointer (rename-tracked by the platform) is created
- * when a {@link Project} is available; a detached, never-resolving pointer is
- * used for project-free typed views (data-level validation, config export).
+ * By-name handle factories shared by the run-config serializer and config
+ * export/import. A live, rename-tracked handle is created when a {@link Project}
+ * is available; a detached, never-resolving one is used for project-free typed
+ * views (data-level validation, config export).
+ *
+ * <p>Modules go through {@link ModuleRef} rather than the platform's
+ * {@code ModulePointer}: that interface is {@code @ApiStatus.NonExtendable}, so a
+ * project-free stand-in cannot implement it. {@code ArtifactPointer} carries no
+ * such annotation, so the detached artifact handle below stays a plain
+ * implementation of the platform interface.
  */
 public final class DeploymentPointers {
 
@@ -29,21 +32,16 @@ public final class DeploymentPointers {
                 : detachedArtifactPointer(name);
     }
 
-    /** Live pointer when {@code project != null}, detached otherwise. */
+    /** Live ref when {@code project != null}, detached otherwise. */
     @NotNull
-    public static ModulePointer modulePointer(@Nullable Project project, @NotNull String name) {
-        return project != null
-                ? ModulePointerManager.getInstance(project).create(name)
-                : detachedModulePointer(name);
+    public static ModuleRef moduleRef(@Nullable Project project, @NotNull String name) {
+        return project != null ? ModuleRef.of(project, name) : ModuleRef.detached(name);
     }
 
-    /** Name-only pointer that never resolves — for project-free typed views. */
+    /** Name-only ref that never resolves — for project-free typed views. */
     @NotNull
-    public static ModulePointer detachedModulePointer(@NotNull String moduleName) {
-        return new ModulePointer() {
-            @Override public @Nullable Module getModule() { return null; }
-            @Override public @NotNull String getModuleName() { return moduleName; }
-        };
+    public static ModuleRef detachedModuleRef(@NotNull String moduleName) {
+        return ModuleRef.detached(moduleName);
     }
 
     /** Name-only pointer that never resolves — for project-free typed views. */

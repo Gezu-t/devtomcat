@@ -4,7 +4,7 @@ import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModulePointer;
+import com.dev.idea.plugins.tomcat.model.ModuleRef;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.ArtifactPointer;
 import org.junit.jupiter.api.DisplayName;
@@ -45,7 +45,7 @@ class DeploymentModuleResolverTest {
     @DisplayName("module-backed deployment resolves to exactly its module")
     void moduleBackedResolvesToItsModule() {
         Module module = mock(Module.class);
-        ModulePointer ptr = mock(ModulePointer.class);
+        ModuleRef ptr = mock(ModuleRef.class);
         when(ptr.getModule()).thenReturn(module);
         ModuleBackedDeployment d = new ModuleBackedDeployment(ptr, Path.of("/out"), "/c", true);
 
@@ -55,7 +55,7 @@ class DeploymentModuleResolverTest {
     @Test
     @DisplayName("module-backed with a deleted module resolves to empty")
     void moduleBackedDeletedIsEmpty() {
-        ModulePointer ptr = mock(ModulePointer.class);
+        ModuleRef ptr = mock(ModuleRef.class);
         when(ptr.getModuleName()).thenReturn("gone");
         when(ptr.getModule()).thenReturn(null);
         ModuleBackedDeployment d = new ModuleBackedDeployment(ptr, Path.of("/out"), "/c", true);

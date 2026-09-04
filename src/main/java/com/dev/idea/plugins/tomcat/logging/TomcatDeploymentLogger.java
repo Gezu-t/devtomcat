@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.logging;
 
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -11,8 +12,10 @@ import org.jetbrains.annotations.Nullable;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -65,6 +68,9 @@ public class TomcatDeploymentLogger {
     // REGISTRY KEYS
     // =====================================================================
 
+    /** Cap on pre-console buffering: a launch emits tens of lines, not thousands. */
+    private static final int MAX_PENDING = 500;
+
     private static final String REG_SHOW_TIMESTAMPS = "devtomcat.log.show.timestamps";
     private static final String REG_DEBUG_MODE = "devtomcat.debug.mode";
 
@@ -77,6 +83,23 @@ public class TomcatDeploymentLogger {
 
     @Nullable
     private volatile ConsoleView consoleView;
+
+    /**
+     * Lines logged before a console exists. Launch preparation — port claim,
+     * catalina.base assembly, artifact deployment, the preflight and launch-mode
+     * notices — all runs from {@code createJavaParameters}, which the platform
+     * calls before {@code createConsole}. Without this buffer those lines are
+     * formatted, dropped on the floor, and survive only in {@code idea.log},
+     * where the user has no reason to look. Replayed in order on attach.
+     */
+    private final List<PendingLine> pending = new ArrayList<>();
+
+    /** Guards {@link #pending} together with {@link #consoleView} so replayed and
+     *  live lines cannot interleave out of order. */
+    private final Object consoleLock = new Object();
+
+    /** Counted, not stored, once {@link #MAX_PENDING} is reached. */
+    private int droppedBeforeConsole;
 
     private final long startTime;
 
@@ -105,9 +128,53 @@ public class TomcatDeploymentLogger {
     // =====================================================================
 
     public void setConsoleView(@Nullable ConsoleView consoleView) {
-        this.consoleView = consoleView;
-        if (consoleView != null) {
-            LOG.debug("Console view attached to deployment logger");
+        List<PendingLine> replay = List.of();
+        int dropped = 0;
+        synchronized (consoleLock) {
+            this.consoleView = consoleView;
+            if (consoleView != null && !pending.isEmpty()) {
+                replay = new ArrayList<>(pending);
+                pending.clear();
+                dropped = droppedBeforeConsole;
+                droppedBeforeConsole = 0;
+            }
+        }
+        if (consoleView == null) return;
+
+        LOG.debug("Console view attached to deployment logger");
+        // Replayed first, and before this method returns, so anything logged
+        // after the attach still lands after the launch-preparation lines.
+        for (PendingLine line : replay) {
+            printToConsole(consoleView, line.text(), line.type());
+        }
+        if (dropped > 0) {
+            printToConsole(consoleView,
+                    formatMessage(WARNING_PREFIX + " " + dropped
+                            + " earlier message(s) exceeded the pre-console buffer and were dropped"),
+                    ConsoleViewContentType.LOG_WARNING_OUTPUT);
+        }
+    }
+
+    /** One buffered console line, already formatted at the time it was logged. */
+    private record PendingLine(@NotNull String text, @NotNull ConsoleViewContentType type) {}
+
+    /**
+     * Formatted text of the lines still waiting for a console, oldest first.
+     * Package-private for {@code TomcatDeploymentLoggerTest}: the replay itself
+     * goes through {@code invokeLater}, so the buffer is what a test can observe
+     * without pumping the EDT.
+     */
+    @NotNull
+    List<String> pendingSnapshot() {
+        synchronized (consoleLock) {
+            return pending.stream().map(PendingLine::text).toList();
+        }
+    }
+
+    /** Count of lines dropped after {@link #MAX_PENDING}. Package-private for tests. */
+    int pendingOverflowCount() {
+        synchronized (consoleLock) {
+            return droppedBeforeConsole;
         }
     }
 
@@ -264,21 +331,45 @@ public class TomcatDeploymentLogger {
 
         String formattedMessage = formatMessage(message);
 
-        // Capture consoleView into a local before the null check so the lambda holds
-        // a stable reference. Without this, another thread can null the field between
-        // the outer check and the actual print call (TOCTOU race -> NPE).
-        ConsoleView cv = consoleView;
-        if (cv != null && !project.isDisposed()) {
-            ApplicationManager.getApplication().invokeLater(() -> {
-                try {
-                    if (!disposed.get() && !project.isDisposed()) {
-                        cv.print(formattedMessage + "\n", contentType);
-                    }
-                } catch (Exception e) {
-                    LOG.warn("Failed to print to console", e);
+        // Read the console and decide buffer-vs-print under one lock: without it,
+        // a line logged concurrently with setConsoleView can be printed before the
+        // buffered lines that preceded it.
+        ConsoleView cv;
+        synchronized (consoleLock) {
+            cv = consoleView;
+            if (cv == null) {
+                if (pending.size() < MAX_PENDING) {
+                    pending.add(new PendingLine(formattedMessage, contentType));
+                } else {
+                    droppedBeforeConsole++;
                 }
-            });
+                return;
+            }
         }
+        printToConsole(cv, formattedMessage, contentType);
+    }
+
+    private void printToConsole(@NotNull ConsoleView cv, @NotNull String formattedMessage,
+                                @NotNull ConsoleViewContentType contentType) {
+        if (project.isDisposed()) return;
+        Application app = ApplicationManager.getApplication();
+        if (app == null) {
+            // No IntelliJ Application means no EDT to schedule onto. Only
+            // reachable outside a running IDE (plain unit tests); print on the
+            // calling thread rather than throwing. Same rationale as
+            // TomcatReadActions.compute.
+            cv.print(formattedMessage + "\n", contentType);
+            return;
+        }
+        app.invokeLater(() -> {
+            try {
+                if (!disposed.get() && !project.isDisposed()) {
+                    cv.print(formattedMessage + "\n", contentType);
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to print to console", e);
+            }
+        });
     }
 
     @NotNull
@@ -347,7 +438,11 @@ public class TomcatDeploymentLogger {
     /** Idempotent. After disposal, all logging attempts are silently dropped. */
     public void dispose() {
         if (disposed.compareAndSet(false, true)) {
-            consoleView = null;
+            synchronized (consoleLock) {
+                consoleView = null;
+                pending.clear();
+                droppedBeforeConsole = 0;
+            }
             LOG.debug("TomcatDeploymentLogger disposed");
         }
     }

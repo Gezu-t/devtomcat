@@ -134,7 +134,7 @@ class TomcatConfigurationSerializerTest {
                 new ArtifactBackedDeployment(
                         DeploymentPointers.detachedArtifactPointer("app-war"), "/a", "/out/app.war", false),
                 new ModuleBackedDeployment(
-                        DeploymentPointers.detachedModulePointer("detected"),
+                        DeploymentPointers.detachedModuleRef("detected"),
                         Path.of("/build/detected"), "/b", true),
                 new ExternalFileDeployment(Path.of("/tmp/my.war"), "/c", false)));
 
@@ -567,7 +567,7 @@ class TomcatConfigurationSerializerTest {
             String raw = "$PROJECT_DIR$/target/web-module";
             TomcatConfigurationData data = new TomcatConfigurationData();
             data.getDeploymentConfig().setDeployments(List.of(new ModuleBackedDeployment(
-                    DeploymentPointers.detachedModulePointer("web-module"),
+                    DeploymentPointers.detachedModuleRef("web-module"),
                     Path.of(raw), "/app", true)));
 
             Element element = new Element("configuration");
@@ -668,7 +668,7 @@ class TomcatConfigurationSerializerTest {
                             DeploymentPointers.detachedArtifactPointer("app-1.0.0"),
                             "/a", "/projects/X/out/app-1.0.0.war", false),
                     new ModuleBackedDeployment(
-                            DeploymentPointers.detachedModulePointer("web-module"),
+                            DeploymentPointers.detachedModuleRef("web-module"),
                             Path.of("/projects/X/target/web-module"), "/b", true, "web-module.war"),
                     new ExternalFileDeployment(
                             Path.of("/projects/Y/app-1.0.0.war"), "/c", false)));

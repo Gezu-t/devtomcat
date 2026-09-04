@@ -14,6 +14,12 @@
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
+- Launch-preparation console output no longer lost before the console opens.
+- JDK from a different WSL distribution refused instead of silently re-rooted.
+- Cross-distribution path references surface in the run console.
+- Coverage refusal decided before stopping the running server.
+- Path system properties not judged against the host filesystem in WSL mode.
+- Unmappable WSL working directory fails cleanly instead of leaking ports.
 - Web resources sync no longer deletes build-produced webapp files.
 - Class sync covers every module a multi-module artifact packages.
 - Removed WAR deployments no longer linger as ghost contexts.

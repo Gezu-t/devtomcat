@@ -545,8 +545,8 @@ class DeployedClassesSyncTest {
         @Test
         @DisplayName("MODULE with deleted Module → 'module-missing' + actionable diagnostic")
         void moduleMissing() {
-            com.intellij.openapi.module.ModulePointer ptr =
-                    org.mockito.Mockito.mock(com.intellij.openapi.module.ModulePointer.class);
+            com.dev.idea.plugins.tomcat.model.ModuleRef ptr =
+                    org.mockito.Mockito.mock(com.dev.idea.plugins.tomcat.model.ModuleRef.class);
             org.mockito.Mockito.when(ptr.getModuleName()).thenReturn("vanished-mod");
             org.mockito.Mockito.when(ptr.getModule()).thenReturn(null);
 

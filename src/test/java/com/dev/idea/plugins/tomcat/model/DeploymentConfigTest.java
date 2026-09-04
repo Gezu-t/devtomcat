@@ -43,7 +43,7 @@ class DeploymentConfigTest {
 
         private Deployment moduleBacked() {
             return new ModuleBackedDeployment(
-                    DeploymentPointers.detachedModulePointer("web-module"),
+                    DeploymentPointers.detachedModuleRef("web-module"),
                     Path.of("/projects/X/target/web-module"), "/web", true);
         }
 

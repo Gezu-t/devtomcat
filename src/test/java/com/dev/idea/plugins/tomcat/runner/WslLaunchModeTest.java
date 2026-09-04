@@ -169,12 +169,32 @@ class WslLaunchModeTest {
         @Test
         @DisplayName("isWslSideJdkHome predicate")
         void predicate() {
-            assertTrue(WslLaunchMode.isWslSideJdkHome("\\\\wsl$\\Ubuntu\\opt\\jdk"));
-            assertTrue(WslLaunchMode.isWslSideJdkHome("/usr/lib/jvm/java-17"));
-            assertFalse(WslLaunchMode.isWslSideJdkHome("C:\\Program Files\\Java\\jdk-17"));
-            assertFalse(WslLaunchMode.isWslSideJdkHome("\\\\fileserver\\share\\jdk"));
-            assertFalse(WslLaunchMode.isWslSideJdkHome(null));
-            assertFalse(WslLaunchMode.isWslSideJdkHome(""));
+            assertTrue(WslLaunchMode.isWslSideJdkHome("\\\\wsl$\\Ubuntu\\opt\\jdk", "Ubuntu"));
+            assertTrue(WslLaunchMode.isWslSideJdkHome("//wsl.localhost/Ubuntu/opt/jdk", "ubuntu"));
+            assertTrue(WslLaunchMode.isWslSideJdkHome("/usr/lib/jvm/java-17", "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome("C:\\Program Files\\Java\\jdk-17", "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome("\\\\fileserver\\share\\jdk", "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome(null, "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome("", "Ubuntu"));
+        }
+
+        @Test
+        @DisplayName("a JDK inside a different distribution is refused, not re-rooted into the launch distro")
+        void foreignDistroJdkRefused() throws ExecutionException {
+            assertFalse(WslLaunchMode.isWslSideJdkHome("\\\\wsl$\\Other\\usr\\lib\\jvm\\jdk-21", "Ubuntu"));
+
+            ExecutionException ex = assertThrows(ExecutionException.class,
+                    () -> mode().requireWslSideJdk(sdk("\\\\wsl$\\Other\\usr\\lib\\jvm\\jdk-21")));
+
+            // Names both distributions: the whole point is that they are different.
+            assertTrue(ex.getMessage().contains("'Other'"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("'Ubuntu'"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("a UNC carrying no distribution segment is not treated as distro-side")
+        void uncWithoutDistroSegmentRefused() {
+            assertFalse(WslLaunchMode.isWslSideJdkHome("\\\\wsl$\\", "Ubuntu"));
         }
     }
 
@@ -304,6 +324,71 @@ class WslLaunchModeTest {
             assertEquals(List.of("-Dcatalina.home=/opt/apache-tomcat", "-classpath", "/a.jar:/b.jar"),
                     params.getVMParametersList().getList());
             assertEquals(List.of("start"), params.getProgramParametersList().getList());
+        }
+    }
+
+    @Nested
+    @DisplayName("guards that must fire before side effects")
+    class EarlyGuards {
+
+        @Test
+        @DisplayName("a working directory that does not map into the distro is refused as an ExecutionException")
+        void unmappableWorkingDirectoryRefused() {
+            // The platform asserts a '/'-rooted value; an AssertionError is an Error
+            // and would bypass the launch's port-releasing catch blocks.
+            ExecutionException ex = assertThrows(ExecutionException.class,
+                    () -> WslLaunchMode.requireDistroSidePath(
+                            "\\\\fileserver\\dev\\base", "\\\\fileserver\\dev\\base", "Ubuntu"));
+            assertTrue(ex.getMessage().contains("Ubuntu"), ex.getMessage());
+
+            assertDoesNotThrow(() -> WslLaunchMode.requireDistroSidePath("/mnt/c/base", "C:\\base", "Ubuntu"));
+            assertDoesNotThrow(() -> WslLaunchMode.requireDistroSidePath("/opt/base", "/opt/base", "Ubuntu"));
+        }
+
+        @Test
+        @DisplayName("the Coverage refusal is decidable from the registered home alone")
+        void coverageRefusedFromHomeAlone() {
+            assertThrows(ExecutionException.class,
+                    () -> WslLaunchMode.requireCoverageCapableHost("\\\\wsl$\\Ubuntu\\opt\\tomcat"));
+            assertDoesNotThrow(() -> WslLaunchMode.requireCoverageCapableHost("C:\\tomcat"));
+            assertDoesNotThrow(() -> WslLaunchMode.requireCoverageCapableHost(null));
+        }
+
+        @Test
+        @DisplayName("cross-distribution references are collected for the console, then drained once")
+        void crossDistroWarningsDrain() throws ExecutionException {
+            WslLaunchMode mode = WslLaunchMode.resolve(WSL_HOME, List.of(distro("Ubuntu")), d -> "/mnt/");
+            assertTrue(mode.drainCrossDistroWarnings().isEmpty());
+
+            mode.mapper().toTarget("\\\\wsl$\\Other\\srv\\app");
+
+            List<String> drained = mode.drainCrossDistroWarnings();
+            assertEquals(1, drained.size());
+            assertTrue(drained.get(0).contains("Other"), drained.get(0));
+            assertTrue(mode.drainCrossDistroWarnings().isEmpty(), "draining twice must not repeat the warning");
+        }
+    }
+
+    @Nested
+    @DisplayName("platform entry point")
+    class PlatformEntryPoint {
+
+        @Test
+        @DisplayName("a non-WSL home is a host launch on every OS")
+        void hostHomeIsNull() throws ExecutionException {
+            assertNull(WslLaunchMode.resolve("C:\\apache-tomcat"));
+            assertNull(WslLaunchMode.resolve("/opt/apache-tomcat"));
+        }
+
+        @Test
+        @DisplayName("a WSL home with no resolvable distribution refuses rather than emitting a Linux command")
+        void unresolvableWslHomeRefuses() {
+            // On any machine without that distribution installed — every non-Windows
+            // host included — this is the guard that keeps a Windows process from
+            // being handed Linux paths.
+            ExecutionException ex = assertThrows(ExecutionException.class,
+                    () -> WslLaunchMode.resolve("\\\\wsl$\\NoSuchDistro\\opt\\apache-tomcat"));
+            assertTrue(ex.getMessage().contains("NoSuchDistro"), ex.getMessage());
         }
     }
 }

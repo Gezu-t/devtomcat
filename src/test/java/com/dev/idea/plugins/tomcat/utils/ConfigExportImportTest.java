@@ -104,7 +104,7 @@ class ConfigExportImportTest {
             // an IntelliJ-artifact reference). The kind attribute pins the fix.
             data.getDeploymentConfig().setDeployments(java.util.List.of(
                     new ModuleBackedDeployment(
-                            DeploymentPointers.detachedModulePointer("web-module"),
+                            DeploymentPointers.detachedModuleRef("web-module"),
                             java.nio.file.Path.of("/projects/X/target/web-module"),
                             "/web-module", true),
                     new ExternalFileDeployment(

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -260,6 +261,25 @@ class TomcatPreflightValidatorTest {
 
             assertTrue(issues.isEmpty());
         }
+
+        @Test
+        @DisplayName("when the JVM runs on another filesystem, path checks are skipped, not answered here")
+        void skippedWhenNotHostFilesystem() {
+            Map<String, String> props = new LinkedHashMap<>();
+            props.put("java.io.tmpdir", "/definitely/not/on/this/machine");
+            List<TomcatPreflightValidator.PreflightIssue> issues = new ArrayList<>();
+
+            // Host launch: this path does not exist here, so it is reported.
+            TomcatPreflightValidator.checkRequiredSystemProperties(props, issues, true);
+            assertFalse(issues.isEmpty());
+
+            // Non-host launch: the value names a path on the target, and this
+            // machine cannot answer for it — silence beats a backwards error.
+            issues.clear();
+            TomcatPreflightValidator.checkRequiredSystemProperties(props, issues, false);
+            assertTrue(issues.isEmpty(), issues.toString());
+        }
+
     }
 
     // =========================================================================

@@ -27,7 +27,7 @@ class TomcatConfigurationValidatorTest {
     private static ModuleBackedDeployment deployment(String name, String path,
                                                      String contextPath, boolean exploded) {
         return new ModuleBackedDeployment(
-                DeploymentPointers.detachedModulePointer(name), Path.of(path), contextPath, exploded);
+                DeploymentPointers.detachedModuleRef(name), Path.of(path), contextPath, exploded);
     }
 
     @BeforeEach

@@ -4,10 +4,7 @@ import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentKind;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
-import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModulePointer;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import com.dev.idea.plugins.tomcat.model.ModuleRef;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -38,14 +35,11 @@ class WarToExplodedQuickFixTest {
     }
 
     /**
-     * Name-only module pointer — lets tests build {@link ModuleBackedDeployment}
+     * Name-only module ref — lets tests build {@link ModuleBackedDeployment}
      * without an IntelliJ {@code Project} / {@code ModulePointerManager}.
      */
-    private static ModulePointer pointerTo(String moduleName) {
-        return new ModulePointer() {
-            @Override public @Nullable Module getModule() { return null; }
-            @Override public @NotNull String getModuleName() { return moduleName; }
-        };
+    private static ModuleRef pointerTo(String moduleName) {
+        return ModuleRef.detached(moduleName);
     }
 
     /**

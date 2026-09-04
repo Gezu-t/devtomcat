@@ -16,7 +16,7 @@ class TomcatArtifactItemTest {
     /** Headless typed fixture — name-only module pointer, no platform services. */
     private static Deployment deployment(String name, String contextPath, boolean exploded) {
         return new ModuleBackedDeployment(
-                DeploymentPointers.detachedModulePointer(name),
+                DeploymentPointers.detachedModuleRef(name),
                 Path.of("/some/path"), contextPath, exploded);
     }
 

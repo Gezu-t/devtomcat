@@ -1,7 +1,7 @@
 package com.dev.idea.plugins.tomcat.model;
 
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModulePointer;
+import com.dev.idea.plugins.tomcat.model.ModuleRef;
 import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactPointer;
@@ -226,7 +226,7 @@ class DeploymentTest {
         @Test
         @DisplayName("kind is MODULE")
         void kind() {
-            ModulePointer ptr = mock(ModulePointer.class);
+            ModuleRef ptr = mock(ModuleRef.class);
             when(ptr.getModuleName()).thenReturn("web-mod");
             ModuleBackedDeployment d = new ModuleBackedDeployment(
                     ptr, Path.of("/out"), "/c", true);
@@ -237,7 +237,7 @@ class DeploymentTest {
         @DisplayName("getModule delegates to pointer")
         void moduleFromPointer() {
             Module module = mock(Module.class);
-            ModulePointer ptr = mock(ModulePointer.class);
+            ModuleRef ptr = mock(ModuleRef.class);
             when(ptr.getModuleName()).thenReturn("web-mod");
             when(ptr.getModule()).thenReturn(module);
 
@@ -250,7 +250,7 @@ class DeploymentTest {
         @Test
         @DisplayName("output path returned directly — does not consult the module")
         void outputPathDirect() {
-            ModulePointer ptr = mock(ModulePointer.class);
+            ModuleRef ptr = mock(ModuleRef.class);
             when(ptr.getModuleName()).thenReturn("m");
 
             Path out = Path.of("/some/output");
@@ -266,11 +266,11 @@ class DeploymentTest {
             Path absent = dir.resolve("nope");
 
             Module module = mock(Module.class);
-            ModulePointer ptrLive = mock(ModulePointer.class);
+            ModuleRef ptrLive = mock(ModuleRef.class);
             when(ptrLive.getModuleName()).thenReturn("m");
             when(ptrLive.getModule()).thenReturn(module);
 
-            ModulePointer ptrStale = mock(ModulePointer.class);
+            ModuleRef ptrStale = mock(ModuleRef.class);
             when(ptrStale.getModuleName()).thenReturn("m");
             when(ptrStale.getModule()).thenReturn(null);
 
@@ -285,9 +285,9 @@ class DeploymentTest {
         @Test
         @DisplayName("equality keys on (moduleName, output, context, exploded)")
         void equality() {
-            ModulePointer a = mock(ModulePointer.class);
+            ModuleRef a = mock(ModuleRef.class);
             when(a.getModuleName()).thenReturn("m");
-            ModulePointer b = mock(ModulePointer.class);
+            ModuleRef b = mock(ModuleRef.class);
             when(b.getModuleName()).thenReturn("m");
 
             assertEquals(new ModuleBackedDeployment(a, Path.of("/o"), "/c", true),
@@ -335,7 +335,7 @@ class DeploymentTest {
         @Test
         @DisplayName("ModuleBackedDeployment dispatches to its branch")
         void module() {
-            ModulePointer ptr = mock(ModulePointer.class);
+            ModuleRef ptr = mock(ModuleRef.class);
             when(ptr.getModuleName()).thenReturn("the-mod");
             assertEquals("module:the-mod",
                     describe(new ModuleBackedDeployment(ptr, Path.of("/o"), "/c", true)));

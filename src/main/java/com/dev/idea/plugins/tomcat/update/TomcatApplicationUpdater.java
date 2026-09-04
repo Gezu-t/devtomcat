@@ -267,7 +267,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
         DeploymentRebuilder rebuilder = DeploymentRebuilder.getInstance();
         rebuildThenContinue(configuration.getConfigData().getUpdateConfig(),
                 () -> rebuildableWarModules(deployments,
-                        d -> com.intellij.openapi.application.ReadAction.compute(
+                        d -> com.dev.idea.plugins.tomcat.utils.TomcatReadActions.compute(
                                 () -> DeploymentModuleResolver.resolve(d, project)),
                         rebuilder == null ? null : m -> rebuilder.canRebuild(project, m),
                         logger),
@@ -628,7 +628,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                 com.dev.idea.plugins.tomcat.utils.DeploymentRebuilder.getInstance();
         List<com.intellij.openapi.module.Module> modules = rebuilder == null ? List.of()
                 : rebuildableWarModules(blocked,
-                        d -> com.intellij.openapi.application.ReadAction.compute(
+                        d -> com.dev.idea.plugins.tomcat.utils.TomcatReadActions.compute(
                                 () -> DeploymentModuleResolver.resolve(d, project)),
                         m -> rebuilder.canRebuild(project, m), logger);
         return buildRebuildAndDeployRemedy(

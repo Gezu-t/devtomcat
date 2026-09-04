@@ -3,7 +3,6 @@ package com.dev.idea.plugins.tomcat.model;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
-import com.intellij.openapi.module.ModulePointerManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -56,7 +55,7 @@ public final class DeploymentResolver {
             });
             if (rebindTo == null) return m;
             return new ModuleBackedDeployment(
-                    ModulePointerManager.getInstance(project).create(rebindTo),
+                    ModuleRef.of(project, rebindTo),
                     m.getOutputPath(), m.getContextPath(), m.isExploded(), m.getLegacyName());
         }
         return deployment;
@@ -117,16 +116,15 @@ public final class DeploymentResolver {
                                                               @NotNull String contextPath,
                                                               boolean exploded) {
         Module module = TomcatReadActions.compute(() -> resolveOwningModule(project, storedName, outputPath));
-        ModulePointerManager pm = ModulePointerManager.getInstance(project);
         // Carry storedName as the legacy name so the round trip echoes back the
         // persisted display name (which may differ from the resolved module name
         // when strategy 2/3 mapped an artifact filename to a differently-named module).
         if (module != null) {
-            return new ModuleBackedDeployment(pm.create(module), outputPath, contextPath, exploded, storedName);
+            return new ModuleBackedDeployment(ModuleRef.of(project, module), outputPath, contextPath, exploded, storedName);
         }
         // Worst case — keep the deployment object alive so the run-config table
         // still shows it; isValid() will return false and the user can re-add it.
-        return new ModuleBackedDeployment(pm.create(storedName), outputPath, contextPath, exploded, storedName);
+        return new ModuleBackedDeployment(ModuleRef.of(project, storedName), outputPath, contextPath, exploded, storedName);
     }
 
     /**
