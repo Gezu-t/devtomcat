@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.logging;
 
 import com.intellij.execution.ui.ConsoleView;
+import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.openapi.project.Project;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -8,7 +9,13 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import org.mockito.InOrder;
+
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,9 +24,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Unit coverage for the logger's pure formatting helpers and for the
  * pre-console replay buffer, both exercised without a platform fixture. With no
- * IntelliJ {@code Application} the logger prints straight through instead of
- * scheduling onto the EDT, so a mocked {@code ConsoleView} sees the calls in
- * order — enough to pin what is buffered, what is replayed, and what is dropped.
+ * logger is built with a direct UI dispatcher, so prints land on a mocked
+ * {@code ConsoleView} synchronously — enough to pin what is buffered, what
+ * actually reaches the console and in which order, and what is dropped. The
+ * dispatcher is injected rather than inferred from whether an IntelliJ
+ * {@code Application} happens to exist, which varies with test execution order.
  */
 @DisplayName("TomcatDeploymentLogger")
 class TomcatDeploymentLoggerTest {
@@ -107,11 +116,12 @@ class TomcatDeploymentLoggerTest {
     @DisplayName("pre-console replay")
     class PreConsoleReplay {
 
+        /** Direct dispatcher: prints land on the mock synchronously, no EDT involved. */
         private TomcatDeploymentLogger logger() {
             Project project = mock(Project.class);
             when(project.getName()).thenReturn("p");
             when(project.isDisposed()).thenReturn(false);
-            return new TomcatDeploymentLogger(project);
+            return new TomcatDeploymentLogger(project, Runnable::run);
         }
 
         @Test
@@ -163,6 +173,41 @@ class TomcatDeploymentLoggerTest {
             // Earliest kept: launch preparation is what this buffer exists for.
             assertTrue(pending.get(0).contains("line 0"), pending.get(0));
             assertTrue(pending.get(499).contains("line 499"), pending.get(499));
+        }
+
+        @Test
+        @DisplayName("the held lines actually reach the console, oldest first")
+        void replayReachesTheConsoleInOrder() {
+            TomcatDeploymentLogger logger = logger();
+            logger.logServerWarning("launch mode notice");
+            logger.logServerInfo("Launch preparation finished");
+
+            ConsoleView console = mock(ConsoleView.class);
+            logger.setConsoleView(console);
+
+            // Draining the buffer is not the point; delivering it is.
+            InOrder ordered = inOrder(console);
+            ordered.verify(console).print(contains("launch mode notice"),
+                    eq(ConsoleViewContentType.LOG_WARNING_OUTPUT));
+            ordered.verify(console).print(contains("Launch preparation finished"),
+                    eq(ConsoleViewContentType.NORMAL_OUTPUT));
+            verifyNoMoreInteractions(console);
+        }
+
+        @Test
+        @DisplayName("the overflow notice reaches the console after the lines it accounts for")
+        void overflowNoticeReachesTheConsole() {
+            TomcatDeploymentLogger logger = logger();
+            for (int i = 0; i < 520; i++) logger.logServerInfo("line " + i);
+
+            ConsoleView console = mock(ConsoleView.class);
+            logger.setConsoleView(console);
+
+            InOrder ordered = inOrder(console);
+            ordered.verify(console).print(contains("line 0"), eq(ConsoleViewContentType.NORMAL_OUTPUT));
+            ordered.verify(console).print(contains("line 499"), eq(ConsoleViewContentType.NORMAL_OUTPUT));
+            ordered.verify(console).print(contains("20 earlier message(s)"),
+                    eq(ConsoleViewContentType.LOG_WARNING_OUTPUT));
         }
 
         @Test

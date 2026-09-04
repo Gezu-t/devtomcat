@@ -18,6 +18,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * Routes structured deployment / server-lifecycle messages to an IntelliJ
@@ -109,11 +110,27 @@ public class TomcatDeploymentLogger {
 
     private final boolean debugMode;
 
+    /**
+     * How a console print reaches the UI thread. Production hands every print to
+     * {@code Application.invokeLater}; tests substitute a direct dispatcher so
+     * delivery is observable without an EDT. Injected rather than branched on
+     * {@code ApplicationManager.getApplication() == null}, because whether an
+     * Application exists depends on what else ran first in the test JVM — a
+     * branch on it makes delivery assertions execution-order dependent.
+     */
+    private final Consumer<Runnable> uiDispatcher;
+
     // =====================================================================
     // CONSTRUCTORS
     // =====================================================================
 
     public TomcatDeploymentLogger(@NotNull Project project) {
+        this(project, TomcatDeploymentLogger::dispatchToUiThread);
+    }
+
+    /** Test seam — see {@link #uiDispatcher}. */
+    TomcatDeploymentLogger(@NotNull Project project, @NotNull Consumer<Runnable> uiDispatcher) {
+        this.uiDispatcher = uiDispatcher;
         this.project = project;
         this.startTime = System.currentTimeMillis();
         this.disposed = new AtomicBoolean(false);
@@ -352,16 +369,7 @@ public class TomcatDeploymentLogger {
     private void printToConsole(@NotNull ConsoleView cv, @NotNull String formattedMessage,
                                 @NotNull ConsoleViewContentType contentType) {
         if (project.isDisposed()) return;
-        Application app = ApplicationManager.getApplication();
-        if (app == null) {
-            // No IntelliJ Application means no EDT to schedule onto. Only
-            // reachable outside a running IDE (plain unit tests); print on the
-            // calling thread rather than throwing. Same rationale as
-            // TomcatReadActions.compute.
-            cv.print(formattedMessage + "\n", contentType);
-            return;
-        }
-        app.invokeLater(() -> {
+        uiDispatcher.accept(() -> {
             try {
                 if (!disposed.get() && !project.isDisposed()) {
                     cv.print(formattedMessage + "\n", contentType);
@@ -370,6 +378,21 @@ public class TomcatDeploymentLogger {
                 LOG.warn("Failed to print to console", e);
             }
         });
+    }
+
+    /**
+     * Console writes belong on the EDT. With no Application there is no EDT to
+     * schedule onto — only reachable outside a running IDE — so the print runs on
+     * the calling thread instead of throwing. Same rationale as
+     * {@code TomcatReadActions.compute}.
+     */
+    private static void dispatchToUiThread(@NotNull Runnable print) {
+        Application app = ApplicationManager.getApplication();
+        if (app == null) {
+            print.run();
+        } else {
+            app.invokeLater(print);
+        }
     }
 
     @NotNull

@@ -13,6 +13,9 @@ import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import static org.mockito.Mockito.mock;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -444,6 +447,37 @@ class TomcatPreflightValidatorTest {
             TomcatPreflightValidator.scanDirectoryForLocks(workDir, "work", issues);
 
             assertTrue(issues.isEmpty());
+        }
+
+        @Test
+        @DisplayName("a target-side persistence path is not probed on this filesystem")
+        void persistencePathsSkippedWhenNotHostFilesystem(@TempDir Path tempDir) throws IOException {
+            Path dataDir = tempDir.resolve("derby-data");
+            Files.createDirectories(dataDir);
+            Path lockedFile = dataDir.resolve("db.lck");
+            Files.writeString(lockedFile, "locked data");
+
+            // A bare mock has no config data, so getCatalinaBase returns null and only
+            // the -D persistence loop can contribute issues here.
+            TomcatRunConfiguration config = mock(TomcatRunConfiguration.class);
+            Map<String, String> props = new LinkedHashMap<>();
+            props.put("derby.system.home", dataDir.toString());
+
+            try (FileChannel channel = FileChannel.open(lockedFile, StandardOpenOption.WRITE);
+                 FileLock lock = channel.lock()) {
+
+                // Host launch: this directory really is the one the JVM will open.
+                List<PreflightIssue> hostIssues = new ArrayList<>();
+                TomcatPreflightValidator.checkLockedPaths(config, props, hostIssues, true);
+                assertEquals(1, hostIssues.size(), hostIssues.toString());
+
+                // Target launch: the value names a path over there. Probing this
+                // machine's namesake can block a launch over a directory the JVM
+                // will never open, so it must not be probed at all.
+                List<PreflightIssue> targetIssues = new ArrayList<>();
+                TomcatPreflightValidator.checkLockedPaths(config, props, targetIssues, false);
+                assertTrue(targetIssues.isEmpty(), targetIssues.toString());
+            }
         }
 
         @Test

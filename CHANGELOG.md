@@ -15,6 +15,8 @@
 
 ### Fixed
 - Launch-preparation console output no longer lost before the console opens.
+- Lock scan no longer probes target-side persistence paths on the host.
+- Preflight lock warnings name the actual directory, not always catalina.base.
 - JDK from a different WSL distribution refused instead of silently re-rooted.
 - Cross-distribution path references surface in the run console.
 - Coverage refusal decided before stopping the running server.

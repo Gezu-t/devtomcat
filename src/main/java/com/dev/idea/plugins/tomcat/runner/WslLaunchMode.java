@@ -22,6 +22,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
@@ -104,12 +106,19 @@ public final class WslLaunchMode {
         // another distribution is translated as if it were ours, and the user is
         // the only one who can tell whether that is what they meant.
         List<String> warnings = new CopyOnWriteArrayList<>();
+        // `seen` is never cleared, so each distinct warning reaches the console once
+        // per launch. Deduplicating against `warnings` alone would not: it is drained
+        // (and emptied) twice, and catalina.base is translated in both phases, so the
+        // same line would be re-admitted and printed again after the first drain.
+        Set<String> seen = ConcurrentHashMap.newKeySet();
         WslPathTranslator translator = new WslPathTranslator(
                 distribution.getMsId(),
                 mntRoot == null || mntRoot.isEmpty() ? WslPathTranslator.DEFAULT_MNT_ROOT : mntRoot,
                 w -> {
-                    LOG.warn(w);
-                    if (!warnings.contains(w)) warnings.add(w);
+                    if (seen.add(w)) {
+                        LOG.warn(w);
+                        warnings.add(w);
+                    }
                 });
         return new WslLaunchMode(distribution, translator, warnings);
     }

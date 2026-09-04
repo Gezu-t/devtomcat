@@ -138,7 +138,7 @@ public final class TomcatPreflightValidator {
         List<Deployment> deployments = configuration.getDeployments();
         checkDuplicateDeployments(deployments, issues);
         checkDuplicateJars(deployments, issues);
-        checkLockedPaths(configuration, parsedProperties, issues);
+        checkLockedPaths(configuration, parsedProperties, issues, hostFilesystem);
         checkCompilerType(configuration, issues);
 
         return new PreflightResult(issues);
@@ -446,12 +446,30 @@ public final class TomcatPreflightValidator {
     static void checkLockedPaths(@NotNull TomcatRunConfiguration configuration,
                                  @NotNull Map<String, String> parsedProperties,
                                  @NotNull List<PreflightIssue> issues) {
+        checkLockedPaths(configuration, parsedProperties, issues, true);
+    }
+
+    /**
+     * @param hostFilesystem {@code false} when the JVM will run on another machine's
+     *                       filesystem (WSL mode). {@code catalina.base} is assembled
+     *                       <em>here</em> even then, so its work/temp/logs scan stays
+     *                       valid; only the application-owned persistence paths named
+     *                       by {@code -D} properties are target-side, and probing this
+     *                       machine's namesake of one can block the launch over a
+     *                       directory the JVM will never open.
+     */
+    static void checkLockedPaths(@NotNull TomcatRunConfiguration configuration,
+                                 @NotNull Map<String, String> parsedProperties,
+                                 @NotNull List<PreflightIssue> issues,
+                                 boolean hostFilesystem) {
         Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration);
         if (catalinaBase != null) {
-            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_WORK), "work", issues);
-            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_TEMP), "temp", issues);
-            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_LOGS), "logs", issues);
+            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_WORK), "catalina.base/work", issues);
+            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_TEMP), "catalina.base/temp", issues);
+            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_LOGS), "catalina.base/logs", issues);
         }
+
+        if (!hostFilesystem) return;
 
         // Also scan application-owned persistence paths from VM properties
         for (Map.Entry<String, String> entry : parsedProperties.entrySet()) {
@@ -477,7 +495,9 @@ public final class TomcatPreflightValidator {
      * the file is held by another process.
      *
      * @param dir     the directory to scan
-     * @param dirName human-readable label for error messages
+     * @param dirName full human-readable label for error messages (the caller supplies
+     *                the whole label — a {@code catalina.base/...} subdirectory says so,
+     *                a {@code -D} persistence path names its property instead)
      * @param issues  list to append any issues to
      */
     static void scanDirectoryForLocks(@NotNull Path dir, @NotNull String dirName,
@@ -487,7 +507,7 @@ public final class TomcatPreflightValidator {
         if (!Files.isDirectory(dir)) {
             issues.add(new PreflightIssue(
                     PreflightIssue.Severity.ERROR,
-                    String.format("catalina.base/%s exists but is not a directory: %s. " +
+                    String.format("%s exists but is not a directory: %s. " +
                             "Remove or rename this file before launching.", dirName, dir)));
             return;
         }
@@ -496,7 +516,7 @@ public final class TomcatPreflightValidator {
         if (!Files.isWritable(dir)) {
             issues.add(new PreflightIssue(
                     PreflightIssue.Severity.ERROR,
-                    String.format("catalina.base/%s is not writable: %s. " +
+                    String.format("%s is not writable: %s. " +
                             "Check directory permissions.", dirName, dir)));
             return;
         }

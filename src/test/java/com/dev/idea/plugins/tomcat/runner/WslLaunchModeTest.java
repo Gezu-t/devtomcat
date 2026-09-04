@@ -194,7 +194,13 @@ class WslLaunchModeTest {
         @Test
         @DisplayName("a UNC carrying no distribution segment is not treated as distro-side")
         void uncWithoutDistroSegmentRefused() {
+            // The forward-slash forms are the ones that actually exercise the WSL-UNC
+            // guard: they would otherwise fall through to the plain startsWith("/")
+            // test and be accepted as distro-side. Sdk.getHomePath() returns this form.
             assertFalse(WslLaunchMode.isWslSideJdkHome("\\\\wsl$\\", "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome("//wsl$/", "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome("//wsl.localhost/", "Ubuntu"));
+            assertFalse(WslLaunchMode.isWslSideJdkHome("//wsl$//opt/jdk", "Ubuntu"));
         }
     }
 
@@ -366,6 +372,21 @@ class WslLaunchModeTest {
             assertEquals(1, drained.size());
             assertTrue(drained.get(0).contains("Other"), drained.get(0));
             assertTrue(mode.drainCrossDistroWarnings().isEmpty(), "draining twice must not repeat the warning");
+        }
+
+        @Test
+        @DisplayName("a path translated again after a drain is not reported to the console twice")
+        void warningNotRepeatedAcrossDrains() throws ExecutionException {
+            WslLaunchMode mode = WslLaunchMode.resolve(WSL_HOME, List.of(distro("Ubuntu")), d -> "/mnt/");
+            String foreign = "\\\\wsl$\\Other\\srv\\app";
+
+            // A launch drains twice, and catalina.base is translated in both phases.
+            mode.mapper().toTarget(foreign);
+            assertEquals(1, mode.drainCrossDistroWarnings().size());
+
+            mode.mapper().toTarget(foreign);
+            assertTrue(mode.drainCrossDistroWarnings().isEmpty(),
+                    "the same path must not produce a second console line in one launch");
         }
     }
 
