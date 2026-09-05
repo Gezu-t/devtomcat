@@ -122,6 +122,7 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
     }
 
     public void testSourceTreePathIsRepointedAtBuildOutput() throws Exception {
+        DeploymentResolver.forgetHeals();
         VirtualFile webapp = dir("src/main/webapp");
         VirtualFile target = dir("target/web-module-1.0");
 
@@ -133,9 +134,17 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
         assertEquals("/web", healed.getContextPath());
         assertEquals(stored.getDisplayName(), healed.getDisplayName());
         assertEquals("the persisted name is carried across the heal", "web-module", healed.getLegacyName());
+
+        // Memoised: the build-file derivation is not consulted again for this stored path.
+        int[] derivations = {0};
+        ModuleBackedDeployment again = readAction(() -> DeploymentResolver.healSourceTreePath(
+                getProject(), stored, module -> { derivations[0]++; return Path.of(target.getPath()); }, contentRule()));
+        assertEquals(Path.of(target.getPath()), again.getResolvedPath());
+        assertEquals("second heal must come from the memo", 0, derivations[0]);
     }
 
     public void testBuildOutputPathIsLeftAlone() throws Exception {
+        DeploymentResolver.forgetHeals();
         VirtualFile target = dir("target/web-module-1.0");
         ModuleBackedDeployment stored = storedAt(target);
         ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
@@ -144,6 +153,7 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
     }
 
     public void testNoDeterminableBuildOutputLeavesTheEntryAlone() throws Exception {
+        DeploymentResolver.forgetHeals();
         ModuleBackedDeployment stored = storedAt(dir("src/main/webapp"));
         ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
                 getProject(), stored, module -> null, contentRule()));
@@ -151,6 +161,7 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
     }
 
     public void testNeverRepointsAtAnotherSourceTreePath() throws Exception {
+        DeploymentResolver.forgetHeals();
         VirtualFile webapp = dir("src/main/webapp");
         VirtualFile other = dir("src/main/other");
         ModuleBackedDeployment stored = storedAt(webapp);

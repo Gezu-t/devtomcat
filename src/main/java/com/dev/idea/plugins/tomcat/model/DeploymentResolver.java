@@ -8,7 +8,7 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.intellij.openapi.diagnostic.Logger;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.BiPredicate;
@@ -93,22 +93,34 @@ public final class DeploymentResolver {
         return TomcatReadActions.compute(() -> {
             Module module = m.getModule();
             if (module == null) return m;
-            if (!insideContent.test(module, m.getOutputPath())) return m;
-            Path output = buildOutput.apply(module);
-            if (output == null || output.equals(m.getOutputPath())) return m;
-            // Never trade one source-tree path for another.
-            if (insideContent.test(module, output)) return m;
-            if (HEALED.add(m.getOutputPath() + " -> " + output)) {
-                LOG.info("Deployment '" + m.getDisplayName() + "': stored path is inside the source tree ("
-                        + m.getOutputPath() + "); using the build output instead (" + output + ")");
+            Path stored = m.getOutputPath();
+            // The resolved view is recomputed on every read of the deployment list,
+            // often on the EDT; a positive heal (which read the build file) is
+            // remembered per stored path so that read happens once per session.
+            Path output = HEALED.get(stored);
+            if (output == null) {
+                if (!insideContent.test(module, stored)) return m;
+                output = buildOutput.apply(module);
+                if (output == null || output.equals(stored)) return m;
+                // Never trade one source-tree path for another.
+                if (insideContent.test(module, output)) return m;
+                if (HEALED.putIfAbsent(stored, output) == null) {
+                    LOG.info("Deployment '" + m.getDisplayName() + "': stored path is inside the source tree ("
+                            + stored + "); using the build output instead (" + output + ")");
+                }
             }
             return new ModuleBackedDeployment(
                     ModuleRef.of(project, module), output, m.getContextPath(), m.isExploded(), m.getLegacyName());
         });
     }
 
-    /** Once-per-session log guard: the resolved view is recomputed on every call. */
-    private static final Set<String> HEALED = ConcurrentHashMap.newKeySet();
+    /** Positive heals per stored path, for the session; negatives are re-evaluated (a build file may be fixed later). */
+    private static final Map<Path, Path> HEALED = new ConcurrentHashMap<>();
+
+    /** Test seam. */
+    static void forgetHeals() {
+        HEALED.clear();
+    }
 
     /** The Maven-derived exploded output — the same derivation auto-detection uses, minus its web-root fallback. */
     @Nullable
