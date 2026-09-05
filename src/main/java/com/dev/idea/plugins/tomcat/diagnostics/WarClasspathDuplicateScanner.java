@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.diagnostics;
 
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -155,6 +156,40 @@ public final class WarClasspathDuplicateScanner {
     private static void indexJarEntries(@NotNull Path jarPath,
                                         @NotNull Map<String, List<String>> pathToLocations) {
         String jarLocation = LIB_LOCATION_PREFIX + jarPath.getFileName().toString();
+        String[] entries = nonBenignEntries(jarPath);
+        if (entries == null) return;
+        for (String relPath : entries) {
+            pathToLocations.computeIfAbsent(relPath, k -> new ArrayList<>()).add(jarLocation);
+        }
+    }
+
+    /**
+     * The jar's non-benign entry names, from a bounded cache keyed by path and
+     * validated by size+mtime — a jar unchanged since the last scan is not
+     * reopened. Every launch scans every deployment's {@code WEB-INF/lib}, and
+     * a dependency jar changes only when the build replaces it, so across
+     * launches nearly every central-directory read is avoided. {@code null}
+     * when the jar cannot be read.
+     */
+    private static String @Nullable [] nonBenignEntries(@NotNull Path jarPath) {
+        long size;
+        long mtime;
+        try {
+            java.nio.file.attribute.BasicFileAttributes a =
+                    Files.readAttributes(jarPath, java.nio.file.attribute.BasicFileAttributes.class);
+            size = a.size();
+            mtime = a.lastModifiedTime().toMillis();
+        } catch (IOException e) {
+            LOG.debug("Could not stat " + jarPath + " for duplicate scan: " + e.getMessage());
+            return null;
+        }
+        Path key = jarPath.toAbsolutePath().normalize();
+        CachedEntries cached = JAR_ENTRIES.get(key);
+        if (cached != null && cached.size() == size && cached.mtime() == mtime) {
+            return cached.entries();
+        }
+        List<String> out = new ArrayList<>();
+        JAR_OPENS.incrementAndGet();
         try (ZipFile zip = new ZipFile(jarPath.toFile())) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
@@ -162,16 +197,35 @@ public final class WarClasspathDuplicateScanner {
                 if (entry.isDirectory()) continue;
                 String relPath = entry.getName();
                 if (isBenign(relPath)) continue;
-                pathToLocations.computeIfAbsent(relPath, k -> new ArrayList<>())
-                        .add(jarLocation);
+                out.add(relPath);
             }
         } catch (IOException e) {
             // A corrupted or unreadable JAR shouldn't crash the scan. The user
             // will see this in the IDE log; the launch itself will surface any
             // resulting ClassNotFoundException with much louder symptoms.
             LOG.debug("Could not read " + jarPath + " for duplicate scan: " + e.getMessage());
+            return null;
         }
+        String[] frozen = out.toArray(new String[0]);
+        JAR_ENTRIES.put(key, new CachedEntries(size, mtime, frozen));
+        return frozen;
     }
+
+    /** Upper bound on cached jars; at a few hundred entries each that is a few megabytes. */
+    private static final int MAX_CACHED_JARS = 1024;
+
+    private record CachedEntries(long size, long mtime, String @NotNull [] entries) {}
+
+    private static final Map<Path, CachedEntries> JAR_ENTRIES = Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(256, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Path, CachedEntries> eldest) {
+                    return size() > MAX_CACHED_JARS;
+                }
+            });
+
+    /** Test seam: real central-directory reads performed so far. */
+    static final java.util.concurrent.atomic.AtomicLong JAR_OPENS = new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * Visible for testing.

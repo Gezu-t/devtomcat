@@ -1501,13 +1501,46 @@ public final class LocalDeploymentStrategy {
         if (tomcatInfo == null) return Collections.emptySet();
         String home = tomcatInfo.getPath();
         if (home == null || home.isEmpty()) return Collections.emptySet();
-        Path homeDir = Paths.get(home);
+        Path homeDir = Paths.get(home).toAbsolutePath().normalize();
+        Path lib = homeDir.resolve("lib");
+        Path bin = homeDir.resolve("bin");
+        // Asked several times per deployment per launch, for a listing that only
+        // changes when a jar is added to or removed from the install — which
+        // updates the directory's own mtime. Two stats validate the memo.
+        long libMtime = directoryMtime(lib);
+        long binMtime = directoryMtime(bin);
+        ContainerLibKeys cached = CONTAINER_LIB_KEYS.get(homeDir);
+        if (cached != null && cached.libMtime() == libMtime && cached.binMtime() == binMtime) {
+            return cached.keys();
+        }
         Set<String> keys = new HashSet<>();
-        addJarKeysFrom(homeDir.resolve("lib"), keys);
+        addJarKeysFrom(lib, keys);
         // bin/ carries bootstrap.jar, tomcat-juli.jar and (when installed)
         // commons-daemon — also container-provided.
-        addJarKeysFrom(homeDir.resolve("bin"), keys);
-        return keys;
+        addJarKeysFrom(bin, keys);
+        Set<String> frozen = Collections.unmodifiableSet(keys);
+        CONTAINER_LIB_KEYS.put(homeDir, new ContainerLibKeys(libMtime, binMtime, frozen));
+        return frozen;
+    }
+
+    /** Per-home memo of {@link #resolveContainerLibKeys}; see there for the validation rule. */
+    private static final java.util.concurrent.ConcurrentHashMap<Path, ContainerLibKeys> CONTAINER_LIB_KEYS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record ContainerLibKeys(long libMtime, long binMtime, @NotNull Set<String> keys) {}
+
+    /** The directory's mtime, or {@code -1} when it cannot be read — never cached as valid. */
+    private static long directoryMtime(@NotNull Path dir) {
+        try {
+            return Files.isDirectory(dir) ? Files.getLastModifiedTime(dir).toMillis() : -1L;
+        } catch (IOException e) {
+            return -1L;
+        }
+    }
+
+    /** Test seam: forget every memoised install. */
+    static void forgetContainerLibKeys() {
+        CONTAINER_LIB_KEYS.clear();
     }
 
     private static void addJarKeysFrom(@NotNull Path dir, @NotNull Set<String> keys) {

@@ -15,6 +15,7 @@
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
+- Unchanged dependency jars not reopened by the duplicate scan; container-jar keys memoised.
 - Compiled JSPs kept across launches when nothing they depend on changed.
 - Launch preparation no longer holds the IDE read lock.
 - Unchanged-file sync no longer re-stats every file or rewrites its manifest.
