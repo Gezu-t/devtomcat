@@ -15,8 +15,8 @@ class LibraryArtifactNamesTest {
         assertAll(
                 () -> assertEquals("commons-lang3",
                         LibraryArtifactNames.libraryArtifactKey("commons-lang3-3.12.0.jar")),
-                () -> assertEquals("some-api",
-                        LibraryArtifactNames.libraryArtifactKey("some-api-2.20.0.jar")),
+                () -> assertEquals("lib4j-api",
+                        LibraryArtifactNames.libraryArtifactKey("lib4j-api-2.20.0.jar")),
                 () -> assertEquals("app-web",
                         LibraryArtifactNames.libraryArtifactKey("app-web-6.2.3.jar"))
         );

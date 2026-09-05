@@ -418,7 +418,7 @@ class TomcatPreflightValidatorTest {
         @Test
         @DisplayName("handles JAR with single-part version")
         void singlePartVersion() {
-            assertEquals("app-logging", TomcatPreflightValidator.extractJarBaseName("app-logging-1.jar"));
+            assertEquals("lib4j", TomcatPreflightValidator.extractJarBaseName("lib4j-1.jar"));
         }
 
         @Test
