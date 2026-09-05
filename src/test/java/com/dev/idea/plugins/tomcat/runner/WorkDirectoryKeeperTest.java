@@ -134,7 +134,25 @@ class WorkDirectoryKeeperTest {
         String after = fp(root);
 
         String why = WorkDirectoryKeeper.firstDifference(before, after);
-        assertTrue(why.startsWith("lib/lib-alpha-1.0.jar: "), why);
+        assertTrue(why.startsWith("/app/lib/lib-alpha-1.0.jar: "), why);
         assertEquals("no visible difference", WorkDirectoryKeeper.firstDifference(before, before));
+    }
+
+    @Test
+    @DisplayName("two apps packaging the same jar name: a clear names the app whose jar changed")
+    void differenceNamesTheRightApp() throws IOException {
+        Path first = app();
+        Path second = Files.createDirectories(tmp.resolve("second"));
+        Files.createDirectories(second.resolve("WEB-INF/lib"));
+        Files.createDirectories(second.resolve("WEB-INF/classes"));
+        Files.writeString(second.resolve("WEB-INF/lib/lib-alpha-1.0.jar"), "jar");
+        List<Deployment> both = List.of(exploded("/app", first), exploded("/second", second));
+
+        String before = WorkDirectoryKeeper.fingerprint(both, "/opt/tomcat", "11.0.0", "/opt/jdk", false);
+        Files.writeString(second.resolve("WEB-INF/lib/lib-alpha-1.0.jar"), "jar rebuilt with more bytes");
+        String after = WorkDirectoryKeeper.fingerprint(both, "/opt/tomcat", "11.0.0", "/opt/jdk", false);
+
+        assertTrue(WorkDirectoryKeeper.firstDifference(before, after).startsWith("/second/lib/lib-alpha-1.0.jar: "),
+                WorkDirectoryKeeper.firstDifference(before, after));
     }
 }

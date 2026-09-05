@@ -75,13 +75,17 @@ public final class WorkDirectoryKeeper {
             sb.append("app=").append(d.getContextPath()).append('|').append(root)
               .append("|exploded=").append(d.isExploded()).append("|valid=").append(d.isValid()).append('\n');
             if (root == null) continue;
+            // Every per-deployment line is keyed by its context, so a clear can name
+            // exactly which app's manifest or jar changed (several apps package the
+            // same jar name; keys must not collide across them).
+            String key = d.getContextPath() + "/";
             if (d.isExploded() || Files.isDirectory(root)) {
-                appendStamp(sb, "classes-manifest",
+                appendStamp(sb, key + "classes-manifest",
                         DeployedClassesSync.classSyncManifestFor(root.resolve(TomcatConstants.WEB_INF_CLASSES_PATH)));
-                appendStamp(sb, "web-manifest", WebResourcesSync.webResourcesManifestFor(root));
-                appendLibListing(sb, root.resolve(TomcatConstants.WEB_INF_LIB_PATH));
+                appendStamp(sb, key + "web-manifest", WebResourcesSync.webResourcesManifestFor(root));
+                appendLibListing(sb, key, root.resolve(TomcatConstants.WEB_INF_LIB_PATH));
             } else {
-                appendStamp(sb, "war", root);
+                appendStamp(sb, key + "war", root);
             }
         }
         if (syncIncomplete) {
@@ -135,21 +139,21 @@ public final class WorkDirectoryKeeper {
         sb.append('\n');
     }
 
-    private static void appendLibListing(@NotNull StringBuilder sb, @NotNull Path lib) {
+    private static void appendLibListing(@NotNull StringBuilder sb, @NotNull String key, @NotNull Path lib) {
         if (!Files.isDirectory(lib)) {
-            sb.append("lib=absent\n");
+            sb.append(key).append("lib=absent\n");
             return;
         }
         List<Path> jars = new ArrayList<>();
         try (Stream<Path> s = Files.list(lib)) {
             s.forEach(jars::add);
         } catch (IOException e) {
-            sb.append("lib=unreadable|").append(System.nanoTime()).append('\n');   // doubt clears
+            sb.append(key).append("lib=unreadable|").append(System.nanoTime()).append('\n');   // doubt clears
             return;
         }
         jars.sort(Comparator.comparing(p -> p.getFileName().toString()));
         for (Path jar : jars) {
-            appendStamp(sb, "lib/" + jar.getFileName(), jar);
+            appendStamp(sb, key + "lib/" + jar.getFileName(), jar);
         }
     }
 
