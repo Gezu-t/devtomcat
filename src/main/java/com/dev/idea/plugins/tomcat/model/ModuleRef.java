@@ -4,6 +4,7 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModulePointer;
 import com.intellij.openapi.module.ModulePointerManager;
 import com.intellij.openapi.project.Project;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -65,9 +66,10 @@ public interface ModuleRef {
             return pointer.getModuleName();
         }
 
+        /** Resolved under a read action — the model boundary for every caller (see {@code ArtifactBackedDeployment#artifact}). */
         @Override
         public @Nullable Module getModule() {
-            return pointer.getModule();
+            return TomcatReadActions.compute(pointer::getModule);
         }
 
         @Override

@@ -472,7 +472,7 @@ public final class WebResourcesSync {
 
     @Nullable
     private static Path moduleContentRoot(@NotNull Module module) {
-        VirtualFile[] roots = ModuleRootManager.getInstance(module).getContentRoots();
+        VirtualFile[] roots = TomcatReadActions.compute(() -> ModuleRootManager.getInstance(module).getContentRoots());
         return roots.length > 0 ? Path.of(roots[0].getPath()) : null;
     }
 

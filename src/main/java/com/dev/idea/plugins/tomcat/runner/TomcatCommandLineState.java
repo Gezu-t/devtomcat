@@ -434,6 +434,29 @@ public class TomcatCommandLineState extends JavaCommandLineState {
     }
 
     @Nullable
+    /**
+     * Launch preparation does not hold the IDE read lock.
+     *
+     * <p>The platform's {@code getJavaParameters()} wraps {@code createJavaParameters()}
+     * in a read action unless this says otherwise. Everything DevTomcat does there —
+     * process enumeration, socket and lock probes, catalina.base assembly, the
+     * class and web syncs, artifact copies, jar scans — is filesystem work that
+     * needs no model access, and holding the read lock across it blocked every
+     * write action in the IDE (typing, refactoring, VFS commits) for the whole
+     * preparation.
+     *
+     * <p>The contract this relies on: every project-model read on the path takes
+     * its own short read action at its boundary — {@code ArtifactBackedDeployment}
+     * and {@code ModuleRef} for pointer resolution, the sync pipelines and the
+     * strategy's model snapshot for module/root enumeration, and
+     * {@code TomcatJavaParametersBuilder#resolveJdkOrNull} for the project SDK.
+     * A new model read added to this path must do the same.
+     */
+    @Override
+    protected boolean isReadActionRequired() {
+        return false;
+    }
+
     private Sdk resolveJdk() {
         return TomcatJavaParametersBuilder.resolveJdkOrNull(configuration, configuration.getProject());
     }

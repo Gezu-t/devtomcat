@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactPointer;
 import com.intellij.packaging.artifacts.ArtifactPointerManager;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -75,9 +76,21 @@ public final class ArtifactBackedDeployment implements Deployment {
 
     @Override public @NotNull String getDisplayName() { return artifactPointer.getArtifactName(); }
 
+    /**
+     * The live artifact, resolved under a read action. This is the model boundary:
+     * launch preparation runs without holding the IDE read lock (see
+     * {@code TomcatCommandLineState#isReadActionRequired}), so every project-model
+     * read on that path must take its own short read action — here, once, for all
+     * callers of this class.
+     */
+    @Nullable
+    private Artifact artifact() {
+        return TomcatReadActions.compute(artifactPointer::getArtifact);
+    }
+
     @Override
     public @Nullable Path getResolvedPath() {
-        Artifact artifact = artifactPointer.getArtifact();
+        Artifact artifact = artifact();
         if (artifact == null) {
             // Pointer unresolved: fall back to the last-known persisted path so
             // display / round-trip keep the stored value instead of blanking it.
@@ -89,7 +102,7 @@ public final class ArtifactBackedDeployment implements Deployment {
 
     @Override
     public boolean isExploded() {
-        Artifact artifact = artifactPointer.getArtifact();
+        Artifact artifact = artifact();
         // Pointer unresolved: fall back to the last-known packaging so the round
         // trip does not silently flip an exploded deployment to war.
         if (artifact == null) return lastKnownExploded;
@@ -113,7 +126,7 @@ public final class ArtifactBackedDeployment implements Deployment {
         // ExternalFileDeployment can safely check file existence because
         // their paths are the actual build-tool output / user-supplied
         // absolute paths.
-        return artifactPointer.getArtifact() != null;
+        return artifact() != null;
     }
 
     public @NotNull ArtifactPointer getArtifactPointer() { return artifactPointer; }

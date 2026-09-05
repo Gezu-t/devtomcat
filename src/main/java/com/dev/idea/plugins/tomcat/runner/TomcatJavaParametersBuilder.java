@@ -24,6 +24,7 @@ import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -422,7 +423,7 @@ public class TomcatJavaParametersBuilder {
             }
             LOG.warn("Configured JRE '" + jreSelection + "' not found, falling back to project SDK");
         }
-        return ProjectRootManager.getInstance(project).getProjectSdk();
+        return TomcatReadActions.compute(() -> ProjectRootManager.getInstance(project).getProjectSdk());
     }
 
     private void setupClasspath(@NotNull JavaParameters params,
