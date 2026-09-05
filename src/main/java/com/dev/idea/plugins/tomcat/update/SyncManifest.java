@@ -168,7 +168,24 @@ final class SyncManifest {
                          @NotNull Path manifest,
                          @NotNull Set<String> currentlySynced,
                          @NotNull Map<String, JarCoverage> jarRecords) {
+        Map<String, Stamp> unknown = new HashMap<>();
+        for (String rel : currentlySynced) unknown.put(rel, Stamp.UNKNOWN);
+        return reconcileStamped(baseDir, manifest, unknown, jarRecords).removed();
+    }
+
+    /**
+     * {@link #reconcile(Path, Path, Set, Map)} with the current stamp of every synced
+     * path where the mirror already knows it; only {@link Stamp#UNKNOWN} entries are
+     * statted. The manifest is rewritten only when its content would change, so a
+     * no-op sync neither stats its files again nor touches the manifest.
+     */
+    static ReconcileResult reconcileStamped(@NotNull Path baseDir,
+                                            @NotNull Path manifest,
+                                            @NotNull Map<String, Stamp> currentStamps,
+                                            @NotNull Map<String, JarCoverage> jarRecords) {
         Path base = baseDir.toAbsolutePath().normalize();
+        Set<String> currentlySynced = currentStamps.keySet();
+        Map<String, Stamp> recordedEntries = readStamped(manifest);
         // Folded-key view of the current synced set (lowercase + Unicode NFC),
         // built lazily on the first stale candidate — the common no-stale run
         // never pays for it. On case-insensitive filesystems (macOS, Windows) a
@@ -180,7 +197,7 @@ final class SyncManifest {
         // stale file) deletion still proceeds.
         Map<String, String> foldedSynced = null;
         int removed = 0;
-        for (Map.Entry<String, Stamp> entry : readStamped(manifest).entrySet()) {
+        for (Map.Entry<String, Stamp> entry : recordedEntries.entrySet()) {
             // Cooperative cancellation: this runs under the launch-prep modal
             // and the update task's indicator, same as the mirror walks.
             TomcatProgress.checkCanceled();
@@ -229,18 +246,44 @@ final class SyncManifest {
                         + " (" + e.getMessage() + ")");
             }
         }
-        writeStamped(manifest, base, currentlySynced, jarRecords);
-        return removed;
+        Map<String, Stamp> entries = resolveStamps(base, currentStamps);
+        boolean changed = removed > 0
+                || !entries.equals(recordedEntries)
+                || !jarRecords.equals(readJarRecords(manifest));
+        if (changed) {
+            writeEntries(manifest, entries, jarRecords);
+        }
+        return new ReconcileResult(removed, changed);
+    }
+
+    /** Stats only the entries whose stamp the caller did not already know. */
+    @NotNull
+    private static Map<String, Stamp> resolveStamps(@NotNull Path base, @NotNull Map<String, Stamp> known) {
+        Map<String, Stamp> out = new HashMap<>(Math.max(16, known.size() * 2));
+        for (Map.Entry<String, Stamp> e : known.entrySet()) {
+            TomcatProgress.checkCanceled();
+            Stamp s = e.getValue();
+            out.put(e.getKey(), s == null || s.isUnknown() ? statOrUnknown(base, e.getKey()) : s);
+        }
+        return out;
     }
 
     /** The deployed file's current size + mtime + creation time, for stamp recording and matching. */
     @NotNull
     private static Stamp currentStamp(@NotNull Path file) throws IOException {
-        BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class);
+        return stampOf(Files.readAttributes(file, BasicFileAttributes.class));
+    }
+
+    /** A stamp from attributes already in hand — no filesystem access. */
+    @NotNull
+    static Stamp stampOf(@NotNull BasicFileAttributes attrs) {
         return new Stamp(attrs.size(),
                 attrs.lastModifiedTime().toMillis(),
                 attrs.creationTime().toMillis());
     }
+
+    /** Outcome of a stamped reconcile: what was deleted, and whether the manifest had to be rewritten. */
+    record ReconcileResult(int removed, boolean manifestWritten) {}
 
     /**
      * Rename-detection key: Unicode NFC + lowercase. Two relative paths with
@@ -473,12 +516,19 @@ final class SyncManifest {
                         @NotNull Path manifest,
                         @NotNull Set<String> contributedPaths,
                         @NotNull Map<String, JarCoverage> jarRecords) {
+        Map<String, Stamp> unknown = new HashMap<>();
+        for (String rel : contributedPaths) unknown.put(rel, Stamp.UNKNOWN);
+        refreshStamped(baseDir, manifest, unknown, jarRecords);
+    }
+
+    /** {@link #refresh(Path, Path, Set, Map)} with known stamps; only {@link Stamp#UNKNOWN} entries are statted. */
+    static void refreshStamped(@NotNull Path baseDir,
+                               @NotNull Path manifest,
+                               @NotNull Map<String, Stamp> contributedStamps,
+                               @NotNull Map<String, JarCoverage> jarRecords) {
         Path base = baseDir.toAbsolutePath().normalize();
         Map<String, Stamp> merged = new HashMap<>(readStamped(manifest));
-        for (String rel : contributedPaths) {
-            TomcatProgress.checkCanceled();
-            merged.put(rel, statOrUnknown(base, rel));
-        }
+        merged.putAll(resolveStamps(base, contributedStamps));
         Map<String, JarCoverage> mergedJars = new HashMap<>(readJarRecords(manifest));
         for (Map.Entry<String, JarCoverage> e : jarRecords.entrySet()) {
             JarCoverage prior = mergedJars.get(e.getKey());

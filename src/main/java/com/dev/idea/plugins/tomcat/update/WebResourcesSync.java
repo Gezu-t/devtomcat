@@ -238,6 +238,9 @@ public final class WebResourcesSync {
             // (filtered <webResources>, WAR overlays, frontend build output,
             // generated descriptors) are never in any manifest and never deleted.
             java.util.Set<String> contributedPaths = new java.util.HashSet<>();
+            java.util.Map<String, SyncManifest.Stamp> recordedStamps =
+                    SyncManifest.readStamped(webResourcesManifestFor(artifactRoot));
+            java.util.Map<String, SyncManifest.Stamp> currentStamps = new java.util.HashMap<>();
             // Same partial-walk guard as DeployedClassesSync: if ANY source
             // root's walk was incomplete, contributedPaths is a partial union
             // and reconciling against it would delete previously-synced files
@@ -254,7 +257,8 @@ public final class WebResourcesSync {
                             + " leftover DevTomcat metadata file(s) from " + src.resolve(WEB_INF));
                 }
                 logger.logServerInfo("Web resources sync: '" + name + "' -> " + src + " -> " + artifactRoot);
-                TreeMirror.MirrorResult mr = mirrorTree(src, artifactRoot);
+                TreeMirror.MirrorResult mr = mirrorTree(src, artifactRoot, recordedStamps);
+                currentStamps.putAll(mr.stamps());
                 copiedForThisArtifact += mr.copied();
                 contributedPaths.addAll(mr.contributedPaths());
                 if (mr.walkFailed()) {
@@ -274,8 +278,10 @@ public final class WebResourcesSync {
             // path (all-empty means every source was unreadable — reconciling on
             // that would mark everything we ever synced as stale).
             if (!contributedPaths.isEmpty() && allRootsWalkedCleanly) {
-                orphansRemovedForThisArtifact = SyncManifest.reconcile(
-                        artifactRoot, webResourcesManifestFor(artifactRoot), contributedPaths);
+                orphansRemovedForThisArtifact = SyncManifest.reconcileStamped(
+                        artifactRoot, webResourcesManifestFor(artifactRoot),
+                        DeployedClassesSync.stampsFor(contributedPaths, currentStamps),
+                        Collections.emptyMap()).removed();
                 if (orphansRemovedForThisArtifact > 0) {
                     logger.logServerInfo("Web resources sync: removed " + orphansRemovedForThisArtifact
                             + " stale file(s) from '" + name
@@ -286,8 +292,10 @@ public final class WebResourcesSync {
                 // overwritten deployed files — refresh their recorded stamps or
                 // a file edited during a deferred run could never be cleaned
                 // once removed from source (stale stamp = permanent leak).
-                SyncManifest.refresh(
-                        artifactRoot, webResourcesManifestFor(artifactRoot), contributedPaths);
+                SyncManifest.refreshStamped(
+                        artifactRoot, webResourcesManifestFor(artifactRoot),
+                        DeployedClassesSync.stampsFor(contributedPaths, currentStamps),
+                        Collections.emptyMap());
             }
             long artifactMs = (System.nanoTime() - artifactStart) / 1_000_000;
             if (copiedForThisArtifact > 0 || orphansRemovedForThisArtifact > 0) {
@@ -493,6 +501,12 @@ public final class WebResourcesSync {
      */
     @NotNull
     static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst) {
+        return mirrorTree(src, dst, null);
+    }
+
+    /** {@code recordedStamps}: the manifest's stamps, letting an up-to-date file skip its destination stat. */
+    static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst,
+                                              @Nullable java.util.Map<String, SyncManifest.Stamp> recordedStamps) {
         return TreeMirror.mirrorTree(src, dst, new TreeMirror.Policy(
                 "Web resources sync",
                 SKIP_SUBTREES,
@@ -502,9 +516,8 @@ public final class WebResourcesSync {
                 // contributed content.
                 f -> f.getFileName().toString().startsWith(".devtomcat-"),
                 null,
-                // Generic failure stat-ing the destination: skip the file
-                // for this run (it stays contributed; the engine debug-logs
-                // the skip).
-                false));
+                false,
+                Long.MIN_VALUE,
+                recordedStamps));
     }
 }

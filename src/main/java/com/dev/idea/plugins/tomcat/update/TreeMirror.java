@@ -6,6 +6,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -14,7 +15,9 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -89,7 +92,8 @@ final class TreeMirror {
                   @Nullable Predicate<Path> fileExclude,
                   @Nullable Predicate<Path> copyVeto,
                   boolean copyOnDstStatError,
-                  long sourceMtimeFloorMillis) {
+                  long sourceMtimeFloorMillis,
+                  @Nullable Map<String, SyncManifest.Stamp> recordedStamps) {
 
         /** No-floor convenience — the shape every pre-floor caller used. */
         Policy(@NotNull String logPrefix,
@@ -97,7 +101,17 @@ final class TreeMirror {
                @Nullable Predicate<Path> fileExclude,
                @Nullable Predicate<Path> copyVeto,
                boolean copyOnDstStatError) {
-            this(logPrefix, subtreeSkips, fileExclude, copyVeto, copyOnDstStatError, Long.MIN_VALUE);
+            this(logPrefix, subtreeSkips, fileExclude, copyVeto, copyOnDstStatError, Long.MIN_VALUE, null);
+        }
+
+        /** Floor without recorded stamps — every file goes through the destination stat. */
+        Policy(@NotNull String logPrefix,
+               @NotNull Set<String> subtreeSkips,
+               @Nullable Predicate<Path> fileExclude,
+               @Nullable Predicate<Path> copyVeto,
+               boolean copyOnDstStatError,
+               long sourceMtimeFloorMillis) {
+            this(logPrefix, subtreeSkips, fileExclude, copyVeto, copyOnDstStatError, sourceMtimeFloorMillis, null);
         }
     }
 
@@ -125,10 +139,11 @@ final class TreeMirror {
     record MirrorResult(int copied,
                         int brokenSkipped,
                         @NotNull Set<String> contributedPaths,
-                        boolean walkFailed) {
+                        boolean walkFailed,
+                        @NotNull Map<String, SyncManifest.Stamp> stamps) {
         /** Nothing contributed and the walk cannot be trusted — the caller must defer the reconcile. */
         static final MirrorResult FAILED = new MirrorResult(
-                0, 0, Collections.emptySet(), true);
+                0, 0, Collections.emptySet(), true, Collections.emptyMap());
     }
 
     /**
@@ -179,6 +194,16 @@ final class TreeMirror {
         // of copy outcome. Used by the caller to compute orphan candidates in
         // the destination tree.
         final Set<String> contributedPaths = new HashSet<>();
+        // Destination stamp per contributed path, known without a stat wherever a
+        // recorded stamp was trusted — the manifest is refreshed from this map
+        // instead of re-statting every file it lists.
+        final Map<String, SyncManifest.Stamp> stamps = new HashMap<>();
+        // Names present in each destination directory, one readdir per directory
+        // and no per-entry stat. This is what makes trusting a recorded stamp
+        // safe: the manifest lives outside the webapp and survives `mvn clean`,
+        // the tree does not — "the stamp matches" is evidence only while the
+        // file is actually there.
+        final Map<Path, Set<String>> dstNamesBySrcDir = new HashMap<>();
         try {
             // Default FileVisitOption set = do NOT follow symlinks. We don't
             // pass FOLLOW_LINKS: a symlinked subdirectory could point outside
@@ -253,8 +278,31 @@ final class TreeMirror {
                         // is already up to date, or refuse because it is a
                         // broken stub) must be in contributedPaths, or its
                         // deployed copy would be cleaned as stale.
-                        contributedPaths.add(rel.toString().replace('\\', '/'));
+                        String relKey = rel.toString().replace('\\', '/');
+                        contributedPaths.add(relKey);
                         Path target = dst.resolve(rel.toString());
+
+                        // Trusted skip: the destination is the copy we made of exactly
+                        // this source — same size and mtime as recorded at that copy
+                        // (the copy below sets the destination's mtime to the
+                        // source's) — and it is still present. No destination stat.
+                        // Creation time is deliberately not compared: it is a
+                        // destination-side value the source walk cannot know, and a
+                        // replaced destination with identical size+mtime was never
+                        // re-copied by the gate below either.
+                        if (p.recordedStamps() != null) {
+                            SyncManifest.Stamp recorded = p.recordedStamps().get(relKey);
+                            if (recorded != null && !recorded.isUnknown()
+                                    && recorded.size() == attrs.size()
+                                    && recorded.mtimeMillis() == attrs.lastModifiedTime().toMillis()) {
+                                Set<String> present = dstNamesBySrcDir.computeIfAbsent(file.getParent(),
+                                        d -> listNames(dst.resolve(src.relativize(d).toString())));
+                                if (present.contains(file.getFileName().toString())) {
+                                    stamps.put(relKey, recorded);
+                                    return FileVisitResult.CONTINUE;
+                                }
+                            }
+                        }
 
                         // Cheap mtime/size gate FIRST. When the deployed copy is
                         // already current we return before the copy veto below —
@@ -265,7 +313,9 @@ final class TreeMirror {
                         // multi-module projects). Gating it behind the copy
                         // decision keeps a no-op sync at stat-only cost; only
                         // copy candidates are ever inspected.
-                        if (!shouldCopy(file, attrs, target, p.copyOnDstStatError())) {
+                        BasicFileAttributes dstAttrs = destinationAttributes(target, p.copyOnDstStatError());
+                        if (dstAttrs != null && !shouldCopy(attrs, dstAttrs)) {
+                            stamps.put(relKey, SyncManifest.stampOf(dstAttrs));
                             return FileVisitResult.CONTINUE;
                         }
 
@@ -314,6 +364,8 @@ final class TreeMirror {
                                 // case the next sync re-copies this one file.
                             }
                             copied[0]++;
+                            // One stat, only for a file that actually changed.
+                            stamps.put(relKey, SyncManifest.stampOf(target));
                         } catch (NoSuchFileException vanished) {
                             // The source file disappeared between visitFile and
                             // copy — common when the IDE re-compiles concurrently
@@ -350,7 +402,7 @@ final class TreeMirror {
             walkFailed[0] = true;
             LOG.debug(p.logPrefix() + ": walk failed for " + src + " (" + e.getMessage() + ")");
         }
-        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths, walkFailed[0]);
+        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths, walkFailed[0], stamps);
     }
 
     /**
@@ -387,31 +439,45 @@ final class TreeMirror {
                               @NotNull BasicFileAttributes sourceAttrs,
                               @NotNull Path target,
                               boolean copyOnDstStatError) throws IOException {
-        // Single stat for the destination: one readAttributes fetches
-        // mtime + size together instead of a separate exists +
-        // getLastModifiedTime + size. This runs once per source file, so
-        // on a large multi-module sync the saved syscalls add up.
-        BasicFileAttributes dstAttrs;
+        BasicFileAttributes dstAttrs = destinationAttributes(target, copyOnDstStatError);
+        return dstAttrs == null || shouldCopy(sourceAttrs, dstAttrs);
+    }
+
+    /**
+     * The destination's attributes, or {@code null} meaning "copy": it is absent,
+     * or — with {@code copyOnDstStatError} — unreadable. A stat failure without
+     * that flag propagates so the engine's per-file catch skips the file.
+     */
+    @Nullable
+    static BasicFileAttributes destinationAttributes(@NotNull Path target,
+                                                     boolean copyOnDstStatError) throws IOException {
         try {
-            dstAttrs = Files.readAttributes(target, BasicFileAttributes.class);
+            return Files.readAttributes(target, BasicFileAttributes.class);
         } catch (NoSuchFileException missing) {
-            return true;
+            return null;
         } catch (IOException e) {
-            if (copyOnDstStatError) {
-                // Can't read the destination — prefer to copy (safer than
-                // leaving stale code).
-                return true;
-            }
+            if (copyOnDstStatError) return null;
             throw e;
         }
+    }
+
+    /** Pure gate on attributes already in hand: source newer, or a different size, means copy. */
+    static boolean shouldCopy(@NotNull BasicFileAttributes sourceAttrs, @NotNull BasicFileAttributes dstAttrs) {
         if (sourceAttrs.lastModifiedTime().toMillis() > dstAttrs.lastModifiedTime().toMillis()) {
             return true;
         }
-        // Size-tiebreaker for the equal-or-older mtime case. We don't care about
-        // a "src is older than dst" scenario — that would mean the user reverted
-        // a file, and overwriting with the older version is fine. So: if mtimes
-        // match exactly and sizes differ, copy. This also catches a second edit
-        // landing within the filesystem's mtime resolution.
         return sourceAttrs.size() != dstAttrs.size();
+    }
+
+    /** Entry names of {@code dir} from one readdir; empty when it is not a readable directory. */
+    @NotNull
+    static Set<String> listNames(@NotNull Path dir) {
+        Set<String> names = new HashSet<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
+            for (Path entry : stream) names.add(entry.getFileName().toString());
+        } catch (IOException | RuntimeException e) {
+            return Collections.emptySet();
+        }
+        return names;
     }
 }

@@ -497,6 +497,9 @@ public final class DeployedClassesSync {
         // would keep getting resolved by the classloader and the user sees
         // "I deleted that class, why is it still here" behaviour.
         java.util.Set<String> contributedPaths = new java.util.HashSet<>();
+        // Read after dropStaleJarOverlays so the stamps reflect its deletions.
+        Map<String, SyncManifest.Stamp> recordedStamps = SyncManifest.readStamped(syncManifest);
+        Map<String, SyncManifest.Stamp> currentStamps = new java.util.HashMap<>();
         // Tracks whether EVERY source root's walk fully enumerated its
         // contribution. If any root's walk failed (vanished source, nesting
         // refusal, unreadable subtree, aborted walk), contributedPaths is an
@@ -523,7 +526,8 @@ public final class DeployedClassesSync {
                 }
             }
             TreeMirror.MirrorResult mr =
-                    mirrorTree(src.path(), webInfClasses, classesOnly, jarMtimeFloor);
+                    mirrorTree(src.path(), webInfClasses, classesOnly, jarMtimeFloor, recordedStamps);
+            currentStamps.putAll(mr.stamps());
             if (coveringJar != null && !coveringJarStamp.isUnknown()
                     && !mr.contributedPaths().isEmpty()) {
                 String jarRel = WEB_INF_LIB_PATH + "/" + coveringJar;
@@ -570,8 +574,9 @@ public final class DeployedClassesSync {
             // build assembles from a root the module resolver doesn't enumerate
             // — is NOT in the manifest and is never deleted, so we can't strip a
             // legitimately-deployed class and cause ClassNotFoundException.
-            orphansRemovedForThisArtifact = SyncManifest.reconcile(
-                    webInfClasses, syncManifest, contributedPaths, jarCoverage);
+            orphansRemovedForThisArtifact = SyncManifest.reconcileStamped(
+                    webInfClasses, syncManifest, stampsFor(contributedPaths, currentStamps), jarCoverage)
+                    .removed();
             if (orphansRemovedForThisArtifact > 0) {
                 logger.logServerInfo("Class sync: removed " + orphansRemovedForThisArtifact
                         + " stale class file(s) from '" + name
@@ -583,8 +588,8 @@ public final class DeployedClassesSync {
             // a class edited during a deferred run could never be cleaned
             // once removed from source (stale stamp = a permanently
             // loadable stale class, the exact bug this manifest fixes).
-            SyncManifest.refresh(
-                    webInfClasses, syncManifest, contributedPaths, jarCoverage);
+            SyncManifest.refreshStamped(
+                    webInfClasses, syncManifest, stampsFor(contributedPaths, currentStamps), jarCoverage);
         }
         if (brokenForThisArtifact > 0) {
             // CRITICAL warning — this is the symptom that caused the user-
@@ -1415,6 +1420,13 @@ public final class DeployedClassesSync {
      */
     static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst,
                                               boolean classesOnly, long sourceMtimeFloorMillis) {
+        return mirrorTree(src, dst, classesOnly, sourceMtimeFloorMillis, null);
+    }
+
+    /** {@code recordedStamps}: the manifest's stamps, letting an up-to-date file skip its destination stat. */
+    static TreeMirror.MirrorResult mirrorTree(@NotNull Path src, @NotNull Path dst,
+                                              boolean classesOnly, long sourceMtimeFloorMillis,
+                                              @Nullable Map<String, SyncManifest.Stamp> recordedStamps) {
         return TreeMirror.mirrorTree(src, dst, new TreeMirror.Policy(
                 "Class sync",
                 Set.of(),
@@ -1428,7 +1440,17 @@ public final class DeployedClassesSync {
                 // Generic failure stat-ing the destination: copy anyway
                 // (safer than leaving stale code).
                 true,
-                sourceMtimeFloorMillis));
+                sourceMtimeFloorMillis,
+                recordedStamps));
+    }
+
+    /** Every contributed path with its known stamp; {@link SyncManifest.Stamp#UNKNOWN} where the mirror had none. */
+    @NotNull
+    static Map<String, SyncManifest.Stamp> stampsFor(@NotNull Set<String> contributed,
+                                                     @NotNull Map<String, SyncManifest.Stamp> known) {
+        Map<String, SyncManifest.Stamp> out = new java.util.HashMap<>(Math.max(16, contributed.size() * 2));
+        for (String rel : contributed) out.put(rel, known.getOrDefault(rel, SyncManifest.Stamp.UNKNOWN));
+        return out;
     }
 
     /**
