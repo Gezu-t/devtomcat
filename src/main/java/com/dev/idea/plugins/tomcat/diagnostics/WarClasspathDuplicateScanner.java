@@ -35,37 +35,27 @@ import java.util.zip.ZipFile;
  * <h2>What counts as benign</h2>
  *
  * <p>Many paths legitimately appear in many JARs and are NOT classpath bugs.
- * The scanner filters these out so the warning only fires on real concerns:
+ * The scanner filters these out with three rules grounded in the JAR, JPMS and
+ * Java-language specifications — never in any library's file names:
  *
  * <ul>
- *   <li><b>JAR housekeeping</b>: {@code META-INF/MANIFEST.MF},
- *       {@code META-INF/INDEX.LIST}, {@code META-INF/DEPENDENCIES} — every JAR
- *       has its own copy by convention.</li>
- *   <li><b>License / notice files</b>: {@code META-INF/LICENSE*},
- *       {@code META-INF/NOTICE*}, {@code META-INF/README*} — each JAR ships
- *       its own attribution.</li>
- *   <li><b>{@code ServiceLoader} entries</b>: {@code META-INF/services/*} —
- *       the Java spec mandates multiple JARs can contribute and they are
- *       merged at runtime.</li>
- *   <li><b>Multi-release JAR overrides</b>: {@code META-INF/versions/*} — the
- *       same logical class compiled for different JVM versions, selected by
- *       the runtime; not a true duplicate.</li>
- *   <li><b>Per-artifact metadata</b>: {@code META-INF/maven/*} — every JAR
- *       carries its own Maven coordinate, by definition unique per JAR.</li>
- *   <li><b>Spec-allowed multi-instance descriptors</b>:
- *       {@code META-INF/persistence.xml}, {@code META-INF/orm.xml},
- *       {@code META-INF/beans.xml}, {@code META-INF/web-fragment.xml} — the
- *       JPA / CDI / Servlet specs explicitly allow multiple instances.</li>
- *   <li><b>Configuration discovery files commonly merged at runtime</b>:
- *       {@code META-INF/spring.factories}, {@code META-INF/spring/*} (Spring
- *       Boot auto-configuration entries are by design assembled across
- *       multiple JARs).</li>
- *   <li><b>Native + GraalVM bindings</b>: {@code META-INF/native/*},
- *       {@code META-INF/native-image/*} — per-platform/per-image artifacts.</li>
- *   <li><b>{@code package-info.class}</b>: legitimately appears in any JAR
- *       that contributes to a split package.</li>
- *   <li><b>{@code module-info.class}</b>: per-JAR JPMS descriptor, never a
- *       collision.</li>
+ *   <li><b>Metadata under {@code META-INF/} that is not a class</b>: the JAR
+ *       spec reserves {@code META-INF/} for per-JAR metadata, and that is
+ *       where every convention that is duplicated <em>by design</em> lives —
+ *       manifests, licences and notices, Maven coordinates,
+ *       {@code ServiceLoader} entries (merged at runtime by spec),
+ *       spec-allowed multi-instance descriptors (persistence, CDI beans,
+ *       web fragments), native and native-image bindings, and every
+ *       framework's own configuration-discovery files, whatever it calls
+ *       them. Treating the whole area as mergeable is what keeps this rule
+ *       complete for libraries the plugin has never heard of.</li>
+ *   <li><b>Multi-release overrides</b>: {@code META-INF/versions/*} — the same
+ *       logical class compiled for different JVM versions, selected by the
+ *       runtime; the one place a {@code .class} under {@code META-INF/} is
+ *       expected.</li>
+ *   <li><b>JPMS and package descriptors</b>: {@code module-info.class} is a
+ *       per-JAR descriptor; {@code package-info.class} legitimately appears
+ *       in every JAR contributing to a split package.</li>
  * </ul>
  *
  * <p>What survives the filter: application-level configuration files (XML,
@@ -93,56 +83,11 @@ public final class WarClasspathDuplicateScanner {
     private static final String CLASSES_LOCATION_LABEL = "WEB-INF/classes/";
     private static final String LIB_LOCATION_PREFIX = "WEB-INF/lib/";
 
-    /**
-     * Exact paths whose duplication across the classpath is universally
-     * expected. Match by full string equality, case-sensitive (JAR entries
-     * are case-sensitive per the spec).
-     */
-    private static final Set<String> BENIGN_EXACT_PATHS = Set.of(
-            "META-INF/MANIFEST.MF",
-            "META-INF/INDEX.LIST",
-            "META-INF/DEPENDENCIES",
-            "META-INF/persistence.xml",
-            "META-INF/orm.xml",
-            "META-INF/beans.xml",
-            "META-INF/web-fragment.xml",
-            "META-INF/jandex.idx",
-            "META-INF/io.netty.versions.properties",
-            "META-INF/spring.factories",
-            "META-INF/spring.handlers",
-            "META-INF/spring.schemas",
-            "META-INF/spring.tooling",
-            "META-INF/additional-spring-configuration-metadata.json",
-            "META-INF/spring-configuration-metadata.json",
-            "META-INF/spring-autoconfigure-metadata.properties",
-            "META-INF/spring-devtools.properties",
-            "module-info.class"
-    );
-
-    /**
-     * Path prefixes whose entries are universally expected to coexist across
-     * multiple JARs. Match by {@code String#startsWith}, case-sensitive.
-     */
-    private static final List<String> BENIGN_PREFIXES = List.of(
-            "META-INF/services/",       // ServiceLoader spec — merged
-            "META-INF/maven/",          // per-JAR Maven coordinate
-            "META-INF/versions/",       // multi-release JAR overrides
-            "META-INF/native/",         // native library bindings
-            "META-INF/native-image/",   // GraalVM hints
-            "META-INF/spring/",         // Spring Boot 3+ auto-config — merged
-            "META-INF/LICENSE",         // LICENSE, LICENSE.txt, LICENSE.md, etc.
-            "META-INF/NOTICE",          // NOTICE variants
-            "META-INF/README",          // README variants
-            "META-INF/proguard/"        // proguard configs per artifact
-    );
-
-    /**
-     * Path suffixes whose entries are universally expected to coexist across
-     * multiple JARs.
-     */
-    private static final List<String> BENIGN_SUFFIXES = List.of(
-            "/package-info.class"       // split-package contributions
-    );
+    private static final String META_INF = "META-INF/";
+    private static final String MULTI_RELEASE = "META-INF/versions/";
+    private static final String CLASS_EXT = ".class";
+    private static final String MODULE_DESCRIPTOR = "module-info.class";
+    private static final String PACKAGE_DESCRIPTOR = "package-info.class";
 
     private WarClasspathDuplicateScanner() {}
 
@@ -232,13 +177,9 @@ public final class WarClasspathDuplicateScanner {
      * Visible for testing.
      */
     static boolean isBenign(@NotNull String relPath) {
-        if (BENIGN_EXACT_PATHS.contains(relPath)) return true;
-        for (String prefix : BENIGN_PREFIXES) {
-            if (relPath.startsWith(prefix)) return true;
-        }
-        for (String suffix : BENIGN_SUFFIXES) {
-            if (relPath.endsWith(suffix)) return true;
-        }
-        return false;
+        if (relPath.startsWith(MULTI_RELEASE)) return true;
+        if (relPath.startsWith(META_INF)) return !relPath.endsWith(CLASS_EXT);
+        if (relPath.equals(MODULE_DESCRIPTOR)) return true;
+        return relPath.equals(PACKAGE_DESCRIPTOR) || relPath.endsWith("/" + PACKAGE_DESCRIPTOR);
     }
 }

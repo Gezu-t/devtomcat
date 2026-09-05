@@ -369,14 +369,16 @@ class WarClasspathDuplicateScannerTest {
         }
 
         @Test
-        @DisplayName("prefix matches: services, maven, versions, native, native-image, spring, LICENSE, NOTICE")
+        @DisplayName("any non-class metadata under META-INF/ is mergeable, whoever put it there")
         void prefixes() {
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/services/com.example.Foo"));
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/maven/group/artifact/pom.xml"));
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/versions/17/com/example/Bar.class"));
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/native/libfoo.so"));
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/native-image/reflect-config.json"));
-            assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/spring/AutoConfig.imports"));
+            assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/app/config.imports"));
+            // A name the plugin has never seen must be covered too — that is the point of a rule.
+            assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/some.library.discovery.properties"));
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/LICENSE.txt"));
             assertTrue(WarClasspathDuplicateScanner.isBenign("META-INF/NOTICE"));
         }
@@ -394,9 +396,11 @@ class WarClasspathDuplicateScannerTest {
             assertFalse(WarClasspathDuplicateScanner.isBenign("com/example/Foo.class"));
             assertFalse(WarClasspathDuplicateScanner.isBenign("config/app.xml"));
             assertFalse(WarClasspathDuplicateScanner.isBenign("app.properties"));
+            // A class under META-INF/ outside versions/ is a real collision, not metadata.
+            assertFalse(WarClasspathDuplicateScanner.isBenign("META-INF/com/example/Foo.class"));
             assertFalse(WarClasspathDuplicateScanner.isBenign("mappings/User.xml"));
             // Adjacent-but-not-prefix paths are NOT benign — defensive against the
-            // BENIGN_PREFIXES list accidentally swallowing application files
+            // the META-INF rule accidentally swallowing application files
             // whose paths happen to start with the same letters as a metadata path.
             assertFalse(WarClasspathDuplicateScanner.isBenign("META-INF-extra/app.xml"));
         }
