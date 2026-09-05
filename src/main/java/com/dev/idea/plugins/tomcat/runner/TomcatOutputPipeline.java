@@ -691,14 +691,14 @@ public final class TomcatOutputPipeline {
     static final class ErrorWarningAnalyzer implements Analyzer {
         // The level token must appear in a recognisable log-line position — not
         // anywhere on the line. A bare \b(SEVERE|ERROR|FATAL)\b match (the old
-        // rule) misclassified informational lines that mention level names as
-        // config values, e.g. Liquibase's
-        //   "To fail when duplicates are found, set liquibase.duplicateFileMode=ERROR"
+        // rule) misclassified informational lines that merely mention a level
+        // name — typically a configuration hint whose text ends in a value, e.g.
+        //   "To fail on duplicates, set some.library.mode=ERROR"
         // The shapes we recognise:
         //   1. Prefix:        "SEVERE: msg"               (JUL default for Tomcat)
-        //   2. Bracketed:     "[ERROR] msg"               (logback/log4j bracket layout)
+        //   2. Bracketed:     "[ERROR] msg"               (bracket layouts)
         //   3. In-layout:     "... ERROR - msg", "... ERROR [thread] msg",
-        //                     "... ERROR --- [thread] ..." (Spring Boot)
+        //                     "... ERROR --- [thread] ..." (dash-separated layouts)
         //   4. Stack frame:   "Caused by: ...", "java.x.YException: ..."
         //
         // Bracketed levels (shape 2) are handled by leadingBracketLevel(), NOT by

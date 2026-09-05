@@ -243,13 +243,13 @@ class BcelModuleInfoCompatTest {
             // First run appends.
             JarSkipListInjector.Outcome first =
                     BcelModuleInfoCompat.applyModuleInfoSkipToCatalinaProperties(
-                            tempDir, List.of("jackson-core-2.17.0.jar"), null);
+                            tempDir, List.of("lib-alpha-2.17.0.jar"), null);
             assertEquals(JarSkipListInjector.Outcome.APPENDED, first);
 
             // Second run with the same input is a no-op (already covered).
             JarSkipListInjector.Outcome second =
                     BcelModuleInfoCompat.applyModuleInfoSkipToCatalinaProperties(
-                            tempDir, List.of("jackson-core-2.17.0.jar"), null);
+                            tempDir, List.of("lib-alpha-2.17.0.jar"), null);
             assertEquals(JarSkipListInjector.Outcome.ALREADY_COVERED, second);
         }
 

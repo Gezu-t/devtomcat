@@ -25,9 +25,10 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.DIR_TEMP;
  * <b>only from {@code conf/server.xml}</b> connectors, which DevTomcat
  * regenerates per launch via {@link ServerXmlMutator}. The following
  * {@code -D} flags are <b>intentionally not set</b> because they are
- * either Spring Boot configuration ({@code -Dserver.port},
- * {@code -Dserver.shutdown.port}) or made-up names that no Tomcat
- * release reads ({@code -Dtomcat.https.port}):
+ * either embedded-server framework configuration ({@code -Dserver.port},
+ * {@code -Dserver.shutdown.port} — read by a framework's own server, never
+ * by Catalina) or made-up names that no Tomcat release reads
+ * ({@code -Dtomcat.https.port}):
  * <ul>
  *   <li>Setting them on a standalone Tomcat JVM has zero effect on the
  *       bound ports — the configuration came from server.xml.</li>

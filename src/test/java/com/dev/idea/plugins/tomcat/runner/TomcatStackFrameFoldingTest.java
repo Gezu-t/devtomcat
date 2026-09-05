@@ -135,16 +135,16 @@ class TomcatStackFrameFoldingTest {
             assertFalse(folding.shouldFoldLine(project,
                     "\tat org.apache.http.client.HttpClient.execute(HttpClient.java:55)"));
             assertFalse(folding.shouldFoldLine(project,
-                    "\tat org.apache.kafka.clients.producer.KafkaProducer.send(KafkaProducer.java:912)"));
+                    "\tat org.apache.somelib.client.Producer.send(Producer.java:912)"));
         }
 
         @Test
-        @DisplayName("framework frames (Spring, Hibernate)")
+        @DisplayName("framework frames (third-party libraries)")
         void frameworkFrames() {
             assertFalse(folding.shouldFoldLine(project,
-                    "\tat org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1067)"));
+                    "\tat org.example.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1067)"));
             assertFalse(folding.shouldFoldLine(project,
-                    "\tat org.hibernate.engine.spi.AbstractEntityPersister.load(AbstractEntityPersister.java:1234)"));
+                    "\tat org.example.orm.engine.EntityPersister.load(EntityPersister.java:1234)"));
         }
 
         @Test

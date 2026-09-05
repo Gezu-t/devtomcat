@@ -613,7 +613,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
             // ordering deterministic.
             //
             // Scope is GlobalSearchScope.allScope so users can navigate into
-            // framework code (Spring, Hibernate, Tomcat itself) — these are
+            // framework code (web/ORM libraries, Tomcat itself) — these are
             // the most common destinations in a Tomcat stack trace, not the
             // user's own classes. Restricting to project source would defeat
             // the point.

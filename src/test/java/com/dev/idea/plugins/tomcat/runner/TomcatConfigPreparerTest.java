@@ -327,12 +327,12 @@ class TomcatConfigPreparerTest {
             Path catalinaBase = tempDir.resolve("base");
             Path tempPath = catalinaBase.resolve("temp");
             Files.createDirectories(tempPath);
-            Path ehcacheDir = Files.createDirectory(tempPath.resolve("ehcache-data"));
-            Files.writeString(ehcacheDir.resolve(".lock"), "");
+            Path cacheDir = Files.createDirectory(tempPath.resolve("cache-data"));
+            Files.writeString(cacheDir.resolve(".lock"), "");
 
             TomcatConfigPreparer.cleanStaleTempState(catalinaBase);
 
-            assertFalse(Files.exists(ehcacheDir), "Stale ehcache directory should be removed");
+            assertFalse(Files.exists(cacheDir), "Stale cache directory should be removed");
         }
 
         @Test

@@ -15,10 +15,10 @@ class LibraryArtifactNamesTest {
         assertAll(
                 () -> assertEquals("commons-lang3",
                         LibraryArtifactNames.libraryArtifactKey("commons-lang3-3.12.0.jar")),
-                () -> assertEquals("log4j-api",
-                        LibraryArtifactNames.libraryArtifactKey("log4j-api-2.20.0.jar")),
-                () -> assertEquals("spring-webmvc",
-                        LibraryArtifactNames.libraryArtifactKey("spring-webmvc-6.2.3.jar"))
+                () -> assertEquals("some-api",
+                        LibraryArtifactNames.libraryArtifactKey("some-api-2.20.0.jar")),
+                () -> assertEquals("app-web",
+                        LibraryArtifactNames.libraryArtifactKey("app-web-6.2.3.jar"))
         );
     }
 
@@ -62,8 +62,8 @@ class LibraryArtifactNamesTest {
         assertAll(
                 () -> assertEquals("foo",
                         LibraryArtifactNames.libraryArtifactKey("foo.jar")),
-                () -> assertEquals("spring-boot-starter",
-                        LibraryArtifactNames.libraryArtifactKey("spring-boot-starter.jar"))
+                () -> assertEquals("app-starter",
+                        LibraryArtifactNames.libraryArtifactKey("app-starter.jar"))
         );
     }
 

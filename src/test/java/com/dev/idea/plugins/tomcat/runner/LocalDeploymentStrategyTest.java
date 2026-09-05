@@ -190,7 +190,7 @@ class LocalDeploymentStrategyTest {
         @DisplayName("union does not flag application libraries or JSTL")
         void unionAllowsAppLibraries() {
             java.util.Set<String> libKeys = java.util.Set.of("catalina", "tomcat-coyote");
-            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar", libKeys));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-core-6.2.3.jar", libKeys));
             assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
                     "jakarta.servlet.jsp.jstl-3.0.1.jar", libKeys));
         }
@@ -226,7 +226,7 @@ class LocalDeploymentStrategyTest {
         @Test
         @DisplayName("does not flag regular application libraries")
         void allowsApplicationLibraries() {
-            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar"));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-core-6.2.3.jar"));
             assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("my-company-shared.jar"));
         }
 
@@ -345,13 +345,13 @@ class LocalDeploymentStrategyTest {
             // This sweep covers libraries that frequently appear in WEB-INF/lib
             // and could collide with a too-broad container prefix.
             assertAll(
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-core-6.2.3.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("spring-webmvc-6.2.3.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("hibernate-core-6.5.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("jackson-databind-2.17.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-core-6.2.3.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-web-6.2.3.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-orm-6.5.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-json-2.17.0.jar")),
                     () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("lombok-1.18.32.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("log4j-core-2.23.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("mysql-connector-j-8.4.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-logging-2.23.0.jar")),
+                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-jdbc-driver-8.4.0.jar")),
                     () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("commons-fileupload-1.5.jar")),
                     () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("commons-lang3-3.14.0.jar"))
             );
@@ -636,8 +636,8 @@ class LocalDeploymentStrategyTest {
         void tomcat7DoesNotCarryModularJarsInPerContextXml(@TempDir Path tempDir) throws Exception {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
-            writeJar(libDir.resolve("jackson-core-2.17.0.jar"),
-                    "com/fasterxml/jackson/core/JsonParser.class",
+            writeJar(libDir.resolve("lib-alpha-2.17.0.jar"),
+                    "com/example/lib/alpha/Parser.class",
                     "META-INF/versions/9/module-info.class");
             writeJar(libDir.resolve("commons-lang3-3.14.0.jar"),
                     "org/apache/commons/lang3/StringUtils.class");
@@ -654,7 +654,7 @@ class LocalDeploymentStrategyTest {
             String contextXml = LocalDeploymentStrategy.buildContextXml(
                     artifact, artifactPath, false, project, tomcat7, null);
 
-            assertFalse(contextXml.contains("jackson-core-2.17.0.jar"),
+            assertFalse(contextXml.contains("lib-alpha-2.17.0.jar"),
                     "Modular JAR must NOT be in per-context XML on Tomcat 7 (the rule for "
                             + "Context/JarScanner/JarScanFilter does not exist there). XML:\n" + contextXml);
             assertFalse(contextXml.contains("commons-lang3-3.14.0.jar"),
@@ -666,7 +666,7 @@ class LocalDeploymentStrategyTest {
         void tomcat11DoesNotCarryModularJars(@TempDir Path tempDir) throws Exception {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
-            writeJar(libDir.resolve("jackson-core-2.17.0.jar"),
+            writeJar(libDir.resolve("lib-alpha-2.17.0.jar"),
                     "META-INF/versions/9/module-info.class");
 
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
@@ -681,7 +681,7 @@ class LocalDeploymentStrategyTest {
             String contextXml = LocalDeploymentStrategy.buildContextXml(
                     artifact, artifactPath, false, project, tomcat11, null);
 
-            assertFalse(contextXml.contains("jackson-core-2.17.0.jar"),
+            assertFalse(contextXml.contains("lib-alpha-2.17.0.jar"),
                     "Tomcat 11 has no BCEL bug; modular JAR must remain scannable. XML:\n" + contextXml);
         }
 
@@ -690,7 +690,7 @@ class LocalDeploymentStrategyTest {
         void boundaryViaXmlOnly(@TempDir Path tempDir) throws Exception {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
-            writeJar(libDir.resolve("byte-buddy-1.14.9.jar"),
+            writeJar(libDir.resolve("lib-gamma-1.14.9.jar"),
                     "META-INF/versions/9/module-info.class");
 
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
@@ -705,7 +705,7 @@ class LocalDeploymentStrategyTest {
                                 "Tomcat 9", version, "/opt/tomcat-9");
                 String xml = LocalDeploymentStrategy.buildContextXml(
                         artifact, artifactPath, false, project, info, null);
-                assertFalse(xml.contains("byte-buddy-1.14.9.jar"),
+                assertFalse(xml.contains("lib-gamma-1.14.9.jar"),
                         "Tomcat " + version + " must not carry modular JARs in per-context XML. XML:\n" + xml);
             }
         }

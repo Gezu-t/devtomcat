@@ -62,20 +62,15 @@ public final class DynamicTomcatEnvironment {
 
     /**
      * Detects environment mode using priority chain:
-     * system property → Spring profile → env var → Registry → DEVELOPMENT.
+     * system property → env var → Registry → DEVELOPMENT. Only the plugin's own
+     * switches are consulted; no framework's profile property is read.
      */
     @NotNull
     public static EnvironmentMode getCurrentMode() {
         String sysProp = System.getProperty("tomcat.environment");
         if (!StringUtil.isEmpty(sysProp)) return EnvironmentMode.fromString(sysProp);
 
-        String springProfiles = System.getProperty("spring.profiles.active");
-        if (!StringUtil.isEmpty(springProfiles)) return EnvironmentMode.fromString(springProfiles);
-
         String envVar = System.getenv("TOMCAT_ENV");
-        if (!StringUtil.isEmpty(envVar)) return EnvironmentMode.fromString(envVar);
-
-        envVar = System.getenv("SPRING_PROFILES_ACTIVE");
         if (!StringUtil.isEmpty(envVar)) return EnvironmentMode.fromString(envVar);
 
         String registryMode = RegistryHelper.getString(REG_ENVIRONMENT_MODE, "");
@@ -144,9 +139,10 @@ public final class DynamicTomcatEnvironment {
     /**
      * Builds CATALINA_OPTS for standalone Tomcat.
      * Only includes properties that Tomcat's Catalina process actually uses.
-     * Spring Boot properties (-Dserver.port, -Dspring.profiles.active, etc.)
-     * are intentionally excluded — they have no effect on standalone Tomcat
-     * and mislead users into thinking they control Tomcat's port binding.
+     * Framework-level properties (application-server ports or profiles read by
+     * an embedded-server framework, not by Catalina) are intentionally excluded —
+     * they have no effect on standalone Tomcat and mislead users into thinking
+     * they control Tomcat's port binding.
      * Tomcat ports are configured via server.xml connectors.
      */
     @NotNull

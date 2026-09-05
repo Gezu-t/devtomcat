@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 
 import java.util.ArrayList;
@@ -319,7 +320,7 @@ class TomcatPreflightValidatorTest {
             Files.createDirectories(libDir);
             Files.createFile(libDir.resolve("guava-31.0.jar"));
             Files.createFile(libDir.resolve("slf4j-api-2.0.9.jar"));
-            Files.createFile(libDir.resolve("jackson-core-2.15.2.jar"));
+            Files.createFile(libDir.resolve("lib-alpha-2.15.2.jar"));
 
             List<PreflightIssue> issues = new ArrayList<>();
             TomcatPreflightValidator.checkDuplicateJarsInDirectory(libDir, "test-app", issues);
@@ -334,8 +335,8 @@ class TomcatPreflightValidatorTest {
             Files.createDirectories(libDir);
             Files.createFile(libDir.resolve("guava-30.1.jar"));
             Files.createFile(libDir.resolve("guava-31.0.jar"));
-            Files.createFile(libDir.resolve("jackson-core-2.14.0.jar"));
-            Files.createFile(libDir.resolve("jackson-core-2.15.2.jar"));
+            Files.createFile(libDir.resolve("lib-alpha-2.14.0.jar"));
+            Files.createFile(libDir.resolve("lib-alpha-2.15.2.jar"));
 
             List<PreflightIssue> issues = new ArrayList<>();
             TomcatPreflightValidator.checkDuplicateJarsInDirectory(libDir, "test-app", issues);
@@ -393,7 +394,7 @@ class TomcatPreflightValidatorTest {
         @Test
         @DisplayName("extracts base from SNAPSHOT JAR")
         void snapshotJar() {
-            assertEquals("spring-core", TomcatPreflightValidator.extractJarBaseName("spring-core-6.1.0-SNAPSHOT.jar"));
+            assertEquals("app-core", TomcatPreflightValidator.extractJarBaseName("app-core-6.1.0-SNAPSHOT.jar"));
         }
 
         @Test
@@ -411,13 +412,13 @@ class TomcatPreflightValidatorTest {
         @Test
         @DisplayName("handles JAR with three-part version")
         void threePartVersion() {
-            assertEquals("jackson-core", TomcatPreflightValidator.extractJarBaseName("jackson-core-2.15.2.jar"));
+            assertEquals("lib-alpha", TomcatPreflightValidator.extractJarBaseName("lib-alpha-2.15.2.jar"));
         }
 
         @Test
         @DisplayName("handles JAR with single-part version")
         void singlePartVersion() {
-            assertEquals("log4j", TomcatPreflightValidator.extractJarBaseName("log4j-1.jar"));
+            assertEquals("app-logging", TomcatPreflightValidator.extractJarBaseName("app-logging-1.jar"));
         }
 
         @Test
@@ -449,34 +450,94 @@ class TomcatPreflightValidatorTest {
             assertTrue(issues.isEmpty());
         }
 
-        @Test
-        @DisplayName("a target-side persistence path is not probed on this filesystem")
-        void persistencePathsSkippedWhenNotHostFilesystem(@TempDir Path tempDir) throws IOException {
-            Path dataDir = tempDir.resolve("derby-data");
-            Files.createDirectories(dataDir);
-            Path lockedFile = dataDir.resolve("db.lck");
-            Files.writeString(lockedFile, "locked data");
+        /** A mock has no config data, so getCatalinaBase is null and only the -D tier runs. */
+        private TomcatRunConfiguration noBase() {
+            return mock(TomcatRunConfiguration.class);
+        }
 
-            // A bare mock has no config data, so getCatalinaBase returns null and only
-            // the -D persistence loop can contribute issues here.
-            TomcatRunConfiguration config = mock(TomcatRunConfiguration.class);
-            Map<String, String> props = new LinkedHashMap<>();
-            props.put("derby.system.home", dataDir.toString());
+        private Map<String, String> props(String key, Path dir) {
+            Map<String, String> m = new LinkedHashMap<>();
+            m.put(key, dir.toString());
+            return m;
+        }
+
+        @Test
+        @DisplayName("any -D whose value names a directory is probed — the key is never consulted")
+        void anyDirectoryValuedPropertyIsProbed(@TempDir Path tempDir) throws IOException {
+            Path dataDir = tempDir.resolve("app-data");
+            Files.createDirectories(dataDir);
+            Path lockedFile = dataDir.resolve("store.lck");
+            Files.writeString(lockedFile, "locked data");
 
             try (FileChannel channel = FileChannel.open(lockedFile, StandardOpenOption.WRITE);
                  FileLock lock = channel.lock()) {
+                // A property name the plugin has never heard of.
+                List<PreflightIssue> issues = new ArrayList<>();
+                TomcatPreflightValidator.checkLockedPaths(noBase(), props("my.app.storage.dir", dataDir), issues, true);
 
-                // Host launch: this directory really is the one the JVM will open.
-                List<PreflightIssue> hostIssues = new ArrayList<>();
-                TomcatPreflightValidator.checkLockedPaths(config, props, hostIssues, true);
-                assertEquals(1, hostIssues.size(), hostIssues.toString());
+                assertEquals(1, issues.size(), issues.toString());
+                assertFalse(issues.get(0).isBlocking(), "inferred tier warns, never blocks");
+                assertTrue(issues.get(0).getMessage().contains("my.app.storage.dir"));
+                assertTrue(issues.get(0).getMessage().contains("store.lck"));
+            }
+        }
 
-                // Target launch: the value names a path over there. Probing this
-                // machine's namesake can block a launch over a directory the JVM
-                // will never open, so it must not be probed at all.
-                List<PreflightIssue> targetIssues = new ArrayList<>();
-                TomcatPreflightValidator.checkLockedPaths(config, props, targetIssues, false);
-                assertTrue(targetIssues.isEmpty(), targetIssues.toString());
+        @Test
+        @DisplayName("a -D naming a read-only directory never blocks the launch")
+        void inferredDirectoryNeverBlocks(@TempDir Path tempDir) throws IOException {
+            Path readOnly = tempDir.resolve("vendor-config");
+            Files.createDirectories(readOnly);
+            Files.writeString(readOnly.resolve("settings.cfg"), "x");
+            assumeTrue(readOnly.toFile().setWritable(false, false), "cannot make dir read-only here");
+            try {
+                List<PreflightIssue> issues = new ArrayList<>();
+                TomcatPreflightValidator.checkLockedPaths(noBase(), props("my.app.config.dir", readOnly), issues, true);
+
+                // The plugin cannot know the app only reads here; a permissions verdict
+                // would be a guess, and a blocking one. Owned dirs keep that check.
+                assertTrue(issues.stream().noneMatch(PreflightIssue::isBlocking), issues.toString());
+            } finally {
+                readOnly.toFile().setWritable(true, false);
+            }
+        }
+
+        @Test
+        @DisplayName("values that are not an existing absolute directory are ignored")
+        void nonDirectoryValuesIgnored(@TempDir Path tempDir) throws IOException {
+            Path file = tempDir.resolve("a.txt");
+            Files.writeString(file, "x");
+            Map<String, String> props = new LinkedHashMap<>();
+            props.put("p.file", file.toString());
+            props.put("p.missing", tempDir.resolve("nope").toString());
+            props.put("p.relative", "data");
+            props.put("p.empty", "");
+            props.put("p.flag", "true");
+            props.put("p.number", "8080");
+
+            List<PreflightIssue> issues = new ArrayList<>();
+            TomcatPreflightValidator.checkLockedPaths(noBase(), props, issues, true);
+            assertTrue(issues.isEmpty(), issues.toString());
+            assertNull(TomcatPreflightValidator.directoryNamedBy("data"));
+            assertNull(TomcatPreflightValidator.directoryNamedBy("8080"));
+        }
+
+        @Test
+        @DisplayName("when the JVM runs on another filesystem, -D directories are not probed here")
+        void inferredTierSkippedWhenNotHostFilesystem(@TempDir Path tempDir) throws IOException {
+            Path dataDir = tempDir.resolve("app-data");
+            Files.createDirectories(dataDir);
+            Path lockedFile = dataDir.resolve("store.lck");
+            Files.writeString(lockedFile, "locked data");
+
+            try (FileChannel channel = FileChannel.open(lockedFile, StandardOpenOption.WRITE);
+                 FileLock lock = channel.lock()) {
+                List<PreflightIssue> host = new ArrayList<>();
+                TomcatPreflightValidator.checkLockedPaths(noBase(), props("my.app.storage.dir", dataDir), host, true);
+                assertEquals(1, host.size());
+
+                List<PreflightIssue> target = new ArrayList<>();
+                TomcatPreflightValidator.checkLockedPaths(noBase(), props("my.app.storage.dir", dataDir), target, false);
+                assertTrue(target.isEmpty(), target.toString());
             }
         }
 
@@ -508,7 +569,7 @@ class TomcatPreflightValidatorTest {
         void detectsLockedInSubdir(@TempDir Path tempDir) throws IOException {
             Path tempSubDir = tempDir.resolve("temp/wcc-local/cache");
             Files.createDirectories(tempSubDir);
-            Path lockedFile = tempSubDir.resolve("ehcache.data");
+            Path lockedFile = tempSubDir.resolve("cache.data");
             Files.writeString(lockedFile, "cache");
 
             try (FileChannel channel = FileChannel.open(lockedFile,
@@ -520,7 +581,7 @@ class TomcatPreflightValidatorTest {
                         tempDir.resolve("temp"), "temp", issues);
 
                 assertEquals(1, issues.size());
-                assertTrue(issues.get(0).getMessage().contains("ehcache.data"));
+                assertTrue(issues.get(0).getMessage().contains("cache.data"));
             }
         }
 

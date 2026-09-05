@@ -121,7 +121,7 @@ final class JarSkipListInjector {
      * {@code CATALINA_BASE/conf/catalina.properties} with the given JARs.
      *
      * @param catalinaBase    the per-launch {@code CATALINA_BASE}
-     * @param jarsToSkip      JAR file names to add (e.g. {@code "jackson-core-2.17.0.jar"})
+     * @param jarsToSkip      JAR file names to add (e.g. {@code "some-lib-2.17.0.jar"})
      * @param reasonHeader    short human-readable explanation rendered in
      *                        the appendix's leading comment block; describes
      *                        why the skip is being applied so a user

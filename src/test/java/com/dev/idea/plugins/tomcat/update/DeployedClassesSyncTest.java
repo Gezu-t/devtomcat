@@ -627,9 +627,9 @@ class DeployedClassesSyncTest {
         @DisplayName("maps each JAR to its version-independent artifact key")
         void mapsJarsToKeys(@TempDir Path tmp) throws Exception {
             writeLibFile(tmp, "common-1.2.3.jar");
-            writeLibFile(tmp, "log4j-api-2.20.0.jar");
-            writeLibFile(tmp, "spring-boot-starter.jar"); // no version segment
-            assertEquals(Set.of("common", "log4j-api", "spring-boot-starter"),
+            writeLibFile(tmp, "lib-alpha-2.20.0.jar");
+            writeLibFile(tmp, "lib-starter.jar"); // no version segment
+            assertEquals(Set.of("common", "lib-alpha", "lib-starter"),
                     DeployedClassesSync.scanDeployedLibraryKeys(tmp));
         }
 
@@ -646,7 +646,7 @@ class DeployedClassesSyncTest {
         @DisplayName("scanDeployedLibraryJars maps each key to the deployed JAR's actual file name")
         void jarsMapKeepsActualFileNames(@TempDir Path tmp) throws Exception {
             writeLibFile(tmp, "common-1.2.3.jar");
-            writeLibFile(tmp, "log4j-api-2.20.0.jar");
+            writeLibFile(tmp, "lib-alpha-2.20.0.jar");
             writeLibFile(tmp, "notes.txt");
             // The VALUE must be the on-disk file name, not the key: the
             // covering-JAR floor stats WEB-INF/lib/<value>, and the manifest's
@@ -654,7 +654,7 @@ class DeployedClassesSyncTest {
             // both (unknown stamp -> no floor, no record).
             assertEquals(java.util.Map.of(
                             "common", "common-1.2.3.jar",
-                            "log4j-api", "log4j-api-2.20.0.jar"),
+                            "lib-alpha", "lib-alpha-2.20.0.jar"),
                     DeployedClassesSync.scanDeployedLibraryJars(tmp));
         }
 

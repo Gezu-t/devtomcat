@@ -14,6 +14,8 @@
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
+- Lock scan probes any -D directory, not a fixed list of library properties.
+- Environment mode reads only DevTomcat's own switches.
 - Launch-preparation console output no longer lost before the console opens.
 - Lock scan no longer probes target-side persistence paths on the host.
 - Preflight lock warnings name the actual directory, not always catalina.base.

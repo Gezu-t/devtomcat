@@ -7,10 +7,12 @@ import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
@@ -70,21 +72,6 @@ public final class TomcatPreflightValidator {
             "java.util.logging.config.file",
             "javax.net.ssl.keyStore",
             "javax.net.ssl.trustStore"
-    );
-
-    /**
-     * System properties that point to application-owned persistence/cache directories.
-     * If set by the user, these directories are scanned for held file locks during
-     * the locked-path check, since a previous Tomcat instance holding locks here is
-     * the most common cause of startup failures.
-     */
-    static final Set<String> PERSISTENCE_PATH_PROPERTIES = Set.of(
-            "ehcache.disk.store.dir",
-            "hazelcast.persistence.dir",
-            "java.io.tmpdir",
-            "derby.system.home",
-            "h2.baseDir",
-            "lucene.index.dir"
     );
 
     /** Maximum depth when walking directories for locked files. */
@@ -431,17 +418,23 @@ public final class TomcatPreflightValidator {
     // =========================================================================
 
     /**
-     * Checks for held file locks in two categories of directories:
+     * Checks for held file locks in two tiers of directories:
      * <ol>
-     *   <li>Tomcat-owned: catalina.base/{work, temp, logs}</li>
-     *   <li>App persistence: directories referenced by known persistence-related
-     *       {@code -D} properties (Ehcache, Derby, H2, etc.)</li>
+     *   <li><b>Owned</b> — {@code catalina.base/{work, temp, logs}}. Tomcat will write
+     *       here, so a missing, non-directory or read-only path is a launch-blocking
+     *       error, and locked files are a warning.</li>
+     *   <li><b>Inferred</b> — every user {@code -D} whose <em>value</em> names an existing
+     *       directory. The key is not consulted: which properties point at data, cache
+     *       or index directories is a fact about the application's libraries, not about
+     *       Tomcat, and no list of property names can stay complete. Because the plugin
+     *       cannot know whether the application writes there, this tier only ever
+     *       <em>warns</em> about locked files — never blocks on permissions.</li>
      * </ol>
      *
-     * <p>For each directory that exists, walks up to {@link #LOCK_SCAN_MAX_DEPTH} levels
-     * deep and probes up to {@link #LOCK_SCAN_MAX_FILES} regular files for exclusive locks.
-     * A file that cannot be locked is evidence that another process (typically a previous
-     * Tomcat instance) is still holding it.
+     * <p>For each directory, walks up to {@link #LOCK_SCAN_MAX_DEPTH} levels deep and
+     * probes up to {@link #LOCK_SCAN_MAX_FILES} regular files for exclusive locks. A file
+     * that cannot be locked is evidence that another process (typically a previous Tomcat
+     * instance) is still holding it.
      */
     static void checkLockedPaths(@NotNull TomcatRunConfiguration configuration,
                                  @NotNull Map<String, String> parsedProperties,
@@ -462,27 +455,40 @@ public final class TomcatPreflightValidator {
                                  @NotNull Map<String, String> parsedProperties,
                                  @NotNull List<PreflightIssue> issues,
                                  boolean hostFilesystem) {
+        Set<Path> owned = new LinkedHashSet<>();
         Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration);
         if (catalinaBase != null) {
-            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_WORK), "catalina.base/work", issues);
-            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_TEMP), "catalina.base/temp", issues);
-            scanDirectoryForLocks(catalinaBase.resolve(TomcatConstants.DIR_LOGS), "catalina.base/logs", issues);
+            for (String sub : new String[] {TomcatConstants.DIR_WORK, TomcatConstants.DIR_TEMP, TomcatConstants.DIR_LOGS}) {
+                Path dir = catalinaBase.resolve(sub);
+                owned.add(dir.toAbsolutePath().normalize());
+                scanDirectoryForLocks(dir, "catalina.base/" + sub, issues);
+            }
         }
 
         if (!hostFilesystem) return;
 
-        // Also scan application-owned persistence paths from VM properties
         for (Map.Entry<String, String> entry : parsedProperties.entrySet()) {
-            if (PERSISTENCE_PATH_PROPERTIES.contains(entry.getKey())) {
-                String value = entry.getValue();
-                if (!value.isEmpty()) {
-                    Path persistenceDir = Paths.get(value);
-                    if (Files.isDirectory(persistenceDir)) {
-                        scanDirectoryForLocks(persistenceDir,
-                                entry.getKey() + " (" + value + ")", issues);
-                    }
-                }
-            }
+            Path dir = directoryNamedBy(entry.getValue());
+            if (dir == null || owned.contains(dir)) continue;
+            probeLocks(dir, "-D" + entry.getKey() + " (" + entry.getValue() + ")", issues);
+        }
+    }
+
+    /**
+     * The existing directory a {@code -D} value names, or {@code null} when the value
+     * is empty, not a syntactically valid path here, or not a directory. Purely a
+     * shape test on the value — no property-name knowledge.
+     */
+    @Nullable
+    static Path directoryNamedBy(@NotNull String value) {
+        String v = stripQuotes(value.trim());
+        if (v.isEmpty()) return null;
+        try {
+            Path p = Paths.get(v);
+            if (!p.isAbsolute() || !Files.isDirectory(p)) return null;
+            return p.toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            return null;
         }
     }
 
@@ -521,7 +527,16 @@ public final class TomcatPreflightValidator {
             return;
         }
 
-        // Walk existing files and try to lock them
+        probeLocks(dir, dirName, issues);
+    }
+
+    /**
+     * Warning-only lock probe: walks {@code dir} and reports files another process
+     * holds. Safe to point at any directory — it never blocks the launch, which is
+     * what lets the inferred tier run on arbitrary {@code -D} values.
+     */
+    static void probeLocks(@NotNull Path dir, @NotNull String dirName,
+                           @NotNull List<PreflightIssue> issues) {
         List<String> lockedFiles = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(dir, LOCK_SCAN_MAX_DEPTH)) {
             Iterator<Path> it = walk
@@ -585,7 +600,7 @@ public final class TomcatPreflightValidator {
 
     /**
      * Extracts the base name from a JAR filename by stripping the version suffix.
-     * For example: "guava-31.0.1-jre.jar" → "guava", "slf4j-api-2.0.9.jar" → "slf4j-api".
+     * For example: "some-lib-1.2.3-jre.jar" → "some-lib", "other-api-2.0.9.jar" → "other-api".
      * If no version pattern is found, returns the full name (minus .jar).
      */
     static String extractJarBaseName(@NotNull String jarName) {

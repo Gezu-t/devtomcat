@@ -82,9 +82,8 @@ import java.util.zip.ZipFile;
  *       trigger the BCEL exception in the first place.</li>
  *   <li>{@code @WebServlet}, {@code @WebFilter}, etc. annotations on
  *       application code in {@code WEB-INF/classes} are still scanned. The
- *       skip applies only to the listed dependency JARs which historically
- *       do not declare such annotations (jackson, jaxb-api, byte-buddy,
- *       snakeyaml, etc.).</li>
+ *       skip applies only to the listed dependency JARs, which are the ones
+ *       that historically do not declare such annotations.</li>
  * </ul>
  *
  * @author Gezahegn Lemma (Gezu)

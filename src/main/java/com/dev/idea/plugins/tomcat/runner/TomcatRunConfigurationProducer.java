@@ -249,8 +249,8 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
         }
 
         // Convention fallbacks for web layouts with no WEB-INF marker that the
-        // structural finders above therefore miss (Spring Boot resource dirs,
-        // static-site roots).
+        // structural finders above therefore miss (framework resource-dir
+        // conventions, static-site roots).
         if (webRoots.isEmpty()) {
             webRoots.addAll(discoverConventionFallbackRoots(module));
         }
@@ -369,10 +369,10 @@ public class TomcatRunConfigurationProducer extends LazyRunConfigurationProducer
      * (no validation), which is why they run only after every structural source came
      * back empty.
      *
-     * <p>Spring Boot's {@code src/main/resources/static} is deliberately not probed
+     * <p>The {@code src/main/resources/static} convention is deliberately not probed
      * here: when it holds servable content {@code TomcatModuleUtils.findWebRoots}
-     * already discovers it (it is in the validated convention-path list), and a
-     * Spring Boot app on an external Tomcat serves static content from the classpath
+     * already discovers it (it is in the validated convention-path list), and an
+     * embedded-server-style app on an external Tomcat serves static content from the classpath
      * ({@code classpath:/static}, {@code /public}, {@code /META-INF/resources}), not
      * from a webapp docBase — so those are not meaningful docBase roots. (The former
      * source-root probe for them was dead regardless: it called

@@ -261,7 +261,7 @@ class DeployedClassesSyncScenariosTest {
 
         writeRaw(src.resolve("App.class"), "code".getBytes(StandardCharsets.UTF_8));
         writeRaw(src.resolve("messages.properties"), "greeting=hi".getBytes(StandardCharsets.UTF_8));
-        writeRaw(src.resolve("logback.xml"), "<configuration/>".getBytes(StandardCharsets.UTF_8));
+        writeRaw(src.resolve("app-logging.xml"), "<configuration/>".getBytes(StandardCharsets.UTF_8));
         writeRaw(src.resolve("application.yml"), "server: { port: 8080 }".getBytes(StandardCharsets.UTF_8));
         writeRaw(src.resolve("schema.json"), "{}".getBytes(StandardCharsets.UTF_8));
 
@@ -270,7 +270,7 @@ class DeployedClassesSyncScenariosTest {
         assertEquals(5, r.copied(), "all 5 (1 class + 4 resources) must mirror");
         assertEquals(0, r.brokenSkipped());
         assertTrue(Files.exists(dst.resolve("messages.properties")));
-        assertTrue(Files.exists(dst.resolve("logback.xml")));
+        assertTrue(Files.exists(dst.resolve("app-logging.xml")));
         assertTrue(Files.exists(dst.resolve("application.yml")));
         assertTrue(Files.exists(dst.resolve("schema.json")));
     }
@@ -415,7 +415,7 @@ class DeployedClassesSyncScenariosTest {
     // -----------------------------------------------------------------
     // Scenario 15: General broken-class contract.
     //
-    // The detector does not care what kind of class is broken — Spring
+    // The detector does not care what kind of class is broken — a framework
     // @Configuration, MyBatis mapper, EJB session bean, plain DAO,
     // framework hook, third-party library shim, the user's own helper.
     // Identical treatment: refuse to overwrite the deployed copy with a
@@ -750,12 +750,12 @@ class DeployedClassesSyncScenariosTest {
         String[] paths = {
                 "com/example/Service.class",
                 "messages.properties",
-                "logback-spring.xml",
+                "app-logging-profile.xml",
                 "application.yml",
                 "application.yaml",
                 "META-INF/MANIFEST.MF",
                 "META-INF/persistence.xml",
-                "META-INF/spring.factories",
+                "META-INF/app.factories",
                 "openapi.json",
                 "schema.graphql",
                 "static-data.csv",

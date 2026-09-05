@@ -245,7 +245,7 @@ class CatalinaScriptSupportTest {
         @Test
         @DisplayName("returns input unchanged for non-catalina commands")
         void leavesNonCatalinaUntouched() {
-            // A custom startup script that doesn't use catalina (e.g. a Spring
+            // A custom startup script that doesn't use catalina (e.g. a framework fat-jar
             // Boot fat-jar) must not have its arguments rewritten — JPDA is a
             // catalina-specific feature.
             List<String> input = List.of("java", "-jar", "myapp.jar");
@@ -364,7 +364,7 @@ class CatalinaScriptSupportTest {
         @Test
         @DisplayName("for non-catalina script: skips JPDA_* env vars but still sets JDWP/CATALINA/JAVA opts")
         void skipsJpdaEnvVarsForNonCatalinaScript() {
-            // A custom script using a non-catalina launcher (e.g. Spring Boot
+            // A custom script using a non-catalina launcher (e.g. an embedded-server
             // fat-jar) won't read JPDA_* — those vars are catalina-specific.
             // The generic CATALINA_OPTS/JAVA_OPTS path still applies because
             // any embedded catalina invocation downstream may pick them up.

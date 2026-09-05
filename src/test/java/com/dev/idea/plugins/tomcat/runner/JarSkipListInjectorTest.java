@@ -82,15 +82,15 @@ class JarSkipListInjectorTest {
                     "bootstrap.jar,tomcat-juli.jar,el-api.jar");
 
             JarSkipListInjector.Outcome outcome = JarSkipListInjector.applyToCatalinaProperties(
-                    base, List.of("jackson-core-2.17.0.jar", "snakeyaml-2.2.jar"), REASON, null);
+                    base, List.of("lib-alpha-2.17.0.jar", "lib-beta-2.2.jar"), REASON, null);
 
             assertEquals(JarSkipListInjector.Outcome.APPENDED, outcome);
             String merged = parsedProps(base).getProperty("tomcat.util.scan.DefaultJarScanner.jarsToSkip");
             assertTrue(merged.contains("bootstrap.jar"), "Existing entry preserved");
             assertTrue(merged.contains("tomcat-juli.jar"));
             assertTrue(merged.contains("el-api.jar"));
-            assertTrue(merged.contains("jackson-core-2.17.0.jar"), "New JAR appended");
-            assertTrue(merged.contains("snakeyaml-2.2.jar"));
+            assertTrue(merged.contains("lib-alpha-2.17.0.jar"), "New JAR appended");
+            assertTrue(merged.contains("lib-beta-2.2.jar"));
             assertTrue(readProps(base).contains("some.unrelated.property=preserved"),
                     "Unrelated lines preserved");
         }
@@ -120,15 +120,15 @@ class JarSkipListInjectorTest {
                     "# Custom\nfoo=bar\n");
 
             JarSkipListInjector.Outcome outcome = JarSkipListInjector.applyToCatalinaProperties(
-                    tempDir, List.of("snakeyaml-2.2.jar"), REASON, null);
+                    tempDir, List.of("lib-beta-2.2.jar"), REASON, null);
 
             assertEquals(JarSkipListInjector.Outcome.APPENDED, outcome);
             Properties p = parsedProps(tempDir);
             assertTrue(p.getProperty("tomcat.util.scan.StandardJarScanFilter.jarsToSkip", "")
-                            .contains("snakeyaml-2.2.jar"),
+                            .contains("lib-beta-2.2.jar"),
                     "StandardJarScanFilter property added");
             assertTrue(p.getProperty("tomcat.util.scan.DefaultJarScanner.jarsToSkip", "")
-                            .contains("snakeyaml-2.2.jar"),
+                            .contains("lib-beta-2.2.jar"),
                     "DefaultJarScanner property added");
         }
     }
@@ -143,7 +143,7 @@ class JarSkipListInjectorTest {
             Path base = setupBase(tempDir,
                     "tomcat.util.scan.DefaultJarScanner.jarsToSkip",
                     "tomcat-juli.jar");
-            List<String> jars = List.of("jackson-core-2.17.0.jar", "byte-buddy-1.14.9.jar");
+            List<String> jars = List.of("lib-alpha-2.17.0.jar", "lib-gamma-1.14.9.jar");
 
             JarSkipListInjector.applyToCatalinaProperties(base, jars, REASON, null);
             String first = readProps(base);
@@ -166,17 +166,17 @@ class JarSkipListInjectorTest {
                     "tomcat-juli.jar");
 
             JarSkipListInjector.applyToCatalinaProperties(
-                    base, List.of("jackson-core-2.17.0.jar"), REASON, null);
+                    base, List.of("lib-alpha-2.17.0.jar"), REASON, null);
 
             JarSkipListInjector.Outcome second = JarSkipListInjector.applyToCatalinaProperties(
-                    base, List.of("jackson-core-2.17.0.jar", "snakeyaml-2.2.jar"), REASON, null);
+                    base, List.of("lib-alpha-2.17.0.jar", "lib-beta-2.2.jar"), REASON, null);
             assertEquals(JarSkipListInjector.Outcome.REFRESHED, second);
 
             String content = readProps(base);
             assertEquals(1, countOccurrences(content, JarSkipListInjector.APPENDIX_MARKER),
                     "Appendix is replaced in place, not duplicated");
-            assertTrue(content.contains("snakeyaml-2.2.jar"));
-            assertTrue(content.contains("jackson-core-2.17.0.jar"));
+            assertTrue(content.contains("lib-beta-2.2.jar"));
+            assertTrue(content.contains("lib-alpha-2.17.0.jar"));
         }
 
         @Test
@@ -251,7 +251,7 @@ class JarSkipListInjectorTest {
             Files.writeString(conf.resolve("catalina.properties"), original);
 
             JarSkipListInjector.applyToCatalinaProperties(
-                    tempDir, List.of("snakeyaml-2.2.jar"), REASON, null);
+                    tempDir, List.of("lib-beta-2.2.jar"), REASON, null);
 
             String after = readProps(tempDir);
             int markerIdx = after.indexOf(JarSkipListInjector.APPENDIX_MARKER);
@@ -263,7 +263,7 @@ class JarSkipListInjectorTest {
             assertTrue(merged.contains("bootstrap.jar"),
                     "Continuation-line entry preserved in merged value");
             assertTrue(merged.contains("tomcat-juli.jar"));
-            assertTrue(merged.contains("snakeyaml-2.2.jar"));
+            assertTrue(merged.contains("lib-beta-2.2.jar"));
         }
 
         @Test
@@ -324,7 +324,7 @@ class JarSkipListInjectorTest {
             TomcatDeploymentLogger logger = org.mockito.Mockito.mock(TomcatDeploymentLogger.class);
 
             JarSkipListInjector.applyToCatalinaProperties(
-                    base, List.of("jackson-core-2.17.0.jar"),
+                    base, List.of("lib-alpha-2.17.0.jar"),
                     "Module-info compatibility for Tomcat 7.", logger);
 
             org.mockito.Mockito.verify(logger).logServerInfo(

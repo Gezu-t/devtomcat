@@ -441,7 +441,7 @@ class TomcatOutputPipelineTest {
         @Test
         @DisplayName("ignores level keywords appearing as config values (e.g. set X=ERROR)")
         void ignoresConfigValueMentions() {
-            analyzer.analyze("To fail when duplicates are found, set liquibase.duplicateFileMode=ERROR", context);
+            analyzer.analyze("To fail on duplicates, set some.library.mode=ERROR", context);
             assertEquals(0, errorCount.get(), "=ERROR is a config value, not a log level");
             assertEquals(0, warningCount.get());
         }
@@ -455,17 +455,17 @@ class TomcatOutputPipelineTest {
         }
 
         @Test
-        @DisplayName("recognises logback dash-separator layout: 'ts ERROR - msg'")
+        @DisplayName("recognises dash-separator layout: 'ts ERROR - msg'")
         void recognisesLogbackDashLayout() {
             analyzer.analyze("2025-05-25 07:18:17.529 ERROR - Application run failed", context);
             assertEquals(1, errorCount.get());
         }
 
         @Test
-        @DisplayName("recognises Spring Boot triple-dash layout: 'ts ERROR --- [thread] logger : msg'")
-        void recognisesSpringBootLayout() {
+        @DisplayName("recognises triple-dash layout: 'ts ERROR --- [thread] logger : msg'")
+        void recognisesTripleDashLayout() {
             analyzer.analyze(
-                "2025-05-25 07:18:17.529 ERROR --- [main] o.s.b.SpringApplication : Application run failed",
+                "2025-05-25 07:18:17.529 ERROR --- [main] c.e.a.Application : Application run failed",
                 context);
             assertEquals(1, errorCount.get());
         }

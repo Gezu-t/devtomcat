@@ -134,14 +134,14 @@ class TomcatJavaParametersBuilderTest {
         void preservesExistingParameters() {
             ParametersList params = new ParametersList();
             params.add("-Xmx512m");
-            params.add("-Dspring.profiles.active=dev");
+            params.add("-Dapp.profile=dev");
 
             TomcatJavaParametersBuilder.injectJdwpAgent(params, 5005);
 
             List<String> all = params.getParameters();
             assertEquals(3, all.size(), "expected exactly 3 params, was: " + all);
             assertEquals("-Xmx512m", all.get(0));
-            assertEquals("-Dspring.profiles.active=dev", all.get(1));
+            assertEquals("-Dapp.profile=dev", all.get(1));
             assertTrue(all.get(2).startsWith("-agentlib:jdwp="),
                     "agent must be appended at the end, was: " + all);
         }

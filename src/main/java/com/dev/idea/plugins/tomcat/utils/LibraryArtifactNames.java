@@ -26,7 +26,7 @@ public final class LibraryArtifactNames {
      * and the version segment starts with a digit while artifactId segments do
      * not — e.g. {@code commons-lang3-3.12.0.jar} keys to {@code commons-lang3}
      * (the {@code 3} in {@code lang3} is mid-segment, not a leading digit),
-     * {@code log4j-api-2.20.0.jar} to {@code log4j-api}. The key is every
+     * {@code some-api-2.20.0.jar} to {@code some-api}. The key is every
      * {@code '-'}-delimited segment up to the first one that begins with a
      * digit; with no such segment the whole base name is the key. The first
      * segment is never treated as a version, so an artifactId that itself

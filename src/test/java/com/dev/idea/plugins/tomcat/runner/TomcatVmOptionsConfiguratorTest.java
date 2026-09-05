@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
  * HTTPS, AJP, and shutdown ports are configured via {@code server.xml}
  * connectors (written by {@link ServerXmlMutator}), <b>not</b> via JVM
  * {@code -D} flags. The dead-property regression guards in
- * {@link DeadSpringBootPropertyRegressionGuards} ensure we never
+ * {@link FrameworkPropertyRegressionGuards} ensure we never
  * reintroduce the misleading flags that the launcher previously emitted.
  */
 @DisplayName("TomcatVmOptionsConfigurator")
@@ -195,8 +195,8 @@ class TomcatVmOptionsConfiguratorTest {
     }
 
     @Nested
-    @DisplayName("dead Spring-Boot-property regression guards")
-    class DeadSpringBootPropertyRegressionGuards {
+    @DisplayName("framework-specific property regression guards")
+    class FrameworkPropertyRegressionGuards {
         // These tests pin the post-fix contract: standalone Tomcat reads its
         // ports from server.xml, so the JVM properties below have no effect
         // and must NOT appear on the command line.
@@ -206,9 +206,8 @@ class TomcatVmOptionsConfiguratorTest {
         // sites were drifting apart on this contract; both are now consistent.
 
         @Test
-        @DisplayName("does not set -Dserver.port (Spring Boot — ignored by standalone Tomcat)")
+        @DisplayName("does not set -Dserver.port (framework property — ignored by standalone Tomcat)")
         void serverPortNotSet() {
-            // server.port is org.springframework.boot.autoconfigure.web.ServerProperties.
             // Setting it on a standalone Tomcat JVM is a confusing no-op.
             ParametersList vmParams = new ParametersList();
 
@@ -219,13 +218,13 @@ class TomcatVmOptionsConfiguratorTest {
                     jdk("17.0.10"));
 
             assertFalse(vmParams.hasProperty("server.port"),
-                    "Spring Boot's server.port must not be set on the standalone Tomcat command line");
+                    "the framework's server.port must not be set on the standalone Tomcat command line");
         }
 
         @Test
-        @DisplayName("does not set -Dserver.shutdown.port (Spring Boot — ignored by standalone Tomcat)")
+        @DisplayName("does not set -Dserver.shutdown.port (framework property — ignored by standalone Tomcat)")
         void serverShutdownPortNotSet() {
-            // server.shutdown.port is also Spring Boot. The actual shutdown
+            // server.shutdown.port is also a framework Boot. The actual shutdown
             // port comes from server.xml's <Server port="..."> attribute,
             // written by ServerXmlMutator.
             ParametersList vmParams = new ParametersList();
@@ -237,7 +236,7 @@ class TomcatVmOptionsConfiguratorTest {
                     jdk("17.0.10"));
 
             assertFalse(vmParams.hasProperty("server.shutdown.port"),
-                    "Spring Boot's server.shutdown.port must not be set on the standalone Tomcat command line");
+                    "the framework's server.shutdown.port must not be set on the standalone Tomcat command line");
         }
 
         @Test
