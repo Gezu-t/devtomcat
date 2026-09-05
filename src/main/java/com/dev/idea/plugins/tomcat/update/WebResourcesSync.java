@@ -133,7 +133,7 @@ public final class WebResourcesSync {
      * into the store (and removed from the webapp) on first contact.
      */
     @NotNull
-    static Path webResourcesManifestFor(@NotNull Path artifactRoot) {
+    public static Path webResourcesManifestFor(@NotNull Path artifactRoot) {
         return SyncManifestStore.resolveWithMigration(
                 "webresources", artifactRoot,
                 artifactRoot.resolve(WEB_INF).resolve(WEB_RESOURCES_MANIFEST));

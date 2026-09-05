@@ -156,9 +156,10 @@ public final class TomcatConfigPreparer {
         List<String> warnings = new ArrayList<>();
 
         // Refuse base == home up front, before ANY destructive step. The conf-copy
-        // guard below only protects conf/, but cleanWorkDirectory and
-        // cleanStaleTempState run first and would wipe the registered Tomcat's
-        // work/ and temp/ (which can hold user files) before that guard fires. One
+        // guard below only protects conf/, but cleanStaleTempState runs first and
+        // would wipe the registered Tomcat's temp/ (which can hold user files)
+        // before that guard fires — and work/ is cleared after deployment by
+        // WorkDirectoryKeeper, which would hit the registered Tomcat's too. One
         // early gate covers the whole base. This happens when a user pins
         // CATALINA_BASE to their Tomcat home (a natural misconfiguration).
         if (isSamePath(catalinaBase, catalinaHome)) {
@@ -172,7 +173,8 @@ public final class TomcatConfigPreparer {
 
         createDirectories(catalinaBase);
         createLogFiles(catalinaBase.resolve(DIR_LOGS));
-        cleanWorkDirectory(catalinaBase);
+        // work/ is decided after deployment (WorkDirectoryKeeper): kept when
+        // nothing the compiled JSPs depend on changed, cleared otherwise.
         cleanStaleTempState(catalinaBase);
 
         // copyConfDirectory skips Catalina/localhost so the mirror owns that subtree.
@@ -516,9 +518,48 @@ public final class TomcatConfigPreparer {
     }
 
     /**
-     * Cleans the {@code work/} directory between runs to prevent stale classloader
-     * caching from a previous launch. Tomcat compiles JSPs and caches class files
-     * here; leftover entries can cause ClassNotFoundException or stale content.
+     * Removes symlinks from {@code work/} without touching anything else — the
+     * safety half of {@link #cleanWorkDirectory}, run on a launch that keeps the
+     * compiled JSPs. Jasper never creates symlinks there; one is either planted
+     * or stray, and following it during a later wipe could reach outside the base.
+     *
+     * @return the number of symlinks removed
+     */
+    static int sanitizeWorkSymlinks(@NotNull Path catalinaBase) throws IOException {
+        Path workDir = catalinaBase.resolve(DIR_WORK);
+        if (!Files.isDirectory(workDir)) return 0;
+        AtomicInteger count = new AtomicInteger();
+        Files.walkFileTree(workDir, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (!dir.equals(workDir) && attrs.isSymbolicLink()) {
+                    Files.deleteIfExists(dir);
+                    count.incrementAndGet();
+                    LOG.warn("Symlink directory removed from work/: " + dir);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (attrs.isSymbolicLink()) {
+                    Files.deleteIfExists(file);
+                    count.incrementAndGet();
+                    LOG.warn("Symlink removed from work/: " + file);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return count.get();
+    }
+
+    /**
+     * Cleans the {@code work/} directory to prevent stale classloader caching from
+     * a previous launch. Tomcat compiles JSPs and caches class files here; leftover
+     * entries can cause ClassNotFoundException or stale content. Invoked by
+     * {@link WorkDirectoryKeeper} when the dependency fingerprint changed — no
+     * longer unconditionally on every launch.
      */
     static void cleanWorkDirectory(@NotNull Path catalinaBase) throws IOException {
         Path workDir = catalinaBase.resolve(DIR_WORK);

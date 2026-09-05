@@ -207,8 +207,13 @@ public class TomcatJavaParametersBuilder {
             phases.record("JVM parameters", t);
 
             t = System.nanoTime();
-            setupDeploymentArtifacts(params, catalinaBase);
+            com.dev.idea.plugins.tomcat.update.DeployedClassesSync.SyncReport classReport =
+                    setupDeploymentArtifacts(params, catalinaBase);
             phases.record("deployments", t);
+
+            t = System.nanoTime();
+            keepOrClearWorkDirectory(catalinaBase, catalinaHome, jdk, classReport);
+            phases.record("work dir", t);
 
             // Coverage agent injection must happen after the Tomcat VM options
             // are set — the coverage -javaagent string is order-sensitive
@@ -530,7 +535,26 @@ public class TomcatJavaParametersBuilder {
         );
     }
 
-    private void setupDeploymentArtifacts(@NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {
+    /**
+     * After deployment, so the fingerprint sees the freshly synced manifests:
+     * keep {@code work/} when nothing the compiled JSPs depend on changed.
+     */
+    private void keepOrClearWorkDirectory(@NotNull Path catalinaBase, @NotNull Path catalinaHome,
+                                          @NotNull Sdk jdk,
+                                          @NotNull com.dev.idea.plugins.tomcat.update.DeployedClassesSync.SyncReport classReport)
+            throws IOException {
+        com.dev.idea.plugins.tomcat.setting.TomcatInfo info = configuration.getTomcatInfo();
+        String fingerprint = WorkDirectoryKeeper.fingerprint(
+                configuration.getDeployments(),
+                catalinaHome.toString(),
+                info == null ? null : info.getVersion(),
+                jdk.getHomePath(),
+                classReport.artifactsSkipped() > 0);
+        WorkDirectoryKeeper.apply(catalinaBase, fingerprint, deploymentLogger);
+    }
+
+    private com.dev.idea.plugins.tomcat.update.DeployedClassesSync.SyncReport setupDeploymentArtifacts(
+            @NotNull JavaParameters params, @NotNull Path catalinaBase) throws ExecutionException {
         // Mirror freshly-compiled module output into each exploded deployment's
         // WEB-INF/classes BEFORE the deployment strategy lays down context.xml.
         // This runs on EVERY launch (initial Run, Stop+Run, cross-executor switch,
@@ -549,8 +573,9 @@ public class TomcatJavaParametersBuilder {
         com.dev.idea.plugins.tomcat.update.TomcatApplicationUpdater
                 .warnAboutWarDeploymentsIfPresent(configuration, deploymentLogger);
 
-        com.dev.idea.plugins.tomcat.update.DeployedClassesSync.syncDeployments(
-                project, deployments, deploymentLogger);
+        com.dev.idea.plugins.tomcat.update.DeployedClassesSync.SyncReport classReport =
+                com.dev.idea.plugins.tomcat.update.DeployedClassesSync.syncDeployments(
+                        project, deployments, deploymentLogger);
 
         // Same rationale for src/main/webapp/ (JSP, JS, CSS, HTML, taglibs).
         // IntelliJ's Make never copies those into target/<war>/, so without
@@ -566,6 +591,7 @@ public class TomcatJavaParametersBuilder {
         // into LocalDeploymentStrategy when it became the sole implementation.
         new LocalDeploymentStrategy(pathMapper)
                 .configureDeployment(params, catalinaBase, configuration, project, deploymentLogger);
+        return classReport;
     }
 
     public static TomcatJavaParametersBuilder create(@NotNull TomcatRunConfiguration configuration,

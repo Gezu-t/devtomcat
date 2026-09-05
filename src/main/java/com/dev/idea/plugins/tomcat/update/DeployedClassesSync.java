@@ -1471,7 +1471,7 @@ public final class DeployedClassesSync {
      * (and removed from the webapp) on first contact.
      */
     @NotNull
-    static Path classSyncManifestFor(@NotNull Path webInfClasses) {
+    public static Path classSyncManifestFor(@NotNull Path webInfClasses) {
         return SyncManifestStore.resolveWithMigration(
                 "classsync", webInfClasses, webInfClasses.resolveSibling(CLASS_SYNC_MANIFEST));
     }
