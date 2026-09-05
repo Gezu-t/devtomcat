@@ -15,11 +15,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -31,7 +30,8 @@ import java.util.stream.Stream;
  * source is newer than its class; what it cannot see is a change in the classes
  * or libraries the compiled JSP was linked against. So the rule is conservative:
  * {@code work/} survives only when a fingerprint of everything a compiled JSP
- * depends on is identical to the one recorded at the previous launch —
+ * depends on is identical to the one recorded at the previous launch — kept as
+ * plain {@code key=value} lines, so a clear can say which line changed —
  *
  * <ul>
  *   <li>the Tomcat home and version, and the JDK;</li>
@@ -87,7 +87,7 @@ public final class WorkDirectoryKeeper {
         if (syncIncomplete) {
             sb.append("sync-incomplete=").append(System.nanoTime()).append('\n');
         }
-        return sha256(sb.toString());
+        return sb.toString();
     }
 
     /**
@@ -103,6 +103,8 @@ public final class WorkDirectoryKeeper {
         Path work = catalinaBase.resolve(TomcatConstants.DIR_WORK);
         String previous = Files.isRegularFile(marker)
                 ? Files.readString(marker, StandardCharsets.UTF_8).trim() : null;
+        // Trailing newline of the text form must not defeat the comparison.
+        fingerprint = fingerprint.trim();
         if (fingerprint.equals(previous) && Files.isDirectory(work)) {
             int links = TomcatConfigPreparer.sanitizeWorkSymlinks(catalinaBase);
             LOG.info("work/ kept for " + catalinaBase + " (fingerprint unchanged)");
@@ -114,11 +116,10 @@ public final class WorkDirectoryKeeper {
         }
         TomcatConfigPreparer.cleanWorkDirectory(catalinaBase);
         TomcatProjectUtils.atomicWriteString(marker, fingerprint);
-        LOG.info("work/ cleared for " + catalinaBase + (previous == null ? " (first launch)" : " (fingerprint changed)"));
+        String why = previous == null ? "first launch in this run directory" : "changed: " + firstDifference(previous, fingerprint);
+        LOG.info("work/ cleared for " + catalinaBase + " (" + why + ")");
         if (logger != null) {
-            logger.logServerInfo(previous == null
-                    ? "work/ cleared: first launch in this run directory"
-                    : "work/ cleared: deployments, libraries or runtime changed since the last launch");
+            logger.logServerInfo("work/ cleared: " + why);
         }
         return false;
     }
@@ -152,16 +153,28 @@ public final class WorkDirectoryKeeper {
         }
     }
 
+    /** The first fingerprint line that differs, as {@code key: old → new}; "no visible difference" if none. */
     @NotNull
-    private static String sha256(@NotNull String text) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte b : digest) hex.append(String.format("%02x", b));
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            LOG.warn("SHA-256 unavailable; work/ will be cleared every launch", e);
-            return "no-digest|" + System.nanoTime();
+    static String firstDifference(@NotNull String previous, @NotNull String current) {
+        Map<String, String> old = lines(previous);
+        Map<String, String> now = lines(current);
+        for (Map.Entry<String, String> e : now.entrySet()) {
+            String was = old.get(e.getKey());
+            if (was == null) return e.getKey() + " added (" + e.getValue() + ")";
+            if (!was.equals(e.getValue())) return e.getKey() + ": " + was + " → " + e.getValue();
         }
+        for (String key : old.keySet()) {
+            if (!now.containsKey(key)) return key + " removed";
+        }
+        return "no visible difference";
+    }
+
+    private static Map<String, String> lines(@NotNull String text) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        for (String line : text.split("\\n")) {
+            int eq = line.indexOf('=');
+            if (eq > 0) out.putIfAbsent(line.substring(0, eq), line.substring(eq + 1));
+        }
+        return out;
     }
 }

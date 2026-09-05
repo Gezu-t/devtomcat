@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
@@ -539,6 +540,20 @@ public final class LocalDeploymentStrategy {
         }
         if (duplicates.isEmpty()) return;
 
+        // The class sync deliberately overlays a dependency jar with the IDE's
+        // fresher classes (first match wins, so the overlay serves). Those pairs
+        // are the plugin's own doing, recorded in the artifact's manifest — not a
+        // packaging duplicate the user can fix.
+        int before = duplicates.size();
+        duplicates = withoutOwnOverlays(duplicates,
+                com.dev.idea.plugins.tomcat.update.DeployedClassesSync.overlayCoverage(artifactPath));
+        if (duplicates.size() < before) {
+            logger.logServerInfo("Classpath scan of '" + deployment.getDisplayName() + "': "
+                    + (before - duplicates.size()) + " path(s) are DevTomcat's own class overlay of a"
+                    + " WEB-INF/lib jar (IDE output newer than the jar) — not duplicates");
+        }
+        if (duplicates.isEmpty()) return;
+
         StringBuilder msg = new StringBuilder();
         msg.append("Classpath duplicates in deployed artifact '")
            .append(deployment.getDisplayName())
@@ -557,6 +572,33 @@ public final class LocalDeploymentStrategy {
            .append(" framework that's auditing the classpath to tolerate duplicates.");
 
         logger.logServerWarning(msg.toString());
+    }
+
+    /**
+     * Drops the groups that are exactly {@code WEB-INF/classes/} plus one jar, where the
+     * manifest records that path as this sync's overlay of that very jar. Anything
+     * else — a third location, an uncovered path, a different jar — stays reported.
+     */
+    @NotNull
+    static List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> withoutOwnOverlays(
+            @NotNull List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> groups,
+            @NotNull Map<String, Set<String>> overlayCoverage) {
+        if (overlayCoverage.isEmpty()) return groups;
+        List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> kept = new ArrayList<>();
+        for (var group : groups) {
+            if (!isOwnOverlay(group, overlayCoverage)) kept.add(group);
+        }
+        return kept;
+    }
+
+    private static boolean isOwnOverlay(
+            @NotNull com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup group,
+            @NotNull Map<String, Set<String>> overlayCoverage) {
+        List<String> locations = group.locations();
+        if (locations.size() != 2 || !locations.contains("WEB-INF/classes/")) return false;
+        String jar = locations.get(0).equals("WEB-INF/classes/") ? locations.get(1) : locations.get(0);
+        Set<String> covered = overlayCoverage.get(jar);
+        return covered != null && covered.contains(group.logicalPath());
     }
 
     /**

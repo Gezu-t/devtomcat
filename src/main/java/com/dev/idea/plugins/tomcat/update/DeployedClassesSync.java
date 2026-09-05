@@ -1481,6 +1481,23 @@ public final class DeployedClassesSync {
      * {@code WEB-INF/.devtomcat-classsync.manifest} is adopted into the store
      * (and removed from the webapp) on first contact.
      */
+    /**
+     * The class overlays this sync placed over deployed jars, from the artifact's
+     * manifest: {@code "WEB-INF/lib/<jar>"} → the {@code WEB-INF/classes} paths
+     * that intentionally shadow it (IDE output newer than the jar). Empty when
+     * there is no manifest. Lets the duplicate scanner tell the plugin's own
+     * overlays apart from a genuine packaging duplicate.
+     */
+    @NotNull
+    public static Map<String, Set<String>> overlayCoverage(@NotNull Path artifactRoot) {
+        Path manifest = classSyncManifestFor(artifactRoot.resolve(WEB_INF_CLASSES_PATH));
+        Map<String, Set<String>> out = new java.util.HashMap<>();
+        for (Map.Entry<String, SyncManifest.JarCoverage> e : SyncManifest.readJarRecords(manifest).entrySet()) {
+            out.put(e.getKey(), e.getValue().coveredPaths());
+        }
+        return out;
+    }
+
     @NotNull
     public static Path classSyncManifestFor(@NotNull Path webInfClasses) {
         return SyncManifestStore.resolveWithMigration(

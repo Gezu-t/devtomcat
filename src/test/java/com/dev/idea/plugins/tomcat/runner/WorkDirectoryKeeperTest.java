@@ -124,4 +124,17 @@ class WorkDirectoryKeeperTest {
         assertFalse(Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS), "symlink removed");
         assertTrue(Files.isDirectory(outside), "its target untouched");
     }
+
+    @Test
+    @DisplayName("a clear names the first fingerprint line that changed")
+    void clearNamesTheDifference() throws IOException {
+        Path root = app();
+        String before = fp(root);
+        Files.writeString(root.resolve("WEB-INF/lib/lib-alpha-1.0.jar"), "jar rebuilt with more bytes");
+        String after = fp(root);
+
+        String why = WorkDirectoryKeeper.firstDifference(before, after);
+        assertTrue(why.startsWith("lib/lib-alpha-1.0.jar: "), why);
+        assertEquals("no visible difference", WorkDirectoryKeeper.firstDifference(before, before));
+    }
 }
