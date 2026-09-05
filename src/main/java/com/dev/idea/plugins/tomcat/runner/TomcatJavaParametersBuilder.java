@@ -224,9 +224,11 @@ public class TomcatJavaParametersBuilder {
                 CoverageAgentAttacher.attach(configuration, params);
             }
 
+            // The per-artifact sync lines above carry their own times; this is
+            // the phase-level view that says which of them to read. Also in
+            // idea.log, so a slow launch is diagnosable from a log alone.
+            LOG.info("Launch preparation: " + phases.summary());
             if (deploymentLogger != null) {
-                // The per-artifact sync lines above carry their own times; this is
-                // the phase-level view that says which of them to read.
                 deploymentLogger.logServerInfo("Launch preparation: " + phases.summary());
             }
             return params;

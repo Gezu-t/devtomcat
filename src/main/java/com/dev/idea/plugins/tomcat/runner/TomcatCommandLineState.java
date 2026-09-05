@@ -222,6 +222,7 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         checks.record("port conflicts", t);
         new LocalDeploymentStrategy().resolveCredentials(configuration);
         // Where the pre-launch time went; the builder prints the same for preparation.
+        LOG.info("Pre-launch checks: " + checks.summary());
         deploymentLogger.logServerInfo("Pre-launch checks: " + checks.summary());
     }
 

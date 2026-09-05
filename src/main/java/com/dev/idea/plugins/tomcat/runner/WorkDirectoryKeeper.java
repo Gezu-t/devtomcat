@@ -105,6 +105,7 @@ public final class WorkDirectoryKeeper {
                 ? Files.readString(marker, StandardCharsets.UTF_8).trim() : null;
         if (fingerprint.equals(previous) && Files.isDirectory(work)) {
             int links = TomcatConfigPreparer.sanitizeWorkSymlinks(catalinaBase);
+            LOG.info("work/ kept for " + catalinaBase + " (fingerprint unchanged)");
             if (logger != null) {
                 logger.logServerInfo("work/ kept: nothing the compiled JSPs depend on changed since the last launch"
                         + (links > 0 ? " (" + links + " symlink(s) removed)" : ""));
@@ -113,6 +114,7 @@ public final class WorkDirectoryKeeper {
         }
         TomcatConfigPreparer.cleanWorkDirectory(catalinaBase);
         TomcatProjectUtils.atomicWriteString(marker, fingerprint);
+        LOG.info("work/ cleared for " + catalinaBase + (previous == null ? " (first launch)" : " (fingerprint changed)"));
         if (logger != null) {
             logger.logServerInfo(previous == null
                     ? "work/ cleared: first launch in this run directory"
