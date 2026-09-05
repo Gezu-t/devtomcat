@@ -36,7 +36,7 @@ class TomcatErrorDiagnosticsTest {
     @DisplayName("NoClassDefFoundError detected")
     void noClassDefFoundError() {
         List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
-                "java.lang.NoClassDefFoundError: org/slf4j/LoggerFactory");
+                "java.lang.NoClassDefFoundError: org/example/logging/LoggerFactory");
         assertFalse(results.isEmpty());
         assertEquals("Missing Class", results.get(0).getCategory());
     }

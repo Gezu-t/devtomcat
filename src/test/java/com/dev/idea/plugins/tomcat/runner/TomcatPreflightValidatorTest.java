@@ -301,7 +301,7 @@ class TomcatPreflightValidatorTest {
             Files.createDirectories(libDir);
             Files.createFile(libDir.resolve("guava-30.1.jar"));
             Files.createFile(libDir.resolve("guava-31.0.jar"));
-            Files.createFile(libDir.resolve("slf4j-api-2.0.9.jar")); // no duplicate
+            Files.createFile(libDir.resolve("lib7j-api-2.0.9.jar")); // no duplicate
 
             List<PreflightIssue> issues = new ArrayList<>();
             TomcatPreflightValidator.checkDuplicateJarsInDirectory(libDir, "test-app", issues);
@@ -319,7 +319,7 @@ class TomcatPreflightValidatorTest {
             Path libDir = tempDir.resolve("WEB-INF/lib");
             Files.createDirectories(libDir);
             Files.createFile(libDir.resolve("guava-31.0.jar"));
-            Files.createFile(libDir.resolve("slf4j-api-2.0.9.jar"));
+            Files.createFile(libDir.resolve("lib7j-api-2.0.9.jar"));
             Files.createFile(libDir.resolve("lib-alpha-2.15.2.jar"));
 
             List<PreflightIssue> issues = new ArrayList<>();
@@ -388,7 +388,7 @@ class TomcatPreflightValidatorTest {
         @Test
         @DisplayName("extracts base from two-part version")
         void twoPartVersion() {
-            assertEquals("slf4j-api", TomcatPreflightValidator.extractJarBaseName("slf4j-api-2.0.jar"));
+            assertEquals("lib7j-api", TomcatPreflightValidator.extractJarBaseName("lib7j-api-2.0.jar"));
         }
 
         @Test

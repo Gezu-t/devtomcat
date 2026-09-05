@@ -40,9 +40,9 @@ class LibraryArtifactNamesTest {
     void dropsClassifierAfterVersion() {
         // Maven layout is <artifactId>-<version>-<classifier>.jar; parsing stops
         // at the version, so the classifier is removed along with it.
-        assertEquals("netty-transport-native-epoll",
+        assertEquals("lib-transport-native-epoll",
                 LibraryArtifactNames.libraryArtifactKey(
-                        "netty-transport-native-epoll-4.1.100-linux-x86_64.jar"));
+                        "lib-transport-native-epoll-4.1.100-linux-x86_64.jar"));
     }
 
     @Test
