@@ -3,6 +3,7 @@
 ## [1.4.3]
 
 ### Changed
+- Console paths shown relative to the project, catalina.base and home.
 - Warn when an artifact packages modules the class sync can't cover.
 - Opt-in: run Maven package before Redeploy.
 - Sync skips surface as notifications with the fix.

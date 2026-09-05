@@ -220,4 +220,57 @@ class TomcatDeploymentLoggerTest {
             assertTrue(logger.pendingSnapshot().isEmpty());
         }
     }
+
+    @Nested
+    @DisplayName("console path abbreviation")
+    class PathAbbreviation {
+
+        private TomcatDeploymentLogger logger() {
+            Project project = mock(Project.class);
+            when(project.getName()).thenReturn("p");
+            when(project.isDisposed()).thenReturn(false);
+            when(project.getBasePath()).thenReturn("/work/proj");
+            TomcatDeploymentLogger logger = new TomcatDeploymentLogger(project, Runnable::run);
+            logger.setPathRoots(java.nio.file.Path.of("/work/run/base"), java.nio.file.Path.of("/opt/tomcat"));
+            return logger;
+        }
+
+        @Test
+        @DisplayName("the run directory, the Tomcat home and the project read by their names")
+        void knownRootsAreNamed() {
+            String out = logger().abbreviatePaths(
+                    "synced /work/proj/app/target/app into /work/run/base/webapps using /opt/tomcat/lib");
+            assertEquals("synced $PROJECT_DIR$/app/target/app into ${catalina.base}/webapps using ${catalina.home}/lib", out);
+        }
+
+        @Test
+        @DisplayName("a sibling directory sharing the prefix is left alone")
+        void siblingPrefixNotCut() {
+            String out = logger().abbreviatePaths("see /work/proj-other/x and /work/proj/y");
+            assertEquals("see /work/proj-other/x and $PROJECT_DIR$/y", out);
+        }
+
+        @Test
+        @DisplayName("the home directory becomes ~, but a run directory under it keeps its own name")
+        void homeIsTildeUnlessAMoreSpecificRootApplies() {
+            String home = System.getProperty("user.home");
+            Project project = mock(Project.class);
+            when(project.getName()).thenReturn("p");
+            when(project.isDisposed()).thenReturn(false);
+            when(project.getBasePath()).thenReturn("/work/proj");
+            TomcatDeploymentLogger logger = new TomcatDeploymentLogger(project, Runnable::run);
+            logger.setPathRoots(java.nio.file.Path.of(home, "runs", "base"), null);
+            String out = logger.abbreviatePaths("a " + home + "/docs/x and b " + home + "/runs/base/temp");
+            assertEquals("a ~/docs/x and b ${catalina.base}/temp", out);
+        }
+
+        @Test
+        @DisplayName("lines without a known root are untouched, and the buffer sees the console form")
+        void untouchedAndBuffered() {
+            TomcatDeploymentLogger logger = logger();
+            assertEquals("Launch preparation: ports 0 ms", logger.abbreviatePaths("Launch preparation: ports 0 ms"));
+            logger.logServerInfo("deployed /work/run/base/webapps/app");
+            assertTrue(logger.pendingSnapshot().get(0).contains("${catalina.base}/webapps/app"));
+        }
+    }
 }

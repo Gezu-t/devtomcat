@@ -18,6 +18,9 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.nio.file.Path;
 import java.util.function.Consumer;
 
 /**
@@ -120,6 +123,18 @@ public class TomcatDeploymentLogger {
      */
     private final Consumer<Runnable> uiDispatcher;
 
+    /**
+     * Console-only path abbreviation: the roots every launch path hangs off,
+     * longest first, each rendered as the name a Tomcat user already knows
+     * ({@code ${catalina.base}}, {@code ${catalina.home}}, {@code $PROJECT_DIR$},
+     * {@code ~}). A prefix matches only at a path-separator boundary, so a sibling
+     * such as {@code proj-other} is never cut into {@code $PROJECT_DIR$-other}.
+     * {@code idea.log} keeps the full paths — only the console line is shortened.
+     */
+    private volatile List<PathRoot> pathRoots = List.of();
+
+    private record PathRoot(@NotNull Pattern prefix, @NotNull String label) {}
+
     // =====================================================================
     // CONSTRUCTORS
     // =====================================================================
@@ -143,6 +158,43 @@ public class TomcatDeploymentLogger {
     // =====================================================================
     // CONSOLE VIEW MANAGEMENT
     // =====================================================================
+
+    /**
+     * Declares the roots to abbreviate in console lines. Call as soon as the
+     * run directory is known — before the first pre-launch line. Either path may
+     * be {@code null}; the project directory and the user's home are always added.
+     */
+    public void setPathRoots(@Nullable Path catalinaBase, @Nullable Path catalinaHome) {
+        List<String[]> raw = new ArrayList<>();
+        if (catalinaBase != null) raw.add(new String[] {catalinaBase.toAbsolutePath().normalize().toString(), "${catalina.base}"});
+        if (catalinaHome != null) raw.add(new String[] {catalinaHome.toAbsolutePath().normalize().toString(), "${catalina.home}"});
+        String projectDir = project.getBasePath();
+        if (projectDir != null && !projectDir.isEmpty()) raw.add(new String[] {projectDir, "$PROJECT_DIR$"});
+        String home = System.getProperty("user.home");
+        if (home != null && !home.isEmpty()) raw.add(new String[] {home, "~"});
+        // Longest prefix first, so a run directory under the home directory reads
+        // as ${catalina.base}, not as ~/....
+        raw.sort((a, b) -> Integer.compare(b[0].length(), a[0].length()));
+        List<PathRoot> roots = new ArrayList<>(raw.size());
+        for (String[] r : raw) {
+            String slash = r[0].replace('\\', '/');
+            String alt = r[0].replace('/', '\\');
+            String either = slash.equals(alt) ? Pattern.quote(slash)
+                    : "(?:" + Pattern.quote(slash) + "|" + Pattern.quote(alt) + ")";
+            roots.add(new PathRoot(Pattern.compile(either + "(?=[/\\\\]|$|[\\s'\"),;:])"), r[1]));
+        }
+        pathRoots = List.copyOf(roots);
+    }
+
+    /** Package-private for tests: the console form of {@code message}. */
+    @NotNull
+    String abbreviatePaths(@NotNull String message) {
+        String out = message;
+        for (PathRoot root : pathRoots) {
+            out = root.prefix().matcher(out).replaceAll(Matcher.quoteReplacement(root.label()));
+        }
+        return out;
+    }
 
     public void setConsoleView(@Nullable ConsoleView consoleView) {
         List<PendingLine> replay = List.of();
@@ -397,6 +449,7 @@ public class TomcatDeploymentLogger {
 
     @NotNull
     private String formatMessage(@NotNull String message) {
+        message = abbreviatePaths(message);
         StringBuilder formatted = new StringBuilder();
 
         if (showTimestamps) {

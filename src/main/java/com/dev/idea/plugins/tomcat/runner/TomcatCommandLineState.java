@@ -189,6 +189,13 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // isRemoteMode() guards in this method are therefore unreachable and
         // have been removed.
         requireRegisteredTomcatServer();
+        // Console lines from here on show paths relative to the run directory,
+        // the Tomcat home and the project instead of the full absolute form.
+        TomcatInfo pathInfo = configuration.getTomcatInfo();
+        deploymentLogger.setPathRoots(
+                com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils.getCatalinaBase(configuration, resolveRunId()),
+                pathInfo == null || pathInfo.getPath() == null || pathInfo.getPath().isEmpty()
+                        ? null : java.nio.file.Paths.get(pathInfo.getPath()));
         // WSL mode is decided here, before any side effect, so its guards fail
         // the launch without leaving claimed ports or balloons behind.
         resolveWslMode();
