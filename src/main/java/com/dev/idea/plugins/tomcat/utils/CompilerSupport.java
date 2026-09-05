@@ -7,6 +7,7 @@ import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,6 +28,8 @@ import java.util.function.IntConsumer;
  * <p>This class owns steps 1-3. The caller provides the messages and step 4.
  */
 public final class CompilerSupport {
+
+    private static final Logger LOG = Logger.getInstance(CompilerSupport.class);
 
     private CompilerSupport() {}
 
@@ -80,8 +83,10 @@ public final class CompilerSupport {
             }
             // The sync passes that follow log their own times; with this line the
             // whole update is accounted for.
-            logger.logServerInfo("Compile finished in "
-                    + String.format("%,d", (System.nanoTime() - started) / 1_000_000) + " ms");
+            String finished = "Compile finished in "
+                    + String.format("%,d", (System.nanoTime() - started) / 1_000_000) + " ms";
+            LOG.info(finished);
+            logger.logServerInfo(finished);
             runSuccessOffEdt(project, warnings, onSuccess);
         };
         CompilerManager compiler = CompilerManager.getInstance(project);

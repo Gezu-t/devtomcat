@@ -312,9 +312,11 @@ public final class WebResourcesSync {
             }
         }
 
-        logger.logServerInfo("Web resources sync: scan complete — " + totalCopied
+        String passSummary = "Web resources sync: scan complete — " + totalCopied
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
-                + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
+                + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)";
+        LOG.info(passSummary);
+        logger.logServerInfo(passSummary);
         return new SyncReport(syncedArtifacts, totalCopied, skipped);
     }
 

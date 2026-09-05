@@ -393,9 +393,11 @@ public final class DeployedClassesSync {
             }
         }
 
-        logger.logServerInfo("Class sync: scan complete — " + totalCopied
+        String passSummary = "Class sync: scan complete — " + totalCopied
                 + " file(s) refreshed across " + syncedArtifacts + " artifact(s), "
-                + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)");
+                + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)";
+        LOG.info(passSummary);
+        logger.logServerInfo(passSummary);
         warnSkippedDeployments(skipReports, SessionNotificationGate.INSTANCE,
                 String.valueOf(project.getLocationHash()),
                 (title, content) -> TomcatNotifier.warning(project, title, content));

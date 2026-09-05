@@ -103,8 +103,10 @@ public final class DeploymentCompileScope {
 
         List<String> names = new ArrayList<>(closure.size());
         for (Module m : closure) names.add(m.getName());
-        logger.logServerInfo("Scoped compile: building " + closure.size()
-                + " module(s) [" + String.join(", ", names) + "] instead of the whole project.");
+        String scoped = "Scoped compile: building " + closure.size()
+                + " module(s) [" + String.join(", ", names) + "] instead of the whole project.";
+        LOG.info(scoped);
+        logger.logServerInfo(scoped);
         return scope;
     }
 
