@@ -1,5 +1,7 @@
 package com.dev.idea.plugins.tomcat.update;
 
+import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -1398,5 +1400,31 @@ class DeployedClassesSyncScenariosTest {
         });
         out.sort(Comparator.naturalOrder());
         return new HashSet<>(out);
+    }
+
+    @Test
+    @DisplayName("deployedTreeChanged: true when files are copied, false when up to date, true again when an orphan is removed")
+    void deployedTreeChangedTracksCopiesAndOrphans(@TempDir Path tmp) throws IOException {
+        Path src = Files.createDirectories(tmp.resolve("target/classes"));
+        Path artifactRoot = Files.createDirectories(tmp.resolve("target/app"));
+        Path webInfClasses = Files.createDirectories(artifactRoot.resolve("WEB-INF/classes"));
+        Files.writeString(src.resolve("A.class"), "a");
+        Files.writeString(src.resolve("B.class"), "b");
+        List<DeployedClassesSync.SourceRoot> roots = List.of(new DeployedClassesSync.SourceRoot(src, false, null));
+        TomcatDeploymentLogger logger = org.mockito.Mockito.mock(TomcatDeploymentLogger.class);
+
+        DeployedClassesSync.ArtifactSyncOutcome first =
+                DeployedClassesSync.syncArtifactTree("app", artifactRoot, webInfClasses, roots, logger);
+        assertTrue(first.deployedTreeChanged(), "two files copied");
+
+        DeployedClassesSync.ArtifactSyncOutcome second =
+                DeployedClassesSync.syncArtifactTree("app", artifactRoot, webInfClasses, roots, logger);
+        assertFalse(second.deployedTreeChanged(), "nothing to do");
+
+        Files.delete(src.resolve("B.class"));
+        DeployedClassesSync.ArtifactSyncOutcome third =
+                DeployedClassesSync.syncArtifactTree("app", artifactRoot, webInfClasses, roots, logger);
+        assertTrue(third.deployedTreeChanged(), "an orphan was removed from the deployed tree");
+        assertFalse(Files.exists(webInfClasses.resolve("B.class")));
     }
 }

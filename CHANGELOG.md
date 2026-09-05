@@ -15,6 +15,7 @@
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
+- Update reloads only the contexts that actually changed; a no-op update reloads nothing.
 - Auto-detected deployments stored at a source path are served from the build output.
 - Unchanged dependency jars not reopened by the duplicate scan; container-jar keys memoised.
 - Compiled JSPs kept across launches when nothing they depend on changed.

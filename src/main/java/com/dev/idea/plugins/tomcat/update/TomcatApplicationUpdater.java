@@ -37,6 +37,8 @@ import java.nio.file.attribute.FileTime;
 import java.nio.file.Path;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.function.Function;
 
@@ -186,12 +188,19 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
      * @return the class-sync report (callers use {@code didAnything()} to
      *         choose hot-swap vs context restart)
      */
-    private DeployedClassesSync.SyncReport syncBothPipelines(@NotNull List<Deployment> deployments,
-                                                             @NotNull TomcatDeploymentLogger logger) {
+    /** Both pipelines' results, plus the union of deployments whose deployed tree actually changed. */
+    record SyncOutcome(@NotNull DeployedClassesSync.SyncReport classReport,
+                       @NotNull Set<String> changedArtifacts) {}
+
+    private SyncOutcome syncBothPipelines(@NotNull List<Deployment> deployments,
+                                          @NotNull TomcatDeploymentLogger logger) {
         DeployedClassesSync.SyncReport classReport =
                 DeployedClassesSync.syncDeployments(project, deployments, logger);
-        WebResourcesSync.syncDeployments(project, deployments, logger);
-        return classReport;
+        WebResourcesSync.SyncReport webReport =
+                WebResourcesSync.syncDeployments(project, deployments, logger);
+        Set<String> changed = new LinkedHashSet<>(classReport.changedArtifacts());
+        changed.addAll(webReport.changedArtifacts());
+        return new SyncOutcome(classReport, changed);
     }
 
     /**
@@ -216,8 +225,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     logger.logServerInfo("Compilation successful" + warningSuffix(warnings));
                     // Both syncs run BEFORE touching context.xml — the deployer's
                     // reload trigger should see the new bytes already in place.
-                    DeployedClassesSync.SyncReport classReport =
-                            syncBothPipelines(deployments, logger);
+                    SyncOutcome sync = syncBothPipelines(deployments, logger);
                     redeployWarArtifacts(logger);
 
                     // When Tomcat is running under the IDE debugger, redefine the
@@ -231,10 +239,10 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                     DebuggerSession session = DebugHotSwap.findHotSwappableSession(project, processHandler);
                     if (session != null) {
                         DebugHotSwap.reloadThenMaybeRestart(project, session,
-                                classReport.didAnything(), logger,
-                                () -> touchExplodedContextXml(logger));
+                                sync.classReport().didAnything(), logger,
+                                () -> touchExplodedContextXml(logger, sync.changedArtifacts()));
                     } else {
-                        touchExplodedContextXml(logger);
+                        touchExplodedContextXml(logger, sync.changedArtifacts());
                     }
                 });
     }
@@ -739,35 +747,65 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
     }
 
     /**
-     * Touches context XML descriptors for exploded artifacts, triggering Tomcat's
-     * deployer to undeploy and redeploy with a fresh classloader. This makes
-     * compiled Java class changes visible without a full server restart.
+     * Touches the context XML descriptors of the exploded artifacts whose deployed
+     * tree changed in this update, triggering Tomcat's deployer to undeploy and
+     * redeploy them with a fresh classloader — so compiled Java class changes
+     * become visible without a full server restart.
+     *
+     * <p>Only changed contexts: a context reload is a stop+start of that webapp,
+     * typically one to several seconds each, and reloading every deployment after
+     * an update that touched none of them was the dominant cost of "change apply".
+     * A JSP or static-file change needs no reload (Jasper recompiles on its own)
+     * but is reloaded anyway here — a descriptor or tag-file change under
+     * {@code WEB-INF} does need one, and the web sync does not yet tell them apart.
+     * {@code Redeploy} still forces every context, unconditionally.
      *
      * <p>WAR artifacts are skipped — their reload is handled by {@link #redeployWarArtifacts}.
      */
-    private void touchExplodedContextXml(@NotNull TomcatDeploymentLogger logger) {
+    private void touchExplodedContextXml(@NotNull TomcatDeploymentLogger logger,
+                                         @NotNull Set<String> changedArtifacts) {
         Path catalinaBase = TomcatProjectUtils.getCatalinaBase(configuration, processHandler.getRunId());
         if (catalinaBase == null) return;
+        touchExplodedContextXml(catalinaBase.resolve(CONTEXT_XML_DIR),
+                configuration.getDeployments(), changedArtifacts, logger);
+    }
 
-        Path contextXmlDir = catalinaBase.resolve(CONTEXT_XML_DIR);
-
-        for (Deployment deployment : configuration.getDeployments()) {
+    /** The file-level half, static for tests; returns the display names whose descriptor was touched. */
+    @NotNull
+    static List<String> touchExplodedContextXml(@NotNull Path contextXmlDir,
+                                                @NotNull List<Deployment> deployments,
+                                                @NotNull Set<String> changedArtifacts,
+                                                @NotNull TomcatDeploymentLogger logger) {
+        List<String> touched = new ArrayList<>();
+        List<String> unchanged = new ArrayList<>();
+        for (Deployment deployment : deployments) {
             if (!deployment.isValid() || !deployment.isExploded()) continue;
-
+            String name = deployment.getDisplayName();
+            if (!changedArtifacts.contains(name)) {
+                unchanged.add(name);
+                continue;
+            }
             String contextName = resolveContextName(deployment.getContextPath());
             Path contextFile = TomcatDeploymentPaths.contextDescriptor(contextXmlDir, contextName);
             if (Files.exists(contextFile)) {
                 try {
                     Files.setLastModifiedTime(contextFile,
                             FileTime.fromMillis(System.currentTimeMillis()));
-                    logger.logServerInfo("Context reload triggered: " + deployment.getDisplayName());
+                    touched.add(name);
+                    logger.logServerInfo("Context reload triggered: " + name);
                 } catch (IOException e) {
                     LOG.warn("Failed to touch context XML: " + contextFile, e);
-                    logger.logServerWarning("Could not trigger context reload for " +
-                            deployment.getDisplayName());
+                    logger.logServerWarning("Could not trigger context reload for " + name);
                 }
             }
         }
+        if (!unchanged.isEmpty()) {
+            logger.logServerInfo(touched.isEmpty()
+                    ? "No deployment changed — no context reloaded (" + String.join(", ", unchanged)
+                            + "). Use Redeploy to force a reload."
+                    : "Context reload skipped for unchanged: " + String.join(", ", unchanged));
+        }
+        return touched;
     }
 
     /**

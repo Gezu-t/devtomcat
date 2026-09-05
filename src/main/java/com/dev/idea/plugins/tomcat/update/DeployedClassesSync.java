@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -174,7 +175,11 @@ public final class DeployedClassesSync {
      * log line ("X file(s) synced to Y artifact(s)"); callers that don't
      * care can ignore the return value.
      */
-    public record SyncReport(int artifactsSynced, int filesCopied, int artifactsSkipped) {
+    public record SyncReport(int artifactsSynced, int filesCopied, int artifactsSkipped,
+                             @NotNull Set<String> changedArtifacts) {
+        public SyncReport(int artifactsSynced, int filesCopied, int artifactsSkipped) {
+            this(artifactsSynced, filesCopied, artifactsSkipped, Set.of());
+        }
         public boolean didAnything() { return filesCopied > 0; }
     }
 
@@ -199,6 +204,7 @@ public final class DeployedClassesSync {
 
         long passStart = System.nanoTime();
         int syncedArtifacts = 0;
+        Set<String> changedArtifacts = new LinkedHashSet<>();
         int totalCopied = 0;
         int skipped = 0;
         List<SyncSkip> skipReports = new ArrayList<>();
@@ -379,6 +385,7 @@ public final class DeployedClassesSync {
 
             ArtifactSyncOutcome outcome = syncArtifactTree(
                     name, artifactRoot, webInfClasses, resolution.sourceRoots(), logger);
+            if (outcome.deployedTreeChanged()) changedArtifacts.add(name);
             long artifactMs = (System.nanoTime() - artifactStart) / 1_000_000;
             if (outcome.copied() > 0) {
                 logger.logServerInfo("Class sync: " + outcome.copied() +
@@ -401,7 +408,7 @@ public final class DeployedClassesSync {
         warnSkippedDeployments(skipReports, SessionNotificationGate.INSTANCE,
                 String.valueOf(project.getLocationHash()),
                 (title, content) -> TomcatNotifier.warning(project, title, content));
-        return new SyncReport(syncedArtifacts, totalCopied, skipped);
+        return new SyncReport(syncedArtifacts, totalCopied, skipped, changedArtifacts);
     }
 
     /**
@@ -443,7 +450,8 @@ public final class DeployedClassesSync {
      * broken-stub copies refused, and the number of source paths this pass
      * claimed (for the summary log lines).
      */
-    record ArtifactSyncOutcome(int copied, int brokenSkipped, int contributedCount) {}
+    /** {@code deployedTreeChanged}: a file was copied, an orphan removed or a stale overlay dropped — the context must reload to see it. */
+    record ArtifactSyncOutcome(int copied, int brokenSkipped, int contributedCount, boolean deployedTreeChanged) {}
 
     /**
      * The complete per-artifact tree-sync sequence for one exploded deployment,
@@ -608,7 +616,8 @@ public final class DeployedClassesSync {
                     + " Reload All Maven Projects, or run 'mvn install' on the command line.");
         }
         return new ArtifactSyncOutcome(
-                copiedForThisArtifact, brokenForThisArtifact, contributedPaths.size());
+                copiedForThisArtifact, brokenForThisArtifact, contributedPaths.size(),
+                copiedForThisArtifact > 0 || orphansRemovedForThisArtifact > 0 || overlaysDropped > 0);
     }
 
     @NotNull

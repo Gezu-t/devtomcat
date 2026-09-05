@@ -85,7 +85,12 @@ public final class WebResourcesSync {
     private WebResourcesSync() {}
 
     /** Aggregate result across all artifacts in a single call. */
-    public record SyncReport(int artifactsSynced, int totalCopied, int skipped) {}
+    public record SyncReport(int artifactsSynced, int totalCopied, int skipped,
+                             @NotNull java.util.Set<String> changedArtifacts) {
+        public SyncReport(int artifactsSynced, int totalCopied, int skipped) {
+            this(artifactsSynced, totalCopied, skipped, java.util.Set.of());
+        }
+    }
 
     /**
      * File name of the LEGACY per-deployment web-resources manifest, which earlier
@@ -157,6 +162,7 @@ public final class WebResourcesSync {
 
         long passStart = System.nanoTime();
         int syncedArtifacts = 0;
+        java.util.Set<String> changedArtifacts = new java.util.LinkedHashSet<>();
         int totalCopied = 0;
         int skipped = 0;
 
@@ -305,6 +311,7 @@ public final class WebResourcesSync {
                         + " source path(s) scanned, " + artifactMs + " ms)");
                 syncedArtifacts++;
                 totalCopied += copiedForThisArtifact;
+                changedArtifacts.add(name);
             } else {
                 logger.logServerInfo("Web resources sync: '" + name
                         + "' already up to date (source files match deployed copies' mtime/size; "
@@ -317,7 +324,7 @@ public final class WebResourcesSync {
                 + skipped + " skipped (" + (System.nanoTime() - passStart) / 1_000_000 + " ms)";
         LOG.info(passSummary);
         logger.logServerInfo(passSummary);
-        return new SyncReport(syncedArtifacts, totalCopied, skipped);
+        return new SyncReport(syncedArtifacts, totalCopied, skipped, changedArtifacts);
     }
 
     /**
