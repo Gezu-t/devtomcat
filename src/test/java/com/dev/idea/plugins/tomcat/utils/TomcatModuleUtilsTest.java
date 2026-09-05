@@ -7,47 +7,44 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pure-logic coverage of {@link TomcatModuleUtils#isWebFrameworkLibrary}, the
- * predicate behind the structural Spring-MVC classpath signal. Matching is on the
- * resolved jar name, not a build-file coordinate. It is deliberately scoped to
- * {@code spring-webmvc} (the servlet web framework that hosts {@code DispatcherServlet}),
- * so it must accept that library and reject the non-servlet Spring artifacts that
- * share the {@code spring-web} prefix — the HTTP-client base ({@code spring-web}),
- * the reactive stack ({@code spring-webflux}), and {@code spring-websocket} — none
- * of which denote a Tomcat-deployable servlet webapp.
+ * Pure-logic coverage of {@link TomcatModuleUtils#isServletContainerInitializerService},
+ * the predicate behind the spec-based classpath signal. It recognises the Servlet
+ * specification's own bootstrap hook in both API eras and nothing else — no
+ * framework name, no jar name, no build-file coordinate.
  */
-@DisplayName("TomcatModuleUtils.isWebFrameworkLibrary")
+@DisplayName("TomcatModuleUtils.isServletContainerInitializerService")
 class TomcatModuleUtilsTest {
 
     @Test
-    @DisplayName("accepts the resolved spring-webmvc library")
-    void acceptsSpringWebMvc() {
-        assertTrue(TomcatModuleUtils.isWebFrameworkLibrary("spring-webmvc-6.1.0.jar"));
+    @DisplayName("accepts the spec's service file in both API eras")
+    void acceptsBothApiEras() {
+        assertTrue(TomcatModuleUtils.isServletContainerInitializerService(
+                "META-INF/services/jakarta.servlet.ServletContainerInitializer"));
+        assertTrue(TomcatModuleUtils.isServletContainerInitializerService(
+                "META-INF/services/javax.servlet.ServletContainerInitializer"));
     }
 
     @Test
-    @DisplayName("matches case-insensitively")
-    void matchesCaseInsensitively() {
-        assertTrue(TomcatModuleUtils.isWebFrameworkLibrary("SPRING-WEBMVC-6.1.0.JAR"));
+    @DisplayName("rejects any other service file, class, or resource")
+    void rejectsEverythingElse() {
+        assertFalse(TomcatModuleUtils.isServletContainerInitializerService(
+                "META-INF/services/com.example.spi.OtherService"));
+        assertFalse(TomcatModuleUtils.isServletContainerInitializerService(
+                "jakarta/servlet/ServletContainerInitializer.class"));
+        assertFalse(TomcatModuleUtils.isServletContainerInitializerService("META-INF/MANIFEST.MF"));
+        assertFalse(TomcatModuleUtils.isServletContainerInitializerService("app-web-1.0.jar"));
     }
 
     @Test
-    @DisplayName("rejects non-servlet Spring web libraries and unrelated libraries")
-    void rejectsNonServletLibraries() {
-        // The precision the narrowed prefix buys: HTTP-client base, reactive stack,
-        // and websocket are not servlet-webapp signals and must not be flagged.
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary("spring-web-6.1.0.jar"));
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary("spring-webflux-6.1.0.jar"));
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary("spring-websocket-6.1.0.jar"));
-        // And the plainly non-web Spring / unrelated artifacts.
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary("spring-boot-3.2.0.jar"));
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary("spring-core-6.1.0.jar"));
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary("commons-lang3-3.14.0.jar"));
+    @DisplayName("case-sensitive, as JAR entries are")
+    void caseSensitive() {
+        assertFalse(TomcatModuleUtils.isServletContainerInitializerService(
+                "META-INF/services/jakarta.servlet.servletcontainerinitializer"));
     }
 
     @Test
     @DisplayName("null-safe")
     void nullSafe() {
-        assertFalse(TomcatModuleUtils.isWebFrameworkLibrary(null));
+        assertFalse(TomcatModuleUtils.isServletContainerInitializerService(null));
     }
 }

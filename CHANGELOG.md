@@ -14,6 +14,8 @@
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
+- Web-module detection keys on the Servlet spec's bootstrap hook, not one framework's jar.
+- Duplicate-classpath scanner filters by JAR-spec rules instead of product allowlists.
 - Lock scan probes any -D directory, not a fixed list of library properties.
 - Environment mode reads only DevTomcat's own switches.
 - Launch-preparation console output no longer lost before the console opens.

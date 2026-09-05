@@ -26,7 +26,7 @@ import java.util.zip.ZipOutputStream;
  * detection after the structural rewrite. The contract:
  *
  * <ul>
- *   <li><b>Structural Spring-MVC signal</b> — a {@code spring-webmvc} library
+ *   <li><b>Spec-based classpath signal</b> — a ServletContainerInitializer service on a resolved jar.
  *       resolved onto the module's runtime classpath makes the module web, with no
  *       web root and no build-file present. A non-web library does not.</li>
  *   <li><b>Cold-project text fallback</b> — a project the IDE has not imported has
@@ -82,27 +82,35 @@ public class TomcatModuleUtilsWebDetectionPlatformTest extends BasePlatformTestC
         });
     }
 
-    public void testSpringMvcLibraryOnClasspathMakesModuleWeb() throws Exception {
-        addModuleLibrary("spring-webmvc-6.1.0.jar");
+    public void testJakartaServletContainerInitializerServiceMakesModuleWeb() throws Exception {
+        addModuleLibrary("app-web-1.0.jar",
+                "META-INF/services/jakarta.servlet.ServletContainerInitializer");
 
-        assertTrue("a resolved spring-webmvc library on the runtime classpath should mark the module web",
+        assertTrue("a jar declaring the jakarta ServletContainerInitializer service marks the module web",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testJavaxServletContainerInitializerServiceMakesModuleWeb() throws Exception {
+        // Older projects and Tomcat releases up to 9 use the javax API name.
+        addModuleLibrary("legacy-web-1.0.jar",
+                "META-INF/services/javax.servlet.ServletContainerInitializer");
+
+        assertTrue("a jar declaring the javax ServletContainerInitializer service marks the module web",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
     public void testNonWebLibraryDoesNotMakeModuleWeb() throws Exception {
-        addModuleLibrary("commons-lang3-3.14.0.jar");
+        addModuleLibrary("lib-alpha-3.14.0.jar");
 
-        assertFalse("a non-web library must not mark the module web",
+        assertFalse("a library with no servlet bootstrap hook must not mark the module web",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
-    public void testNonServletSpringWebLibraryDoesNotMakeModuleWeb() throws Exception {
-        // spring-web is the HTTP-client base (RestTemplate/WebClient), not a servlet
-        // webapp. The classpath signal is scoped to spring-webmvc precisely so a
-        // REST-client/reactive module is not mis-detected as a deployable web app.
-        addModuleLibrary("spring-web-6.1.0.jar");
+    public void testUnrelatedServiceFileDoesNotMakeModuleWeb() throws Exception {
+        // Only the Servlet spec's own hook is a signal — not ServiceLoader files in general.
+        addModuleLibrary("lib-beta-1.0.jar", "META-INF/services/com.example.spi.OtherService");
 
-        assertFalse("a non-servlet spring-web (HTTP client) library must not mark the module web",
+        assertFalse("an unrelated ServiceLoader entry must not mark the module web",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
@@ -162,12 +170,17 @@ public class TomcatModuleUtilsWebDetectionPlatformTest extends BasePlatformTestC
      * wires it into the fixture module as a compile-scope module-level library, so
      * it lands on the module's runtime classpath enumeration.
      */
-    private void addModuleLibrary(String jarFileName) throws IOException {
+    /** Writes a jar holding a marker plus {@code entries} (empty files), then adds it as a module library. */
+    private void addModuleLibrary(String jarFileName, String... entries) throws IOException {
         File jar = new File(tempDir, jarFileName);
         try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(jar))) {
             zos.putNextEntry(new ZipEntry("marker"));
             zos.write(new byte[]{0});
             zos.closeEntry();
+            for (String entry : entries) {
+                zos.putNextEntry(new ZipEntry(entry));
+                zos.closeEntry();
+            }
         }
         // Make the new file visible to the VFS so the JAR content root resolves;
         // OrderEnumerator silently drops roots whose VirtualFile is unresolved.

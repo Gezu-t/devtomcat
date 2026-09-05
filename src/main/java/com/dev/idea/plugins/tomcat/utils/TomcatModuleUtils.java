@@ -95,46 +95,53 @@ public final class TomcatModuleUtils {
     // =====================================================================
     // Cold-project fallback markers (used only by the build-file text scan in
     // hasWebBuildFileTextFallback). Web detection is primarily structural — a
-    // discovered web root, the resolved Maven packaging, or a Spring web library
+    // discovered web root, the resolved Maven packaging, or a servlet-container bootstrap hook on the classpath
     // on the resolved classpath. These raw-text markers exist solely for a project
     // the IDE has not imported/resolved yet, where none of those signals are
     // available. Kept during a deprecation window while structural detection
     // becomes the norm.
     // =====================================================================
 
-    /** POM content fragments indicating the module produces a war artifact or is Spring-Boot-web. */
+    /**
+     * POM content fragments indicating the module produces a war artifact. Only
+     * war signals: an embedded-server framework packaged as a jar cannot be
+     * deployed to an external Tomcat at all, so naming one here would only ever
+     * have produced a false positive.
+     */
     private static final List<String> POM_WEB_INDICATORS = List.of(
             TomcatConstants.POM_PACKAGING_WAR,
-            "maven-war-plugin",
-            "spring-boot-starter-web"
+            "maven-war-plugin"
     );
 
-    /** Gradle build-script fragments (Groovy + Kotlin DSL) indicating war or Spring-Boot-web. */
+    /** Gradle build-script fragments (Groovy + Kotlin DSL) applying the war plugin. */
     private static final List<String> GRADLE_WEB_INDICATORS = List.of(
             "apply plugin: 'war'",
             "id(\"war\")",
             "id 'war'",
             "id \"war\"",
-            "plugin 'war'",
-            "org.springframework.boot",
-            "spring-boot-starter-web"
+            "plugin 'war'"
     );
 
     /**
-     * Resolved-classpath name prefix that marks a module as a servlet web app.
-     * Matched against the jar names returned by {@link OrderEnumerator} (e.g.
-     * {@code spring-webmvc-6.x.jar}). Deliberately {@code spring-webmvc} and not the
-     * broader {@code spring-web}: {@code spring-webmvc} is where {@code DispatcherServlet}
-     * lives, so it denotes a classic Tomcat-deployable servlet app. The broader
-     * {@code spring-web} (the HTTP-client base behind {@code RestTemplate}/{@code WebClient}),
-     * {@code spring-webflux} (reactive, not a servlet), and {@code spring-websocket} are
-     * NOT web-deployment signals and would produce false positives. The
-     * {@code *-starter-web} aggregator carries no classes, so we match the actual
-     * library it resolves to — making the signal build-tool-agnostic (Maven or Gradle,
-     * any DSL) and immune to build-file spelling, property-driven versions, and
-     * BOM-managed dependencies.
+     * The Servlet specification's bootstrap hook. A framework that runs <em>inside</em>
+     * a servlet container registers a {@code ServletContainerInitializer} through the
+     * {@code ServiceLoader} file below — that is how the container finds it. Its
+     * presence on a module's resolved classpath is therefore a spec-level statement
+     * that the module hosts a servlet web app, whichever framework it uses and
+     * whichever API it was written against: the {@code javax} name covers projects
+     * and Tomcat releases up to 9, the {@code jakarta} name covers 10 and later.
+     *
+     * <p>This replaces a resolved-jar-name signal that named one framework's
+     * servlet module. That signal was narrower on purpose — the same framework's
+     * HTTP-client jar also carries this hook — and the trade is accepted knowingly:
+     * this probe is the last resort, consulted only after war packaging, a
+     * deployment descriptor and a webapp directory have all come up empty, and it
+     * now recognises every container-bootstrapped framework rather than one.
      */
-    private static final String SPRING_WEB_LIBRARY_PREFIX = "spring-webmvc";
+    static final List<String> SERVLET_CONTAINER_INITIALIZER_SERVICES = List.of(
+            "META-INF/services/jakarta.servlet.ServletContainerInitializer",
+            "META-INF/services/javax.servlet.ServletContainerInitializer"
+    );
 
     // =====================================================================
     // Web Facet reflection (provided by the platform's JavaEE plugin)
@@ -536,15 +543,17 @@ public final class TomcatModuleUtils {
      *       via a {@code ${property}}, or activated in a profile. ({@code "war"} is
      *       the bare resolved value, distinct from the XML fragment
      *       {@link TomcatConstants#POM_PACKAGING_WAR}.)</li>
-     *   <li><b>Spring MVC on the resolved classpath</b> — a {@code spring-webmvc}
-     *       (servlet) library resolved onto the module's runtime classpath marks it
-     *       web. Build-tool-agnostic (Maven or Gradle, any DSL) and immune to
-     *       build-file spelling; it also catches plain Spring MVC apps (no war
-     *       packaging) that the build-file markers below do not name.</li>
+     *   <li><b>A {@code ServletContainerInitializer} service on the resolved
+     *       classpath</b> — the Servlet spec's own hook by which a framework
+     *       bootstraps inside the container, in either API era. Build-tool-agnostic
+     *       (Maven or Gradle, any DSL), immune to build-file spelling, and it
+     *       catches container-bootstrapped apps with no war packaging that the
+     *       build-file markers below do not name. See
+     *       {@link #SERVLET_CONTAINER_INITIALIZER_SERVICES}.</li>
      *   <li><b>Build-file text fallback</b> — for an un-imported project, where
      *       neither the Maven model nor the classpath is resolved yet. Scans both
-     *       the {@code pom.xml} and the Gradle script for the legacy war / Spring
-     *       markers, identical to the pre-rewrite behaviour, so detection for such
+     *       the {@code pom.xml} and the Gradle script for the war markers, so
+     *       detection for such
      *       projects is unchanged; structural signals simply take precedence when
      *       available.</li>
      * </ol>
@@ -553,42 +562,44 @@ public final class TomcatModuleUtils {
         if ("war".equals(MavenModelProvider.packaging(module))) {
             return true;
         }
-        if (hasWebFrameworkOnClasspath(module)) {
+        if (hasServletContainerInitializerOnClasspath(module)) {
             return true;
         }
         return hasWebBuildFileTextFallback(module);
     }
 
     /**
-     * Structural Spring-web signal: a {@value #SPRING_WEB_LIBRARY_PREFIX}* library
-     * on the module's resolved runtime classpath. Uses the same
-     * {@code runtimeOnly().recursively()} enumeration the run-config producer uses
-     * for Spring Boot detection, so the two stay consistent.
+     * Spec-based classpath signal: any resolved runtime classpath root (jar or
+     * directory) that declares a {@code ServletContainerInitializer} service. Uses
+     * the same {@code runtimeOnly().recursively()} enumeration as the rest of the
+     * plugin's classpath reasoning, and the VFS rather than opening the jar, so a
+     * jar root and an output directory are probed the same way.
      */
-    private static boolean hasWebFrameworkOnClasspath(@NotNull Module module) {
+    private static boolean hasServletContainerInitializerOnClasspath(@NotNull Module module) {
         for (VirtualFile root : OrderEnumerator.orderEntries(module)
                 .runtimeOnly().recursively().classes().getRoots()) {
-            if (isWebFrameworkLibrary(root.getName())) {
-                return true;
+            for (String service : SERVLET_CONTAINER_INITIALIZER_SERVICES) {
+                if (root.findFileByRelativePath(service) != null) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
     /**
-     * Pure predicate: does a resolved classpath-root name denote a Spring web
-     * library? Matched case-insensitively ({@link Locale#ROOT}) against
-     * {@link #SPRING_WEB_LIBRARY_PREFIX}.
+     * Pure predicate: is {@code entryPath} (a path relative to a classpath root, with
+     * {@code /} separators) one of the Servlet spec's {@code ServletContainerInitializer}
+     * service files? Case-sensitive — JAR entries are.
      */
-    static boolean isWebFrameworkLibrary(@Nullable String rootName) {
-        if (rootName == null) return false;
-        return rootName.toLowerCase(Locale.ROOT).startsWith(SPRING_WEB_LIBRARY_PREFIX);
+    static boolean isServletContainerInitializerService(@Nullable String entryPath) {
+        return entryPath != null && SERVLET_CONTAINER_INITIALIZER_SERVICES.contains(entryPath);
     }
 
     /**
      * Last-resort web detection for a not-yet-imported project, kept during a
      * deprecation window while the structural signals above become the norm. Reads
-     * the raw build-file text and matches the known war / Spring-web markers.
+     * the raw build-file text and matches the known war markers.
      *
      * <p>Scans both the {@code pom.xml} and the Gradle build script on every content
      * root (and the project base dir, for single-module layouts whose module root
