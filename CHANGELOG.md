@@ -274,7 +274,7 @@
 - Restart in Debug on 2025.1 threw "Running sync tasks on pure EDT".
 - Services-panel Stop in Debug had the same EDT trap.
 - Remote-deploy URL injection: paths now URL-encoded.
-- Liquibase cleanup missed under tr_TR locale.
+- Duplicate-resource cleanup missed under tr_TR locale.
 - Multi-module artifact-to-module matching broken under tr_TR.
 - Run-config editor leaked its message-bus listener.
 - Remote-deploy progress used JVM-default decimal separator.

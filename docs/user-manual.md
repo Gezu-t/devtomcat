@@ -245,7 +245,7 @@ DevTomcat understands the IntelliJ module dependency graph and handles multi-mod
 
 When a web application depends on a shared module (e.g., `common`) that is packaged as a JAR dependency:
 
-- **Maven-built artifacts** (`mvn package`): `common-1.0-SNAPSHOT.jar` appears in `WEB-INF/lib`. DevTomcat detects this and does **not** add a duplicate classpath overlay for `common/target/classes`. This prevents `ChangeLogParseException: Found 2 files` errors from Liquibase, duplicate bean errors from CDI, and similar duplicate-classpath problems.
+- **Maven-built artifacts** (`mvn package`): `common-1.0-SNAPSHOT.jar` appears in `WEB-INF/lib`. DevTomcat detects this and does **not** add a duplicate classpath overlay for `common/target/classes`. This prevents duplicate-resource errors from classpath-scanning libraries (the `Found 2 files with the path …` shape), duplicate bean errors from CDI, and similar duplicate-classpath problems.
 - **IntelliJ-built artifacts** (exploded): `common`'s classes are merged into `WEB-INF/classes` by the artifact builder. DevTomcat adds `<PreResources>` for `common/target/classes` only when the JAR is not already present in `WEB-INF/lib`.
 - **Hot reload**: Changes to the web module itself (`webapp/target/classes`) are reflected immediately via `<PreResources>`. Changes to shared modules packaged as JARs require a **Redeploy** (not just Build).
 
