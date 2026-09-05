@@ -141,7 +141,7 @@ JVM arguments passed to the Tomcat process. Click the expand button for a full-s
 Common examples:
 ```
 -Xmx1024m -Xms256m
--Dspring.profiles.active=dev
+-Dapp.profile=dev
 -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
 ```
 
@@ -249,7 +249,7 @@ When a web application depends on a shared module (e.g., `common`) that is packa
 - **IntelliJ-built artifacts** (exploded): `common`'s classes are merged into `WEB-INF/classes` by the artifact builder. DevTomcat adds `<PreResources>` for `common/target/classes` only when the JAR is not already present in `WEB-INF/lib`.
 - **Hot reload**: Changes to the web module itself (`webapp/target/classes`) are reflected immediately via `<PreResources>`. Changes to shared modules packaged as JARs require a **Redeploy** (not just Build).
 
-> **Note:** If you see `Liquibase: Found 2 files with the path 'classpath:...'` or similar duplicate-resource errors, it means a module's output is on the classpath twice. Trigger a **Redeploy** from the Services toolbar to regenerate `context.xml` with the correct classpath configuration.
+> **Note:** If a classpath-scanning library reports a duplicate resource (an error of the shape `Found 2 files with the path 'classpath:...'`), it means a module's output is on the classpath twice. Trigger a **Redeploy** from the Services toolbar to regenerate `context.xml` with the correct classpath configuration.
 
 ---
 
@@ -310,7 +310,7 @@ Set environment variables passed to the Tomcat process. The table shows:
 | Variable | Source | Example |
 |----------|--------|---------|
 | `JAVA_HOME` | User-defined | `/usr/lib/jvm/java-17` |
-| `SPRING_PROFILES_ACTIVE` | User-defined | `dev,local` |
+| `APP_PROFILE` | User-defined | `dev,local` |
 | `JAVA_OPTS` | Computed from VM options | `-Xmx1024m -Xms256m` |
 
 Check **Pass parent environment variables** to inherit system environment variables.
@@ -578,7 +578,7 @@ The browser URL is on the **Server tab** under "Open browser". If it shows the w
 3. Click **Test Connection** to verify connectivity before deploying
 4. Check firewall rules — the Manager API port must be accessible
 
-### Duplicate-classpath errors (Liquibase, CDI, Spring) in multi-module projects
+### Duplicate-classpath errors (CDI, migration and framework libraries) in multi-module projects
 
 If you see errors like:
 ```

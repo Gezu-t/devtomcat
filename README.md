@@ -108,7 +108,7 @@ Free-form JVM arguments passed to the Tomcat process. Examples:
 
 ```
 -Xmx1024m -Xms256m
--Dspring.profiles.active=dev
+-Dapp.profile=dev
 -Duser.language=en -Duser.country=US
 ```
 
