@@ -85,4 +85,62 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
     private <T> T readAction(Computable<T> body) {
         return ApplicationManager.getApplication().runReadAction(body);
     }
+
+    // -- source-tree heal ----------------------------------------------------
+    // The rule, with the two project-model lookups injected: on a light fixture the
+    // temp filesystem is invisible to the local VFS, so the real classification
+    // cannot run here; it is the same expression DeploymentSafety already tests.
+
+    private VirtualFile dir(String rel) throws java.io.IOException {
+        return myFixture.getTempDirFixture().findOrCreateDir(rel);
+    }
+
+    private ModuleBackedDeployment storedAt(VirtualFile path) {
+        return new ModuleBackedDeployment(ModuleRef.of(getProject(), getModule()),
+                Path.of(path.getPath()), "/web", true, "web-module");
+    }
+
+    /** "Inside content" = under the content root and not under target/ — what the importer's exclusion yields. */
+    private java.util.function.Predicate<Path> contentRule() {
+        Path root = Path.of(contentRoot());
+        return p -> p.startsWith(root) && !p.startsWith(root.resolve("target"));
+    }
+
+    public void testSourceTreePathIsRepointedAtBuildOutput() throws Exception {
+        VirtualFile webapp = dir("src/main/webapp");
+        VirtualFile target = dir("target/web-module-1.0");
+
+        ModuleBackedDeployment stored = storedAt(webapp);
+        ModuleBackedDeployment healed = readAction(() -> DeploymentResolver.healSourceTreePath(
+                getProject(), stored, module -> Path.of(target.getPath()), contentRule()));
+
+        assertEquals(Path.of(target.getPath()), healed.getResolvedPath());
+        assertEquals("/web", healed.getContextPath());
+        assertEquals(stored.getDisplayName(), healed.getDisplayName());
+        assertEquals("the persisted name is carried across the heal", "web-module", healed.getLegacyName());
+    }
+
+    public void testBuildOutputPathIsLeftAlone() throws Exception {
+        VirtualFile target = dir("target/web-module-1.0");
+        ModuleBackedDeployment stored = storedAt(target);
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
+                getProject(), stored, module -> Path.of(target.getPath()), contentRule()));
+        assertSame(stored, result);
+    }
+
+    public void testNoDeterminableBuildOutputLeavesTheEntryAlone() throws Exception {
+        ModuleBackedDeployment stored = storedAt(dir("src/main/webapp"));
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
+                getProject(), stored, module -> null, contentRule()));
+        assertSame(stored, result);
+    }
+
+    public void testNeverRepointsAtAnotherSourceTreePath() throws Exception {
+        VirtualFile webapp = dir("src/main/webapp");
+        VirtualFile other = dir("src/main/other");
+        ModuleBackedDeployment stored = storedAt(webapp);
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
+                getProject(), stored, module -> Path.of(other.getPath()), contentRule()));
+        assertSame(stored, result);
+    }
 }

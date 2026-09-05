@@ -6,6 +6,14 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -19,6 +27,8 @@ import java.nio.file.Path;
  * deleted artifact) restores artifact-backed behaviour without a config edit.
  */
 public final class DeploymentResolver {
+
+    private static final Logger LOG = Logger.getInstance(DeploymentResolver.class);
 
     private DeploymentResolver() {}
 
@@ -53,12 +63,74 @@ public final class DeploymentResolver {
                 if (m.getModule() != null) return null;
                 return resolveOwningModule(project, m.getLegacyName(), m.getOutputPath());
             });
-            if (rebindTo == null) return m;
-            return new ModuleBackedDeployment(
+            ModuleBackedDeployment bound = rebindTo == null ? m : new ModuleBackedDeployment(
                     ModuleRef.of(project, rebindTo),
                     m.getOutputPath(), m.getContextPath(), m.isExploded(), m.getLegacyName());
+            return healSourceTreePath(project, bound, DeploymentResolver::mavenBuildOutput,
+                    path -> isInsideProjectContent(project, path));
         }
         return deployment;
+    }
+
+    /**
+     * Re-points an auto-detected deployment whose path is inside the project's
+     * content — a web root such as {@code src/main/webapp}, which older versions'
+     * detection fell back to — at the module's build output, when the build
+     * model can determine one. Left alone otherwise. Runtime-only, like every
+     * resolution here: the stored entry is untouched until the user saves the
+     * configuration. Without this, the sync refuses (correctly) to write into
+     * the sources and Tomcat serves the source tree with no {@code WEB-INF/classes}.
+     *
+     * @param buildOutput   the module's exploded build output, or {@code null} when
+     *                      none is determinable
+     * @param insideContent whether a path lies inside the project's (non-excluded)
+     *                      content — {@link #isInsideProjectContent} in production;
+     *                      both are injected so the rule is testable on a light
+     *                      fixture, whose temp filesystem the local VFS cannot see
+     */
+    @NotNull
+    static ModuleBackedDeployment healSourceTreePath(@NotNull Project project,
+                                                     @NotNull ModuleBackedDeployment m,
+                                                     @NotNull Function<Module, Path> buildOutput,
+                                                     @NotNull Predicate<Path> insideContent) {
+        return TomcatReadActions.compute(() -> {
+            Module module = m.getModule();
+            if (module == null) return m;
+            if (!insideContent.test(m.getOutputPath())) return m;
+            Path output = buildOutput.apply(module);
+            if (output == null || output.equals(m.getOutputPath())) return m;
+            // Never trade one source-tree path for another.
+            if (insideContent.test(output)) return m;
+            if (HEALED.add(m.getOutputPath() + " -> " + output)) {
+                LOG.info("Deployment '" + m.getDisplayName() + "': stored path is inside the source tree ("
+                        + m.getOutputPath() + "); using the build output instead (" + output + ")");
+            }
+            return new ModuleBackedDeployment(
+                    ModuleRef.of(project, module), output, m.getContextPath(), m.isExploded(), m.getLegacyName());
+        });
+    }
+
+    /** Once-per-session log guard: the resolved view is recomputed on every call. */
+    private static final Set<String> HEALED = ConcurrentHashMap.newKeySet();
+
+    /** The Maven-derived exploded output — the same derivation auto-detection uses, minus its web-root fallback. */
+    @Nullable
+    private static Path mavenBuildOutput(@NotNull Module module) {
+        ProjectTomcatProfileScanner.DetectedWebappModule detected = ProjectTomcatProfileScanner.scanModule(module);
+        return detected == null ? null : Path.of(detected.explodedPath());
+    }
+
+    /**
+     * Same classification as {@code DeploymentSafety.isInsideProjectContent}
+     * (in content and not excluded; build outputs are excluded by the importer).
+     * Inlined rather than imported: {@code update} depends on this package. A
+     * path absent from the VFS is treated as outside the project. Read action required.
+     */
+    private static boolean isInsideProjectContent(@NotNull Project project, @NotNull Path path) {
+        VirtualFile vf = LocalFileSystem.getInstance().findFileByNioFile(path);
+        if (vf == null) return false;
+        ProjectFileIndex index = ProjectFileIndex.getInstance(project);
+        return index.isInContent(vf) && !index.isExcluded(vf);
     }
 
     /**
