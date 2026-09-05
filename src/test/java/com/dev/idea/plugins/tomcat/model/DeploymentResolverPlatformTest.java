@@ -101,9 +101,24 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
     }
 
     /** "Inside content" = under the content root and not under target/ — what the importer's exclusion yields. */
-    private java.util.function.Predicate<Path> contentRule() {
+    private java.util.function.BiPredicate<Module, Path> contentRule() {
         Path root = Path.of(contentRoot());
-        return p -> p.startsWith(root) && !p.startsWith(root.resolve("target"));
+        return (module, p) -> p.startsWith(root) && !p.startsWith(root.resolve("target"));
+    }
+
+    public void testProductionClassificationUsesRootsNotTheFileIndex() throws Exception {
+        VirtualFile webapp = dir("src/main/webapp");
+        VirtualFile target = dir("target/web-module-1.0");
+        VirtualFile targetRoot = dir("target");
+        ApplicationManager.getApplication().runWriteAction((Runnable) () ->
+                PsiTestUtil.addExcludedRoot(getModule(), targetRoot));
+
+        assertTrue("a web root is content", readAction(() ->
+                DeploymentResolver.isInsideModuleContent(getModule(), Path.of(webapp.getPath()))));
+        assertFalse("an excluded build output is not", readAction(() ->
+                DeploymentResolver.isInsideModuleContent(getModule(), Path.of(target.getPath()))));
+        assertFalse("outside every content root is not", readAction(() ->
+                DeploymentResolver.isInsideModuleContent(getModule(), Path.of("/elsewhere/app"))));
     }
 
     public void testSourceTreePathIsRepointedAtBuildOutput() throws Exception {

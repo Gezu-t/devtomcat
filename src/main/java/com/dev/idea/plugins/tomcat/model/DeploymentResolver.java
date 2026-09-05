@@ -8,12 +8,10 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.roots.ProjectFileIndex;
-import com.intellij.openapi.vfs.LocalFileSystem;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -67,7 +65,7 @@ public final class DeploymentResolver {
                     ModuleRef.of(project, rebindTo),
                     m.getOutputPath(), m.getContextPath(), m.isExploded(), m.getLegacyName());
             return healSourceTreePath(project, bound, DeploymentResolver::mavenBuildOutput,
-                    path -> isInsideProjectContent(project, path));
+                    DeploymentResolver::isInsideModuleContent);
         }
         return deployment;
     }
@@ -83,24 +81,23 @@ public final class DeploymentResolver {
      *
      * @param buildOutput   the module's exploded build output, or {@code null} when
      *                      none is determinable
-     * @param insideContent whether a path lies inside the project's (non-excluded)
-     *                      content — {@link #isInsideProjectContent} in production;
-     *                      both are injected so the rule is testable on a light
-     *                      fixture, whose temp filesystem the local VFS cannot see
+     * @param insideContent whether a path lies inside the module's non-excluded
+     *                      content — {@link #isInsideModuleContent} in production;
+     *                      both are injected so the rule is testable in isolation
      */
     @NotNull
     static ModuleBackedDeployment healSourceTreePath(@NotNull Project project,
                                                      @NotNull ModuleBackedDeployment m,
                                                      @NotNull Function<Module, Path> buildOutput,
-                                                     @NotNull Predicate<Path> insideContent) {
+                                                     @NotNull BiPredicate<Module, Path> insideContent) {
         return TomcatReadActions.compute(() -> {
             Module module = m.getModule();
             if (module == null) return m;
-            if (!insideContent.test(m.getOutputPath())) return m;
+            if (!insideContent.test(module, m.getOutputPath())) return m;
             Path output = buildOutput.apply(module);
             if (output == null || output.equals(m.getOutputPath())) return m;
             // Never trade one source-tree path for another.
-            if (insideContent.test(output)) return m;
+            if (insideContent.test(module, output)) return m;
             if (HEALED.add(m.getOutputPath() + " -> " + output)) {
                 LOG.info("Deployment '" + m.getDisplayName() + "': stored path is inside the source tree ("
                         + m.getOutputPath() + "); using the build output instead (" + output + ")");
@@ -121,16 +118,32 @@ public final class DeploymentResolver {
     }
 
     /**
-     * Same classification as {@code DeploymentSafety.isInsideProjectContent}
-     * (in content and not excluded; build outputs are excluded by the importer).
-     * Inlined rather than imported: {@code update} depends on this package. A
-     * path absent from the VFS is treated as outside the project. Read action required.
+     * Whether {@code path} lies under one of the module's content roots and not
+     * under any of its excluded roots — the importer excludes build outputs such
+     * as {@code target/} and {@code build/}, so those read as "not content".
+     *
+     * <p>Pure root-model + path logic, deliberately <em>not</em> a
+     * {@code ProjectFileIndex} query: the resolved view is computed wherever the
+     * deployment list is read, including on the EDT (the process handler's
+     * {@code startNotified}), where a workspace-index lookup is a prohibited slow
+     * operation. Same containment shape as {@link #resolveOwningModule}'s third
+     * strategy. Read action required.
      */
-    private static boolean isInsideProjectContent(@NotNull Project project, @NotNull Path path) {
-        VirtualFile vf = LocalFileSystem.getInstance().findFileByNioFile(path);
-        if (vf == null) return false;
-        ProjectFileIndex index = ProjectFileIndex.getInstance(project);
-        return index.isInContent(vf) && !index.isExcluded(vf);
+    static boolean isInsideModuleContent(@NotNull Module module, @NotNull Path path) {
+        Path p = path.toAbsolutePath().normalize();
+        ModuleRootManager roots = ModuleRootManager.getInstance(module);
+        boolean inContent = false;
+        for (VirtualFile root : roots.getContentRoots()) {
+            if (p.startsWith(Path.of(root.getPath()).toAbsolutePath().normalize())) {
+                inContent = true;
+                break;
+            }
+        }
+        if (!inContent) return false;
+        for (VirtualFile excluded : roots.getExcludeRoots()) {
+            if (p.startsWith(Path.of(excluded.getPath()).toAbsolutePath().normalize())) return false;
+        }
+        return true;
     }
 
     /**
