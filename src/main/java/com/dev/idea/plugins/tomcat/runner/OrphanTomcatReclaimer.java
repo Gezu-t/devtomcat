@@ -63,7 +63,16 @@ final class OrphanTomcatReclaimer {
     private static final Logger LOG = Logger.getInstance(OrphanTomcatReclaimer.class);
 
     private static final String MARKER_PREFIX = "-Dcatalina.base=";
-    private static final long GRACE_PERIOD_MS = 1500;
+    /**
+     * How long a SIGTERM'd orphan may take to exit before it is force-killed.
+     * A JVM runs its shutdown hooks on SIGTERM whether or not Tomcat's shutdown
+     * port works: Catalina stops every context and an embedded database closes
+     * its files. For a Tomcat hosting several apps that takes a few seconds —
+     * 1.5 s force-killed such a Tomcat mid-shutdown, and the next launch then
+     * paid several seconds of database recovery. The wait returns the moment the
+     * process exits, so a prompt exit costs nothing extra.
+     */
+    static final long GRACE_PERIOD_MS = 6_000;
     private static final long POST_KILL_SOCKET_RELEASE_MS = 200;
 
     private final TomcatRunConfiguration configuration;
@@ -171,30 +180,34 @@ final class OrphanTomcatReclaimer {
         }
     }
 
+    /** Outcome of {@link #terminate}: survivors that had to be force-killed, and how long the polite stage took. */
+    record Termination(@NotNull List<Long> forceKilled, long politeWaitMs) {}
+
     /**
-     * Three-stage termination: polite SIGTERM, grace-period await, then
-     * force-kill any survivors. Most orphans don't have a working shutdown
-     * port (that's exactly why they're orphans), so the polite step rarely
-     * succeeds — but try it anyway so we don't SIGKILL a clean-shutdown-
-     * capable JVM unnecessarily.
+     * Three-stage termination: polite SIGTERM, a bounded wait for clean exits,
+     * then force-kill any survivors. Static so the timing contract is testable
+     * with mocked handles; {@code graceMs} is {@link #GRACE_PERIOD_MS} in production.
      */
-    private void terminateOrphans(@NotNull List<ProcessHandle> orphans) {
-        // Stage 1: polite SIGTERM.
+    @NotNull
+    static Termination terminate(@NotNull List<ProcessHandle> orphans, long graceMs) {
+        // Stage 1: polite SIGTERM — the JVM runs its shutdown hooks.
         for (ProcessHandle p : orphans) {
             try { p.destroy(); } catch (Exception ignored) { /* try next */ }
         }
 
-        // Stage 2: grace period — wait for clean exits.
-        long graceDeadlineMs = System.currentTimeMillis() + GRACE_PERIOD_MS;
+        // Stage 2: wait for clean exits, bounded by one shared deadline.
+        long started = System.currentTimeMillis();
+        long graceDeadlineMs = started + graceMs;
         for (ProcessHandle p : orphans) {
             long remaining = graceDeadlineMs - System.currentTimeMillis();
             if (remaining <= 0) break;
             try {
                 p.onExit().get(remaining, TimeUnit.MILLISECONDS);
             } catch (Exception ignored) {
-                // Still alive after grace period — will be force-killed below.
+                // Still alive after the grace period — force-killed below.
             }
         }
+        long politeWaitMs = System.currentTimeMillis() - started;
 
         // Stage 3: force-kill survivors.
         List<Long> forceKilled = new ArrayList<>();
@@ -208,6 +221,11 @@ final class OrphanTomcatReclaimer {
                 LOG.debug("destroyForcibly failed for pid=" + p.pid(), e);
             }
         }
+        return new Termination(forceKilled, politeWaitMs);
+    }
+
+    private void terminateOrphans(@NotNull List<ProcessHandle> orphans) {
+        Termination outcome = terminate(orphans, GRACE_PERIOD_MS);
 
         // Brief pause so the OS releases the sockets before the next port
         // probe runs. The SO_REUSEADDR probe in PortUtils.tryBind makes
@@ -221,9 +239,12 @@ final class OrphanTomcatReclaimer {
         // Windows TIME_WAIT fallback
         waitForPreferredPortRelease();
 
+        String how = outcome.forceKilled().isEmpty()
+                ? " (exited " + outcome.politeWaitMs() + " ms after SIGTERM)"
+                : " (force-killed after " + outcome.politeWaitMs() + " ms: " + outcome.forceKilled() + ")";
+        LOG.info("Reclaimed " + orphans.size() + " orphan Tomcat process(es)" + how);
         deploymentLogger.logServerWarning("Reclaimed " + orphans.size()
-                + " orphan Tomcat process(es) from prior launches of this configuration"
-                + (forceKilled.isEmpty() ? "" : " (force-killed: " + forceKilled + ")"));
+                + " orphan Tomcat process(es) from prior launches of this configuration" + how);
     }
 
     private static final long PORT_RELEASE_VERIFY_MS = 5_000L;
