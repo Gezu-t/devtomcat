@@ -68,6 +68,7 @@ public final class CompilerSupport {
                                       @Nullable CompileScope scope,
                                       @NotNull IntConsumer onSuccess) {
         logger.logServerInfo(startMessage);
+        long started = System.nanoTime();
         CompileStatusNotification callback = (aborted, errors, warnings, compileContext) -> {
             if (aborted) {
                 logger.logServerWarning(abortMessage);
@@ -77,6 +78,10 @@ public final class CompilerSupport {
                 logger.logServerError(errorMessage + " with " + errors + " error(s)");
                 return;
             }
+            // The sync passes that follow log their own times; with this line the
+            // whole update is accounted for.
+            logger.logServerInfo("Compile finished in "
+                    + String.format("%,d", (System.nanoTime() - started) / 1_000_000) + " ms");
             runSuccessOffEdt(project, warnings, onSuccess);
         };
         CompilerManager compiler = CompilerManager.getInstance(project);

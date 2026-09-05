@@ -9,6 +9,7 @@ import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 
 import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
+import com.dev.idea.plugins.tomcat.utils.PhaseTimings;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
 import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.intellij.execution.ExecutionException;
@@ -198,10 +199,17 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // the Services panel's actually-bound port. Runs after the registration
         // gate so we don't waste cycles scanning for a launch that's about to
         // fail anyway.
+        PhaseTimings checks = new PhaseTimings();
+        long t = System.nanoTime();
         reclaimOrphanTomcats();
+        checks.record("orphan reclaim", t);
 
+        t = System.nanoTime();
         checkCompatibility();
+        checks.record("compatibility", t);
+        t = System.nanoTime();
         runPreflightValidation();
+        checks.record("preflight", t);
         warnIfManualJdwpInDebugMode();
 
         // Both calls below are non-throwing (LaunchPortClaimer.claim() returns a
@@ -209,8 +217,12 @@ public class TomcatCommandLineState extends JavaCommandLineState {
         // there is no ExecutionException to catch and no ports to release here.
         // Failures during port-claim turn into LaunchPortClaimer's own balloon /
         // unrecoverable-state surfaces.
+        t = System.nanoTime();
         resolvePortConflicts();
+        checks.record("port conflicts", t);
         new LocalDeploymentStrategy().resolveCredentials(configuration);
+        // Where the pre-launch time went; the builder prints the same for preparation.
+        deploymentLogger.logServerInfo("Pre-launch checks: " + checks.summary());
     }
 
     /**

@@ -10,6 +10,7 @@
 - Redeploy tooltip states the as-last-built contract.
 
 ### Added
+- Console shows where launch-preparation and update time goes, per phase.
 - Deployment Freshness view: per module, how it's delivered and whether it's current.
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 

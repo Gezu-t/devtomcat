@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.setting.TomcatServerManagerState;
+import com.dev.idea.plugins.tomcat.utils.PhaseTimings;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
@@ -186,17 +187,27 @@ public class TomcatJavaParametersBuilder {
         try {
             Path catalinaBase = getCatalinaBase();
             Path catalinaHome = getCatalinaHome();
+            PhaseTimings phases = new PhaseTimings();
+            long t = System.nanoTime();
             PortConfig ports = new PortResolver(configuration, resolvedPorts, deploymentLogger).resolve();
+            phases.record("ports", t);
 
+            t = System.nanoTime();
             prepareCatalinaBase(catalinaBase, catalinaHome, ports);
+            phases.record("catalina.base", t);
 
+            t = System.nanoTime();
             Sdk jdk = resolveJdk();
             JavaParameters params = new JavaParameters();
             setupBasicParameters(params, catalinaBase, jdk);
             setupClasspath(params, catalinaHome);
             setupEnvironment(params);
             setupVmOptions(params, catalinaBase, catalinaHome, ports, jdk);
+            phases.record("JVM parameters", t);
+
+            t = System.nanoTime();
             setupDeploymentArtifacts(params, catalinaBase);
+            phases.record("deployments", t);
 
             // Coverage agent injection must happen after the Tomcat VM options
             // are set — the coverage -javaagent string is order-sensitive
@@ -207,6 +218,11 @@ public class TomcatJavaParametersBuilder {
                 CoverageAgentAttacher.attach(configuration, params);
             }
 
+            if (deploymentLogger != null) {
+                // The per-artifact sync lines above carry their own times; this is
+                // the phase-level view that says which of them to read.
+                deploymentLogger.logServerInfo("Launch preparation: " + phases.summary());
+            }
             return params;
 
         } catch (IOException e) {
