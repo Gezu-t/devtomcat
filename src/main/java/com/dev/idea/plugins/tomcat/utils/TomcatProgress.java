@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.progress.ProgressManager;
@@ -16,7 +17,7 @@ import org.jetbrains.annotations.NotNull;
  * used to ignore the indicator entirely, so pressing Cancel appeared to do
  * nothing until a full sync pass finished. These helpers close that gap.
  *
- * <p>Both methods are safe in every environment the pipeline runs in:
+ * <p>Every method is safe in every environment the pipeline runs in:
  * {@link ProgressManager#checkCanceled()} no-ops when no ProgressManager is
  * installed (plain unit tests) or no indicator is attached to the current
  * thread, and the detail setter null-checks the indicator. Single-seam
@@ -33,6 +34,14 @@ public final class TomcatProgress {
      */
     public static void checkCanceled() {
         ProgressManager.checkCanceled();
+    }
+
+    /** Call first in a broad catch: rethrows what the platform treats as control flow (cancellation). */
+    public static void rethrowIfControlFlow(@NotNull Throwable t) {
+        if (!Logger.shouldRethrow(t)) return;
+        if (t instanceof RuntimeException re) throw re;
+        if (t instanceof Error err) throw err;
+        throw new IllegalStateException(t);
     }
 
     /**

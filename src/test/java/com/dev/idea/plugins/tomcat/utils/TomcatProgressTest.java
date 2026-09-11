@@ -1,17 +1,17 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.intellij.openapi.progress.ProcessCanceledException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import java.io.IOException;
+import java.util.concurrent.CancellationException;
 
-/**
- * Environment-safety contract for {@link TomcatProgress}: both helpers must
- * be callable from any code path — including plain unit tests with no
- * platform and production threads with no indicator attached — without
- * throwing. The cancellation behavior under a real, canceled indicator is
- * covered by the platform-fixture test in the update package.
- */
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+/** checkCanceled / setDetail never throw without a platform; rethrowIfControlFlow throws only control flow, unchanged. */
 @DisplayName("TomcatProgress")
 class TomcatProgressTest {
 
@@ -25,5 +25,26 @@ class TomcatProgressTest {
     @DisplayName("setDetail is a no-op without an indicator")
     void setDetailIsNoOpWithoutIndicator() {
         assertDoesNotThrow(() -> TomcatProgress.setDetail("any detail text"));
+    }
+
+    @Test
+    @DisplayName("rethrowIfControlFlow rethrows ProcessCanceledException unchanged")
+    void rethrowsProcessCanceled() {
+        ProcessCanceledException pce = new ProcessCanceledException();
+        assertSame(pce, assertThrows(ProcessCanceledException.class, () -> TomcatProgress.rethrowIfControlFlow(pce)));
+    }
+
+    @Test
+    @DisplayName("rethrowIfControlFlow rethrows a plain CancellationException unchanged")
+    void rethrowsCancellation() {
+        CancellationException ce = new CancellationException();
+        assertSame(ce, assertThrows(CancellationException.class, () -> TomcatProgress.rethrowIfControlFlow(ce)));
+    }
+
+    @Test
+    @DisplayName("rethrowIfControlFlow ignores ordinary failures")
+    void ignoresOrdinaryFailures() {
+        assertDoesNotThrow(() -> TomcatProgress.rethrowIfControlFlow(new IOException("disk")));
+        assertDoesNotThrow(() -> TomcatProgress.rethrowIfControlFlow(new IllegalStateException("state")));
     }
 }

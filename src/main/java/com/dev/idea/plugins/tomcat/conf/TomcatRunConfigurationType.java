@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 
 /**
  * Registers Tomcat as a run configuration type, provides Local/Remote factories.
@@ -163,6 +164,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             try {
                 applyDynamicDefaults(config);
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.error("Failed to apply defaults for project: " + project.getName(), e);
             }
             return config;
@@ -327,11 +329,13 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                 try {
                     autoSelectTomcatServer(config);
                 } catch (Exception e) {
+                    TomcatProgress.rethrowIfControlFlow(e);
                     LOG.warn("Error auto-selecting Tomcat server", e);
                 }
 
                 LOG.debug("Applied dynamic defaults: " + DynamicTomcatEnvironment.getConfigurationSummary());
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.error("Unexpected error applying dynamic defaults", e);
             }
         }
@@ -364,6 +368,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
                     LOG.debug("No valid Tomcat server found for auto-selection");
                 }
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.warn("Failed to auto-select Tomcat server", e);
             }
         }
@@ -379,6 +384,7 @@ public class TomcatRunConfigurationType implements ConfigurationType {
             try {
                 applyDynamicDefaults(newConfig);
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.warn("Error re-applying dynamic defaults", e);
             }
 
