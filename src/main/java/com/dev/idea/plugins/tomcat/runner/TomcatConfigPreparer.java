@@ -9,6 +9,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
@@ -32,7 +33,7 @@ import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
  *   <li>Create directory structure (temp, logs, webapps, work, conf)</li>
  *   <li>Pre-create log files for IntelliJ's log tabs</li>
  *   <li>Copy full {@code conf} tree from CATALINA_HOME to CATALINA_BASE</li>
- *   <li>Mutate only {@code server.xml} via {@link ServerXmlMutator}</li>
+ *   <li>Mutate {@code server.xml} and {@code logging.properties} (IDE-managed bases)</li>
  * </ul>
  */
 public final class TomcatConfigPreparer {
@@ -50,6 +51,11 @@ public final class TomcatConfigPreparer {
             CONFIG_WEB_XML,
             CONFIG_CATALINA_PROPERTIES
     };
+
+    private static final String CONTAINER_HANDLERS_KEY =
+            "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].handlers";
+
+    private static final String CONSOLE_HANDLER = "java.util.logging.ConsoleHandler";
 
     /**
      * Convenience overload — no conf overlay, no log restart, no reserved context names.
@@ -183,6 +189,12 @@ public final class TomcatConfigPreparer {
 
         if (confOverlay != null) {
             applyConfOverlay(confOverlay, catalinaBase);
+        }
+
+        // After the overlay, so the final logging.properties is the one patched.
+        // Pinned bases are the user's to manage and are never rewritten.
+        if (ideManagedBase) {
+            routeContainerLogsToConsole(catalinaBase);
         }
 
         warnings.addAll(customizeServerXml(
@@ -436,6 +448,73 @@ public final class TomcatConfigPreparer {
         LOG.info("Copied conf directory from " + sourceConf + " to " + targetConf
                 + " (excluding Catalina/localhost, owned by CatalinaHomeMirror; "
                 + (ideManaged ? "regenerated" : "fill-missing for pinned base") + ")");
+    }
+
+    /**
+     * Appends {@code ConsoleHandler} to the {@code [Catalina].[localhost]} logger so webapp
+     * INFO/WARN reach the run console: Tomcat's {@code ClassLoaderLogManager} sets
+     * {@code useParentHandlers=false} on any logger declaring its own handlers. IDE-managed
+     * bases only; no-op if absent, already routed, or a line continuation.
+     */
+    static boolean routeContainerLogsToConsole(@NotNull Path catalinaBase) {
+        Path loggingProps = catalinaBase.resolve(CONFIG_LOGGING_PROPERTIES);
+        if (!Files.isRegularFile(loggingProps)) return false;
+
+        try {
+            // ISO-8859-1 is the .properties encoding, so untouched lines round-trip verbatim.
+            List<String> lines = new ArrayList<>(
+                    Files.readAllLines(loggingProps, StandardCharsets.ISO_8859_1));
+
+            int idx = indexOfPropertyLine(lines, CONTAINER_HANDLERS_KEY);
+            if (idx < 0) {
+                // No own handlers — useParentHandlers stays true, console already reached.
+                return false;
+            }
+
+            String line = lines.get(idx);
+            if (line.stripTrailing().endsWith("\\")) {
+                LOG.info("Not routing container logs to console: " + CONTAINER_HANDLERS_KEY
+                        + " spans a line continuation in " + loggingProps);
+                return false;
+            }
+            if (line.contains(CONSOLE_HANDLER)) return false;
+
+            int sep = firstSeparator(line);
+            String value = line.substring(sep + 1).trim();
+            lines.set(idx, value.isEmpty()
+                    ? line.substring(0, sep + 1) + " " + CONSOLE_HANDLER
+                    : line.stripTrailing() + ", " + CONSOLE_HANDLER);
+
+            Files.write(loggingProps, lines, StandardCharsets.ISO_8859_1);
+            LOG.info("Routed container logs to the run console in " + loggingProps);
+            return true;
+        } catch (IOException e) {
+            LOG.warn("Could not route container logs to the run console in " + loggingProps
+                    + "; leaving it as CATALINA_HOME shipped it", e);
+            return false;
+        }
+    }
+
+    /** Index of the first non-comment line whose key is exactly {@code key} — the separator
+     *  check after the key stops a longer key with the same prefix from matching. */
+    private static int indexOfPropertyLine(@NotNull List<String> lines, @NotNull String key) {
+        for (int i = 0; i < lines.size(); i++) {
+            String trimmed = lines.get(i).trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) continue;
+            if (!trimmed.startsWith(key)) continue;
+            String rest = trimmed.substring(key.length()).stripLeading();
+            if (rest.startsWith("=") || rest.startsWith(":")) return i;
+        }
+        return -1;
+    }
+
+    /** Offset of the key/value separator. The keys we look for contain no {@code =} or {@code :}. */
+    private static int firstSeparator(@NotNull String line) {
+        int eq = line.indexOf('=');
+        int colon = line.indexOf(':');
+        if (eq < 0) return colon;
+        if (colon < 0) return eq;
+        return Math.min(eq, colon);
     }
 
     /**

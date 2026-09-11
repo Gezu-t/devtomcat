@@ -644,4 +644,129 @@ class TomcatConfigPreparerTest {
             assertTrue(content.contains("port=\"9005\""), "Shutdown port should be 9005");
         }
     }
+
+    @Nested
+    @DisplayName("routeContainerLogsToConsole")
+    class RouteContainerLogsToConsole {
+
+        private static final String KEY =
+                "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].handlers";
+        private static final String CONSOLE = "java.util.logging.ConsoleHandler";
+
+        private Path writeLoggingProps(Path catalinaBase, String content) throws IOException {
+            Path conf = catalinaBase.resolve("conf");
+            Files.createDirectories(conf);
+            Path file = conf.resolve("logging.properties");
+            Files.writeString(file, content);
+            return file;
+        }
+
+        @Test
+        @DisplayName("appends ConsoleHandler to the container logger's own handler list")
+        void appendsConsoleHandler(@TempDir Path base) throws IOException {
+            Path file = writeLoggingProps(base,
+                    KEY + " = 2localhost.org.apache.juli.AsyncFileHandler\n");
+
+            assertTrue(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+
+            String patched = Files.readString(file);
+            assertTrue(patched.contains("2localhost.org.apache.juli.AsyncFileHandler, " + CONSOLE),
+                    "ConsoleHandler should be appended to the existing handler: " + patched);
+        }
+
+        @Test
+        @DisplayName("leaves every other line byte-for-byte unchanged")
+        void preservesOtherLines(@TempDir Path base) throws IOException {
+            String original = "# Console handler\n"
+                    + "java.util.logging.ConsoleHandler.level = FINE\n"
+                    + "java.util.logging.ConsoleHandler.encoding = UTF-8\n"
+                    + KEY + " = 2localhost.org.apache.juli.AsyncFileHandler\n"
+                    + "org.apache.catalina.core.ContainerBase.[Catalina].[localhost].level = INFO\n";
+            Path file = writeLoggingProps(base, original);
+
+            assertTrue(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+
+            List<String> lines = Files.readAllLines(file);
+            assertEquals("# Console handler", lines.get(0));
+            assertEquals("java.util.logging.ConsoleHandler.level = FINE", lines.get(1));
+            assertEquals("java.util.logging.ConsoleHandler.encoding = UTF-8", lines.get(2));
+            assertEquals(KEY + " = 2localhost.org.apache.juli.AsyncFileHandler, " + CONSOLE,
+                    lines.get(3));
+            assertEquals("org.apache.catalina.core.ContainerBase.[Catalina].[localhost].level = INFO",
+                    lines.get(4));
+        }
+
+        @Test
+        @DisplayName("no-op when the container logger declares no handlers of its own")
+        void noOpWhenKeyAbsent(@TempDir Path base) throws IOException {
+            String original = "handlers = java.util.logging.ConsoleHandler\n";
+            Path file = writeLoggingProps(base, original);
+
+            assertFalse(TomcatConfigPreparer.routeContainerLogsToConsole(base),
+                    "without its own handlers the logger already propagates to the console");
+            assertEquals(original, Files.readString(file));
+        }
+
+        @Test
+        @DisplayName("no-op when ConsoleHandler is already listed — re-running does not duplicate it")
+        void idempotent(@TempDir Path base) throws IOException {
+            Path file = writeLoggingProps(base,
+                    KEY + " = 2localhost.org.apache.juli.AsyncFileHandler\n");
+
+            assertTrue(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+            String afterFirst = Files.readString(file);
+
+            assertFalse(TomcatConfigPreparer.routeContainerLogsToConsole(base),
+                    "second run should find ConsoleHandler already present");
+            assertEquals(afterFirst, Files.readString(file));
+        }
+
+        @Test
+        @DisplayName("fills an empty handler value rather than emitting a leading comma")
+        void fillsEmptyValue(@TempDir Path base) throws IOException {
+            Path file = writeLoggingProps(base, KEY + " =\n");
+
+            assertTrue(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+
+            String patched = Files.readString(file).strip();
+            assertEquals(KEY + " = " + CONSOLE, patched);
+        }
+
+        @Test
+        @DisplayName("leaves a line-continuation value alone rather than corrupting it")
+        void skipsLineContinuation(@TempDir Path base) throws IOException {
+            String original = KEY + " = 2localhost.org.apache.juli.AsyncFileHandler, \\\n"
+                    + "    3manager.org.apache.juli.AsyncFileHandler\n";
+            Path file = writeLoggingProps(base, original);
+
+            assertFalse(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+            assertEquals(original, Files.readString(file));
+        }
+
+        @Test
+        @DisplayName("ignores a commented-out declaration")
+        void ignoresComments(@TempDir Path base) throws IOException {
+            String original = "#" + KEY + " = 2localhost.org.apache.juli.AsyncFileHandler\n";
+            Path file = writeLoggingProps(base, original);
+
+            assertFalse(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+            assertEquals(original, Files.readString(file));
+        }
+
+        @Test
+        @DisplayName("does not match a longer key that merely starts with the same text")
+        void rejectsPrefixMatch(@TempDir Path base) throws IOException {
+            String original = KEY + "Extra = 2localhost.org.apache.juli.AsyncFileHandler\n";
+            Path file = writeLoggingProps(base, original);
+
+            assertFalse(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+            assertEquals(original, Files.readString(file));
+        }
+
+        @Test
+        @DisplayName("returns false without throwing when logging.properties is absent")
+        void missingFile(@TempDir Path base) {
+            assertFalse(TomcatConfigPreparer.routeContainerLogsToConsole(base));
+        }
+    }
 }

@@ -16,6 +16,7 @@
 - Experimental WSL mode: Tomcat and JDK inside a WSL distribution.
 
 ### Fixed
+- Webapp INFO and WARN lines reach the run console, not just errors.
 - Orphan Tomcats get a real chance to stop cleanly before being force-killed.
 - Duplicate-classpath warning no longer reports the sync's own class overlays.
 - Update reloads only the contexts that actually changed; a no-op update reloads nothing.
