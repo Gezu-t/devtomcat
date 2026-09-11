@@ -96,9 +96,8 @@ public final class TomcatNotifier {
             if (project.isDisposed()) return;
             try {
                 post.run();
-            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                throw pce;
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.debug("Could not show notification '" + title + "': " + e.getMessage());
             }
         });

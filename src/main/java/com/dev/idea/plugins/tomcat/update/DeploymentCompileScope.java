@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
 import com.dev.idea.plugins.tomcat.model.Deployment;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.compiler.CompileScope;
 import com.intellij.openapi.compiler.CompilerManager;
@@ -73,6 +74,7 @@ public final class DeploymentCompileScope {
         try {
             return TomcatReadActions.compute(() -> computeScope(project, deployments, logger));
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // Never let scope resolution break Update — fall back to whole-project.
             LOG.warn("Scoped compile: could not resolve deployment module scope; compiling whole project", t);
             return null;

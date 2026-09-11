@@ -11,6 +11,7 @@ import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.model.TomcatConfigurationData;
 import com.dev.idea.plugins.tomcat.utils.ConfigExportImport;
 import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.dev.idea.plugins.tomcat.ui.deployment.ArtifactSelectionHandler;
 import com.dev.idea.plugins.tomcat.ui.deployment.DeploymentConfigurationPanel;
@@ -170,6 +171,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             LOG.debug("DevTomcat: Configuration validation failed: " + e.getTitle());
             throw e;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.error("DevTomcat: Unexpected error applying configuration", e);
             throw new ConfigurationException("Failed to apply configuration: " + e.getLocalizedMessage());
         } finally {
@@ -314,6 +316,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                 artifactMgr = TomcatReadActions.compute(() -> ArtifactManager.getInstance(project));
                 LOG.info("DevTomcat: ArtifactManager obtained: " + (artifactMgr != null));
             } catch (Throwable t) {
+                TomcatProgress.rethrowIfControlFlow(t);
                 LOG.warn("DevTomcat: ArtifactManager not available: " + t.getMessage());
             }
 
@@ -370,6 +373,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
             tabbedPane.addTab("Deployment", deploymentTab);
             LOG.info("DevTomcat: Deployment tab added to pane");
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             LOG.error("DevTomcat: Failed to create Deployment tab", t);
             tabbedPane.addTab("Deployment", createErrorPanel("Deployment tab error: " + t.getMessage()));
         }
@@ -516,6 +520,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
 
             LOG.info("DevTomcat: Subscribed to artifact and module rename events");
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("DevTomcat: Could not subscribe to rename events: " + e.getMessage());
         }
     }
@@ -726,6 +731,7 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                     () -> ArtifactManager.getInstance(project));
             syncBeforeLaunchPanelWithSelectedDeployment(artifactManager);
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // ArtifactManager not available — Community Edition.
             // Fall back to syncing the custom TomcatBuildArtifactsTask into the panel.
             LOG.debug("DevTomcat: ArtifactManager unavailable, using Community fallback for Before Launch sync");
@@ -847,7 +853,8 @@ public class TomcatConfigurationEditor extends SettingsEditor<TomcatRunConfigura
                         .CONFIGURATION_EDITOR_KEY
                         .getData(DataManager.getInstance().getDataContext(comp));
                 if (wrapper != null) return wrapper;
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
+                TomcatProgress.rethrowIfControlFlow(ex);
                 // DataContext might not be available for some components
             }
             comp = comp.getParent();

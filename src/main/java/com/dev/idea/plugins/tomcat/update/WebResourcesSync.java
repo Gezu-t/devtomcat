@@ -210,13 +210,8 @@ public final class WebResourcesSync {
             List<Path> webappSources;
             try {
                 webappSources = TomcatReadActions.compute(() -> findWebappSourceRootsForTyped(project, deployment));
-            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                // Cancellation from the read-action traversal must propagate
-                // before the generic handler, or the user's Cancel is mislogged
-                // as a resolution failure and the loop continues (mirrors the
-                // DeployedClassesSync fix).
-                throw pce;
             } catch (Throwable t) {
+                TomcatProgress.rethrowIfControlFlow(t);
                 LOG.debug("Web resources sync: module resolve threw for '" + name + "': " + t.getMessage());
                 logger.logServerWarning("Web resources sync skipped '" + name
                         + "': module resolution threw (" + t.getMessage() + ")");

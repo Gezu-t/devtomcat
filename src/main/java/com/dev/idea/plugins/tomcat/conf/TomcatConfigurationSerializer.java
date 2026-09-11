@@ -17,6 +17,7 @@ import com.dev.idea.plugins.tomcat.model.RunnerSettings;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.RemoteCredentialStore;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -737,6 +738,7 @@ public class TomcatConfigurationSerializer {
         try {
             return PathMacroManager.getInstance(project).expandPath(raw);
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Path macro expansion failed; keeping raw value", e);
             return raw;
         }
@@ -757,6 +759,7 @@ public class TomcatConfigurationSerializer {
         try {
             return PathMacroManager.getInstance(project).collapsePath(raw);
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Path macro collapse failed; keeping raw value", e);
             return raw;
         }

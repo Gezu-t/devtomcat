@@ -5,7 +5,6 @@ import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessListener;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -46,9 +45,8 @@ public final class IdeaMavenDeploymentRebuilder implements DeploymentRebuilder {
     public boolean canRebuild(@NotNull Project project, @NotNull Module module) {
         try {
             return mavenProject(project, module) != null;
-        } catch (ProcessCanceledException pce) {
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             return false;
         }
     }
@@ -59,9 +57,8 @@ public final class IdeaMavenDeploymentRebuilder implements DeploymentRebuilder {
         MavenProject mavenProject;
         try {
             mavenProject = mavenProject(project, module);
-        } catch (ProcessCanceledException pce) {
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             mavenProject = null;
         }
         if (mavenProject == null) {
@@ -97,9 +94,8 @@ public final class IdeaMavenDeploymentRebuilder implements DeploymentRebuilder {
                                         + (error != null ? ": " + error.getMessage() : ""));
                             }
                         });
-            } catch (ProcessCanceledException pce) {
-                throw pce;
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 onFailure.accept("could not start the Maven build: " + e.getMessage());
             }
         });

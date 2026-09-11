@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.browsers.WebBrowser;
 import com.intellij.ide.browsers.WebBrowserManager;
@@ -189,6 +190,7 @@ public class BrowserLaunchSection implements ConfigurationSection {
             updateBrowserControls();
 
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             isSettingBrowser = false;
             LOG.error("Error loading browsers", e);
             if (browserComboBox.getItemCount() == 0) {

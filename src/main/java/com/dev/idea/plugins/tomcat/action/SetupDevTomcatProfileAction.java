@@ -9,6 +9,7 @@ import com.dev.idea.plugins.tomcat.model.PortStrategy;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
@@ -131,6 +132,7 @@ public class SetupDevTomcatProfileAction extends AnAction implements DumbAware {
                     + " deployment(s).",
                     "DevTomcat Setup");
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             LOG.warn("Setup failed", t);
             Messages.showErrorDialog(project,
                     "Could not create configuration: " + t.getMessage(),

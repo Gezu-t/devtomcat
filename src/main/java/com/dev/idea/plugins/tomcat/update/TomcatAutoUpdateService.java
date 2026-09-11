@@ -8,6 +8,7 @@ import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.openapi.application.ApplicationManager;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.components.Service;
@@ -186,6 +187,7 @@ public final class TomcatAutoUpdateService {
                 return false;
             });
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             LOG.warn("Could not determine module-backed deployment; allowing update", t);
             return true;
         }

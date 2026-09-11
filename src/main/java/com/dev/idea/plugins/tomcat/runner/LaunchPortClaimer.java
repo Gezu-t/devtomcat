@@ -6,6 +6,7 @@ import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.model.debug.DebugConfig;
 import com.dev.idea.plugins.tomcat.utils.PortConflictDetector;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunManagerListener;
 import com.intellij.execution.RunnerAndConfigurationSettings;
@@ -518,11 +519,13 @@ final class LaunchPortClaimer {
                             .runConfigurationChanged(settings);
                 }
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.debug("RunManager change notification after port writeback failed", e);
             }
             try {
                 RunDashboardManager.getInstance(project).updateDashboard(true);
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.debug("Dashboard refresh after port writeback failed", e);
             }
         });

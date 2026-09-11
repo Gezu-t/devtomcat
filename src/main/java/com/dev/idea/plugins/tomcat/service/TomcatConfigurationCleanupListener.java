@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.service;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunManagerListener;
 import com.intellij.execution.RunnerAndConfigurationSettings;
@@ -59,6 +60,7 @@ public final class TomcatConfigurationCleanupListener implements RunManagerListe
                     }
                 }
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.debug("Could not populate config name map: " + e.getMessage());
                 populated.set(false);
             }

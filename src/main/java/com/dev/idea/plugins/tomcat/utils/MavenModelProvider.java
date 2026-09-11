@@ -56,6 +56,7 @@ public interface MavenModelProvider {
             List<MavenModelProvider> extensions = EP.getExtensionList();
             return extensions.isEmpty() ? null : extensions.get(0);
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             return null;
         }
     }

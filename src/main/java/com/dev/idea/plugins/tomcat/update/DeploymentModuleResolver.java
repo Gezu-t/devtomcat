@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.update;
 import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ModuleBackedDeployment;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
@@ -103,9 +104,8 @@ public final class DeploymentModuleResolver {
                 ArtifactManager mgr;
                 try {
                     mgr = ArtifactManager.getInstance(project);
-                } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                    throw pce;
-                } catch (NoClassDefFoundError | Exception ignored) {
+                } catch (NoClassDefFoundError | Exception e) {
+                    TomcatProgress.rethrowIfControlFlow(e);
                     // Packaging plugin unavailable on this IDE/edition.
                     return empty;
                 }
@@ -117,12 +117,8 @@ public final class DeploymentModuleResolver {
                 return mod != null ? fromModule.apply(mod) : empty;
             }
             return empty; // ExternalFileDeployment — no project module
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            // Cancellation must propagate before the generic handler — the
-            // packaging-tree walk / artifact resolution can hit
-            // ProgressManager.checkCanceled() under the launch-prep indicator.
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Failed to resolve " + failureNoun + " for '" + deployment.getDisplayName()
                     + "': " + e.getMessage());
             return empty;

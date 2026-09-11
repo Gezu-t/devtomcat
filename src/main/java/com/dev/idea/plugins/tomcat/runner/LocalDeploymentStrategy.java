@@ -398,7 +398,8 @@ public final class LocalDeploymentStrategy {
                 try {
                     runtimeJvm = com.intellij.openapi.projectRoots.JavaSdk.getInstance()
                             .getVersion(params.getJdk());
-                } catch (Throwable ignored) {
+                } catch (Throwable t) {
+                    TomcatProgress.rethrowIfControlFlow(t);
                     // Defensive — a misconfigured Sdk should not block the launch.
                 }
             }

@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.setting;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -86,6 +87,7 @@ public final class ProjectTomcatProfileScanner {
         try {
             tomcats.addAll(TomcatServerManagerState.getInstance().getTomcatInfos());
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             LOG.debug("Profile scanner: TomcatServerManagerState unavailable: " + t.getMessage());
         }
 

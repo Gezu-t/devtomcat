@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.debugger.DebuggerManager;
 import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.engine.DebugProcess;
@@ -114,6 +115,7 @@ public final class DebugHotSwap {
             }
             return session;
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // Debugger APIs live in the Java plugin; if anything about the
             // session lookup throws (disposed process, API drift across the
             // supported platform range), treat it as "no hot-swap" and let the
@@ -173,6 +175,7 @@ public final class DebugHotSwap {
                     try {
                         HotSwapUI.getInstance(project).reloadChangedClasses(session, false, listener);
                     } catch (Throwable t) {
+                        TomcatProgress.rethrowIfControlFlow(t);
                         // If the reload trigger itself throws, fall back to a
                         // restart so the user's change is still applied.
                         LOG.debug("Hot reload: reloadChangedClasses threw — falling back to restart", t);

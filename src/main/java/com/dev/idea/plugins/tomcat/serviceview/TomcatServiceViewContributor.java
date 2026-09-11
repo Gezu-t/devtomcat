@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.serviceview;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.services.ServiceViewContributor;
@@ -51,6 +52,7 @@ public final class TomcatServiceViewContributor
             }
             return services;
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // RunManager can throw if invoked during project init / disposal.
             return Collections.emptyList();
         }

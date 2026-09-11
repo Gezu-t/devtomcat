@@ -12,6 +12,7 @@ import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.PortValidator;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
 import com.intellij.execution.configurations.RuntimeConfigurationWarning;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.text.StringUtil;
@@ -134,6 +135,7 @@ public final class TomcatConfigurationValidator {
         try {
             state = TomcatServerManagerState.getInstance();
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // No Application service — headless test path. Pure data validator
             // still runs; runtime strictness is applied inside
             // TomcatJavaParametersBuilder.getCatalinaHome() as a second gate.
@@ -399,6 +401,7 @@ public final class TomcatConfigurationValidator {
             // inside the action, then throw outside.
             deployments = TomcatReadActions.compute(config::getDeployments);
         } catch (NoClassDefFoundError | Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             // Platform model not available — skip this validation.
             return;
         }

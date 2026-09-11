@@ -1,5 +1,7 @@
 package com.dev.idea.plugins.tomcat.ui.server.dialogs;
 
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
+
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.Project;
@@ -124,7 +126,8 @@ class AutoDetectJdkDialog extends DialogWrapper {
             for (String home : JavaSdk.getInstance().suggestHomePaths(project)) {
                 addJdkCandidate(new File(home), seen, found);
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // Discovery must never break the dialog — the curated scan still runs.
         }
 

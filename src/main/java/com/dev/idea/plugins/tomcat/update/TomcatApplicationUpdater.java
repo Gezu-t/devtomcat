@@ -8,6 +8,7 @@ import com.dev.idea.plugins.tomcat.model.UpdateConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatDeploymentPaths;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.debugger.impl.DebuggerSession;
 import com.intellij.execution.RunManager;
@@ -477,6 +478,7 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
                         logger.logServerError("Could not find run configuration settings for restart");
                     }
                 } catch (Exception e) {
+                    TomcatProgress.rethrowIfControlFlow(e);
                     LOG.warn("Failed to restart Tomcat: " + configuration.getName(), e);
                     ProcessStopSupport.purgeTerminatedDescriptors(project);
                     logger.logServerError("Failed to restart: " + e.getMessage());

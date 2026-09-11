@@ -90,6 +90,7 @@ public final class ProcessStopSupport {
                                     .removeRunContent(executor, descriptor);
                         }
                     } catch (Exception e) {
+                        TomcatProgress.rethrowIfControlFlow(e);
                         // Descriptor cleanup is best-effort — the IDE will GC the entry
                         // eventually. Never let a cleanup failure block the relaunch.
                         LOG.debug("Failed to remove old run content: " + e.getMessage());
@@ -132,6 +133,7 @@ public final class ProcessStopSupport {
                     }
                 }
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.debug("Could not purge terminated descriptors: " + e.getMessage());
             }
         });

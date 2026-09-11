@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentHistory;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
 import com.dev.idea.plugins.tomcat.stats.StartupTimeTracker;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.openapi.diagnostic.Logger;
@@ -333,6 +334,7 @@ public interface TomcatLifecycleListener {
                 }
             }
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             return true;
         }
         return false;

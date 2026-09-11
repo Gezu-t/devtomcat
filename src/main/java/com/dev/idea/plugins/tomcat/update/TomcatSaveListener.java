@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.update;
 
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -47,6 +48,7 @@ public final class TomcatSaveListener implements FileDocumentManagerListener {
                 inContent = TomcatReadActions.compute(() ->
                         ProjectFileIndex.getInstance(project).getContentRootForFile(file) != null);
             } catch (Throwable t) {
+                TomcatProgress.rethrowIfControlFlow(t);
                 inContent = false;
             }
             if (!inContent) continue;

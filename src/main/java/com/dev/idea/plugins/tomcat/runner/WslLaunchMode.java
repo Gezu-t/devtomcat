@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.utils.LaunchPathMapper;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.WslPathDetector;
 import com.dev.idea.plugins.tomcat.utils.WslPathTranslator;
 import com.intellij.execution.ExecutionException;
@@ -13,7 +14,6 @@ import com.intellij.execution.wsl.WSLDistribution;
 import com.intellij.execution.wsl.WSLUtil;
 import com.intellij.execution.wsl.WslDistributionManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.util.PathsList;
@@ -139,9 +139,8 @@ public final class WslLaunchMode {
         if (!WSLUtil.isSystemCompatible()) return List.of();
         try {
             return WslDistributionManager.getInstance().getInstalledDistributions();
-        } catch (ProcessCanceledException e) {
-            throw e;
         } catch (RuntimeException e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Could not enumerate WSL distributions", e);
             return List.of();
         }
@@ -150,9 +149,8 @@ public final class WslLaunchMode {
     private static String mntRootOf(@NotNull WSLDistribution distribution) {
         try {
             return distribution.getMntRoot();
-        } catch (ProcessCanceledException e) {
-            throw e;
         } catch (RuntimeException e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Could not read the mount root of '" + distribution.getMsId()
                     + "'; assuming " + WslPathTranslator.DEFAULT_MNT_ROOT, e);
             return WslPathTranslator.DEFAULT_MNT_ROOT;

@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.serviceview.TomcatArtifactItem;
 import com.dev.idea.plugins.tomcat.serviceview.TomcatRunConfigContributor;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
@@ -254,7 +255,8 @@ final class ServiceActionUtils {
                     }
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable ex) {
+            TomcatProgress.rethrowIfControlFlow(ex);
         }
         return null;
     }

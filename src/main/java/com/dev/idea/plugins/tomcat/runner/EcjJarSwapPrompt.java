@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.runner;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationGroupManager;
@@ -174,6 +175,7 @@ final class EcjJarSwapPrompt {
         try {
             return JavaSdk.getInstance().getVersion(jdk);
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // Defensive: the platform's getVersion can throw on a misconfigured
             // SDK. A null return causes the picker to fall back to the modern
             // default, which keeps existing user setups behaving identically.

@@ -2,6 +2,7 @@ package com.dev.idea.plugins.tomcat.diagnostics;
 
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.impl.RunDialog;
@@ -111,6 +112,7 @@ public final class DiagnosticBalloonRouter {
                     RunDialog.editConfiguration(project, settings, "Edit Run Configuration");
                 }
             } catch (Throwable t) {
+                TomcatProgress.rethrowIfControlFlow(t);
                 LOG.debug("Could not open run configuration editor: " + t.getMessage());
             }
         });

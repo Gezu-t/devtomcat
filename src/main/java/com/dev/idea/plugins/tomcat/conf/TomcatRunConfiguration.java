@@ -10,6 +10,7 @@ import com.dev.idea.plugins.tomcat.utils.ArtifactMatchingUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatNotifier;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
 import com.dev.idea.plugins.tomcat.ui.TomcatConfigurationEditor;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.configurations.coverage.CoverageEnabledConfiguration;
@@ -96,11 +97,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                 return new com.dev.idea.plugins.tomcat.runner.RemoteDeploymentRunProfileState(env, this);
             }
             return new TomcatCommandLineState(env, this);
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            // Honour IntelliJ cancellation: returning null on PCE would silently
-            // drop the cancellation signal and the platform might keep waiting.
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.error("Failed to create run profile state for: " + getName(), e);
             return null;
         }
@@ -218,7 +216,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                     return th;
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             // ExecutionManager state can be in flux during project init / disposal.
         }
         return null;
@@ -484,10 +483,8 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                         platformArtifactTaskAdded = true;
                     }
                 }
-            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                // Honour IntelliJ cancellation: never swallow PCE in a broad catch.
-                throw pce;
-            } catch (NoClassDefFoundError | Exception ignored) {
+            } catch (NoClassDefFoundError | Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 // ArtifactManager unavailable on this IDE/edition; fall through.
             }
 
@@ -508,6 +505,7 @@ public class TomcatRunConfiguration extends LocatableConfigurationBase<TomcatRun
                     + (platformArtifactTaskAdded ? " (platform BuildArtifacts included)" : ""));
 
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("DevTomcat: Error syncing Before Launch tasks: " + e.getMessage(), e);
         }
     }

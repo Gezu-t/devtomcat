@@ -3,6 +3,7 @@ package com.dev.idea.plugins.tomcat.ui.server.sections;
 import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.ui.server.dialogs.JREConfigurationDialog;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
@@ -80,6 +81,7 @@ public class JreConfigurationSection implements ConfigurationSection {
                         }
                     });
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("Could not subscribe to JDK table changes", e);
         }
     }
@@ -138,6 +140,7 @@ public class JreConfigurationSection implements ConfigurationSection {
                 return "Default (" + projectSdk.getName() + " - project SDK)";
             }
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("Could not detect project SDK", e);
         }
         return "Default (project SDK)";

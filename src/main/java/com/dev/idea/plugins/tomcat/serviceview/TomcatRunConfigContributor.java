@@ -7,6 +7,7 @@ import com.dev.idea.plugins.tomcat.model.PortConfig;
 import com.dev.idea.plugins.tomcat.runner.TomcatProcessHandler;
 import com.dev.idea.plugins.tomcat.service.TomcatDeploymentStatusService;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.executors.DefaultDebugExecutor;
@@ -166,7 +167,8 @@ public final class TomcatRunConfigContributor
                     }
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable ex) {
+            TomcatProgress.rethrowIfControlFlow(ex);
             // Defensive — ExecutionManager state can change during tree refresh.
         }
         return null;
@@ -181,7 +183,8 @@ public final class TomcatRunConfigContributor
             TomcatDeploymentStatusService.ConfigStatus status =
                     service.getStatus(tomcatConfig.getName());
             if (status != null) return status.getArtifactStates();
-        } catch (Throwable ignored) {
+        } catch (Throwable ex) {
+            TomcatProgress.rethrowIfControlFlow(ex);
         }
         return Collections.emptyMap();
     }
@@ -339,7 +342,8 @@ public final class TomcatRunConfigContributor
             try {
                 return TomcatDeploymentStatusService.getInstance(project)
                         .getStatus(tomcatConfig.getName());
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                TomcatProgress.rethrowIfControlFlow(t);
                 return null;
             }
         }

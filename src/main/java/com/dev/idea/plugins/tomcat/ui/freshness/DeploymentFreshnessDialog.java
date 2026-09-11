@@ -3,10 +3,10 @@ package com.dev.idea.plugins.tomcat.ui.freshness;
 import com.dev.idea.plugins.tomcat.update.DeploymentFreshnessReport;
 import com.dev.idea.plugins.tomcat.update.DeploymentFreshnessReport.ModuleRow;
 import com.dev.idea.plugins.tomcat.update.DeploymentFreshnessReport.Report;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.ColoredTableCellRenderer;
@@ -109,9 +109,8 @@ public class DeploymentFreshnessDialog extends DialogWrapper {
             List<Line> lines;
             try {
                 lines = flatten(computer.get());
-            } catch (ProcessCanceledException pce) {
-                throw pce;
             } catch (Exception ex) {
+                TomcatProgress.rethrowIfControlFlow(ex);
                 LOG.warn("Deployment freshness computation failed", ex);
                 lines = List.of(new Line(
                         "Could not compute freshness — see the IDE log", "", "",

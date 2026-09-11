@@ -35,11 +35,13 @@ public final class RemoteCredentialStore {
                     CredentialAttributes attributes = createAttributes(managerUrl);
                     safe.set(attributes, new Credentials(managerUrl, password));
                 } catch (Exception e) {
+                    TomcatProgress.rethrowIfControlFlow(e);
                     LOG.warn("Failed to store password in credential store", e);
                 }
             });
             return true;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Failed to schedule password storage", e);
             return false;
         }
@@ -62,10 +64,8 @@ public final class RemoteCredentialStore {
             if (credentials != null && credentials.getPasswordAsString() != null) {
                 return credentials.getPasswordAsString();
             }
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            // Honour IntelliJ cancellation: never swallow PCE in a broad catch.
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Failed to retrieve password from credential store", e);
         }
         return "";

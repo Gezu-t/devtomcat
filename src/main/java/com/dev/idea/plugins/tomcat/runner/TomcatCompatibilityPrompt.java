@@ -4,6 +4,7 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import com.dev.idea.plugins.tomcat.conf.TomcatRunConfiguration;
 import com.dev.idea.plugins.tomcat.diagnostics.TomcatCompatibilityChecker;
 import com.dev.idea.plugins.tomcat.setting.TomcatInfo;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.impl.EditConfigurationsDialog;
@@ -197,6 +198,7 @@ final class TomcatCompatibilityPrompt {
                     }
                     new EditConfigurationsDialog(project).show();
                 } catch (Throwable t) {
+                    TomcatProgress.rethrowIfControlFlow(t);
                     LOG.debug("Could not open run-config editor", t);
                 }
             });
@@ -222,6 +224,7 @@ final class TomcatCompatibilityPrompt {
                     // the safe default is the dialog's root.
                     ShowSettingsUtil.getInstance().showSettingsDialog(project, "SDKs");
                 } catch (Throwable t) {
+                    TomcatProgress.rethrowIfControlFlow(t);
                     LOG.debug("Could not open SDKs settings", t);
                 }
             });

@@ -287,14 +287,8 @@ public final class DeployedClassesSync {
             try {
                 resolution = TomcatReadActions.compute(() ->
                         resolveTyped(project, deployment));
-            } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-                // User cancelled the launch-prep / update indicator: the read
-                // action's OrderEnumerator/ModuleRootManager traversal hit
-                // ProgressManager.checkCanceled(). Must propagate BEFORE the
-                // generic handler below, or Cancel is mislogged as a resolution
-                // failure and the loop continues as if nothing happened.
-                throw pce;
             } catch (Throwable t) {
+                TomcatProgress.rethrowIfControlFlow(t);
                 LOG.debug("Could not resolve module output for '" + name + "': " + t.getMessage());
                 logger.logServerWarning("Class sync skipped '" + name
                         + "': module resolution threw (" + t.getMessage() + ")");

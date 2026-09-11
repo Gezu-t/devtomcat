@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import com.dev.idea.plugins.tomcat.utils.TomcatPortRegistry;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.intellij.util.execution.ParametersListUtil;
 
@@ -689,6 +690,7 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     tw.activate(null);
                 }
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.debug("Could not activate console: " + e.getMessage());
             }
         });
@@ -743,11 +745,13 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
                     }
                     deploymentLogger.logServerInfo(logMsg);
                 } catch (Exception e) {
+                    TomcatProgress.rethrowIfControlFlow(e);
                     LOG.warn("Failed to open browser", e);
                     deploymentLogger.logServerWarning("Could not open browser: " + e.getMessage());
                 }
             });
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Error launching browser", e);
         }
     }

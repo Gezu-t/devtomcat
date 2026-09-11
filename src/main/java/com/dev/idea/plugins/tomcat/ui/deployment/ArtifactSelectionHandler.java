@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
 import com.intellij.openapi.diagnostic.Logger;
 
@@ -269,9 +270,8 @@ public class ArtifactSelectionHandler {
                 }
                 return pomNames;
             });
-        } catch (ProcessCanceledException pce) {
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("Error detecting POM modules", e);
             return new HashSet<>();
         }
@@ -300,9 +300,8 @@ public class ArtifactSelectionHandler {
                     if (VfsUtil.loadText(pomFile).contains(TomcatConstants.POM_PACKAGING_POM)) {
                         return true;
                     }
-                } catch (ProcessCanceledException pce) {
-                    throw pce;
                 } catch (IOException | RuntimeException e) {
+                    TomcatProgress.rethrowIfControlFlow(e);
                     LOG.debug("Error reading pom.xml for module '" + module.getName() +
                             "' at " + pomFile.getPath(), e);
                 }
@@ -381,9 +380,8 @@ public class ArtifactSelectionHandler {
                     .collect(Collectors.toList());
 
             return sortByTypeCategory(filtered);
-        } catch (ProcessCanceledException pce) {
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("Error getting selectable artifacts", e);
             return new ArrayList<>();
         }
@@ -509,9 +507,8 @@ public class ArtifactSelectionHandler {
                 }
                 return names;
             });
-        } catch (ProcessCanceledException pce) {
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("Error getting active module names", e);
             return new HashSet<>();
         }
@@ -537,9 +534,8 @@ public class ArtifactSelectionHandler {
         try {
             spellings.add(com.dev.idea.plugins.tomcat.update.DeployedClassesSync
                     .libraryArtifactNameFor(module).toLowerCase(Locale.ROOT));
-        } catch (ProcessCanceledException pce) {
-            throw pce;
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("Could not resolve build-tool name for module " + raw, e);
         }
         int dot = raw.lastIndexOf('.');
