@@ -5,6 +5,8 @@ import com.dev.idea.plugins.tomcat.model.ArtifactBackedDeployment;
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.DeploymentRow;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
+import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
+import com.dev.idea.plugins.tomcat.update.DeployedClassesSync;
 import com.dev.idea.plugins.tomcat.utils.ArtifactPackagingDetector;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
@@ -532,11 +534,18 @@ public class ArtifactSelectionHandler {
         String raw = module.getName();
         spellings.add(raw.toLowerCase(Locale.ROOT));
         try {
-            spellings.add(com.dev.idea.plugins.tomcat.update.DeployedClassesSync
-                    .libraryArtifactNameFor(module).toLowerCase(Locale.ROOT));
+            spellings.add(DeployedClassesSync.libraryArtifactNameFor(module).toLowerCase(Locale.ROOT));
         } catch (Exception e) {
             TomcatProgress.rethrowIfControlFlow(e);
             LOG.debug("Could not resolve build-tool name for module " + raw, e);
+        }
+        try {
+            // A war named by <finalName> answers to that name, not the module's.
+            var detected = ProjectTomcatProfileScanner.scanModule(module);
+            if (detected != null) spellings.add(detected.outputName().toLowerCase(Locale.ROOT));
+        } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
+            LOG.debug("Could not resolve build output name for module " + raw, e);
         }
         int dot = raw.lastIndexOf('.');
         if (dot >= 0 && dot < raw.length() - 1) {

@@ -19,6 +19,7 @@
 - Webapp INFO and WARN lines reach the run console, not just errors.
 - A canceled toolbar update no longer leaves the run-configuration template without a Tomcat server.
 - IDE cancellation propagates through deploy, update, service-view and editor code instead of being swallowed.
+- Maven modules with a custom finalName deploy from their real build output; their .war is no longer dropped as stale.
 - Orphan Tomcats get a real chance to stop cleanly before being force-killed.
 - Duplicate-classpath warning no longer reports the sync's own class overlays.
 - Update reloads only the contexts that actually changed; a no-op update reloads nothing.

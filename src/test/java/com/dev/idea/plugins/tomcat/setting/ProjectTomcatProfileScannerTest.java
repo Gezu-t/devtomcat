@@ -134,4 +134,69 @@ class ProjectTomcatProfileScannerTest {
                 </project>
                 """, "fallback-name"));
     }
+
+    @Test
+    @DisplayName("literal <build><finalName> names the build output")
+    void literalFinalName() {
+        var coords = ProjectTomcatProfileScanner.parseWarCoordinates("""
+                <project>
+                    <artifactId>web-storefront</artifactId>
+                    <version>1.0-SNAPSHOT</version>
+                    <packaging>war</packaging>
+                    <build>
+                        <finalName>storefront</finalName>
+                    </build>
+                </project>
+                """, "fallback-name");
+        assertEquals("storefront", coords.finalName());
+    }
+
+    @Test
+    @DisplayName("no finalName: Maven's default artifactId-version")
+    void defaultFinalName() {
+        assertEquals("app-2.0", ProjectTomcatProfileScanner.finalNameFrom("<project/>", "app", "2.0"));
+    }
+
+    @Test
+    @DisplayName("a plugin's finalName configuration is not the build's")
+    void pluginFinalNameIgnored() {
+        assertEquals("app-2.0", ProjectTomcatProfileScanner.finalNameFrom("""
+                <project><build><plugins><plugin>
+                    <artifactId>maven-assembly-plugin</artifactId>
+                    <configuration><finalName>bundle</finalName></configuration>
+                </plugin></plugins></build></project>
+                """, "app", "2.0"));
+    }
+
+    @Test
+    @DisplayName("a profile's finalName does not apply to the default build")
+    void profileFinalNameIgnored() {
+        assertEquals("app-2.0", ProjectTomcatProfileScanner.finalNameFrom(
+                "<project><profiles><profile><build><finalName>prof</finalName></build></profile></profiles></project>",
+                "app", "2.0"));
+    }
+
+    @Test
+    @DisplayName("${project.artifactId} resolves; an unknown property falls back to the default")
+    void finalNameProperties() {
+        assertEquals("app", ProjectTomcatProfileScanner.finalNameFrom(
+                "<project><build><finalName>${project.artifactId}</finalName></build></project>", "app", "2.0"));
+        assertEquals("app-2.0", ProjectTomcatProfileScanner.finalNameFrom(
+                "<project><build><finalName>${custom.name}</finalName></build></project>", "app", "2.0"));
+    }
+
+    @Test
+    @DisplayName("a commented-out finalName is ignored")
+    void commentedFinalNameIgnored() {
+        assertEquals("app-2.0", ProjectTomcatProfileScanner.finalNameFrom(
+                "<project><build><!-- <finalName>old</finalName> --></build></project>", "app", "2.0"));
+    }
+
+    @Test
+    @DisplayName("the resolved build directory and finalName win over the pom text")
+    void resolvedModelWins() {
+        var coords = new ProjectTomcatProfileScanner.PomCoordinates("web-storefront", "1.0", "storefront");
+        assertEquals("/p/out/site", ProjectTomcatProfileScanner.explodedOutputPath("/p", "/p/out", "site", coords));
+        assertEquals("/p/target/storefront", ProjectTomcatProfileScanner.explodedOutputPath("/p", null, null, coords));
+    }
 }

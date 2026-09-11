@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.setting;
 
 import com.dev.idea.plugins.tomcat.TomcatConstants;
+import com.dev.idea.plugins.tomcat.utils.MavenModelProvider;
 import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -39,6 +40,12 @@ public final class ProjectTomcatProfileScanner {
      */
     private static final Pattern POM_SECTIONS = Pattern.compile(
             "<(properties|dependencyManagement|dependencies|build|profiles|modules|repositories|pluginRepositories)>");
+    private static final Pattern XML_COMMENT = Pattern.compile("<!--.*?-->", Pattern.DOTALL);
+    private static final Pattern POM_PROFILES_BLOCK = Pattern.compile("<profiles>.*?</profiles>", Pattern.DOTALL);
+    private static final Pattern POM_BUILD_BLOCK = Pattern.compile("<build>(.*?)</build>", Pattern.DOTALL);
+    private static final Pattern POM_PLUGIN_BLOCKS = Pattern.compile(
+            "<(plugins|pluginManagement)>.*?</\\1>", Pattern.DOTALL);
+    private static final Pattern POM_FINAL_NAME = Pattern.compile("<finalName>\\s*([^<\\s]+)\\s*</finalName>");
 
     public record DetectedWebappModule(
             @NotNull String moduleName,
@@ -58,6 +65,13 @@ public final class ProjectTomcatProfileScanner {
         @NotNull
         public DetectedWebappModule withContextPath(@NotNull String newContextPath) {
             return new DetectedWebappModule(moduleName, artifactId, version, explodedPath, newContextPath);
+        }
+
+        /** The build output's name: the exploded directory's last segment, i.e. Maven's {@code build.finalName}. */
+        @NotNull
+        public String outputName() {
+            int slash = Math.max(explodedPath.lastIndexOf('/'), explodedPath.lastIndexOf('\\'));
+            return explodedPath.substring(slash + 1);
         }
     }
 
@@ -97,8 +111,8 @@ public final class ProjectTomcatProfileScanner {
     /**
      * Inspects a single module for WAR packaging and, when found, returns its
      * detected webapp profile — Maven artifactId, version, and the exploded
-     * build-output path ({@code <contentRoot>/target/<artifactId>-<version>},
-     * the maven-war-plugin default). Returns {@code null} for modules that
+     * build-output path ({@code <build.directory>/<build.finalName>}, where
+     * maven-war-plugin writes the exploded webapp). Returns {@code null} for modules that
      * don't package a WAR.
      *
      * <p>The exploded path is a <em>build output</em>, never a source web root —
@@ -127,8 +141,8 @@ public final class ProjectTomcatProfileScanner {
             PomCoordinates coords = parseWarCoordinates(pomText, module.getName());
             if (coords == null) continue;
 
-            String explodedPath = root.getPath() + "/target/"
-                    + coords.artifactId() + "-" + coords.version();
+            String explodedPath = explodedOutputPath(root.getPath(),
+                    MavenModelProvider.buildDirectory(module), MavenModelProvider.finalName(module), coords);
 
             return new DetectedWebappModule(
                     module.getName(), coords.artifactId(), coords.version(), explodedPath);
@@ -137,10 +151,10 @@ public final class ProjectTomcatProfileScanner {
     }
 
     /** The Maven coordinates that name a WAR module's build output. */
-    record PomCoordinates(@NotNull String artifactId, @NotNull String version) {}
+    record PomCoordinates(@NotNull String artifactId, @NotNull String version, @NotNull String finalName) {}
 
     /**
-     * Extracts a WAR module's own artifactId/version from raw pom text, or
+     * Extracts a WAR module's own artifactId/version/finalName from raw pom text, or
      * {@code null} when the pom doesn't declare WAR packaging.
      *
      * <p>A multi-module child pom declares its {@code <parent>} coordinates
@@ -166,7 +180,32 @@ public final class ProjectTomcatProfileScanner {
         String inheritedVersion = firstMatch(POM_VERSION, parentBlock, "1.0-SNAPSHOT");
         String version = firstMatch(POM_VERSION, ownText, inheritedVersion);
 
-        return new PomCoordinates(artifactId, version);
+        return new PomCoordinates(artifactId, version, finalNameFrom(pomText, artifactId, version));
+    }
+
+    /**
+     * {@code <build.directory>/<build.finalName>}: the resolved Maven model's values, else the pom's literal
+     * ones under {@code <contentRoot>/target}.
+     */
+    @NotNull
+    static String explodedOutputPath(@NotNull String contentRoot, @Nullable String resolvedBuildDirectory,
+                                     @Nullable String resolvedFinalName, @NotNull PomCoordinates coords) {
+        String dir = resolvedBuildDirectory != null ? resolvedBuildDirectory : contentRoot + "/target";
+        return dir + "/" + (resolvedFinalName != null ? resolvedFinalName : coords.finalName());
+    }
+
+    /**
+     * The pom's literal {@code <build><finalName>} (profiles and plugin configuration excluded), else Maven's
+     * default {@code artifactId-version}; an unresolvable {@code ${...}} also falls back to the default.
+     */
+    @NotNull
+    static String finalNameFrom(@NotNull String pomText, @NotNull String artifactId, @NotNull String version) {
+        String text = POM_PROFILES_BLOCK.matcher(XML_COMMENT.matcher(pomText).replaceAll("")).replaceAll("");
+        String build = POM_PLUGIN_BLOCKS.matcher(firstMatch(POM_BUILD_BLOCK, text, "")).replaceAll("");
+        String name = firstMatch(POM_FINAL_NAME, build, "")
+                .replace("${project.artifactId}", artifactId).replace("${artifactId}", artifactId)
+                .replace("${project.version}", version).replace("${version}", version);
+        return name.isEmpty() || name.contains("${") ? artifactId + "-" + version : name;
     }
 
     @NotNull

@@ -46,6 +46,14 @@ public interface MavenModelProvider {
     @Nullable
     Element getWarPluginConfiguration(@NotNull Module module);
 
+    /** The effective {@code build.finalName} (Maven's default: {@code artifactId-version}), or {@code null}. */
+    @Nullable
+    String getFinalName(@NotNull Module module);
+
+    /** The effective {@code build.directory}, absolute (default {@code <basedir>/target}), or {@code null}. */
+    @Nullable
+    String getBuildDirectory(@NotNull Module module);
+
     /**
      * The registered provider, or {@code null} when the Maven plugin isn't present
      * (or the platform isn't initialized, e.g. a headless unit test). Never throws.
@@ -75,6 +83,7 @@ public interface MavenModelProvider {
         try {
             return provider.getArtifactId(module);
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             return null;
         }
     }
@@ -86,6 +95,7 @@ public interface MavenModelProvider {
         try {
             return provider.getPackaging(module);
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             return null;
         }
     }
@@ -97,6 +107,31 @@ public interface MavenModelProvider {
         try {
             return provider.getWarPluginConfiguration(module);
         } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
+            return null;
+        }
+    }
+
+    @Nullable
+    static String finalName(@NotNull Module module) {
+        MavenModelProvider provider = getInstance();
+        if (provider == null) return null;
+        try {
+            return provider.getFinalName(module);
+        } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
+            return null;
+        }
+    }
+
+    @Nullable
+    static String buildDirectory(@NotNull Module module) {
+        MavenModelProvider provider = getInstance();
+        if (provider == null) return null;
+        try {
+            return provider.getBuildDirectory(module);
+        } catch (Throwable t) {
+            TomcatProgress.rethrowIfControlFlow(t);
             return null;
         }
     }

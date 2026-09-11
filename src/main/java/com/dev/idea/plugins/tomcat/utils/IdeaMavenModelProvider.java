@@ -47,6 +47,20 @@ public final class IdeaMavenModelProvider implements MavenModelProvider {
                 : null;
     }
 
+    @Override
+    @Nullable
+    public String getFinalName(@NotNull Module module) {
+        MavenProject project = mavenProject(module);
+        return project != null ? project.getFinalName() : null;
+    }
+
+    @Override
+    @Nullable
+    public String getBuildDirectory(@NotNull Module module) {
+        MavenProject project = mavenProject(module);
+        return project != null ? project.getBuildDirectory() : null;
+    }
+
     @Nullable
     private static MavenProject mavenProject(@NotNull Module module) {
         return MavenProjectsManager.getInstance(module.getProject()).findProject(module);
