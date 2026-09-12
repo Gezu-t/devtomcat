@@ -22,22 +22,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Platform-fixture coverage of {@link TomcatModuleUtils#isWebModule} build-config
- * detection after the structural rewrite. The contract:
- *
- * <ul>
- *   <li><b>Spec-based classpath signal</b> — a ServletContainerInitializer service on a resolved jar.
- *       resolved onto the module's runtime classpath makes the module web, with no
- *       web root and no build-file present. A non-web library does not.</li>
- *   <li><b>Cold-project text fallback</b> — a project the IDE has not imported has
- *       no resolved Maven model and no classpath, so a {@code war}-packaged
- *       {@code pom.xml} is still detected via the raw build-file scan. The fixture
- *       module carries no external-system id, so this also exercises the
- *       "unknown id scans both build tools" routing branch.</li>
- * </ul>
- *
- * <p>Every signal is asserted structurally with synthetic, minimal inputs — no
- * reference to any specific real-world project, library version, or path.
+ * {@link TomcatModuleUtils#isWebModule}: a Maven module is what its packaging says (resolved, else the pom's
+ * literal element; absent = jar). Other modules need a webapp root (WEB-INF or a webapp-convention name, not
+ * static, public, www) or a build-file war marker. A classpath jar is never a signal.
  */
 public class TomcatModuleUtilsWebDetectionPlatformTest extends BasePlatformTestCase {
 
@@ -82,35 +69,61 @@ public class TomcatModuleUtilsWebDetectionPlatformTest extends BasePlatformTestC
         });
     }
 
-    public void testJakartaServletContainerInitializerServiceMakesModuleWeb() throws Exception {
+    public void testServletContainerInitializerOnClasspathDoesNotMakeModuleWeb() throws Exception {
+        // A dependency is not a packaging decision, whatever hook its jar declares.
         addModuleLibrary("app-web-1.0.jar",
                 "META-INF/services/jakarta.servlet.ServletContainerInitializer");
 
-        assertTrue("a jar declaring the jakarta ServletContainerInitializer service marks the module web",
+        assertFalse("a servlet bootstrap hook on the classpath is a dependency, not a webapp",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
-    public void testJavaxServletContainerInitializerServiceMakesModuleWeb() throws Exception {
-        // Older projects and Tomcat releases up to 9 use the javax API name.
+    public void testLegacyServletContainerInitializerOnClasspathDoesNotMakeModuleWeb() throws Exception {
+        // Same for the javax-era spelling used by projects and Tomcat releases up to 9.
         addModuleLibrary("legacy-web-1.0.jar",
                 "META-INF/services/javax.servlet.ServletContainerInitializer");
 
-        assertTrue("a jar declaring the javax ServletContainerInitializer service marks the module web",
+        assertFalse("the javax-era hook is likewise a dependency, not a webapp",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
     public void testNonWebLibraryDoesNotMakeModuleWeb() throws Exception {
         addModuleLibrary("lib-alpha-3.14.0.jar");
 
-        assertFalse("a library with no servlet bootstrap hook must not mark the module web",
+        assertFalse("a plain library must not mark the module web",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
-    public void testUnrelatedServiceFileDoesNotMakeModuleWeb() throws Exception {
-        // Only the Servlet spec's own hook is a signal — not ServiceLoader files in general.
-        addModuleLibrary("lib-beta-1.0.jar", "META-INF/services/com.example.spi.OtherService");
+    public void testStaticResourceDirectoryDoesNotMakeModuleWeb() {
+        // findWebRoots admits this asset directory; the deployability gate must not.
+        myFixture.addFileToProject("src/main/resources/static/app.js", "console.log(1);");
 
-        assertFalse("an unrelated ServiceLoader entry must not mark the module web",
+        assertFalse("bundled static assets must not make a library module a deployable webapp",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testAssetDirectoryNamesDoNotMakeModuleWeb() {
+        // "public" and "www" are on the web-root convention list but name a bundled
+        // asset directory, which a library module has as readily as a webapp.
+        myFixture.addFileToProject("public/index.html", "<html/>");
+        myFixture.addFileToProject("www/page.html", "<html/>");
+
+        assertFalse("asset-directory conventions are not webapp roots",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testWebappRootWithoutWebInfMakesModuleWeb() {
+        // No WEB-INF: with failOnMissingWebXml=false a war's sources often have none.
+        myFixture.addFileToProject("src/main/webapp/index.jsp", "<html/>");
+
+        assertTrue("src/main/webapp is a webapp root whether or not WEB-INF exists yet",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testWebInfHoldingWebRootMakesModuleWeb() {
+        myFixture.addFileToProject("src/main/webapp/WEB-INF/web.xml", "<web-app/>");
+
+        assertTrue("a webapp root holding WEB-INF is a deployable web application",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 
@@ -162,6 +175,39 @@ public class TomcatModuleUtilsWebDetectionPlatformTest extends BasePlatformTestC
                 "<project><packaging>pom</packaging></project>");
 
         assertFalse("a pom-packaged aggregator module must not be detected as web",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testJarPackagedMavenModuleWithWebappRootIsNotWeb() {
+        myFixture.addFileToProject("pom.xml", "<project><packaging>jar</packaging></project>");
+        myFixture.addFileToProject("src/main/webapp/legacy.html", "<html/>");
+
+        assertFalse("Maven never packages a jar module's src/main/webapp",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testMavenModuleWithoutPackagingIsJarEvenWithWebInf() {
+        myFixture.addFileToProject("pom.xml", "<project><artifactId>lib</artifactId></project>");
+        myFixture.addFileToProject("src/main/webapp/WEB-INF/web.xml", "<web-app/>");
+
+        assertFalse("no <packaging> element is Maven's default, jar",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testCommentedOutWarPackagingIsIgnored() {
+        myFixture.addFileToProject("pom.xml",
+                "<project><!-- <packaging>war</packaging> --><packaging>jar</packaging></project>");
+        myFixture.addFileToProject("src/main/webapp/index.jsp", "<html/>");
+
+        assertFalse("a commented-out element is not the packaging",
+                ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
+    }
+
+    public void testUnresolvedPackagingPropertyDefersToWebappRoot() {
+        myFixture.addFileToProject("pom.xml", "<project><packaging>${packaging.type}</packaging></project>");
+        myFixture.addFileToProject("src/main/webapp/index.jsp", "<html/>");
+
+        assertTrue("an unresolved property gives no verdict; the webapp root decides",
                 ReadAction.compute(() -> TomcatModuleUtils.isWebModule(getModule())));
     }
 

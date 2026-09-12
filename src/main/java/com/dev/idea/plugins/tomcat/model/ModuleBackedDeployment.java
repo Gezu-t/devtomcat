@@ -94,6 +94,16 @@ public final class ModuleBackedDeployment implements Deployment {
         return exploded;
     }
 
+    /**
+     * Always WAR: these are only built for modules that passed {@code isWebModule},
+     * which requires war packaging or a webapp root. Not recomputed here — the resolved
+     * view is rebuilt on the EDT, where build-file reads are prohibited.
+     */
+    @Override
+    public @NotNull DeploymentArchive getArchive() {
+        return DeploymentArchive.WAR;
+    }
+
     @Override
     public boolean isValid() {
         // Both module and output dir must be present — they go stale independently

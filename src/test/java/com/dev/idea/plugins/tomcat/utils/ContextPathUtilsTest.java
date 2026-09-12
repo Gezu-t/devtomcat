@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArchive;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -475,6 +476,90 @@ class ContextPathUtilsTest {
         void returnsNameAsIsForUnknownType() {
             assertEquals("some-thing",
                     ContextPathUtils.formatArtifactDisplayName("some-thing", null));
+        }
+    }
+
+    @Nested
+    @DisplayName("formatArtifactDisplayName with an explicit archive")
+    class FormatArtifactDisplayNameWithArchive {
+
+        @Test
+        @DisplayName("labels a war in both packings")
+        void labelsWar() {
+            assertEquals("web-module:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "web-module", DeploymentArchive.WAR, true));
+            assertEquals("web-module:war",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "web-module", DeploymentArchive.WAR, false));
+        }
+
+        @Test
+        @DisplayName("labels an ear as an ear, exploded included")
+        void labelsEar() {
+            // The boolean overload had no way to express this: it mapped the
+            // exploded flag straight onto war, so an ear rendered as a war.
+            assertEquals("suite:ear exploded",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "suite", DeploymentArchive.EAR, true));
+            assertEquals("suite:ear",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "suite", DeploymentArchive.EAR, false));
+        }
+
+        @Test
+        @DisplayName("names no archive when none was established, in either packing")
+        void unknownRendersBareName() {
+            // The defect this overload exists to fix: an exploded directory the
+            // user picked by hand is not a war, and must not be labelled one.
+            assertEquals("staging-dir",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "staging-dir", DeploymentArchive.UNKNOWN, true));
+            assertEquals("staging-dir",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "staging-dir", DeploymentArchive.UNKNOWN, false));
+        }
+
+        @Test
+        @DisplayName("leaves the name untouched when no archive is established")
+        void unknownDoesNotTrimTheName() {
+            // No suffix is going to be appended, so there is nothing to trim
+            // towards — the stored name is shown exactly as stored.
+            assertEquals("app-1.0.0",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "app-1.0.0", DeploymentArchive.UNKNOWN, true));
+        }
+
+        @Test
+        @DisplayName("strips packaging suffix and version before appending")
+        void stripsBeforeAppending() {
+            assertEquals("web-module:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "web-module_war_exploded", DeploymentArchive.WAR, true));
+            assertEquals("web-module:war",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "web-module##5.18.0.war", DeploymentArchive.WAR, false));
+            assertEquals("web-module:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "web-module-5.18.0", DeploymentArchive.WAR, true));
+        }
+
+        @Test
+        @DisplayName("preserves existing colon notation")
+        void preservesColonNotation() {
+            assertEquals("app:war exploded",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "app:war exploded", DeploymentArchive.WAR, true));
+        }
+
+        @Test
+        @DisplayName("the archive decides, not the name's suffix")
+        void archiveWinsOverNameSuffix() {
+            // The type-string overload re-infers the type from the name and lets it
+            // override the caller. Here the caller has resolved evidence and wins.
+            assertEquals("suite:ear",
+                    ContextPathUtils.formatArtifactDisplayName(
+                            "suite_war", DeploymentArchive.EAR, false));
         }
     }
 }

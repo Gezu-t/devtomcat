@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArchive;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.packaging.artifacts.Artifact;
 import org.jetbrains.annotations.NotNull;
@@ -59,5 +60,41 @@ public final class ArtifactPackagingDetector {
 
         // Default: treat as exploded (better for local development — supports hot reload)
         return true;
+    }
+
+    /**
+     * Archive form (war / ear / unknown) from the artifact type ID, then its name, then the output
+     * path: {@link #resolveExplodedPackaging}'s order, but with no default. UNKNOWN, never a guessed war.
+     */
+    @NotNull
+    public static DeploymentArchive resolveArchive(@NotNull Artifact artifact) {
+        try {
+            String typeId = artifact.getArtifactType().getId().toLowerCase(Locale.ROOT);
+            if (typeId.contains("war")) return DeploymentArchive.WAR;
+            if (typeId.contains("ear")) return DeploymentArchive.EAR;
+        } catch (RuntimeException e) {
+            LOG.debug("Error resolving artifact type for deployment '" + artifact.getName() + "'", e);
+        }
+
+        DeploymentArchive byName = archiveFromArtifactName(artifact.getName());
+        if (byName != DeploymentArchive.UNKNOWN) return byName;
+
+        return DeploymentArchive.ofFileName(artifact.getOutputFilePath());
+    }
+
+    /**
+     * Archive an artifact name spells: {@code app:war exploded}, {@code app_war_exploded}, {@code app.war}.
+     * Pure string work, so it also serves a deployment whose artifact pointer no longer resolves.
+     */
+    @NotNull
+    public static DeploymentArchive archiveFromArtifactName(@NotNull String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.contains(":war") || lower.contains("_war") || lower.endsWith(".war")) {
+            return DeploymentArchive.WAR;
+        }
+        if (lower.contains(":ear") || lower.contains("_ear") || lower.endsWith(".ear")) {
+            return DeploymentArchive.EAR;
+        }
+        return DeploymentArchive.UNKNOWN;
     }
 }

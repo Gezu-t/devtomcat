@@ -1,10 +1,10 @@
 package com.dev.idea.plugins.tomcat.utils;
 
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
@@ -25,6 +25,8 @@ import com.dev.idea.plugins.tomcat.TomcatConstants;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Module and Project utilities for DevTomcat plugin.
@@ -44,6 +46,11 @@ public final class TomcatModuleUtils {
     // Common web root directory names
     private static final Set<String> WEB_ROOT_NAMES = Set.of(
             "webapp", "WebContent", "web", "WebRoot", "webroot", "public", "www"
+    );
+
+    /** Webapp-root names for the deployability gate. Excludes public/www/static — asset dirs, not webapps. */
+    private static final Set<String> DEPLOYABLE_WEB_ROOT_NAMES = Set.of(
+            "webapp", "WebContent", "web", "WebRoot", "webroot"
     );
 
     // Common paths to web directories
@@ -95,11 +102,9 @@ public final class TomcatModuleUtils {
     // =====================================================================
     // Cold-project fallback markers (used only by the build-file text scan in
     // hasWebBuildFileTextFallback). Web detection is primarily structural — a
-    // discovered web root, the resolved Maven packaging, or a servlet-container bootstrap hook on the classpath
-    // on the resolved classpath. These raw-text markers exist solely for a project
-    // the IDE has not imported/resolved yet, where none of those signals are
-    // available. Kept during a deprecation window while structural detection
-    // becomes the norm.
+    // WEB-INF-holding webapp root, or the resolved Maven packaging. These raw-text
+    // markers exist solely for a project the IDE has not imported/resolved yet,
+    // where neither signal is available.
     // =====================================================================
 
     /**
@@ -122,26 +127,8 @@ public final class TomcatModuleUtils {
             "plugin 'war'"
     );
 
-    /**
-     * The Servlet specification's bootstrap hook. A framework that runs <em>inside</em>
-     * a servlet container registers a {@code ServletContainerInitializer} through the
-     * {@code ServiceLoader} file below — that is how the container finds it. Its
-     * presence on a module's resolved classpath is therefore a spec-level statement
-     * that the module hosts a servlet web app, whichever framework it uses and
-     * whichever API it was written against: the {@code javax} name covers projects
-     * and Tomcat releases up to 9, the {@code jakarta} name covers 10 and later.
-     *
-     * <p>This replaces a resolved-jar-name signal that named one framework's
-     * servlet module. That signal was narrower on purpose — the same framework's
-     * HTTP-client jar also carries this hook — and the trade is accepted knowingly:
-     * this probe is the last resort, consulted only after war packaging, a
-     * deployment descriptor and a webapp directory have all come up empty, and it
-     * now recognises every container-bootstrapped framework rather than one.
-     */
-    static final List<String> SERVLET_CONTAINER_INITIALIZER_SERVICES = List.of(
-            "META-INF/services/jakarta.servlet.ServletContainerInitializer",
-            "META-INF/services/javax.servlet.ServletContainerInitializer"
-    );
+    private static final Pattern POM_PACKAGING_ELEMENT = Pattern.compile("<packaging>\\s*([^<\\s]+)\\s*</packaging>");
+    private static final Pattern XML_COMMENT = Pattern.compile("<!--.*?-->", Pattern.DOTALL);
 
     // =====================================================================
     // Web Facet reflection (provided by the platform's JavaEE plugin)
@@ -156,20 +143,44 @@ public final class TomcatModuleUtils {
         // Utility class
     }
 
+    /**
+     * Whether this module is a deployable web application — the Deployment tab's gate.
+     * Stricter than {@link #findWebRoots}, which answers "is there servable content here?"
+     * for the sync pipeline and would admit any module with a static-asset directory.
+     */
     public static boolean isWebModule(@NotNull Module module) {
         // Skip test modules
         if (isTestModule(module)) {
             return false;
         }
 
-        // Check for web roots
-        List<VirtualFile> webRoots = findWebRoots(module);
-        if (!webRoots.isEmpty()) {
-            return true;
+        // A Maven module is exactly what its packaging says; web folders count only without one.
+        Boolean mavenWar = mavenPackagingVerdict(module);
+        if (mavenWar != null) {
+            return mavenWar;
         }
 
-        // Check for build tool configurations (e.g., Maven war plugin)
-        return hasWebBuildConfiguration(module);
+        return hasDeployableWebRoot(module) || hasWebBuildFileTextFallback(module);
+    }
+
+    private static boolean hasDeployableWebRoot(@NotNull Module module) {
+        return !findDeployableWebRoots(module).isEmpty();
+    }
+
+    /**
+     * {@link #findWebRoots} narrowed to webapp roots: holds WEB-INF or has a webapp-convention name
+     * (Servlet 3.0+ war sources often lack WEB-INF). First entry is the best deploy path. Read action.
+     */
+    @NotNull
+    public static List<VirtualFile> findDeployableWebRoots(@NotNull Module module) {
+        List<VirtualFile> deployable = new ArrayList<>();
+        for (VirtualFile webRoot : findWebRoots(module)) {
+            if (isContentRootWebapp(webRoot)
+                    || containsIgnoreCase(DEPLOYABLE_WEB_ROOT_NAMES, webRoot.getName())) {
+                deployable.add(webRoot);
+            }
+        }
+        return deployable;
     }
 
     @NotNull
@@ -532,83 +543,33 @@ public final class TomcatModuleUtils {
     }
 
     /**
-     * Whether the module's build configuration marks it as web, determined
-     * structurally first and only falling back to raw build-file text for a
-     * project the IDE has not imported/resolved yet.
-     *
-     * <p>Order:
-     * <ol>
-     *   <li><b>Resolved Maven packaging</b> — {@code "war"} is web by definition,
-     *       and the resolved model sees packaging inherited from a parent POM, set
-     *       via a {@code ${property}}, or activated in a profile. ({@code "war"} is
-     *       the bare resolved value, distinct from the XML fragment
-     *       {@link TomcatConstants#POM_PACKAGING_WAR}.)</li>
-     *   <li><b>A {@code ServletContainerInitializer} service on the resolved
-     *       classpath</b> — the Servlet spec's own hook by which a framework
-     *       bootstraps inside the container, in either API era. Build-tool-agnostic
-     *       (Maven or Gradle, any DSL), immune to build-file spelling, and it
-     *       catches container-bootstrapped apps with no war packaging that the
-     *       build-file markers below do not name. See
-     *       {@link #SERVLET_CONTAINER_INITIALIZER_SERVICES}.</li>
-     *   <li><b>Build-file text fallback</b> — for an un-imported project, where
-     *       neither the Maven model nor the classpath is resolved yet. Scans both
-     *       the {@code pom.xml} and the Gradle script for the war markers, so
-     *       detection for such
-     *       projects is unchanged; structural signals simply take precedence when
-     *       available.</li>
-     * </ol>
+     * Maven's verdict: the resolved packaging, else the pom's literal {@code <packaging>} (absent = jar).
+     * {@code null} when there is no pom or its packaging is an unresolved {@code ${property}}.
      */
-    private static boolean hasWebBuildConfiguration(@NotNull Module module) {
-        if ("war".equals(MavenModelProvider.packaging(module))) {
-            return true;
+    @Nullable
+    private static Boolean mavenPackagingVerdict(@NotNull Module module) {
+        String resolved = MavenModelProvider.packaging(module);
+        if (resolved != null) {
+            return "war".equals(resolved);
         }
-        if (hasServletContainerInitializerOnClasspath(module)) {
-            return true;
-        }
-        return hasWebBuildFileTextFallback(module);
-    }
-
-    /**
-     * Spec-based classpath signal: any resolved runtime classpath root (jar or
-     * directory) that declares a {@code ServletContainerInitializer} service. Uses
-     * the same {@code runtimeOnly().recursively()} enumeration as the rest of the
-     * plugin's classpath reasoning, and the VFS rather than opening the jar, so a
-     * jar root and an output directory are probed the same way.
-     */
-    private static boolean hasServletContainerInitializerOnClasspath(@NotNull Module module) {
-        for (VirtualFile root : OrderEnumerator.orderEntries(module)
-                .runtimeOnly().recursively().classes().getRoots()) {
-            for (String service : SERVLET_CONTAINER_INITIALIZER_SERVICES) {
-                if (root.findFileByRelativePath(service) != null) {
-                    return true;
-                }
+        for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
+            VirtualFile pom = root.findChild(TomcatConstants.MAVEN_BUILD_FILE);
+            if (pom == null || !pom.exists()) continue;
+            try {
+                Matcher m = POM_PACKAGING_ELEMENT.matcher(XML_COMMENT.matcher(VfsUtil.loadText(pom)).replaceAll(""));
+                if (!m.find()) return false;
+                String packaging = m.group(1);
+                return packaging.contains("${") ? null : "war".equalsIgnoreCase(packaging);
+            } catch (IOException e) {
+                return null;
             }
         }
-        return false;
+        return null;
     }
 
     /**
-     * Pure predicate: is {@code entryPath} (a path relative to a classpath root, with
-     * {@code /} separators) one of the Servlet spec's {@code ServletContainerInitializer}
-     * service files? Case-sensitive — JAR entries are.
-     */
-    static boolean isServletContainerInitializerService(@Nullable String entryPath) {
-        return entryPath != null && SERVLET_CONTAINER_INITIALIZER_SERVICES.contains(entryPath);
-    }
-
-    /**
-     * Last-resort web detection for a not-yet-imported project, kept during a
-     * deprecation window while the structural signals above become the norm. Reads
-     * the raw build-file text and matches the known war markers.
-     *
-     * <p>Scans both the {@code pom.xml} and the Gradle build script on every content
-     * root (and the project base dir, for single-module layouts whose module root
-     * differs). It does <em>not</em> route by the resolved external-system id: the
-     * scans are already self-selecting (each only fires when its build file is
-     * present), and gating by owner could hide a module whose only web signal lives
-     * in the other tool's file — a worse outcome than the rare cross-tool
-     * false positive gating would suppress. This mirrors the pre-rewrite behaviour
-     * exactly, so the fallback never loses a verdict the old code produced.
+     * Last-resort detection for a not-yet-imported project, kept during a deprecation window: war markers
+     * in each content root's pom.xml / Gradle script. The base dir is scanned only for a single-module project.
      */
     private static boolean hasWebBuildFileTextFallback(@NotNull Module module) {
         for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
@@ -617,9 +578,9 @@ public final class TomcatModuleUtils {
             }
         }
 
-        VirtualFile baseDir = ProjectUtil.guessProjectDir(module.getProject());
-        if (baseDir != null) {
-            if (checkMavenWebConfig(baseDir) || checkGradleWebConfig(baseDir)) {
+        if (ModuleManager.getInstance(module.getProject()).getModules().length == 1) {
+            VirtualFile baseDir = ProjectUtil.guessProjectDir(module.getProject());
+            if (baseDir != null && (checkMavenWebConfig(baseDir) || checkGradleWebConfig(baseDir))) {
                 return true;
             }
         }

@@ -62,6 +62,12 @@ public final class ExternalFileDeployment implements Deployment {
         return exploded;
     }
 
+    /** From the picked path's extension; a browsed-to directory stays UNKNOWN. */
+    @Override
+    public @NotNull DeploymentArchive getArchive() {
+        return DeploymentArchive.ofPath(externalPath);
+    }
+
     @Override
     public boolean isValid() {
         return Files.exists(externalPath);

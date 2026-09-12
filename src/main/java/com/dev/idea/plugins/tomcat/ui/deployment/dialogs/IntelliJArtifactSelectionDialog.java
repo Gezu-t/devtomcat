@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.ui.deployment.dialogs;
 
+import com.dev.idea.plugins.tomcat.utils.ArtifactPackagingDetector;
 import com.dev.idea.plugins.tomcat.utils.ContextPathUtils;
 import com.intellij.ide.util.ChooseElementsDialog;
 import com.intellij.openapi.project.Project;
@@ -7,7 +8,6 @@ import com.intellij.packaging.artifacts.Artifact;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
-import java.util.Locale;
 import com.intellij.openapi.diagnostic.Logger;
 import javax.swing.Icon;
 
@@ -31,32 +31,14 @@ public class IntelliJArtifactSelectionDialog extends ChooseElementsDialog<Artifa
 
     @Override
     protected String getItemText(Artifact item) {
-        // Use the actual artifact type from IntelliJ's type system for accurate display.
-        // When the platform provides web-typed IDs ("exploded-war", "war",
-        // "web-application-exploded", etc.) we use those directly; when only generic
-        // types are present ("plain", "jar"), we also check the artifact name for
-        // type hints (e.g. "myapp_war_exploded", "myapp.war").
-        String type = resolveDisplayType(item);
-        return ContextPathUtils.formatArtifactDisplayName(item.getName(), type);
+        // ArtifactPackagingDetector owns the packaging policy; an artifact declaring no archive renders bare.
+        return ContextPathUtils.formatArtifactDisplayName(
+                item.getName(),
+                ArtifactPackagingDetector.resolveArchive(item),
+                ArtifactPackagingDetector.resolveExplodedPackaging(item));
     }
 
-    private static String resolveDisplayType(@NotNull Artifact item) {
-        try {
-            String typeId = item.getArtifactType().getId().toLowerCase(Locale.ROOT);
-            if (typeId.contains("exploded")) return "exploded";
-            if (typeId.contains("war")) return "war";
-            if (typeId.contains("ear")) return "ear";
-        } catch (Exception ignored) {}
 
-        // Fallback: infer from artifact name (common in Community Edition)
-        String name = item.getName().toLowerCase(Locale.ROOT);
-        if (name.contains("exploded")) return "exploded";
-        if (name.endsWith(".war") || name.endsWith("_war") || name.endsWith(":war")) return "war";
-
-        // No type signal — return null so formatArtifactDisplayName returns the raw name
-        return null;
-    }
-    
     public List<Artifact> getSelectedArtifacts() {
         return getChosenElements();
     }

@@ -79,10 +79,9 @@ public final class ProjectArtifactDetector {
     }
 
     /**
-     * The exploded deployment path for a web module: its build output when one is
-     * determinable (Maven {@code target/<finalName>}), else a web root as a
-     * fallback, else the module content root. Never returns {@code null} for a
-     * module with any content root. Must be called under a read action.
+     * Exploded deployment path: the build output when known, else the webapp root, else {@code null}
+     * (not offered). Never the content root: DeploymentSafety refuses to sync into source trees.
+     * Read action required.
      */
     @Nullable
     private static Path deployableExplodedPath(@NotNull Module module) {
@@ -90,12 +89,8 @@ public final class ProjectArtifactDetector {
         if (detected != null) {
             return Path.of(detected.explodedPath());
         }
-        List<VirtualFile> webRoots = TomcatModuleUtils.findWebRoots(module);
-        if (!webRoots.isEmpty()) {
-            return Path.of(webRoots.get(0).getPath());
-        }
-        VirtualFile[] contentRoots = ModuleRootManager.getInstance(module).getContentRoots();
-        return contentRoots.length > 0 ? Path.of(contentRoots[0].getPath()) : null;
+        List<VirtualFile> webRoots = TomcatModuleUtils.findDeployableWebRoots(module);
+        return webRoots.isEmpty() ? null : Path.of(webRoots.get(0).getPath());
     }
 
     /**

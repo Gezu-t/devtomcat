@@ -28,8 +28,10 @@ public class ModuleDeploymentDialog extends ChooseElementsDialog<Deployment> {
 
     @Override
     protected String getItemText(Deployment item) {
-        // Format using colon notation (e.g. "app:war exploded")
-        return ContextPathUtils.formatArtifactDisplayName(item.getDisplayName(), item.isExploded());
+        // Colon notation from the archive the item established (e.g. "app:war exploded");
+        // a bare name when it established none.
+        return ContextPathUtils.formatArtifactDisplayName(
+                item.getDisplayName(), item.getArchive(), item.isExploded());
     }
 
     public List<Deployment> getSelectedDeployments() {

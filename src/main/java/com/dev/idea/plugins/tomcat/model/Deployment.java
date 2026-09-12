@@ -26,5 +26,11 @@ public sealed interface Deployment
 
     boolean isExploded();
 
+    /**
+     * Archive form produced, orthogonal to {@link #isExploded()} (packed vs unpacked).
+     * Return {@link DeploymentArchive#UNKNOWN} rather than guess.
+     */
+    @NotNull DeploymentArchive getArchive();
+
     boolean isValid();
 }

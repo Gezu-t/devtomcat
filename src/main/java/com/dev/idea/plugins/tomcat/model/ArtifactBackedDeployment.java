@@ -113,6 +113,15 @@ public final class ArtifactBackedDeployment implements Deployment {
         return ArtifactPackagingDetector.resolveExplodedPackaging(artifact);
     }
 
+    /** From the live artifact; falls back to the persisted name when the pointer is dead. */
+    @Override
+    public @NotNull DeploymentArchive getArchive() {
+        Artifact artifact = artifact();
+        return artifact == null
+                ? ArtifactPackagingDetector.archiveFromArtifactName(artifactPointer.getArtifactName())
+                : ArtifactPackagingDetector.resolveArchive(artifact);
+    }
+
     @Override
     public boolean isValid() {
         // Check only that the Artifact is registered in the project model.

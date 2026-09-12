@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.dev.idea.plugins.tomcat.model.DeploymentArchive;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -173,6 +174,43 @@ public final class ContextPathUtils {
     @NotNull
     public static String formatArtifactDisplayName(@NotNull String name, boolean exploded) {
         return formatArtifactDisplayName(name, exploded ? TYPE_EXPLODED : TYPE_WAR);
+    }
+
+    /**
+     * Display name labelled with the archive the deployment established; {@link DeploymentArchive#UNKNOWN}
+     * renders the name bare. Prefer over the boolean overload, which can only ever say war.
+     */
+    @NotNull
+    public static String formatArtifactDisplayName(@NotNull String name,
+                                                   @NotNull DeploymentArchive archive,
+                                                   boolean exploded) {
+        // Already in colon notation — the name states its own archive; leave it alone.
+        if (name.contains(ARTIFACT_SUFFIX_WAR) || name.contains(ARTIFACT_SUFFIX_EAR)) {
+            return name;
+        }
+        String suffix = archive.displaySuffix(exploded);
+        // Nothing established an archive: render the name exactly as stored rather
+        // than trimming it towards a label we are not going to append.
+        return suffix == null ? name : baseNameFor(name) + suffix;
+    }
+
+    /**
+     * The name with any packaging suffix ({@code _war_exploded}, {@code .war}, …)
+     * and trailing version ({@code ##5.18.0}, {@code -5.18.0-SNAPSHOT}) removed —
+     * what a colon-notation label is built on.
+     */
+    @NotNull
+    private static String baseNameFor(@NotNull String name) {
+        String baseName = name;
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (SuffixToType mapping : ARTIFACT_NAME_SUFFIXES_BY_TYPE) {
+            if (lower.endsWith(mapping.suffix())) {
+                baseName = name.substring(0, name.length() - mapping.suffix().length());
+                break;
+            }
+        }
+        baseName = baseName.replaceAll("(?i)##\\d+(\\.\\d+)*(-SNAPSHOT)?$", "");
+        return baseName.replaceAll("(?i)-\\d+(\\.\\d+)+(-SNAPSHOT)?$", "");
     }
 
     /** Maps an artifact type back to its colon-notation display suffix, or {@code null} for unknown / unmatched types. */

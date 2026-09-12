@@ -51,9 +51,10 @@ public class DeploymentTableManager {
                                                  boolean hasFocus) {
                 if (value != null) {
                     setIcon(AllIcons.Nodes.Artifact);
-                    // Format display name using colon notation (e.g. "app:war exploded")
+                    // Colon notation from the archive the deployment established
+                    // (e.g. "app:war exploded"); a bare name when it established none.
                     String displayName = ContextPathUtils.formatArtifactDisplayName(
-                            value.getDisplayName(), value.isExploded());
+                            value.getDisplayName(), value.getArchive(), value.isExploded());
                     append(displayName, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                 }
             }

@@ -52,6 +52,11 @@ public final class DeploymentRow {
         return getKind() == DeploymentKind.EXTERNAL ? exploded : source.isExploded();
     }
 
+    /** From the core; unaffected by the row's exploded edit — the two axes are independent. */
+    public @NotNull DeploymentArchive getArchive() {
+        return source.getArchive();
+    }
+
     public boolean isValid() {
         return source.isValid();
     }
