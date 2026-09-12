@@ -71,6 +71,7 @@ public final class ProjectArtifactDetector {
                             contextPath, /* exploded */ true));
                 }
             } catch (Exception e) {
+                TomcatProgress.rethrowIfControlFlow(e);
                 LOG.warn("DevTomcat: Error detecting web modules", e);
             }
 
@@ -125,6 +126,7 @@ public final class ProjectArtifactDetector {
                 scanWarDirectory(new File(rootPath, "out/artifacts"), results);
             }
         } catch (Exception e) {
+            TomcatProgress.rethrowIfControlFlow(e);
             LOG.warn("DevTomcat: Error scanning module build outputs", e);
         }
 

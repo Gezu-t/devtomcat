@@ -1,7 +1,10 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.intellij.facet.Facet;
+import com.intellij.facet.FacetManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ModuleRootManager;
@@ -15,8 +18,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 
@@ -363,10 +368,10 @@ public final class TomcatModuleUtils {
     @NotNull
     public static List<VirtualFile> findWebFacetRoots(@NotNull Module module) {
         try {
-            com.intellij.facet.FacetManager fm = com.intellij.facet.FacetManager.getInstance(module);
-            if (fm == null) return java.util.Collections.emptyList();
+            FacetManager fm = FacetManager.getInstance(module);
+            if (fm == null) return Collections.emptyList();
             LinkedHashSet<VirtualFile> out = new LinkedHashSet<>();
-            for (com.intellij.facet.Facet<?> facet : fm.getAllFacets()) {
+            for (Facet<?> facet : fm.getAllFacets()) {
                 // String-ID match avoids a compile-time dependency on WebFacet
                 // (which lives in the optional JavaEE plugin).
                 if (!WEB_FACET_STRING_ID.equals(facet.getType().getStringId())) continue;
@@ -379,11 +384,11 @@ public final class TomcatModuleUtils {
                             out.add(vf);
                         }
                     }
-                } catch (java.lang.reflect.InvocationTargetException e) {
+                } catch (InvocationTargetException e) {
                     // Cancellation must escape the reflective boundary — this
                     // runs per existing config on the cancelable action-update
                     // path (run-config producer matching).
-                    if (e.getCause() instanceof com.intellij.openapi.progress.ProcessCanceledException pce) {
+                    if (e.getCause() instanceof ProcessCanceledException pce) {
                         throw pce;
                     }
                     // Facet shape unexpected — skip this facet, try the next.
@@ -392,12 +397,9 @@ public final class TomcatModuleUtils {
                 }
             }
             return new ArrayList<>(out);
-        } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
-            // PCE before the generic handler — cancellation propagates instead
-            // of silently degrading facet discovery to convention fallbacks.
-            throw pce;
         } catch (NoClassDefFoundError | Exception e) {
-            return java.util.Collections.emptyList();
+            TomcatProgress.rethrowIfControlFlow(e);
+            return Collections.emptyList();
         }
     }
 
