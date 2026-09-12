@@ -8,7 +8,9 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.dev.idea.plugins.tomcat.setting.ProjectTomcatProfileScanner;
 import com.intellij.openapi.diagnostic.Logger;
+import java.nio.file.Files;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.BiPredicate;
@@ -16,6 +18,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
+import java.util.function.Predicate;
 
 /**
  * Access-time resolution for stored {@link Deployment}s. Storage keeps
@@ -64,49 +67,43 @@ public final class DeploymentResolver {
             ModuleBackedDeployment bound = rebindTo == null ? m : new ModuleBackedDeployment(
                     ModuleRef.of(project, rebindTo),
                     m.getOutputPath(), m.getContextPath(), m.isExploded(), m.getLegacyName());
-            return healSourceTreePath(project, bound, DeploymentResolver::mavenBuildOutput,
-                    DeploymentResolver::isInsideModuleContent);
+            return healStoredPath(project, bound, DeploymentResolver::mavenBuildOutput,
+                    DeploymentResolver::isInsideModuleContent, Files::exists);
         }
         return deployment;
     }
 
     /**
-     * Re-points an auto-detected deployment whose path is inside the project's
-     * content — a web root such as {@code src/main/webapp}, which older versions'
-     * detection fell back to — at the module's build output, when the build
-     * model can determine one. Left alone otherwise. Runtime-only, like every
-     * resolution here: the stored entry is untouched until the user saves the
-     * configuration. Without this, the sync refuses (correctly) to write into
-     * the sources and Tomcat serves the source tree with no {@code WEB-INF/classes}.
+     * Re-points a deployment whose stored path cannot serve: one inside the project's content (a web
+     * root such as {@code src/main/webapp}, which older detection fell back to), or one that no longer
+     * exists (a build output renamed since, e.g. after a {@code finalName} change). A missing path is
+     * only traded for a build output that exists, so a not-yet-built deployment is left alone.
+     * Runtime-only: the stored entry is untouched until the user saves the configuration.
      *
-     * @param buildOutput   the module's exploded build output, or {@code null} when
-     *                      none is determinable
-     * @param insideContent whether a path lies inside the module's non-excluded
-     *                      content — {@link #isInsideModuleContent} in production;
-     *                      both are injected so the rule is testable in isolation
+     * @param buildOutput   the module's exploded build output, or {@code null} when none is determinable
+     * @param insideContent whether a path lies inside the module's non-excluded content
+     * @param exists        filesystem probe; {@code Files::exists} in production. All three are injected
+     *                      so the rule is testable in isolation
      */
     @NotNull
-    static ModuleBackedDeployment healSourceTreePath(@NotNull Project project,
-                                                     @NotNull ModuleBackedDeployment m,
-                                                     @NotNull Function<Module, Path> buildOutput,
-                                                     @NotNull BiPredicate<Module, Path> insideContent) {
+    static ModuleBackedDeployment healStoredPath(@NotNull Project project,
+                                                 @NotNull ModuleBackedDeployment m,
+                                                 @NotNull Function<Module, Path> buildOutput,
+                                                 @NotNull BiPredicate<Module, Path> insideContent,
+                                                 @NotNull Predicate<Path> exists) {
         return TomcatReadActions.compute(() -> {
             Module module = m.getModule();
             if (module == null) return m;
             Path stored = m.getOutputPath();
-            // The resolved view is recomputed on every read of the deployment list,
-            // often on the EDT; a positive heal (which read the build file) is
-            // remembered per stored path so that read happens once per session.
+            // The resolved view is recomputed on every read of the deployment list, often on the EDT,
+            // so each verdict is remembered per stored path: one build-file read, one stat, per session.
             Path output = HEALED.get(stored);
             if (output == null) {
-                if (!insideContent.test(module, stored)) return m;
-                output = buildOutput.apply(module);
-                if (output == null || output.equals(stored)) return m;
-                // Never trade one source-tree path for another.
-                if (insideContent.test(module, output)) return m;
+                output = healedTarget(module, stored, buildOutput, insideContent, exists);
+                if (output == null) return m;
                 if (HEALED.putIfAbsent(stored, output) == null) {
-                    LOG.info("Deployment '" + m.getDisplayName() + "': stored path is inside the source tree ("
-                            + stored + "); using the build output instead (" + output + ")");
+                    LOG.info("Deployment '" + m.getDisplayName() + "': stored path " + stored
+                            + " is unusable (source tree, or gone); using the build output " + output);
                 }
             }
             return new ModuleBackedDeployment(
@@ -114,12 +111,36 @@ public final class DeploymentResolver {
         });
     }
 
+    /** The build output to use instead of {@code stored}, or {@code null} to keep what is stored. */
+    @Nullable
+    private static Path healedTarget(@NotNull Module module, @NotNull Path stored,
+                                     @NotNull Function<Module, Path> buildOutput,
+                                     @NotNull BiPredicate<Module, Path> insideContent,
+                                     @NotNull Predicate<Path> exists) {
+        boolean insideSource = insideContent.test(module, stored);
+        if (!insideSource && (LIVE.contains(stored) || exists.test(stored))) {
+            LIVE.add(stored);
+            return null;
+        }
+        Path output = buildOutput.apply(module);
+        if (output == null || output.equals(stored)) return null;
+        // Never trade one source-tree path for another.
+        if (insideContent.test(module, output)) return null;
+        // A stored path that is merely not built yet keeps its place; only a real directory replaces it.
+        if (!insideSource && !exists.test(output)) return null;
+        return output;
+    }
+
     /** Positive heals per stored path, for the session; negatives are re-evaluated (a build file may be fixed later). */
     private static final Map<Path, Path> HEALED = new ConcurrentHashMap<>();
+
+    /** Stored paths already found present, so the EDT stats each one at most once per session. */
+    private static final Set<Path> LIVE = ConcurrentHashMap.newKeySet();
 
     /** Test seam. */
     static void forgetHeals() {
         HEALED.clear();
+        LIVE.clear();
     }
 
     /** The Maven-derived exploded output — the same derivation auto-detection uses, minus its web-root fallback. */

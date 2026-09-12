@@ -21,6 +21,7 @@
 - IDE cancellation propagates through deploy, update, service-view and editor code instead of being swallowed.
 - Maven modules with a custom finalName deploy from their real build output; their .war is no longer dropped as stale.
 - A blocked launch names the artifacts at fault in the balloon, instead of pointing at a run console that never opens.
+- A saved deployment whose build output was renamed follows the module's current output instead of failing the launch.
 - Orphan Tomcats get a real chance to stop cleanly before being force-killed.
 - Duplicate-classpath warning no longer reports the sync's own class overlays.
 - Update reloads only the contexts that actually changed; a no-op update reloads nothing.

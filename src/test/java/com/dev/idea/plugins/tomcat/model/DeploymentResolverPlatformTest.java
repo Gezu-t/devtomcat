@@ -127,8 +127,8 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
         VirtualFile target = dir("target/web-module-1.0");
 
         ModuleBackedDeployment stored = storedAt(webapp);
-        ModuleBackedDeployment healed = readAction(() -> DeploymentResolver.healSourceTreePath(
-                getProject(), stored, module -> Path.of(target.getPath()), contentRule()));
+        ModuleBackedDeployment healed = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(target.getPath()), contentRule(), p -> true));
 
         assertEquals(Path.of(target.getPath()), healed.getResolvedPath());
         assertEquals("/web", healed.getContextPath());
@@ -137,8 +137,9 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
 
         // Memoised: the build-file derivation is not consulted again for this stored path.
         int[] derivations = {0};
-        ModuleBackedDeployment again = readAction(() -> DeploymentResolver.healSourceTreePath(
-                getProject(), stored, module -> { derivations[0]++; return Path.of(target.getPath()); }, contentRule()));
+        ModuleBackedDeployment again = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> { derivations[0]++; return Path.of(target.getPath()); },
+                contentRule(), p -> true));
         assertEquals(Path.of(target.getPath()), again.getResolvedPath());
         assertEquals("second heal must come from the memo", 0, derivations[0]);
     }
@@ -147,16 +148,16 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
         DeploymentResolver.forgetHeals();
         VirtualFile target = dir("target/web-module-1.0");
         ModuleBackedDeployment stored = storedAt(target);
-        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
-                getProject(), stored, module -> Path.of(target.getPath()), contentRule()));
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(target.getPath()), contentRule(), p -> true));
         assertSame(stored, result);
     }
 
     public void testNoDeterminableBuildOutputLeavesTheEntryAlone() throws Exception {
         DeploymentResolver.forgetHeals();
         ModuleBackedDeployment stored = storedAt(dir("src/main/webapp"));
-        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
-                getProject(), stored, module -> null, contentRule()));
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> null, contentRule(), p -> true));
         assertSame(stored, result);
     }
 
@@ -165,8 +166,53 @@ public class DeploymentResolverPlatformTest extends BasePlatformTestCase {
         VirtualFile webapp = dir("src/main/webapp");
         VirtualFile other = dir("src/main/other");
         ModuleBackedDeployment stored = storedAt(webapp);
-        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healSourceTreePath(
-                getProject(), stored, module -> Path.of(other.getPath()), contentRule()));
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(other.getPath()), contentRule(), p -> true));
         assertSame(stored, result);
+    }
+
+    public void testMissingStoredPathFollowsTheCurrentBuildOutput() throws Exception {
+        DeploymentResolver.forgetHeals();
+        VirtualFile current = dir("target/storefront");
+        Path renamedAway = Path.of(contentRoot()).resolve("target/web-module-1.0-SNAPSHOT");
+        ModuleBackedDeployment stored = new ModuleBackedDeployment(
+                ModuleRef.of(getProject(), getModule()), renamedAway, "/web", true, "web-module");
+
+        ModuleBackedDeployment healed = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(current.getPath()), contentRule(),
+                p -> p.equals(Path.of(current.getPath()))));
+
+        assertEquals("a stored output that no longer exists follows the module's current one",
+                Path.of(current.getPath()), healed.getResolvedPath());
+        assertEquals("/web", healed.getContextPath());
+        assertEquals("web-module", healed.getLegacyName());
+    }
+
+    public void testMissingStoredPathStaysWhenTheBuildOutputIsMissingToo() throws Exception {
+        DeploymentResolver.forgetHeals();
+        Path renamedAway = Path.of(contentRoot()).resolve("target/web-module-1.0-SNAPSHOT");
+        ModuleBackedDeployment stored = new ModuleBackedDeployment(
+                ModuleRef.of(getProject(), getModule()), renamedAway, "/web", true, "web-module");
+
+        ModuleBackedDeployment result = readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(contentRoot()).resolve("target/storefront"),
+                contentRule(), p -> false));
+
+        assertSame("a deployment that is merely not built yet keeps its path", stored, result);
+    }
+
+    public void testPresentStoredPathIsProbedOnlyOnce() throws Exception {
+        DeploymentResolver.forgetHeals();
+        VirtualFile target = dir("target/web-module-1.0");
+        ModuleBackedDeployment stored = storedAt(target);
+        int[] probes = {0};
+        java.util.function.Predicate<Path> counting = p -> { probes[0]++; return true; };
+
+        readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(target.getPath()), contentRule(), counting));
+        readAction(() -> DeploymentResolver.healStoredPath(
+                getProject(), stored, module -> Path.of(target.getPath()), contentRule(), counting));
+
+        assertEquals("the EDT probes a stored path at most once per session", 1, probes[0]);
     }
 }
