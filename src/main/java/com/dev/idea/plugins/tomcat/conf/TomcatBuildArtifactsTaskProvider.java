@@ -182,11 +182,10 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         // for repeat-noise on every launch — those now stay in the console.
         ArtifactStructureValidator.Result structure = ArtifactStructureValidator.validate(deployments);
         if (structure.hasBlockingErrors()) {
+            // The launch aborts here, so no run console ever opens: the balloon carries the detail.
             TomcatNotifier.error(tomcatConfig.getProject(),
                     "Artifact structure invalid",
-                    "See run console for details.");
-            // Full per-artifact details in the console so the user has the
-            // signal without the balloon body bloat.
+                    blockingErrorsMessage(structure.blockingErrors()));
             for (String err : structure.blockingErrors()) {
                 LOG.warn("DevTomcat artifact structure: " + err);
             }
@@ -208,6 +207,22 @@ public class TomcatBuildArtifactsTaskProvider extends BeforeRunTaskProvider<Tomc
         // time Tomcat reads it. Keeping the validation gates above (missing
         // path, broken structure) because those are still real blockers.
         return true;
+    }
+
+    private static final int MAX_BALLOON_ERRORS = 3;
+
+    /** Balloon body for a blocked launch: the first few errors verbatim, then a count of the rest. */
+    @NotNull
+    static String blockingErrorsMessage(@NotNull List<String> errors) {
+        StringBuilder body = new StringBuilder();
+        for (String err : errors.subList(0, Math.min(errors.size(), MAX_BALLOON_ERRORS))) {
+            body.append("\u2022 ").append(err).append("\n");
+        }
+        int rest = errors.size() - MAX_BALLOON_ERRORS;
+        if (rest > 0) {
+            body.append("\u2022 and ").append(rest).append(" more (see idea.log)\n");
+        }
+        return body.append("Build the project, then launch again.").toString();
     }
 
     @Override
