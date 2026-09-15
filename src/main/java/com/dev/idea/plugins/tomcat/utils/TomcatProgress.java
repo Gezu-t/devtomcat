@@ -1,10 +1,12 @@
 package com.dev.idea.plugins.tomcat.utils;
 
-import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.diagnostic.ControlFlowException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.progress.ProgressManager;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.concurrent.CancellationException;
 
 /**
  * Cooperative progress/cancellation entry points for the deployment pipeline.
@@ -36,9 +38,12 @@ public final class TomcatProgress {
         ProgressManager.checkCanceled();
     }
 
-    /** Call first in a broad catch: rethrows what the platform treats as control flow (cancellation). */
+    /**
+     * Call first in a broad catch: rethrows what the platform treats as control flow (cancellation).
+     * Checked directly because {@code Logger.shouldRethrow} is internal API from 2026.2.
+     */
     public static void rethrowIfControlFlow(@NotNull Throwable t) {
-        if (!Logger.shouldRethrow(t)) return;
+        if (!(t instanceof ControlFlowException || t instanceof CancellationException)) return;
         if (t instanceof RuntimeException re) throw re;
         if (t instanceof Error err) throw err;
         throw new IllegalStateException(t);

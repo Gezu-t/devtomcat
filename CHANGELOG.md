@@ -19,6 +19,7 @@
 - Webapp INFO and WARN lines reach the run console, not just errors.
 - A canceled toolbar update no longer leaves the run-configuration template without a Tomcat server.
 - IDE cancellation propagates through deploy, update, service-view and editor code instead of being swallowed.
+- No internal API use flagged by the Marketplace verifier on 2026.2.
 - Maven modules with a custom finalName deploy from their real build output; their .war is no longer dropped as stale.
 - A blocked launch names the artifacts at fault in the balloon, instead of pointing at a run console that never opens.
 - A saved deployment whose build output was renamed follows the module's current output instead of failing the launch.

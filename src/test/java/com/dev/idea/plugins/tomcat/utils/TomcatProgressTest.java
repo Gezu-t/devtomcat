@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.utils;
 
+import com.intellij.openapi.diagnostic.ControlFlowException;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,9 +43,18 @@ class TomcatProgressTest {
     }
 
     @Test
+    @DisplayName("rethrowIfControlFlow rethrows a non-cancellation ControlFlowException unchanged")
+    void rethrowsOtherControlFlow() {
+        RuntimeException cfe = new ControlFlow();
+        assertSame(cfe, assertThrows(ControlFlow.class, () -> TomcatProgress.rethrowIfControlFlow(cfe)));
+    }
+
+    @Test
     @DisplayName("rethrowIfControlFlow ignores ordinary failures")
     void ignoresOrdinaryFailures() {
         assertDoesNotThrow(() -> TomcatProgress.rethrowIfControlFlow(new IOException("disk")));
         assertDoesNotThrow(() -> TomcatProgress.rethrowIfControlFlow(new IllegalStateException("state")));
     }
+
+    private static final class ControlFlow extends RuntimeException implements ControlFlowException {}
 }
