@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
@@ -207,8 +209,26 @@ public final class WarClasspathDuplicateScanner {
             return null;
         }
         String[] frozen = out.toArray(new String[0]);
+        Arrays.sort(frozen);
         JAR_ENTRIES.put(key, new CachedEntries(size, mtime, frozen));
         return frozen;
+    }
+
+    /** How many of {@code entryPaths} the jar holds (non-benign entries only); -1 when it cannot be read. */
+    public static int countContained(@NotNull Path jar, @NotNull Collection<String> entryPaths) {
+        String[] entries = nonBenignEntries(jar);
+        if (entries == null) return -1;
+        int hits = 0;
+        for (String path : entryPaths) {
+            if (Arrays.binarySearch(entries, path) >= 0) hits++;
+        }
+        return hits;
+    }
+
+    /** Number of non-benign entries; -1 when the jar cannot be read. */
+    public static int entryCount(@NotNull Path jar) {
+        String[] entries = nonBenignEntries(jar);
+        return entries == null ? -1 : entries.length;
     }
 
     /** Upper bound on cached jars; at a few hundred entries each that is a few megabytes. */

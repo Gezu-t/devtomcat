@@ -471,7 +471,8 @@ public final class DeployedClassesSync {
         // dependency NOT packaged here → full content (so its resources
         // still reach Tomcat). Scanned once per artifact off the model.
         Map<String, String> deployedLibraryJars = scanDeployedLibraryJars(artifactRoot);
-        Set<String> deployedLibraryKeys = deployedLibraryJars.keySet();
+        Map<SourceRoot, DeployedJarMatcher.Match> coveringJars =
+                coveringJarMatches(sourceRoots, new DeployedJarMatcher(artifactRoot, deployedLibraryJars));
 
         // Overlay-staleness pass BEFORE mirroring: overlay classes mirrored
         // while an older WEB-INF/lib JAR covered their dependency shadow a
@@ -512,14 +513,15 @@ public final class DeployedClassesSync {
         // strip a working deployment (silent staleness or NoClassDefFound).
         boolean allRootsWalkedCleanly = true;
         for (SourceRoot src : sourceRoots) {
-            boolean classesOnly = shouldMirrorClassesOnly(src, deployedLibraryKeys);
+            DeployedJarMatcher.Match match = coveringJars.get(src);
+            boolean classesOnly = shouldMirrorClassesOnly(src, match);
             // Covering-JAR gate: when a deployed JAR covers this dependency
             // root, only IDE output NEWER than the JAR may overlay it —
             // otherwise the JAR's copy is the freshest and mirroring (or
             // keeping) loose classes would shadow it. Files at/below the
             // floor are not contributed, so the reconcile below also drops
             // their previously-mirrored copies.
-            String coveringJar = coveringJarFor(src, deployedLibraryJars);
+            String coveringJar = match.jar();
             long jarMtimeFloor = Long.MIN_VALUE;
             SyncManifest.Stamp coveringJarStamp = null;
             if (coveringJar != null) {
@@ -1148,58 +1150,18 @@ public final class DeployedClassesSync {
     }
 
     /**
-     * Decides whether a source root should mirror {@code .class} files only,
-     * given the artifact keys actually present in the deployed
-     * {@code WEB-INF/lib/}.
-     *
-     * <ul>
-     *   <li>The web module's own root ({@code classesOnly == false}) always
-     *       mirrors full content — never returns {@code true} here.</li>
-     *   <li>A dependency whose artifact is packaged as a JAR in
-     *       {@code WEB-INF/lib/} stays {@code .class}-only: its resources reach
-     *       Tomcat through that JAR, so copying them into {@code WEB-INF/classes/}
-     *       too would duplicate every shared path on the classpath.</li>
-     *   <li>A dependency confirmed <em>absent</em> from {@code WEB-INF/lib/}
-     *       mirrors full content, so its resources still reach Tomcat — nothing
-     *       else carries them, so no duplication is possible.</li>
-     *   <li>A dependency whose identity could not be resolved
-     *       ({@code artifactName == null}) falls back to {@code .class}-only,
-     *       the duplicate-safe default: copying resources a JAR also holds is
-     *       the fatal failure, whereas a missed resource is not.</li>
-     * </ul>
-     *
-     * <p>Both sides are normalized through
-     * {@link LibraryArtifactNames#libraryArtifactKey} so the dependency's
-     * identity and the deployed JAR's identity are compared on the same
-     * version-independent basis.
+     * A dependency root mirrors {@code .class}-only when a deployed jar packages it
+     * (its resources come from the jar). With no jar and nothing to decide by, an
+     * unresolved identity keeps the duplicate-safe {@code .class}-only default.
      */
     static boolean shouldMirrorClassesOnly(@NotNull SourceRoot root,
-                                           @NotNull Set<String> deployedLibraryKeys) {
+                                           @NotNull DeployedJarMatcher.Match match) {
         if (!root.classesOnly()) return false;
-        String name = root.artifactName();
-        if (name == null) return true;
-        return deployedLibraryKeys.contains(
-                LibraryArtifactNames.libraryArtifactKey(name + EXT_JAR));
+        if (match.jar() != null) return true;
+        return !match.byContent() && root.artifactName() == null;
     }
 
-    /**
-     * Reads the deployed {@code WEB-INF/lib/} and returns the version-independent
-     * artifact key (via {@link LibraryArtifactNames#libraryArtifactKey}) of
-     * every JAR present. Empty when the directory is absent or unreadable.
-     * Plain file I/O — no read action or project-model access, safe on the
-     * background sync thread.
-     */
-    @NotNull
-    static Set<String> scanDeployedLibraryKeys(@NotNull Path artifactRoot) {
-        return scanDeployedLibraryJars(artifactRoot).keySet();
-    }
-
-    /**
-     * Like {@link #scanDeployedLibraryKeys} but keeps the mapping from each
-     * version-independent artifact key to the deployed JAR's file name, so a
-     * covered dependency root can be tied to the concrete JAR that covers it
-     * (for the covering-JAR mtime floor and the manifest's JAR records).
-     */
+    /** Deployed {@code WEB-INF/lib} jars: version-independent artifact key → file name. Plain file I/O. */
     /**
      * The production module dependencies whose output this module's deployment
      * also carries — the same closure {@link #collectProductionRoots} mirrors,
@@ -1276,19 +1238,42 @@ public final class DeployedClassesSync {
         return jars;
     }
 
+    /** The deployed jar packaging a dependency root; the module's own root is never covered. */
+    @NotNull
+    static DeployedJarMatcher.Match coveringJarMatch(@NotNull SourceRoot root,
+                                                     @NotNull DeployedJarMatcher matcher) {
+        return coveringJarMatches(List.of(root), matcher).get(root);
+    }
+
     /**
-     * The file name of the deployed {@code WEB-INF/lib} JAR covering
-     * {@code root}, or {@code null} when the root is the module's own output,
-     * has no resolved identity, or no matching JAR is deployed. Non-null
-     * exactly when {@link #shouldMirrorClassesOnly} returned {@code true}
-     * because of an actual JAR (not the unresolved-identity default).
+     * One match per dependency module, sampled over every root that shares its
+     * identity: a module split into a classes root and a resources root must
+     * not have the resources root decided alone (no classes to sample).
      */
-    @Nullable
-    static String coveringJarFor(@NotNull SourceRoot root,
-                                 @NotNull Map<String, String> deployedLibraryJars) {
-        if (!root.classesOnly() || root.artifactName() == null) return null;
-        return deployedLibraryJars.get(
-                LibraryArtifactNames.libraryArtifactKey(root.artifactName() + EXT_JAR));
+    @NotNull
+    static Map<SourceRoot, DeployedJarMatcher.Match> coveringJarMatches(@NotNull List<SourceRoot> roots,
+                                                                        @NotNull DeployedJarMatcher matcher) {
+        Map<String, List<Path>> pathsByArtifact = new LinkedHashMap<>();
+        for (SourceRoot root : roots) {
+            if (root.classesOnly() && root.artifactName() != null) {
+                pathsByArtifact.computeIfAbsent(root.artifactName(), k -> new ArrayList<>()).add(root.path());
+            }
+        }
+        Map<String, DeployedJarMatcher.Match> byArtifact = new HashMap<>();
+        Map<SourceRoot, DeployedJarMatcher.Match> out = new HashMap<>();
+        for (SourceRoot root : roots) {
+            DeployedJarMatcher.Match match;
+            if (!root.classesOnly()) {
+                match = DeployedJarMatcher.Match.NONE;
+            } else if (root.artifactName() == null) {
+                match = matcher.jarFor(List.of(root.path()), null);
+            } else {
+                match = byArtifact.computeIfAbsent(root.artifactName(),
+                        name -> matcher.jarFor(pathsByArtifact.get(name), name));
+            }
+            out.put(root, match);
+        }
+        return out;
     }
 
     /**
@@ -1315,15 +1300,12 @@ public final class DeployedClassesSync {
             @NotNull Map<String, String> deployedLibraryJars,
             @NotNull Path artifactRoot) {
         List<OutdatedJar> outdated = new ArrayList<>();
+        DeployedJarMatcher matcher = new DeployedJarMatcher(artifactRoot, deployedLibraryJars);
         for (Map.Entry<String, ? extends Collection<Path>> e : outputRootsByUncoveredModule.entrySet()) {
             TomcatProgress.checkCanceled();
-            // Match on the module's JAR identity (libraryArtifactNameFor), NOT
-            // its IDE module name: the two differ for Gradle subprojects and
-            // any module renamed away from its artifactId, and a mismatch here
-            // silently disables the warning instead of raising a false one.
+            // Identity from libraryArtifactNameFor, not the IDE module name; the jar's content decides, the name is the fallback.
             String artifactName = artifactNameByModule.getOrDefault(e.getKey(), e.getKey());
-            String jarFile = deployedLibraryJars.get(
-                    LibraryArtifactNames.libraryArtifactKey(artifactName + EXT_JAR));
+            String jarFile = matcher.jarFor(e.getValue(), artifactName).jar();
             if (jarFile == null) continue;
             Path jar = artifactRoot.resolve(WEB_INF_LIB_PATH).resolve(jarFile);
             long jarMtime;

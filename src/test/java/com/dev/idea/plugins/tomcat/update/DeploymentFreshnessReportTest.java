@@ -103,6 +103,28 @@ class DeploymentFreshnessReportTest {
         }
 
         @Test
+        @DisplayName("a jar the build named freely is still JAR_ONLY: found by its classes")
+        void buildNamedJarFoundByContent(@TempDir Path tmp) throws Exception {
+            Path app = tmp.resolve("app");
+            Path jar = app.resolve("WEB-INF/lib/backend-final.jar");
+            Files.createDirectories(jar.getParent());
+            try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("com/example/A.class"));
+                zip.closeEntry();
+            }
+            Files.setLastModifiedTime(jar, FileTime.fromMillis(200_000L));
+            Path out = tmp.resolve("out/web-lib");
+            write(out.resolve("com/example/A.class"), 100_000L);
+
+            Report r = DeploymentFreshnessReport.forExploded("web-module", app,
+                    Map.of("web-lib", List.of(out)), Map.of("web-lib", "web-lib"),
+                    Set.of(), scanJars(app), Set.of());
+
+            assertEquals(Delivery.JAR_ONLY, r.rows().get(0).delivery(),
+                    "no jar carries the module's name; its classes identify it");
+        }
+
+        @Test
         @DisplayName("deployed jar + manifest overlay records (module not in covered set) → JAR_PLUS_OVERLAY")
         void overlayRecordsAloneQualify(@TempDir Path tmp) throws Exception {
             Path app = tmp.resolve("app");

@@ -564,12 +564,15 @@ class DeployedClassesSyncTest {
     }
 
     @Nested
-    @DisplayName("shouldMirrorClassesOnly — per-root resource policy vs deployed WEB-INF/lib")
+    @DisplayName("shouldMirrorClassesOnly — per-root resource policy vs the deployed jar")
     class ShouldMirrorClassesOnlyPolicy {
 
-        /** A dependency root: classesOnly candidate, tagged with an artifact identity. */
         private static DeployedClassesSync.SourceRoot dependency(String artifactName) {
             return new DeployedClassesSync.SourceRoot(Path.of("/out/dep"), true, artifactName);
+        }
+
+        private static DeployedJarMatcher.Match byName(String jar) {
+            return new DeployedJarMatcher.Match(jar, false);
         }
 
         @Test
@@ -577,38 +580,40 @@ class DeployedClassesSyncTest {
         void ownRootAlwaysFullContent() {
             DeployedClassesSync.SourceRoot own =
                     new DeployedClassesSync.SourceRoot(Path.of("/out/web"), false, null);
-            // Never .class-only, regardless of what the deployed lib set holds.
-            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(own, Set.of("web")));
-            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(own, Set.of()));
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(own, byName("web-1.0.jar")));
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(own, DeployedJarMatcher.Match.NONE));
         }
 
         @Test
-        @DisplayName("dependency packaged in WEB-INF/lib → .class-only (resources come from the JAR)")
+        @DisplayName("dependency packaged in WEB-INF/lib → .class-only, whatever the jar is called")
         void jarredDependencyClassesOnly() {
-            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(
-                    dependency("common"), Set.of("common", "shared")));
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dependency("common"), byName("common-1.0.jar")));
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dependency("common"),
+                    new DeployedJarMatcher.Match("named-by-the-build.jar", true)));
         }
 
         @Test
         @DisplayName("dependency absent from WEB-INF/lib → full content (resources must still reach Tomcat)")
         void unjarredDependencyFullContent() {
-            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(
-                    dependency("common"), Set.of("shared")));
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(dependency("common"), DeployedJarMatcher.Match.NONE));
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(dependency("common"), new DeployedJarMatcher.Match(null, true)));
         }
 
         @Test
-        @DisplayName("dependency with no resolved identity → .class-only (duplicate-safe default)")
+        @DisplayName("no resolved identity and nothing to decide by → .class-only (duplicate-safe default)")
         void unresolvedIdentityClassesOnly() {
-            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(
-                    dependency(null), Set.of("shared")));
-            // Empty lib set must NOT flip the default to full content.
-            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(
-                    dependency(null), Set.of()));
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dependency(null), DeployedJarMatcher.Match.NONE));
+        }
+
+        @Test
+        @DisplayName("no resolved identity but the jars' content says unpackaged → full content")
+        void unresolvedIdentityDecidedByContent() {
+            assertFalse(DeployedClassesSync.shouldMirrorClassesOnly(dependency(null), new DeployedJarMatcher.Match(null, true)));
         }
     }
 
     @Nested
-    @DisplayName("scanDeployedLibraryKeys — version-independent keys from deployed WEB-INF/lib")
+    @DisplayName("scanDeployedLibraryJars — version-independent keys from deployed WEB-INF/lib")
     class ScanDeployedLibraryKeys {
 
         /** Creates an empty file at {@code WEB-INF/lib/<jarName>} under {@code artifactRoot}. */
@@ -620,7 +625,7 @@ class DeployedClassesSyncTest {
         @Test
         @DisplayName("absent WEB-INF/lib → empty set")
         void absentLibDir(@TempDir Path tmp) {
-            assertTrue(DeployedClassesSync.scanDeployedLibraryKeys(tmp).isEmpty());
+            assertTrue(DeployedClassesSync.scanDeployedLibraryJars(tmp).isEmpty());
         }
 
         @Test
@@ -630,7 +635,7 @@ class DeployedClassesSyncTest {
             writeLibFile(tmp, "lib4j-api-2.20.0.jar");
             writeLibFile(tmp, "lib-starter.jar"); // no version segment
             assertEquals(Set.of("common", "lib4j-api", "lib-starter"),
-                    DeployedClassesSync.scanDeployedLibraryKeys(tmp));
+                    DeployedClassesSync.scanDeployedLibraryJars(tmp).keySet());
         }
 
         @Test
@@ -639,7 +644,7 @@ class DeployedClassesSyncTest {
             writeLibFile(tmp, "common-1.0.0.jar");
             writeLibFile(tmp, "notes.txt");
             assertEquals(Set.of("common"),
-                    DeployedClassesSync.scanDeployedLibraryKeys(tmp));
+                    DeployedClassesSync.scanDeployedLibraryJars(tmp).keySet());
         }
 
         @Test
@@ -666,46 +671,84 @@ class DeployedClassesSyncTest {
             // must reconcile on identity alone — no version match required — so the
             // dependency mirrors .class-only and its resources are not duplicated.
             writeLibFile(tmp, "common-2.0.0.jar");
-            Set<String> deployed = DeployedClassesSync.scanDeployedLibraryKeys(tmp);
+            DeployedJarMatcher matcher =
+                    new DeployedJarMatcher(tmp, DeployedClassesSync.scanDeployedLibraryJars(tmp));
 
             DeployedClassesSync.SourceRoot dep =
                     new DeployedClassesSync.SourceRoot(Path.of("/out/common"), true, "common");
-            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dep, deployed),
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(dep,
+                            DeployedClassesSync.coveringJarMatch(dep, matcher)),
                     "a packaged dependency must mirror .class-only even when the deployed "
                             + "JAR version differs from the classpath module");
         }
     }
 
     @Nested
-    @DisplayName("coveringJarFor — ties a covered dependency root to its deployed JAR")
-    class CoveringJarFor {
+    @DisplayName("coveringJarMatch — ties a covered dependency root to its deployed JAR")
+    class CoveringJarMatch {
 
-        private final java.util.Map<String, String> jars =
-                java.util.Map.of("common", "common-1.0.0.jar", "shared", "shared-2.0.jar");
+        /** Two name-matchable jars, unreadable as archives: the name rule is what decides here. */
+        private static DeployedJarMatcher matcher(Path tmp) throws Exception {
+            Path lib = Files.createDirectories(tmp.resolve("WEB-INF/lib"));
+            Files.createFile(lib.resolve("common-1.0.0.jar"));
+            Files.createFile(lib.resolve("shared-2.0.jar"));
+            return new DeployedJarMatcher(tmp, DeployedClassesSync.scanDeployedLibraryJars(tmp));
+        }
 
         @Test
         @DisplayName("covered dependency root → the deployed JAR's file name (version-independent match)")
-        void coveredDependency() {
+        void coveredDependency(@TempDir Path tmp) throws Exception {
             DeployedClassesSync.SourceRoot dep =
-                    new DeployedClassesSync.SourceRoot(Path.of("/out/common"), true, "common");
-            assertEquals("common-1.0.0.jar", DeployedClassesSync.coveringJarFor(dep, jars));
+                    new DeployedClassesSync.SourceRoot(tmp.resolve("out/common"), true, "common");
+            assertEquals("common-1.0.0.jar", DeployedClassesSync.coveringJarMatch(dep, matcher(tmp)).jar());
         }
 
         @Test
         @DisplayName("own root is never covered")
-        void ownRootNeverCovered() {
+        void ownRootNeverCovered(@TempDir Path tmp) throws Exception {
             DeployedClassesSync.SourceRoot own =
-                    new DeployedClassesSync.SourceRoot(Path.of("/out/web"), false, null);
-            assertNull(DeployedClassesSync.coveringJarFor(own, jars));
+                    new DeployedClassesSync.SourceRoot(tmp.resolve("out/web"), false, null);
+            assertNull(DeployedClassesSync.coveringJarMatch(own, matcher(tmp)).jar());
         }
 
         @Test
         @DisplayName("unresolved identity or no matching JAR → no cover")
-        void unresolvedOrUnmatched() {
-            assertNull(DeployedClassesSync.coveringJarFor(
-                    new DeployedClassesSync.SourceRoot(Path.of("/out/x"), true, null), jars));
-            assertNull(DeployedClassesSync.coveringJarFor(
-                    new DeployedClassesSync.SourceRoot(Path.of("/out/x"), true, "unpackaged"), jars));
+        void unresolvedOrUnmatched(@TempDir Path tmp) throws Exception {
+            DeployedJarMatcher m = matcher(tmp);
+            assertNull(DeployedClassesSync.coveringJarMatch(
+                    new DeployedClassesSync.SourceRoot(tmp.resolve("out/x"), true, null), m).jar());
+            assertNull(DeployedClassesSync.coveringJarMatch(
+                    new DeployedClassesSync.SourceRoot(tmp.resolve("out/x"), true, "unpackaged"), m).jar());
+        }
+
+        @Test
+        @DisplayName("split roots of one module share one match: the resources root is not decided alone")
+        void splitRootsShareTheMatch(@TempDir Path tmp) throws Exception {
+            Path jar = tmp.resolve("WEB-INF/lib/backend-final.jar");
+            Files.createDirectories(jar.getParent());
+            try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                for (String e : List.of("com/example/A.class", "config/app.properties")) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry(e));
+                    zip.closeEntry();
+                }
+            }
+            Path classes = tmp.resolve("out/classes");
+            Files.createDirectories(classes.resolve("com/example"));
+            Files.writeString(classes.resolve("com/example/A.class"), "b");
+            Path resources = tmp.resolve("out/resources");
+            Files.createDirectories(resources.resolve("config"));
+            Files.writeString(resources.resolve("config/app.properties"), "k=v");
+            DeployedClassesSync.SourceRoot classesRoot = new DeployedClassesSync.SourceRoot(classes, true, "common");
+            DeployedClassesSync.SourceRoot resourcesRoot = new DeployedClassesSync.SourceRoot(resources, true, "common");
+            DeployedClassesSync.SourceRoot own = new DeployedClassesSync.SourceRoot(tmp.resolve("out/web"), false, null);
+
+            var matches = DeployedClassesSync.coveringJarMatches(List.of(resourcesRoot, classesRoot, own),
+                    new DeployedJarMatcher(tmp, DeployedClassesSync.scanDeployedLibraryJars(tmp)));
+
+            assertEquals("backend-final.jar", matches.get(resourcesRoot).jar());
+            assertEquals("backend-final.jar", matches.get(classesRoot).jar());
+            assertTrue(DeployedClassesSync.shouldMirrorClassesOnly(resourcesRoot, matches.get(resourcesRoot)));
+            assertNull(matches.get(own).jar());
         }
     }
 
@@ -745,6 +788,32 @@ class DeployedClassesSyncTest {
             assertEquals("common", outdated.get(0).moduleName());
             assertEquals("common-1.0.0.jar", outdated.get(0).jarFileName());
             assertEquals(200_000L, outdated.get(0).newerByMillis());
+        }
+
+        @Test
+        @DisplayName("a jar the build named freely is matched by content and reported")
+        void buildNamedJarReported(@TempDir Path tmp) throws Exception {
+            Path artifactRoot = tmp.resolve("app-1.0.0");
+            Path jar = artifactRoot.resolve("WEB-INF/lib/backend-final.jar");
+            Files.createDirectories(jar.getParent());
+            try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+                zip.putNextEntry(new java.util.zip.ZipEntry("com/example/A.class"));
+                zip.closeEntry();
+            }
+            Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
+            Path out = tmp.resolve("out/common");
+            Files.createDirectories(out.resolve("com/example"));
+            Files.writeString(out.resolve("com/example/A.class"), "class-bytes");
+            Files.setLastModifiedTime(out.resolve("com/example/A.class"), FileTime.fromMillis(300_000L));
+
+            List<DeployedClassesSync.OutdatedJar> outdated =
+                    DeployedClassesSync.findOutdatedUncoveredJars(
+                            java.util.Map.of("common", List.of(out)),
+                            java.util.Map.of("common", "common"),
+                            DeployedClassesSync.scanDeployedLibraryJars(artifactRoot), artifactRoot);
+
+            assertEquals(1, outdated.size(), "the jar is found by its content, not its name");
+            assertEquals("backend-final.jar", outdated.get(0).jarFileName());
         }
 
         @Test

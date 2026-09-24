@@ -8,6 +8,7 @@
 - Class-sync overlay bookkeeping no longer printed to the console.
 
 ### Fixed
+- Module jars matched by their classes, not their file name.
 - Tomcat warnings and errors no longer printed twice.
 - One leak advisory per web application, not one per thread; it names the fix.
 - One library at two versions reported once, by preflight.

@@ -1269,6 +1269,83 @@ class DeployedClassesSyncScenariosTest {
         assertFileContent(webInfClasses.resolve(depClass), "ide-output-v2-newer-than-jar");
     }
 
+    @Test
+    @DisplayName("production sequence — a dependency jar the build named freely is still the cover: .class-only, floored, recorded")
+    void jarFloor04_buildNamedJarIsTheCover(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path artifactRoot = Files.createDirectories(tmp.resolve("web/target/app"));
+        Path webInfClasses = Files.createDirectories(artifactRoot.resolve("WEB-INF/classes"));
+        // Not "common-<version>.jar": a finalName, a classifier, a Gradle archive name.
+        Path jar = artifactRoot.resolve("WEB-INF/lib/backend-final.jar");
+        String depClass = "com/example/dep/Util.class";
+        String oldClass = "com/example/dep/Legacy.class";
+        String depResource = "com/example/dep/messages.properties";
+        writeZip(jar, depClass, oldClass, depResource);
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
+        writeClass(src, depClass, "ide-output-newer");
+        writeClass(src, oldClass, "ide-output-older");
+        Files.writeString(src.resolve(depResource), "key=value");
+        Files.setLastModifiedTime(src.resolve(depClass), FileTime.fromMillis(110_000L));
+        Files.setLastModifiedTime(src.resolve(oldClass), FileTime.fromMillis(90_000L));
+        Files.setLastModifiedTime(src.resolve(depResource), FileTime.fromMillis(110_000L));
+        var logger = org.mockito.Mockito.mock(TomcatDeploymentLogger.class);
+        List<DeployedClassesSync.SourceRoot> roots =
+                List.of(new DeployedClassesSync.SourceRoot(src, true, "common"));
+
+        DeployedClassesSync.ArtifactSyncOutcome outcome = DeployedClassesSync.syncArtifactTree(
+                "web-module", artifactRoot, webInfClasses, roots, logger);
+
+        assertEquals(1, outcome.copied(), "only the class newer than the jar overlays it");
+        assertFileContent(webInfClasses.resolve(depClass), "ide-output-newer");
+        assertFalse(Files.exists(webInfClasses.resolve(oldClass)), "below the jar's floor: the jar serves it");
+        assertFalse(Files.exists(webInfClasses.resolve(depResource)), ".class-only: the jar carries the resource");
+        Map<String, Set<String>> coverage = DeployedClassesSync.overlayCoverage(artifactRoot);
+        assertEquals(Set.of(depClass), coverage.get("WEB-INF/lib/backend-final.jar"),
+                "the overlay is recorded under the jar's real name, so the duplicate warning knows it is the sync's own");
+    }
+
+    @Test
+    @DisplayName("production sequence — a module split into classes and resources roots: the resources root is covered too")
+    void jarFloor05_splitRootsCoveredTogether(@TempDir Path tmp) throws Exception {
+        Path classes = Files.createDirectories(tmp.resolve("dep/build/classes/java/main"));
+        Path resources = Files.createDirectories(tmp.resolve("dep/build/resources/main"));
+        Path artifactRoot = Files.createDirectories(tmp.resolve("web/build/app"));
+        Path webInfClasses = Files.createDirectories(artifactRoot.resolve("WEB-INF/classes"));
+        Path jar = artifactRoot.resolve("WEB-INF/lib/dep-custom.jar");
+        String depClass = "com/example/dep/Util.class";
+        String depResource = "application.properties";
+        writeZip(jar, depClass, depResource);
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(100_000L));
+        writeClass(classes, depClass, "ide-output-newer");
+        Files.setLastModifiedTime(classes.resolve(depClass), FileTime.fromMillis(110_000L));
+        Files.writeString(resources.resolve(depResource), "k=v");
+        Files.setLastModifiedTime(resources.resolve(depResource), FileTime.fromMillis(110_000L));
+        var logger = org.mockito.Mockito.mock(TomcatDeploymentLogger.class);
+        List<DeployedClassesSync.SourceRoot> roots = List.of(
+                new DeployedClassesSync.SourceRoot(classes, true, "dep"),
+                new DeployedClassesSync.SourceRoot(resources, true, "dep"));
+
+        DeployedClassesSync.ArtifactSyncOutcome outcome = DeployedClassesSync.syncArtifactTree(
+                "web-module", artifactRoot, webInfClasses, roots, logger);
+
+        assertEquals(1, outcome.copied());
+        assertFileContent(webInfClasses.resolve(depClass), "ide-output-newer");
+        assertFalse(Files.exists(webInfClasses.resolve(depResource)),
+                "the resources root shares the module's cover: the jar carries the resource");
+        assertEquals(Set.of(depClass), DeployedClassesSync.overlayCoverage(artifactRoot).get("WEB-INF/lib/dep-custom.jar"));
+    }
+
+    private static void writeZip(Path zipFile, String... entries) throws IOException {
+        Files.createDirectories(zipFile.getParent());
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(zipFile))) {
+            for (String e : entries) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(e));
+                zip.write(1);
+                zip.closeEntry();
+            }
+        }
+    }
+
     // ===========================================================================
     // walkFailed contract — deletion-safety guard for the caller's reconcile.
     // A root whose walk could not be trusted to fully enumerate its tree must

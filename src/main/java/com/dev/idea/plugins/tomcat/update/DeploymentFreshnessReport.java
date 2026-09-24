@@ -2,7 +2,6 @@ package com.dev.idea.plugins.tomcat.update;
 
 import com.dev.idea.plugins.tomcat.model.Deployment;
 import com.dev.idea.plugins.tomcat.model.ExternalFileDeployment;
-import com.dev.idea.plugins.tomcat.utils.LibraryArtifactNames;
 import com.dev.idea.plugins.tomcat.utils.TomcatProgress;
 import com.dev.idea.plugins.tomcat.utils.TomcatProjectUtils;
 import com.dev.idea.plugins.tomcat.utils.TomcatReadActions;
@@ -25,7 +24,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
-import static com.dev.idea.plugins.tomcat.TomcatConstants.EXT_JAR;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_CLASSES_PATH;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.WEB_INF_LIB_PATH;
 
@@ -295,16 +293,14 @@ public final class DeploymentFreshnessReport {
                               @NotNull Set<String> overlayRecordedJarRelPaths) {
         if (outputRootsByModule.isEmpty()) return unresolved(deploymentName, Shape.EXPLODED);
         Path webInfClasses = artifactRoot.resolve(WEB_INF_CLASSES_PATH);
+        DeployedJarMatcher matcher = new DeployedJarMatcher(artifactRoot, deployedLibraryJars);
         List<ModuleRow> rows = new ArrayList<>(outputRootsByModule.size());
         for (Map.Entry<String, ? extends Collection<Path>> e : outputRootsByModule.entrySet()) {
             TomcatProgress.checkCanceled();
             String module = e.getKey();
-            // Same module→JAR identity the sync matches on (Maven artifactId /
-            // Gradle project name / module stem) — the raw module name misses
-            // every qualified or renamed module's JAR.
+            // The sync's own module→jar decision: content first, the artifact identity as fallback.
             String artifactName = artifactNamesByModule.getOrDefault(module, module);
-            String jarFile = deployedLibraryJars.get(
-                    LibraryArtifactNames.libraryArtifactKey(artifactName + EXT_JAR));
+            String jarFile = matcher.jarFor(e.getValue(), artifactName).jar();
             if (jarFile == null) {
                 rows.add(new ModuleRow(module, Delivery.LOOSE_CLASSES,
                         servedCopyFreshness(e.getValue(), webInfClasses, NO_JAR)));
