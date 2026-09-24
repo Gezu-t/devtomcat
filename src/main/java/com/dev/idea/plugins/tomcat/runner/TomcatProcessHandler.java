@@ -177,8 +177,6 @@ public class TomcatProcessHandler extends KillableColoredProcessHandler implemen
             @Override public void logServerStartup(long durationMs) { deploymentLogger.logServerStartup(durationMs); }
             @Override public void logDeploymentSuccess(@NotNull String name, long ms) { deploymentLogger.logDeploymentSuccess(name, ms); }
             @Override public void logServerInfo(@NotNull String msg) { deploymentLogger.logServerInfo(msg); }
-            @Override public void logServerError(@NotNull String msg) { deploymentLogger.logServerError(msg); }
-            @Override public void logServerWarning(@NotNull String msg) { deploymentLogger.logServerWarning(msg); }
             @Override
             public void onActionableDiagnostic(@NotNull TomcatErrorDiagnostics.Diagnostic diagnostic) {
                 if (diagnosticRouter != null) diagnosticRouter.route(diagnostic);

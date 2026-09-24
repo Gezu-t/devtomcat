@@ -341,7 +341,7 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
      * listener composite. The remote-deploy flow doesn't go through the
      * Catalina output pipeline (there's no Catalina output — the local JVM
      * is gone), so the logger's catalina-specific hooks are inert here. The
-     * five abstract methods have to be implemented explicitly because the
+     * abstract methods have to be implemented explicitly because the
      * interface marks them abstract (intentionally — pipeline analyzers
      * rely on these calls in the local-mode path).
      */
@@ -350,8 +350,6 @@ public final class RemoteDeploymentProcessHandler extends ProcessHandler {
             @Override public void logServerStartup(long durationMs) {}
             @Override public void logDeploymentSuccess(@NotNull String artifactName, long durationMs) {}
             @Override public void logServerInfo(@NotNull String message) {}
-            @Override public void logServerError(@NotNull String message) {}
-            @Override public void logServerWarning(@NotNull String message) {}
         };
     }
 }

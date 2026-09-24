@@ -1,5 +1,6 @@
 package com.dev.idea.plugins.tomcat.runner;
 
+import com.dev.idea.plugins.tomcat.diagnostics.TomcatErrorDiagnostics;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,8 +38,6 @@ class TomcatOutputPipelineTest {
             @Override public void logServerStartup(long durationMs) {}
             @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
             @Override public void logServerInfo(@NotNull String msg) {}
-            @Override public void logServerError(@NotNull String msg) {}
-            @Override public void logServerWarning(@NotNull String msg) {}
         };
         startupDetected = new AtomicBoolean(false);
         deployedCount = new AtomicInteger(0);
@@ -513,18 +512,36 @@ class TomcatOutputPipelineTest {
         }
 
         @Test
-        @DisplayName("shutdown suppresses error counter updates but still logs")
+        @DisplayName("counts without re-printing: the console already shows the raw line")
+        void doesNotRelayLineToLogger() {
+            AtomicInteger relayed = new AtomicInteger(0);
+            TomcatOutputPipeline.Context ctx = new TomcatOutputPipeline.Context(
+                    new TomcatOutputPipeline.PipelineLogger() {
+                        @Override public void logServerStartup(long durationMs) { relayed.incrementAndGet(); }
+                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) { relayed.incrementAndGet(); }
+                        @Override public void logServerInfo(@NotNull String msg) { relayed.incrementAndGet(); }
+                    },
+                    new TomcatLifecycleListener() {}, "testConfig", contextToArtifact, startupDetected,
+                    deployedCount, errorCount, warningCount, true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+
+            analyzer.analyze("SEVERE: boom", ctx);
+            analyzer.analyze("WARNING: careful", ctx);
+
+            assertEquals(1, errorCount.get());
+            assertEquals(1, warningCount.get());
+            assertEquals(0, relayed.get(), "the console is attached to the process; a line must not be printed twice");
+        }
+
+        @Test
+        @DisplayName("shutdown suppresses error counter updates")
         void shutdownSuppressesErrors() {
-            AtomicInteger loggedErrors = new AtomicInteger(0);
             AtomicInteger lifecycleErrors = new AtomicInteger(0);
             TomcatOutputPipeline.Context shutdownContext = new TomcatOutputPipeline.Context(
-                    new TomcatOutputPipeline.PipelineLogger() {
-                        @Override public void logServerStartup(long durationMs) {}
-                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
-                        @Override public void logServerInfo(@NotNull String msg) {}
-                        @Override public void logServerError(@NotNull String msg) { loggedErrors.incrementAndGet(); }
-                        @Override public void logServerWarning(@NotNull String msg) {}
-                    },
+                    logger,
                     new TomcatLifecycleListener() {
                         @Override public void onError(@NotNull String configName) {
                             lifecycleErrors.incrementAndGet();
@@ -547,22 +564,14 @@ class TomcatOutputPipelineTest {
 
             assertEquals(0, errorCount.get());
             assertEquals(0, lifecycleErrors.get());
-            assertEquals(1, loggedErrors.get());
         }
 
         @Test
-        @DisplayName("shutdown suppresses warning counter updates but still logs")
+        @DisplayName("shutdown suppresses warning counter updates")
         void shutdownSuppressesWarnings() {
-            AtomicInteger loggedWarnings = new AtomicInteger(0);
             AtomicInteger lifecycleWarnings = new AtomicInteger(0);
             TomcatOutputPipeline.Context shutdownContext = new TomcatOutputPipeline.Context(
-                    new TomcatOutputPipeline.PipelineLogger() {
-                        @Override public void logServerStartup(long durationMs) {}
-                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
-                        @Override public void logServerInfo(@NotNull String msg) {}
-                        @Override public void logServerError(@NotNull String msg) {}
-                        @Override public void logServerWarning(@NotNull String msg) { loggedWarnings.incrementAndGet(); }
-                    },
+                    logger,
                     new TomcatLifecycleListener() {
                         @Override public void onWarning(@NotNull String configName) {
                             lifecycleWarnings.incrementAndGet();
@@ -585,7 +594,71 @@ class TomcatOutputPipelineTest {
 
             assertEquals(0, warningCount.get());
             assertEquals(0, lifecycleWarnings.get());
-            assertEquals(1, loggedWarnings.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("DiagnosticsAnalyzer")
+    class DiagnosticsAnalyzerTests {
+
+        private final List<String> infoLines = new ArrayList<>();
+        private final List<TomcatErrorDiagnostics.Diagnostic> actionable = new ArrayList<>();
+        private final TomcatOutputPipeline.DiagnosticsAnalyzer analyzer = new TomcatOutputPipeline.DiagnosticsAnalyzer();
+        private TomcatOutputPipeline.Context capturing;
+
+        @BeforeEach
+        void captureLogger() {
+            capturing = new TomcatOutputPipeline.Context(
+                    new TomcatOutputPipeline.PipelineLogger() {
+                        @Override public void logServerStartup(long durationMs) {}
+                        @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
+                        @Override public void logServerInfo(@NotNull String msg) { infoLines.add(msg); }
+                        @Override public void onActionableDiagnostic(@NotNull TomcatErrorDiagnostics.Diagnostic d) { actionable.add(d); }
+                    },
+                    new TomcatLifecycleListener() {}, "testConfig", contextToArtifact, startupDetected,
+                    deployedCount, errorCount, warningCount, true,
+                    duration -> capturedStartupTime.set(duration),
+                    () -> postStartupCalled.set(true),
+                    readyContext::set
+            );
+        }
+
+        @Test
+        @DisplayName("one leaked-thread report per thread yields one advisory per application")
+        void leakAdvisoryOncePerApplication() {
+            for (int i = 1; i <= 5; i++) {
+                analyzer.analyze("WARNING [main] org.apache.catalina.loader.WebappClassLoaderBase.clearReferencesThreads "
+                        + "The web application [web-module] appears to have started a thread named [worker-" + i
+                        + "] but has failed to stop it. This is very likely to create a memory leak. Stack trace of thread:",
+                        capturing);
+            }
+            assertEquals(1, infoLines.size(), infoLines.toString());
+            assertTrue(infoLines.get(0).contains("[web-module]"), infoLines.get(0));
+        }
+
+        @Test
+        @DisplayName("distinct applications each get their own advisory")
+        void distinctApplicationsEachReported() {
+            analyzer.analyze("The web application [shop] appears to have started a thread named [worker-1] but has failed to stop it.", capturing);
+            analyzer.analyze("The web application [admin] appears to have started a thread named [worker-1] but has failed to stop it.", capturing);
+            assertEquals(2, infoLines.size(), infoLines.toString());
+        }
+
+        @Test
+        @DisplayName("a missing class restated on every Caused-by link is written once and ballooned once")
+        void missingClassReportedOnce() {
+            analyzer.analyze("Caused by: java.lang.ClassNotFoundException: com.example.Missing", capturing);
+            analyzer.analyze("Caused by: java.lang.ClassNotFoundException: com.example.Missing", capturing);
+            assertEquals(1, infoLines.size(), infoLines.toString());
+            assertEquals(1, actionable.size());
+        }
+
+        @Test
+        @DisplayName("a different missing class is a new advisory")
+        void differentClassIsNewAdvisory() {
+            analyzer.analyze("java.lang.ClassNotFoundException: com.example.First", capturing);
+            analyzer.analyze("java.lang.ClassNotFoundException: com.example.Second", capturing);
+            assertEquals(2, infoLines.size(), infoLines.toString());
         }
     }
 
@@ -987,8 +1060,6 @@ class TomcatOutputPipelineTest {
                 @Override public void logServerStartup(long durationMs) {}
                 @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
                 @Override public void logServerInfo(@NotNull String msg) {}
-                @Override public void logServerError(@NotNull String msg) {}
-                @Override public void logServerWarning(@NotNull String msg) {}
                 @Override
                 public void onStartupRootCause(@NotNull String exceptionClass, @NotNull String message) {
                     captured.add(new String[]{exceptionClass, message});
@@ -1208,8 +1279,6 @@ class TomcatOutputPipelineTest {
                         @Override public void logServerStartup(long durationMs) {}
                         @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
                         @Override public void logServerInfo(@NotNull String msg) { infos.add(msg); }
-                        @Override public void logServerError(@NotNull String msg) {}
-                        @Override public void logServerWarning(@NotNull String msg) {}
                     },
                     new TomcatLifecycleListener() {}, "testConfig",
                     contextToArtifact, startupDetected, deployedCount,

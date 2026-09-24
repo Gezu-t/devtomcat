@@ -83,7 +83,5 @@ class StartupTimeConsumerTest {
                 @Override public void logServerStartup(long durationMs) {}
                 @Override public void logDeploymentSuccess(@NotNull String artifactName, long durationMs) {}
                 @Override public void logServerInfo(@NotNull String message) {}
-                @Override public void logServerError(@NotNull String message) {}
-                @Override public void logServerWarning(@NotNull String message) {}
             };
 }

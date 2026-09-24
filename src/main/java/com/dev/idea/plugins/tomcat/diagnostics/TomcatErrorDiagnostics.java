@@ -44,6 +44,9 @@ public final class TomcatErrorDiagnostics {
         public @NotNull String getSuggestion() { return suggestion; }
         @Nullable public String getQuickFixId() { return quickFixId; }
 
+        /** Category plus message: what "the same diagnostic" means for once-per-launch dedup. */
+        public @NotNull String identityKey() { return category + "|" + message; }
+
         @Override
         public String toString() {
             return "[" + severity + "] " + category + ": " + message + " → " + suggestion;
@@ -82,8 +85,17 @@ public final class TomcatErrorDiagnostics {
             "One or more listeners failed to start");
     private static final Pattern FILTER_START_FAILED = Pattern.compile(
             "One or more filters failed to start");
-    private static final Pattern CLASSLOADER_LEAK = Pattern.compile(
-            "(?:The web application|webapp).*(?:appears to have started a thread|memory leak|ThreadLocal)", Pattern.CASE_INSENSITIVE);
+    // WebappClassLoaderBase's stop-time leak reports. Each names the web
+    // application; the kind decides the advice. Tomcat's own "this is not a
+    // memory leak" / "correctly set to null" ThreadLocal lines do not match.
+    private static final Pattern LEAKED_THREAD = Pattern.compile(
+            "The web application \\[([^\\]]++)\\] appears to have started a (?:Timer)?[Tt]hread named \\[[^\\]]*+\\][^\\n]*?but has failed to stop it");
+    private static final Pattern LEAKED_THREAD_LOCAL = Pattern.compile(
+            "The web application \\[([^\\]]++)\\] created a ThreadLocal[^\\n]*?but failed to remove it");
+    private static final Pattern LEAKED_JDBC_DRIVER = Pattern.compile(
+            "The web application \\[([^\\]]++)\\] registered the JDBC driver \\[([^\\]]++)\\] but failed to unregister it");
+    private static final Pattern REQUEST_STILL_RUNNING = Pattern.compile(
+            "of web application \\[([^\\]]++)\\] is still processing a request that has yet to finish");
     private static final Pattern DUPLICATE_WEB_FRAGMENT = Pattern.compile(
             "More than one fragment with the name \\[([^\\]]+)] was found.*Duplicate fragments found in \\[(.+)]");
     private static final Pattern MISSING_REQUIRED_SYSTEM_PROPERTY = Pattern.compile(
@@ -337,14 +349,45 @@ public final class TomcatErrorDiagnostics {
                     null));
         }
 
-        // Classloader leak warning
-        m = CLASSLOADER_LEAK.matcher(text);
+        // Stop-time leak reports. The message names the application, so the
+        // pipeline's per-message dedup yields one advisory per (application,
+        // kind) — not one per leaked thread. Reloading a context in the same
+        // JVM keeps its old classloader alive until these are fixed; a full
+        // Stop is unaffected.
+        m = LEAKED_THREAD.matcher(text);
         if (m.find()) {
             results.add(new Diagnostic(Severity.WARNING, "Memory Leak",
-                    "Potential classloader leak detected",
-                    "The web application may have started threads or registered ThreadLocals that "
-                            + "prevent garbage collection on redeploy. Consider adding "
-                            + "JreMemoryLeakPreventionListener in server.xml.",
+                    "Web application [" + m.group(1) + "] left threads running after it stopped",
+                    "Each reload in the same JVM keeps the stopped classloader alive; a full Stop is unaffected. "
+                            + "Shut down executors, timers and HTTP clients in ServletContextListener.contextDestroyed. "
+                            + "The application frame in each thread's stack names the code that started it.",
+                    null));
+        }
+
+        m = LEAKED_THREAD_LOCAL.matcher(text);
+        if (m.find()) {
+            results.add(new Diagnostic(Severity.WARNING, "Memory Leak",
+                    "Web application [" + m.group(1) + "] left ThreadLocals on Tomcat's worker threads",
+                    "Tomcat renews its worker threads to contain this. "
+                            + "To fix it, remove the ThreadLocal in a finally block when the request ends.",
+                    null));
+        }
+
+        m = LEAKED_JDBC_DRIVER.matcher(text);
+        if (m.find()) {
+            results.add(new Diagnostic(Severity.WARNING, "Memory Leak",
+                    "Web application [" + m.group(1) + "] left JDBC driver " + m.group(2) + " registered",
+                    "Tomcat deregistered it. Move the driver JAR from WEB-INF/lib to Tomcat's lib directory, "
+                            + "or call DriverManager.deregisterDriver in ServletContextListener.contextDestroyed.",
+                    null));
+        }
+
+        m = REQUEST_STILL_RUNNING.matcher(text);
+        if (m.find()) {
+            results.add(new Diagnostic(Severity.WARNING, "Memory Leak",
+                    "Web application [" + m.group(1) + "] stopped with a request still running",
+                    "The request's thread keeps the stopped classloader alive until it finishes. "
+                            + "Tomcat waits the context's unloadDelay (default 2000 ms) before giving up.",
                     null));
         }
 

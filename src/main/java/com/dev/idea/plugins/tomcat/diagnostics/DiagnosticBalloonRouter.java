@@ -80,8 +80,7 @@ public final class DiagnosticBalloonRouter {
      */
     public void route(@NotNull TomcatErrorDiagnostics.Diagnostic diagnostic) {
         if (project.isDisposed()) return;
-        String key = diagnostic.getCategory() + "|" + diagnostic.getMessage();
-        if (!shown.add(key)) return;
+        if (!shown.add(diagnostic.identityKey())) return;
 
         notifier.show(
                 project,

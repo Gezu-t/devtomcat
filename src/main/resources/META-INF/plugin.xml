@@ -173,6 +173,8 @@
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatStartupBannerFolding"/>
         <consoleFolding
                 implementation="com.dev.idea.plugins.tomcat.runner.TomcatStackFrameFolding"/>
+        <consoleFolding
+                implementation="com.dev.idea.plugins.tomcat.runner.ThreadDumpJdkFrameFolding"/>
 
         <!-- Notification Group for balloon notifications -->
         <notificationGroup id="DevTomcat" displayType="BALLOON"/>

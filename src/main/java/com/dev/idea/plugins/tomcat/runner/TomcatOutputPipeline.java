@@ -44,8 +44,6 @@ public final class TomcatOutputPipeline {
         void logServerStartup(long durationMs);
         void logDeploymentSuccess(@NotNull String artifactName, long durationMs);
         void logServerInfo(@NotNull String message);
-        void logServerError(@NotNull String message);
-        void logServerWarning(@NotNull String message);
 
         /**
          * Called by {@link DiagnosticsAnalyzer} when a Tomcat error pattern matches
@@ -527,12 +525,19 @@ public final class TomcatOutputPipeline {
     /**
      * Runs smart error diagnostics on every line, producing actionable hints
      * for common Tomcat errors (class version mismatches, missing TLDs, etc.).
+     *
+     * <p>Each distinct diagnostic is written once per launch. Tomcat restates
+     * one condition across many lines — a leaked-thread report per thread, a
+     * missing class per {@code Caused by:} link — and the raw lines are already
+     * in the console; the hint only has to appear once.
      */
     static final class DiagnosticsAnalyzer implements Analyzer {
+        private final Set<String> reported = ConcurrentHashMap.newKeySet();
+
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
-            List<TomcatErrorDiagnostics.Diagnostic> diagnostics = TomcatErrorDiagnostics.analyze(text);
-            for (TomcatErrorDiagnostics.Diagnostic diag : diagnostics) {
+            for (TomcatErrorDiagnostics.Diagnostic diag : TomcatErrorDiagnostics.analyze(text)) {
+                if (!reported.add(diag.identityKey())) continue;
                 ctx.logger.logServerInfo(TomcatErrorDiagnostics.formatForConsole(diag));
                 // Diagnostics carrying a quickFixId are the ones where we can
                 // direct the user to a specific place to fix the problem (port,
@@ -686,7 +691,9 @@ public final class TomcatOutputPipeline {
 
     /**
      * Counts SEVERE/ERROR/FATAL and WARNING/WARN lines, updates the deployment
-     * status service for dashboard refresh.
+     * status service for dashboard refresh. Counting only: the console is
+     * attached to the process and already shows the line, so nothing is
+     * re-printed.
      */
     static final class ErrorWarningAnalyzer implements Analyzer {
         // The level token must appear in a recognisable log-line position — not
@@ -725,19 +732,22 @@ public final class TomcatOutputPipeline {
 
         @Override
         public void analyze(@NotNull String text, @NotNull Context ctx) {
+            // Shutdown cleanup noise (classloader, JDBC driver) is not
+            // actionable and must not inflate the dashboard badge.
+            if (ctx.shuttingDown.get()) return;
             Level bracketed = leadingBracketLevel(text);
             if (bracketed != null) {
                 // The line carries its own bracketed level — authoritative. A lower
                 // level (DEBUG/INFO/TRACE/...) means it is neither an error nor a
                 // warning, even if a bracketed [ERROR]/[WARN] appears later in the text.
-                if (bracketed == Level.ERROR) emitError(text, ctx);
-                else if (bracketed == Level.WARNING) emitWarning(text, ctx);
+                if (bracketed == Level.ERROR) countError(ctx);
+                else if (bracketed == Level.WARNING) countWarning(ctx);
                 return;
             }
             if (ERROR_PATTERN.matcher(text).find()) {
-                emitError(text, ctx);
+                countError(ctx);
             } else if (WARNING_PATTERN.matcher(text).find()) {
-                emitWarning(text, ctx);
+                countWarning(ctx);
             }
         }
 
@@ -752,22 +762,14 @@ public final class TomcatOutputPipeline {
             };
         }
 
-        private static void emitError(@NotNull String text, @NotNull Context ctx) {
-            ctx.logger.logServerError(text);
-            // Only increment counter while running — shutdown cleanup
-            // errors (classloader, JDBC driver) are not actionable.
-            if (!ctx.shuttingDown.get()) {
-                ctx.errorCount.incrementAndGet();
-                ctx.lifecycleListener.onError(ctx.configName);
-            }
+        private static void countError(@NotNull Context ctx) {
+            ctx.errorCount.incrementAndGet();
+            ctx.lifecycleListener.onError(ctx.configName);
         }
 
-        private static void emitWarning(@NotNull String text, @NotNull Context ctx) {
-            ctx.logger.logServerWarning(text);
-            if (!ctx.shuttingDown.get()) {
-                ctx.warningCount.incrementAndGet();
-                ctx.lifecycleListener.onWarning(ctx.configName);
-            }
+        private static void countWarning(@NotNull Context ctx) {
+            ctx.warningCount.incrementAndGet();
+            ctx.lifecycleListener.onWarning(ctx.configName);
         }
     }
 }

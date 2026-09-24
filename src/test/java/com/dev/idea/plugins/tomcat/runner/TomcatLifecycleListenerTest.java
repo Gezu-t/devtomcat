@@ -207,8 +207,6 @@ class TomcatLifecycleListenerTest {
                 @Override public void logServerStartup(long durationMs) {}
                 @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
                 @Override public void logServerInfo(@NotNull String msg) { logged.add(msg); }
-                @Override public void logServerError(@NotNull String msg) {}
-                @Override public void logServerWarning(@NotNull String msg) {}
             };
 
             TomcatLifecycleListener consumer = TomcatLifecycleListener.startupTimeConsumer(tracker, logger);
@@ -232,8 +230,6 @@ class TomcatLifecycleListenerTest {
                 @Override public void logServerStartup(long durationMs) {}
                 @Override public void logDeploymentSuccess(@NotNull String name, long ms) {}
                 @Override public void logServerInfo(@NotNull String msg) {}
-                @Override public void logServerError(@NotNull String msg) {}
-                @Override public void logServerWarning(@NotNull String msg) {}
             };
 
             TomcatLifecycleListener consumer = TomcatLifecycleListener.startupTimeConsumer(tracker, logger);

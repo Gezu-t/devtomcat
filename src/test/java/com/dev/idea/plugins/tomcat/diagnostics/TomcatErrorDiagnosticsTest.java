@@ -1,6 +1,7 @@
 package com.dev.idea.plugins.tomcat.diagnostics;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -201,15 +202,86 @@ class TomcatErrorDiagnosticsTest {
         assertEquals("Initialization Error", results.get(0).getCategory());
     }
 
-    @Test
-    @DisplayName("Classloader leak warning")
-    void classloaderLeak() {
-        List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
-                "WARNING: The web application [myapp] appears to have started a thread named [Timer-0]");
-        assertFalse(results.isEmpty());
-        TomcatErrorDiagnostics.Diagnostic d = results.get(0);
-        assertEquals(TomcatErrorDiagnostics.Severity.WARNING, d.getSeverity());
-        assertEquals("Memory Leak", d.getCategory());
+    @Nested
+    @DisplayName("Stop-time leak reports")
+    class LeakReports {
+
+        @Test
+        @DisplayName("leaked thread names the application; the advice is the app-side fix")
+        void leakedThread() {
+            List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                    "WARNING [main] org.apache.catalina.loader.WebappClassLoaderBase.clearReferencesThreads "
+                            + "The web application [web-module] appears to have started a thread named [worker-1] "
+                            + "but has failed to stop it. This is very likely to create a memory leak. Stack trace of thread:");
+            assertEquals(1, results.size(), results.toString());
+            TomcatErrorDiagnostics.Diagnostic d = results.get(0);
+            assertEquals(TomcatErrorDiagnostics.Severity.WARNING, d.getSeverity());
+            assertEquals("Memory Leak", d.getCategory());
+            assertTrue(d.getMessage().contains("[web-module]"), d.getMessage());
+            assertTrue(d.getSuggestion().contains("contextDestroyed"), d.getSuggestion());
+            assertEquals("Memory Leak|" + d.getMessage(), d.identityKey());
+        }
+
+        @Test
+        @DisplayName("leaked java.util.Timer thread is the same kind")
+        void leakedTimerThread() {
+            List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                    "The web application [web-module] appears to have started a TimerThread named [Timer-0] via the "
+                            + "java.util.Timer API but has failed to stop it. To prevent a memory leak, the timer "
+                            + "(and hence the associated thread) has been forcibly canceled.");
+            assertEquals(1, results.size(), results.toString());
+            assertTrue(results.get(0).getMessage().contains("threads running"), results.get(0).getMessage());
+        }
+
+        @Test
+        @DisplayName("ThreadLocal left behind")
+        void leakedThreadLocal() {
+            List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                    "The web application [web-module] created a ThreadLocal with key of type [com.example.Ctx] "
+                            + "(value [com.example.Ctx@1a2b]) and a value of type [java.lang.String] (value [x]) but failed "
+                            + "to remove it when the web application was stopped. Threads are going to be renewed over "
+                            + "time to try and avoid a probable memory leak.");
+            assertEquals(1, results.size(), results.toString());
+            assertTrue(results.get(0).getMessage().contains("ThreadLocal"), results.get(0).getMessage());
+        }
+
+        @Test
+        @DisplayName("Tomcat's own 'not a memory leak' ThreadLocal lines are not flagged")
+        void harmlessThreadLocalIgnored() {
+            assertTrue(TomcatErrorDiagnostics.analyze(
+                    "The web application [web-module] created a ThreadLocal with key of type [com.example.Ctx] "
+                            + "(value [com.example.Ctx@1a2b]) and a value of type [java.lang.String] (value [x]). "
+                            + "Since keys are only weakly held by the ThreadLocal Map this is not a memory leak.").isEmpty());
+            assertTrue(TomcatErrorDiagnostics.analyze(
+                    "The web application [web-module] created a ThreadLocal with key of type [com.example.Ctx] "
+                            + "(value [com.example.Ctx@1a2b]). The ThreadLocal has been correctly set to null and the key "
+                            + "will be removed by GC.").isEmpty());
+        }
+
+        @Test
+        @DisplayName("JDBC driver left registered")
+        void leakedJdbcDriver() {
+            List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                    "The web application [web-module] registered the JDBC driver [org.example.jdbc.Driver] but failed to "
+                            + "unregister it when the web application was stopped. To prevent a memory leak, the JDBC "
+                            + "Driver has been forcibly unregistered.");
+            assertEquals(1, results.size(), results.toString());
+            assertTrue(results.get(0).getMessage().contains("org.example.jdbc.Driver"), results.get(0).getMessage());
+            assertTrue(results.get(0).getSuggestion().contains("WEB-INF/lib"), results.get(0).getSuggestion());
+        }
+
+        @Test
+        @DisplayName("request still running at stop")
+        void requestStillRunning() {
+            List<TomcatErrorDiagnostics.Diagnostic> results = TomcatErrorDiagnostics.analyze(
+                    "The thread [http-nio-exec-3] of web application [web-module] is still processing a request "
+                            + "that has yet to finish. This is very likely to create a memory leak. You can control the "
+                            + "time allowed for requests to finish by using the unloadDelay attribute of the standard "
+                            + "Context implementation. Stack trace of request processing thread:[...]");
+            assertEquals(1, results.size(), results.toString());
+            assertTrue(results.get(0).getMessage().contains("[web-module]"), results.get(0).getMessage());
+            assertTrue(results.get(0).getSuggestion().contains("unloadDelay"), results.get(0).getSuggestion());
+        }
     }
 
     @Test

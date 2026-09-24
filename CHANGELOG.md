@@ -17,6 +17,9 @@
 
 ### Fixed
 - Webapp INFO and WARN lines reach the run console, not just errors.
+- Tomcat warnings and errors no longer printed twice.
+- One leak advisory per web application, not one per thread; it names the fix.
+- JDK frames in leaked-thread stacks fold.
 - A canceled toolbar update no longer leaves the run-configuration template without a Tomcat server.
 - IDE cancellation propagates through deploy, update, service-view and editor code instead of being swallowed.
 - No internal API use flagged by the Marketplace verifier on 2026.2.
