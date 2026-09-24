@@ -3,6 +3,7 @@
 ## [1.4.4]
 
 ### Changed
+- Container-provided jars recognised by their classes, not a name list.
 - Classpath-duplicate warning lists jar pairs with examples, not every path.
 - JDK frames in leaked-thread stacks fold.
 - Class-sync overlay bookkeeping no longer printed to the console.

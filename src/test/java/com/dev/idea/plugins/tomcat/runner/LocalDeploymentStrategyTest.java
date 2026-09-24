@@ -146,215 +146,143 @@ class LocalDeploymentStrategyTest {
     // -------------------------------------------------------------------------
 
     @Nested
-    @DisplayName("isContainerProvidedJar")
+    @DisplayName("isContainerProvidedJar — decided from what the configured Tomcat ships")
     class IsContainerProvidedJarTests {
 
-        @Test
-        @DisplayName("detects Tomcat Jasper jars as container-provided")
-        void detectsTomcatJasperJars() {
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("tomcat-jasper-10.1.44.jar"));
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("tomcat-embed-jasper-10.1.50.jar"));
+        private static void zip(Path path, String... entries) throws IOException {
+            Files.createDirectories(path.getParent());
+            try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(Files.newOutputStream(path))) {
+                for (String e : entries) {
+                    zos.putNextEntry(new java.util.zip.ZipEntry(e));
+                    zos.closeEntry();
+                }
+            }
+        }
+
+        private static final String[] SERVLET = {
+                "jakarta/servlet/Servlet.class", "jakarta/servlet/Filter.class", "jakarta/servlet/http/HttpServlet.class"};
+        private static final String[] EL = {"jakarta/el/ELContext.class", "jakarta/el/ExpressionFactory.class"};
+
+        /** A Tomcat home shipping the spec APIs under Tomcat's bare names, plus its own internals. */
+        private static ContainerLibs tomcat(Path home) throws IOException {
+            zip(home.resolve("lib/servlet-api.jar"), SERVLET);
+            zip(home.resolve("lib/jsp-api.jar"), "jakarta/servlet/jsp/JspPage.class");
+            zip(home.resolve("lib/el-api.jar"), EL);
+            zip(home.resolve("lib/catalina.jar"), "org/apache/catalina/Context.class");
+            zip(home.resolve("lib/tomcat-i18n-fr.jar"), "org/apache/catalina/LocalStrings_fr.properties");
+            zip(home.resolve("bin/tomcat-juli.jar"), "org/apache/juli/ClassLoaderLogManager.class");
+            LocalDeploymentStrategy.forgetContainerLibs();
+            return LocalDeploymentStrategy.resolveContainerLibs(
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo("T", "11.0.0", home.toString()));
+        }
+
+        private static Path webappJar(Path tmp, String name, String... entries) throws IOException {
+            Path jar = tmp.resolve("webapp/WEB-INF/lib/" + name);
+            zip(jar, entries);
+            return jar;
         }
 
         @Test
-        @DisplayName("detects servlet and jsp api jars as container-provided")
-        void detectsServletApis() {
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.servlet-api-6.1.0.jar"));
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jsp-api-2.3.3.jar"));
-        }
-
-        @Test
-        @DisplayName("lib-key match catches a container jar the static prefix list misses")
-        void libKeyMatchCatchesNonPrefixedContainerJar() {
-            // A container core jar that matches no static prefix (renamed / fork).
-            java.util.Set<String> libKeys = java.util.Set.of("coyote", "myfork-core");
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("coyote-9.0.0.jar", libKeys));
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("myfork-core-1.2.jar", libKeys));
-            // Without the authoritative lib set, the prefix-only fallback does NOT
-            // flag it — this is exactly the coverage the lib scan adds.
-            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("coyote-9.0.0.jar", java.util.Set.of()));
-        }
-
-        @Test
-        @DisplayName("union still flags spec-API jars by prefix when the lib-key set can't match them")
-        void unionKeepsPrefixCoverageForSpecApis() {
-            // Tomcat ships servlet-api.jar (key 'servlet-api') while the webapp
-            // pulls jakarta.servlet-api (key 'jakarta.servlet-api') — the keys
-            // differ, so the prefix arm of the union must still catch it.
-            java.util.Set<String> libKeys = java.util.Set.of("servlet-api", "jsp-api");
+        @DisplayName("a spec API under its Maven name is container-provided: the container ships its classes")
+        void specApiUnderMavenName(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
             assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
-                    "jakarta.servlet-api-6.1.0.jar", libKeys));
+                    webappJar(tmp, "jakarta.servlet-api-6.1.0.jar", SERVLET), libs));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "jakarta.el-api-6.0.0.jar", EL), libs));
         }
 
         @Test
-        @DisplayName("union does not flag application libraries or JSTL")
-        void unionAllowsAppLibraries() {
-            java.util.Set<String> libKeys = java.util.Set.of("catalina", "tomcat-coyote");
-            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-core-6.2.3.jar", libKeys));
+        @DisplayName("Tomcat's own copy of a spec API differs in helper classes: the reference jar is still container-provided")
+        void containerHelpersDifferFromReferenceJar(@TempDir Path tmp) throws IOException {
+            Path home = tmp.resolve("tomcat");
+            zip(home.resolve("lib/el-api.jar"), "jakarta/el/ELContext.class", "jakarta/el/ExpressionFactory.class",
+                    "jakarta/el/FactoryFinder.class", "jakarta/el/ELUtil.class");
+            LocalDeploymentStrategy.forgetContainerLibs();
+            ContainerLibs libs = LocalDeploymentStrategy.resolveContainerLibs(
+                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo("T", "11.0.0", home.toString()));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "jakarta.el-api-5.0.1.jar", "jakarta/el/ELContext.class", "jakarta/el/ExpressionFactory.class",
+                            "jakarta/el/ExpressionFactoryCache.class", "jakarta/el/Util.class", "jakarta/el/Cache.class"), libs));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "jakarta.el-api-6.1.0.jar", "jakarta/el/Extra.class"), libs),
+                    "a class in a package the container owns is the container's");
+        }
+
+        @Test
+        @DisplayName("a jar with a shipped jar's key is container-provided even with nothing to sample")
+        void shippedKeyWithoutClasses(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "tomcat-i18n-fr-11.0.0.jar", "org/apache/catalina/LocalStrings_fr.properties"), libs));
+            Path unreadable = tmp.resolve("webapp/WEB-INF/lib/catalina-11.0.jar");
+            Files.createDirectories(unreadable.getParent());
+            Files.writeString(unreadable, "not a zip");
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(unreadable, libs));
+        }
+
+        @Test
+        @DisplayName("a renamed or forked container jar is recognised by its classes")
+        void renamedContainerJar(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "core-fork.jar", "org/apache/catalina/Context.class"), libs));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "logging-copy.jar", "org/apache/juli/ClassLoaderLogManager.class"), libs),
+                    "bin/ jars are container-provided too");
+        }
+
+        @Test
+        @DisplayName("JSTL shares the servlet API's name head but not its classes: app-provided")
+        void jstlStaysAppProvided(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
             assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
-                    "jakarta.servlet.jsp.jstl-3.0.1.jar", libKeys));
+                    webappJar(tmp, "jakarta.servlet.jsp.jstl-3.0.1.jar",
+                            "jakarta/servlet/jsp/jstl/core/Config.class", "org/apache/taglibs/standard/Version.class"), libs));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "jakarta.servlet.jsp.jstl-api-3.0.0.jar",
+                            "jakarta/servlet/jsp/jstl/core/Config.class"), libs));
         }
 
         @Test
-        @DisplayName("resolveContainerLibKeys reads the Tomcat lib/ and bin/ jars by artifact key")
-        void resolveContainerLibKeysScansTomcatHome(@TempDir Path home) throws IOException {
-            Files.createDirectories(home.resolve("lib"));
-            Files.createDirectories(home.resolve("bin"));
-            makeJar(home.resolve("lib").resolve("catalina.jar"), "org/apache/catalina/X.class");
-            makeJar(home.resolve("lib").resolve("coyote-renamed-9.0.0.jar"), "org/apache/coyote/Y.class");
-            makeJar(home.resolve("bin").resolve("tomcat-juli.jar"), "org/apache/juli/Z.class");
-
-            java.util.Set<String> keys = LocalDeploymentStrategy.resolveContainerLibKeys(
-                    new com.dev.idea.plugins.tomcat.setting.TomcatInfo("T", "10.1.0", home.toString()));
-
-            assertTrue(keys.contains("catalina"));
-            assertTrue(keys.contains("coyote-renamed"));
-            assertTrue(keys.contains("tomcat-juli"), "bin/ jars are container-provided too");
-            // A webapp jar whose key is in this set is now container-provided even
-            // though "coyote-renamed" matches no static prefix.
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("coyote-renamed-9.0.0.jar", keys));
+        @DisplayName("an app library that bundles a couple of API classes stays app-provided")
+        void bundledApiClassesDoNotTip(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
+            java.util.List<String> entries = new java.util.ArrayList<>(java.util.List.of(SERVLET[0], SERVLET[1]));
+            for (int i = 0; i < 20; i++) entries.add("org/example/app/C" + i + ".class");
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "app-core-6.2.3.jar", entries.toArray(new String[0])), libs));
         }
 
         @Test
-        @DisplayName("resolveContainerLibKeys is empty when the Tomcat home is unknown")
-        void resolveContainerLibKeysEmptyWhenNoHome() {
-            assertTrue(LocalDeploymentStrategy.resolveContainerLibKeys(null).isEmpty());
-            assertTrue(LocalDeploymentStrategy.resolveContainerLibKeys(
+        @DisplayName("alternative implementations, resource-only and plain app jars stay app-provided")
+        void appJarsStayAppProvided(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "ws-impl-2.1.5.jar", "org/example/ws/Server.class", "org/example/ws/Session.class"), libs));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "app-config.jar", "config/app.properties"), libs));
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "lib-alpha-1.0.jar", "org/alpha/X.class"), libs));
+        }
+
+        @Test
+        @DisplayName("unknown Tomcat home: nothing is container-provided")
+        void unknownHome(@TempDir Path tmp) throws IOException {
+            assertTrue(LocalDeploymentStrategy.resolveContainerLibs(null).isEmpty());
+            assertTrue(LocalDeploymentStrategy.resolveContainerLibs(
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo("T", "10", "")).isEmpty());
+            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "jakarta.servlet-api-6.1.0.jar", SERVLET), ContainerLibs.EMPTY));
         }
 
         @Test
-        @DisplayName("does not flag regular application libraries")
-        void allowsApplicationLibraries() {
-            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-core-6.2.3.jar"));
-            assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("my-company-shared.jar"));
-        }
-
-        @Test
-        @DisplayName("JSTL Jakarta API and impl are app-provided, not filtered")
-        void allowsJakartaJstl() {
-            // The literal strings "jakarta.servlet" and "jakarta.jsp" used to be
-            // listed here as container-provided prefixes. Both swallow JSTL
-            // artifacts as a side effect: jakarta.servlet.jsp.jstl-* starts with
-            // "jakarta.servlet". Verifying these flow through to WEB-INF/lib
-            // injection prevents the regression that caused
-            // ClassNotFoundException: jakarta.servlet.jsp.jstl.core.Config
-            // for users who added JSTL to their pom.xml after a clean install.
-            assertAll(
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
-                            "jakarta.servlet.jsp.jstl-api-3.0.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
-                            "jakarta.servlet.jsp.jstl-3.0.1.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
-                            "jakarta.servlet.jsp.jstl-api-2.0.0.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("legacy javax JSTL is also app-provided")
-        void allowsJavaxJstl() {
-            assertAll(
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
-                            "javax.servlet.jsp.jstl-api-1.2.6.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar(
-                            "jstl-1.2.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("EL implementation JAR (jakarta.el-3.x.x.jar) is container-provided")
-        void detectsElImplementation() {
-            // Tomcat ships both jakarta.el-api-*.jar (the API spec) and
-            // jakarta.el-*.jar (the Glassfish-derived implementation) in lib/.
-            // The "jakarta.el-" prefix covers both, but must not trip on
-            // "jakarta.elasticsearch-*.jar" or other app libs starting with
-            // a similar token followed by something other than a digit/api.
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.el-api-5.0.1.jar"));
-            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.el-4.0.0.jar"));
-        }
-
-        @Test
-        @DisplayName("annotation API is container-provided across Tomcat versions")
-        void detectsAnnotationApi() {
-            assertAll(
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.annotation-api-2.1.1.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("javax.annotation-api-1.3.2.jar")),
-                    // Legacy Tomcat 8/9 ships the bare "annotations-api-*.jar" naming.
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("annotations-api-9.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("WebSocket API is container-provided")
-        void detectsWebSocketApi() {
-            assertAll(
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.websocket-api-2.1.0.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jakarta.websocket-client-api-2.1.0.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("javax.websocket-api-1.1.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("websocket-api-9.0.0.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("websocket-client-api-9.0.0.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("alternative WebSocket implementations stay app-provided")
-        void allowsAlternativeWebSocketImpls() {
-            // Apps that need server-push features sometimes use Tyrus or
-            // Atmosphere as their websocket implementation, shipping those
-            // JARs in WEB-INF/lib alongside their app classes. They must not
-            // collide with the container's API JAR filter.
-            assertAll(
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("tyrus-server-2.1.5.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("atmosphere-runtime-3.0.10.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("JASPIC (auth SPI) JARs are container-provided")
-        void detectsJaspicApi() {
-            assertAll(
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jaspic-api.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
-                            "jakarta.security.auth.message-api-3.0.0.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("Tomcat catalina-* and jasper-* internals are container-provided")
-        void detectsTomcatCatalinaJasperInternals() {
-            assertAll(
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-ant-10.1.34.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-ha-10.1.34.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-tribes-10.1.34.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-ssi-10.1.34.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("catalina-storeconfig-10.1.34.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jasper.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("jasper-el.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("bootstrap.jar")),
-                    () -> assertTrue(LocalDeploymentStrategy.isContainerProvidedJar("commons-daemon-1.3.4.jar"))
-            );
-        }
-
-        @Test
-        @DisplayName("common app libraries with overlapping name heads stay app-provided")
-        void allowsCommonAppLibraries() {
-            // Bias: prefer false negatives (a container JAR slipping through
-            // and causing a duplicate-class warning) over false positives (an
-            // app-provided JAR mistakenly filtered, causing ClassNotFoundException).
-            // This sweep covers libraries that frequently appear in WEB-INF/lib
-            // and could collide with a too-broad container prefix.
-            assertAll(
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-core-6.2.3.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-web-6.2.3.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-orm-6.5.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-json-2.17.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("lombok-1.18.32.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-logging-2.23.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("app-jdbc-driver-8.4.0.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("commons-fileupload-1.5.jar")),
-                    () -> assertFalse(LocalDeploymentStrategy.isContainerProvidedJar("commons-lang3-3.14.0.jar"))
-            );
+        @DisplayName("resolveContainerLibs reads lib/ and bin/ by key and by classes")
+        void readsLibAndBin(@TempDir Path tmp) throws IOException {
+            ContainerLibs libs = tomcat(tmp.resolve("tomcat"));
+            assertTrue(libs.keys().containsAll(java.util.Set.of("catalina", "servlet-api", "tomcat-juli", "tomcat-i18n-fr")));
+            assertTrue(LocalDeploymentStrategy.isContainerProvidedJar(
+                    webappJar(tmp, "coyote-renamed-9.0.0.jar", "org/apache/catalina/Context.class"), libs));
         }
     }
 
@@ -719,13 +647,16 @@ class LocalDeploymentStrategyTest {
             Path artifactPath = Files.createDirectories(tempDir.resolve("webapp"));
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
             writeJar(libDir.resolve("servlet-api-2.5.jar"), "javax/servlet/Servlet.class");
+            Path home = Files.createDirectories(tempDir.resolve("tomcat-11/lib")).getParent();
+            writeJar(home.resolve("lib/servlet-api.jar"), "javax/servlet/Servlet.class");
+            LocalDeploymentStrategy.forgetContainerLibs();
 
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
                     new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
                             artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat11 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
-                            "Tomcat 11", "11.0.0", "/opt/tomcat-11");
+                            "Tomcat 11", "11.0.0", home.toString());
             com.intellij.openapi.project.Project project =
                     org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
 
@@ -751,13 +682,17 @@ class LocalDeploymentStrategyTest {
             Path libDir = Files.createDirectories(artifactPath.resolve("WEB-INF").resolve("lib"));
             writeJar(libDir.resolve("servlet-api-2.5.jar"), "javax/servlet/Servlet.class");
             writeJar(libDir.resolve("jsp-api-2.2.jar"), "javax/servlet/jsp/JspPage.class");
+            Path home = Files.createDirectories(tempDir.resolve("tomcat-7/lib")).getParent();
+            writeJar(home.resolve("lib/servlet-api.jar"), "javax/servlet/Servlet.class");
+            writeJar(home.resolve("lib/jsp-api.jar"), "javax/servlet/jsp/JspPage.class");
+            LocalDeploymentStrategy.forgetContainerLibs();
 
             com.dev.idea.plugins.tomcat.model.Deployment artifact =
                     new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(
                             artifactPath, "/", /* exploded */ true);
             com.dev.idea.plugins.tomcat.setting.TomcatInfo tomcat7 =
                     new com.dev.idea.plugins.tomcat.setting.TomcatInfo(
-                            "Tomcat 7", "7.0.109", "/opt/tomcat-7");
+                            "Tomcat 7", "7.0.109", home.toString());
             com.intellij.openapi.project.Project project =
                     org.mockito.Mockito.mock(com.intellij.openapi.project.Project.class);
 

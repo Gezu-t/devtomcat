@@ -30,11 +30,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Locale;
 import java.util.Set;
 import static com.dev.idea.plugins.tomcat.TomcatConstants.*;
 
@@ -122,96 +120,6 @@ public final class LocalDeploymentStrategy {
     // artifact, so there is no shadowing conflict with docBase content.
     private static final String POST_RESOURCE_TEMPLATE =
             "\n    <PostResources className=\"%s\"\n                    base=\"%s\" webAppMount=\"%s\" />";
-
-    /**
-     * Container-provided libraries must not be injected into a webapp deployed to
-     * an external Tomcat. Doing so causes duplicate classes/web fragments when the
-     * artifact already contains app-managed variants.
-     *
-     * <p>Every prefix in this list is a {@code String#startsWith} match against
-     * the lower-cased JAR file name. Prefixes intentionally end with a hyphen,
-     * {@code -api}, or a full {@code .jar} filename so they cannot swallow an
-     * application library whose Maven coordinate happens to share the head of
-     * a Tomcat name. The regression that motivated this list is JSTL: the
-     * artifacts {@code jakarta.servlet.jsp.jstl-api-*.jar} and
-     * {@code jakarta.servlet.jsp.jstl-*.jar} both start with the bare literals
-     * {@code "jakarta.servlet"} and {@code "jakarta.jsp"}. If those bare
-     * prefixes were listed here, JSTL would be silently excluded from
-     * {@code WEB-INF/lib} resource injection and the webapp would throw
-     * {@code ClassNotFoundException: jakarta.servlet.jsp.jstl.core.Config}
-     * on the first {@code <c:*>} tag.
-     *
-     * <p>Coverage targets every JAR Tomcat 7 through 11 ships in {@code lib/}:
-     * <ul>
-     *   <li>Tomcat internals: {@code tomcat-*}, {@code catalina-*},
-     *       {@code catalina.jar}, {@code jasper*}, {@code ecj-*},
-     *       {@code bootstrap.jar}, {@code commons-daemon-*}.</li>
-     *   <li>Servlet/JSP/EL API: {@code jakarta.*-api} and the legacy
-     *       {@code javax.*-api} forms, plus the bare {@code servlet-api-*},
-     *       {@code jsp-api-*}, {@code el-api-*} naming used by older Tomcats.</li>
-     *   <li>EL implementation: {@code jakarta.el-} (matches both API and the
-     *       Glassfish-derived impl JAR).</li>
-     *   <li>Annotation API: {@code jakarta.annotation-api},
-     *       {@code javax.annotation-api}, legacy {@code annotations-api}.</li>
-     *   <li>WebSocket API: {@code jakarta.websocket-},
-     *       {@code javax.websocket-}, plus legacy {@code websocket-api},
-     *       {@code websocket-client-api}.</li>
-     *   <li>JASPIC (auth): {@code jaspic-api},
-     *       {@code jakarta.security.auth.message-api}.</li>
-     * </ul>
-     *
-     * <p>Bias: prefer false negatives (an app-provided JAR slipping through and
-     * causing a duplicate-class warning at startup) over false positives (a
-     * container JAR mistakenly identified as app-provided, which would cause
-     * a hard {@code ClassNotFoundException} at runtime). Bare prefixes that
-     * could collide with longer Maven coordinates are not on this list.
-     */
-    private static final String[] CONTAINER_PROVIDED_JAR_PREFIXES = {
-            // Tomcat internals
-            "tomcat-",                          // tomcat-api, tomcat-coyote, tomcat-juli, tomcat-util,
-                                                // tomcat-websocket, tomcat-jdbc, tomcat-dbcp, tomcat-jni,
-                                                // tomcat-i18n-*, tomcat-jasper, tomcat-servlet-api, etc.
-            "catalina-",                        // catalina-ant, catalina-ha, catalina-ssi,
-                                                // catalina-storeconfig, catalina-tribes
-            "catalina.jar",                     // bare catalina core
-            "jasper-", "jasper.jar",            // JSP engine (jasper.jar, jasper-el.jar)
-            "ecj-",                             // Eclipse JDT compiler
-            "bootstrap.jar",                    // catalina.sh / catalina.bat bootstrap
-            "commons-daemon-",                  // jsvc/procrun launcher
-
-            // Servlet API. Hyphen on "-api" disambiguates from
-            // jakarta.servlet.jsp.jstl-*.jar.
-            "jakarta.servlet-api",
-            "javax.servlet-api",
-            "servlet-api",
-
-            // JSP API. Hyphen on "-api" disambiguates from any future
-            // jakarta.jsp.jstl-*.jar variant.
-            "jakarta.jsp-api",
-            "javax.jsp-api",
-            "jsp-api",
-
-            // Expression Language. The "-" on "jakarta.el-" matches both
-            // jakarta.el-api-*.jar (API) and jakarta.el-*.jar (Glassfish impl).
-            "jakarta.el-",
-            "javax.el-api",
-            "el-api",
-
-            // Annotation API
-            "jakarta.annotation-api",
-            "javax.annotation-api",
-            "annotations-api",                  // legacy Tomcat 8/9 naming
-
-            // WebSocket API
-            "jakarta.websocket-",                // jakarta.websocket-api, jakarta.websocket-client-api
-            "javax.websocket-",
-            "websocket-api",
-            "websocket-client-api",
-
-            // JASPIC (Java Authentication SPI for Containers)
-            "jakarta.security.auth.message-api",
-            "jaspic-api"
-    };
 
     // --- IntelliJ + Maven path conventions (single-file scope) ---
 
@@ -682,15 +590,14 @@ public final class LocalDeploymentStrategy {
         Path webInfLib = artifactPath.resolve(WEB_INF).resolve(WEB_INF_LIB);
         if (!Files.isDirectory(webInfLib)) return "";
 
-        Set<String> containerLibKeys = resolveContainerLibKeys(tomcatInfo);
+        ContainerLibs containerLibs = resolveContainerLibs(tomcatInfo);
         // LinkedHashSet for deterministic order in the generated XML.
         java.util.LinkedHashSet<String> skip = new java.util.LinkedHashSet<>();
         try (var stream = Files.list(webInfLib)) {
             stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
                   .forEach(p -> {
-                      String jarName = p.getFileName().toString();
-                      if (isContainerProvidedJar(jarName, containerLibKeys)) {
-                          skip.add(jarName);
+                      if (isContainerProvidedJar(p, containerLibs)) {
+                          skip.add(p.getFileName().toString());
                       }
                   });
         } catch (IOException e) {
@@ -744,7 +651,7 @@ public final class LocalDeploymentStrategy {
     private static List<String> collectContainerProvidedJarsAcrossDeployments(
             @NotNull TomcatRunConfiguration configuration) {
         java.util.TreeSet<String> all = new java.util.TreeSet<>();
-        Set<String> containerLibKeys = resolveContainerLibKeys(configuration.getTomcatInfo());
+        ContainerLibs containerLibs = resolveContainerLibs(configuration.getTomcatInfo());
         for (Deployment deployment : configuration.getDeployments()) {
             if (!deployment.isValid() || !deployment.isExploded()) continue;
             Path artifactPath = deployment.getResolvedPath();
@@ -753,8 +660,8 @@ public final class LocalDeploymentStrategy {
             if (!Files.isDirectory(webInfLib)) continue;
             try (var stream = Files.list(webInfLib)) {
                 stream.filter(p -> p.getFileName().toString().endsWith(EXT_JAR))
+                        .filter(p -> isContainerProvidedJar(p, containerLibs))
                         .map(p -> p.getFileName().toString())
-                        .filter(name -> isContainerProvidedJar(name, containerLibKeys))
                         .forEach(all::add);
             } catch (IOException e) {
                 LOG.debug("Could not scan " + webInfLib + " for container-provided jars: " + e.getMessage());
@@ -1182,8 +1089,7 @@ public final class LocalDeploymentStrategy {
         // and WEB-INF/lib show up here via the recursive classpath walk
         // and re-mounting them would be redundant).
         String artifactAbsPath = artifactPath.toAbsolutePath().toString().replace('\\', '/');
-        // Authoritative container-provided set from the configured Tomcat's lib/.
-        Set<String> containerLibKeys = resolveContainerLibKeys(tomcatInfo);
+        ContainerLibs containerLibs = resolveContainerLibs(tomcatInfo);
 
         List<String> extraJars = new ArrayList<>();
 
@@ -1204,7 +1110,7 @@ public final class LocalDeploymentStrategy {
             File file = new File(nativePath);
             if (!file.isFile()) continue;
             String jarName = file.getName();
-            if (isContainerProvidedJar(jarName, containerLibKeys)) continue;
+            if (isContainerProvidedJar(file.toPath(), containerLibs)) continue;
             if (deployedLibArtifacts.contains(LibraryArtifactNames.libraryArtifactKey(jarName))) continue;
             extraJars.add(nativePath);
         }
@@ -1423,25 +1329,6 @@ public final class LocalDeploymentStrategy {
     }
 
     /**
-     * Whether {@code jarName} is provided by the target container and must not be
-     * injected into the webapp classpath (it would duplicate classes / web
-     * fragments the container's own loader already provides).
-     *
-     * <p>Authoritative signal first: a match by version-independent artifact key
-     * against {@code containerLibKeys} — the JARs the configured Tomcat actually
-     * ships in {@code lib/} (and {@code bin/}). This tracks the real install and
-     * auto-covers JARs the static list below never anticipated (a renamed core
-     * JAR, a Tomcat fork, a future release).
-     *
-     * <p>Union'd with the static {@link #CONTAINER_PROVIDED_JAR_PREFIXES}, which
-     * is still required for the spec API JARs: a webapp pulls them under Maven
-     * coordinates ({@code jakarta.servlet-api}, {@code javax.servlet-api}) while
-     * Tomcat ships them under bare names ({@code servlet-api.jar}), so their
-     * artifact keys don't match and the lib-key signal alone would miss them. The
-     * prefix list is also the sole fallback when the Tomcat home is unknown or
-     * unreadable (empty {@code containerLibKeys}).
-     */
-    /**
      * Path-containment test on forward-slash-normalized absolute paths, with a
      * separator boundary so a sibling that merely shares a name prefix is NOT
      * treated as inside the base. Without the boundary, {@code rootPath.startsWith}
@@ -1452,96 +1339,76 @@ public final class LocalDeploymentStrategy {
         return rootPath.equals(basePath) || rootPath.startsWith(basePath + "/");
     }
 
-    static boolean isContainerProvidedJar(@NotNull String jarName,
-                                          @NotNull Set<String> containerLibKeys) {
-        if (!containerLibKeys.isEmpty()
-                && containerLibKeys.contains(LibraryArtifactNames.libraryArtifactKey(jarName))) {
-            return true;
-        }
-        return isContainerProvidedJar(jarName);
+    /** Whether the configured Tomcat already ships {@code jar}; see {@link ContainerLibs#provides}. */
+    static boolean isContainerProvidedJar(@NotNull Path jar, @NotNull ContainerLibs libs) {
+        return libs.provides(jar);
     }
 
     /**
-     * Static-prefix fallback for {@link #isContainerProvidedJar(String, Set)} —
-     * used when the configured Tomcat's {@code lib/} set is unavailable, and
-     * (because of the Maven-vs-Tomcat naming variance noted there) always
-     * consulted for the spec API JARs. Package-private for direct unit testing of
-     * the prefix coverage.
-     */
-    static boolean isContainerProvidedJar(@NotNull String jarName) {
-        String normalized = jarName.toLowerCase(Locale.ROOT);
-        for (String prefix : CONTAINER_PROVIDED_JAR_PREFIXES) {
-            if (normalized.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Version-independent artifact keys for every JAR the configured Tomcat ships
-     * in {@code lib/} and {@code bin/} — the authoritative set of container-provided
-     * libraries for this install. Empty when the Tomcat home is unknown or
-     * unreadable, in which case {@link #isContainerProvidedJar(String, Set)} falls
-     * back to the static prefix heuristic alone.
+     * What the configured Tomcat ships in {@code lib/} and {@code bin/}; empty when
+     * the home is unknown or unreadable. Memoised per home, validated by every
+     * jar's name, size and mtime (a jar rewritten in place is re-read).
      */
     @NotNull
-    static Set<String> resolveContainerLibKeys(@Nullable TomcatInfo tomcatInfo) {
-        if (tomcatInfo == null) return Collections.emptySet();
+    static ContainerLibs resolveContainerLibs(@Nullable TomcatInfo tomcatInfo) {
+        if (tomcatInfo == null) return ContainerLibs.EMPTY;
         String home = tomcatInfo.getPath();
-        if (home == null || home.isEmpty()) return Collections.emptySet();
+        if (home == null || home.isEmpty()) return ContainerLibs.EMPTY;
         Path homeDir = Paths.get(home).toAbsolutePath().normalize();
         Path lib = homeDir.resolve("lib");
         Path bin = homeDir.resolve("bin");
-        // Asked several times per deployment per launch, for a listing that only
-        // changes when a jar is added to or removed from the install — which
-        // updates the directory's own mtime. Two stats validate the memo.
-        long libMtime = directoryMtime(lib);
-        long binMtime = directoryMtime(bin);
-        ContainerLibKeys cached = CONTAINER_LIB_KEYS.get(homeDir);
-        if (cached != null && cached.libMtime() == libMtime && cached.binMtime() == binMtime) {
-            return cached.keys();
+        List<String> signature = jarSignature(lib, bin);
+        ContainerLibsMemo cached = CONTAINER_LIBS.get(homeDir);
+        if (cached != null && cached.signature().equals(signature)) {
+            return cached.libs();
         }
-        Set<String> keys = new HashSet<>();
-        addJarKeysFrom(lib, keys);
-        // bin/ carries bootstrap.jar, tomcat-juli.jar and (when installed)
-        // commons-daemon — also container-provided.
-        addJarKeysFrom(bin, keys);
-        Set<String> frozen = Collections.unmodifiableSet(keys);
-        CONTAINER_LIB_KEYS.put(homeDir, new ContainerLibKeys(libMtime, binMtime, frozen));
-        return frozen;
+        ContainerLibs libs = ContainerLibs.read(lib, bin);
+        if (libs.isEmpty()) {
+            LOG.warn("No jars readable under " + lib + " — container-provided jar detection is off for this launch");
+        }
+        CONTAINER_LIBS.put(homeDir, new ContainerLibsMemo(signature, libs));
+        return libs;
     }
 
-    /** Per-home memo of {@link #resolveContainerLibKeys}; see there for the validation rule. */
-    private static final java.util.concurrent.ConcurrentHashMap<Path, ContainerLibKeys> CONTAINER_LIB_KEYS =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    /** Per-home memo of {@link #resolveContainerLibs}, bounded to the last few installs used. */
+    private static final Map<Path, ContainerLibsMemo> CONTAINER_LIBS = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(8, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Path, ContainerLibsMemo> eldest) {
+                    return size() > 8;
+                }
+            });
 
-    private record ContainerLibKeys(long libMtime, long binMtime, @NotNull Set<String> keys) {}
+    private record ContainerLibsMemo(@NotNull List<String> signature, @NotNull ContainerLibs libs) {}
 
-    /** The directory's mtime, or {@code -1} when it cannot be read — never cached as valid. */
-    private static long directoryMtime(@NotNull Path dir) {
-        try {
-            return Files.isDirectory(dir) ? Files.getLastModifiedTime(dir).toMillis() : -1L;
-        } catch (IOException e) {
-            return -1L;
+    /** Sorted {@code name|size|mtime} of every jar in the directories; a missing or unreadable jar contributes its name only. */
+    @NotNull
+    private static List<String> jarSignature(@NotNull Path... dirs) {
+        List<String> signature = new ArrayList<>();
+        for (Path dir : dirs) {
+            if (!Files.isDirectory(dir)) continue;
+            try (var stream = Files.list(dir)) {
+                for (Path jar : (Iterable<Path>) stream::iterator) {
+                    String name = jar.getFileName().toString();
+                    if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(EXT_JAR)) continue;
+                    try {
+                        var attributes = Files.readAttributes(jar, java.nio.file.attribute.BasicFileAttributes.class);
+                        signature.add(name + "|" + attributes.size() + "|" + attributes.lastModifiedTime().toMillis());
+                    } catch (IOException e) {
+                        signature.add(name);
+                    }
+                }
+            } catch (IOException | java.io.UncheckedIOException e) {
+                LOG.debug("Could not list " + dir + ": " + e.getMessage());
+            }
         }
+        java.util.Collections.sort(signature);
+        return signature;
     }
 
     /** Test seam: forget every memoised install. */
-    static void forgetContainerLibKeys() {
-        CONTAINER_LIB_KEYS.clear();
-    }
-
-    private static void addJarKeysFrom(@NotNull Path dir, @NotNull Set<String> keys) {
-        if (!Files.isDirectory(dir)) return;
-        try (var stream = Files.list(dir)) {
-            stream.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(EXT_JAR))
-                  .forEach(p -> keys.add(
-                          LibraryArtifactNames.libraryArtifactKey(p.getFileName().toString())));
-        } catch (IOException e) {
-            LOG.debug("Could not scan Tomcat dir for container-provided jars: "
-                    + dir + " (" + e.getMessage() + ")");
-        }
+    static void forgetContainerLibs() {
+        CONTAINER_LIBS.clear();
     }
 
     /**

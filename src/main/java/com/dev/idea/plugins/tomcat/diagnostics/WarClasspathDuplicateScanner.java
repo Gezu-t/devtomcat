@@ -231,6 +231,18 @@ public final class WarClasspathDuplicateScanner {
         return entries == null ? -1 : entries.length;
     }
 
+    /** The jar's class entries, sorted (descriptors and multi-release copies excluded); empty when unreadable. */
+    @NotNull
+    public static List<String> classEntries(@NotNull Path jar) {
+        String[] entries = nonBenignEntries(jar);
+        if (entries == null) return List.of();
+        List<String> classes = new ArrayList<>();
+        for (String entry : entries) {
+            if (entry.endsWith(CLASS_EXT)) classes.add(entry);
+        }
+        return classes;
+    }
+
     /** Upper bound on cached jars; at a few hundred entries each that is a few megabytes. */
     private static final int MAX_CACHED_JARS = 1024;
 
