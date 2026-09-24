@@ -563,8 +563,8 @@ public final class DeployedClassesSync {
                 // classpath breaks resource enumeration), so an edit waits for the jar.
                 logger.logServerWarning("Class sync: " + mr.excludedNewerThanFloor() + " resource file(s) in "
                         + src.path() + " are newer than WEB-INF/lib/" + coveringJar
-                        + "; the jar's copies are served. Rebuild that jar (or enable 'Rebuild before"
-                        + " redeploy') to apply resource changes.");
+                        + "; the jar's copies are served. Repackage that module with your build tool"
+                        + " to apply resource changes.");
             }
         }
         // Orphan-reconcile only when at least one source root actually

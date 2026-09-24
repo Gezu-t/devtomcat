@@ -146,6 +146,71 @@ class LocalDeploymentStrategyTest {
     // -------------------------------------------------------------------------
 
     @Nested
+    @DisplayName("warnAboutPackagingDuplicates — the launch-time checks, for Redeploy")
+    class WarnAboutPackagingDuplicates {
+
+        private static void zip(Path path, String... entries) throws IOException {
+            Files.createDirectories(path.getParent());
+            try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(Files.newOutputStream(path))) {
+                for (String e : entries) {
+                    zos.putNextEntry(new java.util.zip.ZipEntry(e));
+                    zos.closeEntry();
+                }
+            }
+        }
+
+        private static com.dev.idea.plugins.tomcat.model.Deployment exploded(Path root) {
+            return new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(root, "/", true);
+        }
+
+        @Test
+        @DisplayName("one library at two versions: the conflicting-jars line, and no per-path listing")
+        void twoVersionsReportedOnce(@TempDir Path tmp) throws IOException {
+            Path app = Files.createDirectories(tmp.resolve("app"));
+            zip(app.resolve("WEB-INF/lib/lib-alpha-1.0.jar"), "org/alpha/A.class", "org/alpha/B.class");
+            zip(app.resolve("WEB-INF/lib/lib-alpha-2.0.jar"), "org/alpha/A.class", "org/alpha/B.class");
+            var logger = org.mockito.Mockito.mock(com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            LocalDeploymentStrategy.warnAboutPackagingDuplicates(java.util.List.of(exploded(app)), logger);
+
+            org.mockito.Mockito.verify(logger).logServerWarning(org.mockito.ArgumentMatchers.argThat(
+                    m -> m.contains("conflicting JARs") && m.contains("lib-alpha-1.0.jar") && m.contains("lib-alpha-2.0.jar")));
+            org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerWarning(
+                    org.mockito.ArgumentMatchers.contains("Classpath duplicates"));
+        }
+
+        @Test
+        @DisplayName("a path in two different libraries: the grouped classpath warning")
+        void crossLibraryDuplicateReported(@TempDir Path tmp) throws IOException {
+            Path app = Files.createDirectories(tmp.resolve("app"));
+            zip(app.resolve("WEB-INF/lib/lib-alpha-1.0.jar"), "org/shared/Util.class");
+            zip(app.resolve("WEB-INF/lib/lib-beta-1.0.jar"), "org/shared/Util.class");
+            var logger = org.mockito.Mockito.mock(com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            LocalDeploymentStrategy.warnAboutPackagingDuplicates(java.util.List.of(exploded(app)), logger);
+
+            org.mockito.Mockito.verify(logger).logServerWarning(org.mockito.ArgumentMatchers.argThat(
+                    m -> m.contains("Classpath duplicates") && m.contains("lib-alpha-1.0.jar + WEB-INF/lib/lib-beta-1.0.jar")));
+        }
+
+        @Test
+        @DisplayName("a clean artifact, a missing one and a WAR: silent")
+        void silentWhenNothingToReport(@TempDir Path tmp) throws IOException {
+            Path app = Files.createDirectories(tmp.resolve("app"));
+            zip(app.resolve("WEB-INF/lib/lib-alpha-1.0.jar"), "org/alpha/A.class");
+            Path war = tmp.resolve("other.war");
+            Files.writeString(war, "war-bytes");
+            var logger = org.mockito.Mockito.mock(com.dev.idea.plugins.tomcat.logging.TomcatDeploymentLogger.class);
+
+            LocalDeploymentStrategy.warnAboutPackagingDuplicates(java.util.List.of(
+                    exploded(app), exploded(tmp.resolve("gone")),
+                    new com.dev.idea.plugins.tomcat.model.ExternalFileDeployment(war, "/other", false)), logger);
+
+            org.mockito.Mockito.verify(logger, org.mockito.Mockito.never()).logServerWarning(org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Nested
     @DisplayName("isContainerProvidedJar — decided from what the configured Tomcat ships")
     class IsContainerProvidedJarTests {
 

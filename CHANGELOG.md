@@ -7,6 +7,7 @@
 - Classpath-duplicate warning lists jar pairs with examples, not every path.
 - JDK frames in leaked-thread stacks fold.
 - Class-sync overlay bookkeeping no longer printed to the console.
+- Redeploy runs the same packaging-duplicate checks as a launch.
 
 ### Added
 - Update says when a changed resource is still served from its module's jar.

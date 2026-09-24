@@ -419,6 +419,26 @@ public final class LocalDeploymentStrategy {
         }
     }
 
+    /**
+     * The packaging-duplicate checks a launch runs, for a Redeploy whose build step may
+     * have changed {@code WEB-INF/lib}: preflight's conflicting-jar check, then the
+     * duplicate scan of each exploded deployment.
+     */
+    public static void warnAboutPackagingDuplicates(@NotNull List<Deployment> deployments,
+                                                    @NotNull TomcatDeploymentLogger logger) {
+        List<TomcatPreflightValidator.PreflightIssue> issues = new ArrayList<>();
+        TomcatPreflightValidator.checkDuplicateJars(deployments, issues);
+        for (TomcatPreflightValidator.PreflightIssue issue : issues) {
+            logger.logServerWarning(issue.getMessage());
+        }
+        for (Deployment deployment : deployments) {
+            if (!deployment.isValid() || !deployment.isExploded()) continue;
+            Path artifactPath = deployment.getResolvedPath();
+            if (artifactPath == null || !Files.isDirectory(artifactPath)) continue;
+            warnAboutClasspathDuplicates(deployment, artifactPath, logger);
+        }
+    }
+
     /** Non-blocking, library-agnostic duplicate scan of the exploded artifact; see {@link ClasspathDuplicateWarning}. */
     private static void warnAboutClasspathDuplicates(@NotNull Deployment deployment,
                                                      @NotNull Path artifactPath,

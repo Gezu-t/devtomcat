@@ -875,6 +875,9 @@ public class TomcatApplicationUpdater implements RunningApplicationUpdater {
             }
         }
         notifyBlockedStaleWars(blockedStale, webappsDir, logger);
+        // A package step may have changed WEB-INF/lib; the launch-time checks are the same two.
+        com.dev.idea.plugins.tomcat.runner.LocalDeploymentStrategy.warnAboutPackagingDuplicates(
+                configuration.getDeployments(), logger);
     }
 
     /**
