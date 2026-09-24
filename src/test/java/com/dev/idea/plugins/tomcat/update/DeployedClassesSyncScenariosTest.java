@@ -1302,6 +1302,30 @@ class DeployedClassesSyncScenariosTest {
         Map<String, Set<String>> coverage = DeployedClassesSync.overlayCoverage(artifactRoot);
         assertEquals(Set.of(depClass), coverage.get("WEB-INF/lib/backend-final.jar"),
                 "the overlay is recorded under the jar's real name, so the duplicate warning knows it is the sync's own");
+        org.mockito.Mockito.verify(logger).logServerWarning(org.mockito.ArgumentMatchers.argThat(
+                msg -> msg.contains("1 resource file(s)") && msg.contains("backend-final.jar")));
+    }
+
+    @Test
+    @DisplayName("covering-JAR floor — resources the policy excludes are counted only when newer than the jar")
+    void jarFloor06_resourcesNewerThanJarCounted(@TempDir Path tmp) throws Exception {
+        Path src = Files.createDirectories(tmp.resolve("dep/target/classes"));
+        Path dst = Files.createDirectories(tmp.resolve("web/target/app/WEB-INF/classes"));
+        long jarMtime = 100_000L;
+        writeClass(src, "com/example/dep/Util.class", "c");
+        writeClass(src, "config/edited.properties", "k=v2");
+        writeClass(src, "config/untouched.properties", "k=v");
+        Files.setLastModifiedTime(src.resolve("com/example/dep/Util.class"), FileTime.fromMillis(jarMtime + 10));
+        Files.setLastModifiedTime(src.resolve("config/edited.properties"), FileTime.fromMillis(jarMtime + 10));
+        Files.setLastModifiedTime(src.resolve("config/untouched.properties"), FileTime.fromMillis(jarMtime - 10));
+
+        TreeMirror.MirrorResult floored = DeployedClassesSync.mirrorTree(src, dst, true, jarMtime);
+        assertEquals(1, floored.excludedNewerThanFloor(), "only the resource edited after the jar counts");
+        assertEquals(1, floored.copied(), "the class still overlays; classes are never counted");
+
+        TreeMirror.MirrorResult unfloored = DeployedClassesSync.mirrorTree(
+                Files.createDirectories(tmp.resolve("dep2/target/classes")), dst, true);
+        assertEquals(0, unfloored.excludedNewerThanFloor(), "no covering jar, nothing to be newer than");
     }
 
     @Test

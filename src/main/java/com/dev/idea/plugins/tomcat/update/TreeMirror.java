@@ -140,10 +140,11 @@ final class TreeMirror {
                         int brokenSkipped,
                         @NotNull Set<String> contributedPaths,
                         boolean walkFailed,
-                        @NotNull Map<String, SyncManifest.Stamp> stamps) {
+                        @NotNull Map<String, SyncManifest.Stamp> stamps,
+                        int excludedNewerThanFloor) {
         /** Nothing contributed and the walk cannot be trusted — the caller must defer the reconcile. */
         static final MirrorResult FAILED = new MirrorResult(
-                0, 0, Collections.emptySet(), true, Collections.emptyMap());
+                0, 0, Collections.emptySet(), true, Collections.emptyMap(), 0);
     }
 
     /**
@@ -185,6 +186,9 @@ final class TreeMirror {
 
         final int[] copied = {0};
         final int[] brokenSkipped = {0};
+        // Files the policy excluded although newer than the floor: for the class
+        // sync, resources edited after the covering jar was built.
+        final int[] excludedNewerThanFloor = {0};
         // Flipped true when a whole subtree is silently dropped from the walk
         // (an unreadable directory) or the outer walk aborts — either way the
         // contributedPaths set is incomplete and the caller must not treat a
@@ -259,6 +263,10 @@ final class TreeMirror {
                         // caller's Policy construction for the rationale of
                         // its exclusions.
                         if (p.fileExclude() != null && p.fileExclude().test(file)) {
+                            if (p.sourceMtimeFloorMillis() != Long.MIN_VALUE
+                                    && attrs.lastModifiedTime().toMillis() > p.sourceMtimeFloorMillis()) {
+                                excludedNewerThanFloor[0]++;
+                            }
                             return FileVisitResult.CONTINUE;
                         }
 
@@ -402,7 +410,8 @@ final class TreeMirror {
             walkFailed[0] = true;
             LOG.debug(p.logPrefix() + ": walk failed for " + src + " (" + e.getMessage() + ")");
         }
-        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths, walkFailed[0], stamps);
+        return new MirrorResult(copied[0], brokenSkipped[0], contributedPaths, walkFailed[0], stamps,
+                excludedNewerThanFloor[0]);
     }
 
     /**

@@ -8,6 +8,9 @@
 - JDK frames in leaked-thread stacks fold.
 - Class-sync overlay bookkeeping no longer printed to the console.
 
+### Added
+- Update says when a changed resource is still served from its module's jar.
+
 ### Fixed
 - Module jars matched by their classes, not their file name.
 - Tomcat warnings and errors no longer printed twice.

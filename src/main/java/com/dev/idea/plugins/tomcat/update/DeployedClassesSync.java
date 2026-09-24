@@ -558,6 +558,14 @@ public final class DeployedClassesSync {
                 logger.logServerInfo("Class sync:     " + mr.copied() + " file(s) from " + src.path()
                         + (classesOnly ? " (.class only)" : ""));
             }
+            if (mr.excludedNewerThanFloor() > 0 && coveringJar != null) {
+                // Resources of a jar-covered module are never overlaid (a second copy on the
+                // classpath breaks resource enumeration), so an edit waits for the jar.
+                logger.logServerWarning("Class sync: " + mr.excludedNewerThanFloor() + " resource file(s) in "
+                        + src.path() + " are newer than WEB-INF/lib/" + coveringJar
+                        + "; the jar's copies are served. Rebuild that jar (or enable 'Rebuild before"
+                        + " redeploy') to apply resource changes.");
+            }
         }
         // Orphan-reconcile only when at least one source root actually
         // contributed (the FAILED MirrorResult from a non-existent src
