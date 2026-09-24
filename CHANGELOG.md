@@ -1,5 +1,17 @@
 # DevTomcat Changelog
 
+## [1.4.4]
+
+### Changed
+- Classpath-duplicate warning lists jar pairs with examples, not every path.
+- JDK frames in leaked-thread stacks fold.
+- Class-sync overlay bookkeeping no longer printed to the console.
+
+### Fixed
+- Tomcat warnings and errors no longer printed twice.
+- One leak advisory per web application, not one per thread; it names the fix.
+- One library at two versions reported once, by preflight.
+
 ## [1.4.3]
 
 ### Changed
@@ -17,12 +29,6 @@
 
 ### Fixed
 - Webapp INFO and WARN lines reach the run console, not just errors.
-- Tomcat warnings and errors no longer printed twice.
-- One leak advisory per web application, not one per thread; it names the fix.
-- JDK frames in leaked-thread stacks fold.
-- Classpath-duplicate warning lists jar pairs with examples, not every path.
-- One library at two versions reported once, by preflight.
-- Class-sync overlay bookkeeping no longer printed to the console.
 - A canceled toolbar update no longer leaves the run-configuration template without a Tomcat server.
 - IDE cancellation propagates through deploy, update, service-view and editor code instead of being swallowed.
 - No internal API use flagged by the Marketplace verifier on 2026.2.
