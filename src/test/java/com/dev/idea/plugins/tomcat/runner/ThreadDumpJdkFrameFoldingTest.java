@@ -12,12 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
-/**
- * Unit tests for {@link ThreadDumpJdkFrameFolding}: JDK frames in Tomcat's
- * leaked-thread stacks (no {@code at}, module qualifier first) fold; the
- * application frame that names the code which started the thread stays
- * visible. The mock {@code Project} satisfies the {@code @NotNull} guard.
- */
 class ThreadDumpJdkFrameFoldingTest {
 
     private final ThreadDumpJdkFrameFolding folding = new ThreadDumpJdkFrameFolding();

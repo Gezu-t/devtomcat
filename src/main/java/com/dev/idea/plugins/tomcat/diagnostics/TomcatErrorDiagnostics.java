@@ -44,7 +44,7 @@ public final class TomcatErrorDiagnostics {
         public @NotNull String getSuggestion() { return suggestion; }
         @Nullable public String getQuickFixId() { return quickFixId; }
 
-        /** Category plus message: what "the same diagnostic" means for once-per-launch dedup. */
+        /** Dedup key: category plus message. */
         public @NotNull String identityKey() { return category + "|" + message; }
 
         @Override
@@ -85,9 +85,7 @@ public final class TomcatErrorDiagnostics {
             "One or more listeners failed to start");
     private static final Pattern FILTER_START_FAILED = Pattern.compile(
             "One or more filters failed to start");
-    // WebappClassLoaderBase's stop-time leak reports. Each names the web
-    // application; the kind decides the advice. Tomcat's own "this is not a
-    // memory leak" / "correctly set to null" ThreadLocal lines do not match.
+    // WebappClassLoaderBase's stop-time leak reports; the harmless ThreadLocal lines do not match.
     private static final Pattern LEAKED_THREAD = Pattern.compile(
             "The web application \\[([^\\]]++)\\] appears to have started a (?:Timer)?[Tt]hread named \\[[^\\]]*+\\][^\\n]*?but has failed to stop it");
     private static final Pattern LEAKED_THREAD_LOCAL = Pattern.compile(
@@ -349,11 +347,7 @@ public final class TomcatErrorDiagnostics {
                     null));
         }
 
-        // Stop-time leak reports. The message names the application, so the
-        // pipeline's per-message dedup yields one advisory per (application,
-        // kind) — not one per leaked thread. Reloading a context in the same
-        // JVM keeps its old classloader alive until these are fixed; a full
-        // Stop is unaffected.
+        // Message names the application, so the pipeline's dedup gives one advisory per app and kind.
         m = LEAKED_THREAD.matcher(text);
         if (m.find()) {
             results.add(new Diagnostic(Severity.WARNING, "Memory Leak",

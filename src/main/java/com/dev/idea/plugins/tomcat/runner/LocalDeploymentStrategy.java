@@ -511,18 +511,7 @@ public final class LocalDeploymentStrategy {
         }
     }
 
-    /**
-     * Runs {@link com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner}
-     * against the deployed exploded artifact and, if any duplicates are
-     * found, surfaces a consolidated console warning naming each duplicate
-     * and the locations it appears in.
-     *
-     * <p>The scan is library-agnostic and the warning is non-blocking. The
-     * remedies named in the message are generic — fix the build to package
-     * each resource once, or configure whichever framework is auditing the
-     * classpath to tolerate duplicates. We don't pattern-match for any
-     * specific framework.
-     */
+    /** Non-blocking, library-agnostic duplicate scan of the exploded artifact; see {@link ClasspathDuplicateWarning}. */
     private static void warnAboutClasspathDuplicates(@NotNull Deployment deployment,
                                                      @NotNull Path artifactPath,
                                                      @Nullable TomcatDeploymentLogger logger) {
@@ -531,75 +520,32 @@ public final class LocalDeploymentStrategy {
         try {
             duplicates = com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.scan(artifactPath);
         } catch (Exception e) {
-            // Defensive: the scanner already handles per-JAR I/O failures
-            // internally, but a top-level exception (disk gone, etc.) should
-            // not block deploy. The launch itself will surface the real
-            // problem if one exists.
+            // Never block the deploy over the scan.
             LOG.debug("Classpath duplicate scan failed for "
                     + deployment.getDisplayName() + ": " + e.getMessage());
             return;
         }
         if (duplicates.isEmpty()) return;
 
-        // The class sync deliberately overlays a dependency jar with the IDE's
-        // fresher classes (first match wins, so the overlay serves). Those pairs
-        // are the plugin's own doing, recorded in the artifact's manifest — not a
-        // packaging duplicate the user can fix.
+        // Overlays the class sync wrote itself are bookkeeping: idea.log, not the console.
         int before = duplicates.size();
-        duplicates = withoutOwnOverlays(duplicates,
+        duplicates = ClasspathDuplicateWarning.withoutOwnOverlays(duplicates,
                 com.dev.idea.plugins.tomcat.update.DeployedClassesSync.overlayCoverage(artifactPath));
         if (duplicates.size() < before) {
-            logger.logServerInfo("Classpath scan of '" + deployment.getDisplayName() + "': "
-                    + (before - duplicates.size()) + " path(s) are DevTomcat's own class overlay of a"
-                    + " WEB-INF/lib jar (IDE output newer than the jar) — not duplicates");
+            LOG.info("Classpath scan of '" + deployment.getDisplayName() + "': "
+                    + (before - duplicates.size()) + " path(s) are the class sync's own overlay"
+                    + " of a WEB-INF/lib jar, not reported");
+        }
+        int beforeVersions = duplicates.size();
+        duplicates = ClasspathDuplicateWarning.withoutSameLibraryVersions(duplicates);
+        if (duplicates.size() < beforeVersions) {
+            LOG.info("Classpath scan of '" + deployment.getDisplayName() + "': "
+                    + (beforeVersions - duplicates.size()) + " path(s) are one library at several"
+                    + " versions, left to the preflight warning");
         }
         if (duplicates.isEmpty()) return;
 
-        StringBuilder msg = new StringBuilder();
-        msg.append("Classpath duplicates in deployed artifact '")
-           .append(deployment.getDisplayName())
-           .append("' — ")
-           .append(duplicates.size())
-           .append(duplicates.size() == 1 ? " path appears" : " paths appear")
-           .append(" in multiple locations:");
-        for (var group : duplicates) {
-            msg.append("\n  - ").append(group.logicalPath()).append("  →  ");
-            msg.append(String.join(" , ", group.locations()));
-        }
-        msg.append("\nFirst match wins in classloader resolution; frameworks that enumerate")
-           .append(" all instances of a resource (strict-classpath audits) may refuse to start.")
-           .append(" To fix: update your build so each resource is packaged in only one")
-           .append(" location, or — if the duplication is intentional — configure the")
-           .append(" framework that's auditing the classpath to tolerate duplicates.");
-
-        logger.logServerWarning(msg.toString());
-    }
-
-    /**
-     * Drops the groups that are exactly {@code WEB-INF/classes/} plus one jar, where the
-     * manifest records that path as this sync's overlay of that very jar. Anything
-     * else — a third location, an uncovered path, a different jar — stays reported.
-     */
-    @NotNull
-    static List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> withoutOwnOverlays(
-            @NotNull List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> groups,
-            @NotNull Map<String, Set<String>> overlayCoverage) {
-        if (overlayCoverage.isEmpty()) return groups;
-        List<com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup> kept = new ArrayList<>();
-        for (var group : groups) {
-            if (!isOwnOverlay(group, overlayCoverage)) kept.add(group);
-        }
-        return kept;
-    }
-
-    private static boolean isOwnOverlay(
-            @NotNull com.dev.idea.plugins.tomcat.diagnostics.WarClasspathDuplicateScanner.DuplicateGroup group,
-            @NotNull Map<String, Set<String>> overlayCoverage) {
-        List<String> locations = group.locations();
-        if (locations.size() != 2 || !locations.contains("WEB-INF/classes/")) return false;
-        String jar = locations.get(0).equals("WEB-INF/classes/") ? locations.get(1) : locations.get(0);
-        Set<String> covered = overlayCoverage.get(jar);
-        return covered != null && covered.contains(group.logicalPath());
+        logger.logServerWarning(ClasspathDuplicateWarning.format(deployment.getDisplayName(), duplicates));
     }
 
     /**

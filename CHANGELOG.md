@@ -20,6 +20,9 @@
 - Tomcat warnings and errors no longer printed twice.
 - One leak advisory per web application, not one per thread; it names the fix.
 - JDK frames in leaked-thread stacks fold.
+- Classpath-duplicate warning lists jar pairs with examples, not every path.
+- One library at two versions reported once, by preflight.
+- Class-sync overlay bookkeeping no longer printed to the console.
 - A canceled toolbar update no longer leaves the run-configuration template without a Tomcat server.
 - IDE cancellation propagates through deploy, update, service-view and editor code instead of being swallowed.
 - No internal API use flagged by the Marketplace verifier on 2026.2.
