@@ -51,7 +51,7 @@ Apache Tomcat integration for IntelliJ IDEA, with built-in error diagnostics, li
 |-------------|----------------|
 | IntelliJ IDEA | 2025.1+ |
 | Apache Tomcat | 7.x or later |
-| Java (JDK) | 17+ |
+| Java (JDK) | What your Tomcat needs: Java 6+ for Tomcat 7 up to Java 17+ for Tomcat 11; checked before launch |
 
 ---
 

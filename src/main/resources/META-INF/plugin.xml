@@ -62,7 +62,7 @@
     <ul>
         <li>IntelliJ IDEA 2025.1+</li>
         <li>Apache Tomcat 7+ (legacy installs supported via auto-applied compatibility shims)</li>
-        <li>Java 17+</li>
+        <li>Java: the version your Tomcat needs, from Java 6+ for Tomcat 7 to Java 17+ for Tomcat 11 (checked before launch)</li>
     </ul>
     ]]></description>
 

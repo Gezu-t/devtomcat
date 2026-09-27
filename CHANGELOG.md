@@ -13,6 +13,7 @@
 - Update says when a changed resource is still served from its module's jar.
 
 ### Fixed
+- Java requirement stated per Tomcat version, not 17+.
 - Module jars matched by their classes, not their file name.
 - Tomcat warnings and errors no longer printed twice.
 - One leak advisory per web application, not one per thread; it names the fix.

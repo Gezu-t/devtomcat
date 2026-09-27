@@ -34,7 +34,7 @@ Run, debug, and deploy web applications with categorized error analysis, live st
 |---------------|--------------------------------------------|
 | IntelliJ IDEA | 2025.1+                                    |
 | Apache Tomcat | 7+ (legacy installs covered by auto-shims) |
-| Java (JDK)    | 17+                                        |
+| Java (JDK)    | What your Tomcat needs: Java 6+ for Tomcat 7 up to Java 17+ for Tomcat 11; checked before launch |
 
 > **WSL is not yet supported.** DevTomcat launches Tomcat as a local host
 > process, so a Tomcat or JDK installed **inside a WSL distribution** (a home
