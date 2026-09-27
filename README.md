@@ -36,14 +36,17 @@ Run, debug, and deploy web applications with categorized error analysis, live st
 | Apache Tomcat | 7+ (legacy installs covered by auto-shims) |
 | Java (JDK)    | What your Tomcat needs: Java 6+ for Tomcat 7 up to Java 17+ for Tomcat 11; checked before launch |
 
-> **WSL is not yet supported.** DevTomcat launches Tomcat as a local host
-> process, so a Tomcat or JDK installed **inside a WSL distribution** (a home
-> path like `\\wsl$\<distro>\...` or `\\wsl.localhost\<distro>\...`) cannot run —
-> the Linux paths and binaries would be handed to a Windows process and fail.
-> DevTomcat detects such a path and refuses it up front with a clear message
-> instead of a cryptic launch error. For now, use a Windows-side Tomcat + JDK,
-> or IntelliJ IDEA Ultimate's WSL application-server support. Native WSL support
-> is a planned enhancement.
+> **WSL support is experimental (since 1.4.3).** A Tomcat home inside a WSL
+> distribution (`\\wsl$\<distro>\...` or `\\wsl.localhost\<distro>\...`) runs
+> inside that distribution: DevTomcat translates every path it emits, joins the
+> classpath with `:`, and starts the JVM through `wsl.exe`. `catalina.base` stays
+> on the Windows side and is reached through the distribution's drive mount.
+> Requirements: a JDK installed in the same distribution, the default startup,
+> and the Run or Debug executor. Custom startup scripts and Coverage are not
+> supported in this mode. Not yet verified on a real WSL2 machine: debugger
+> attach and port-conflict detection across the WSL2 network boundary, and
+> whether Stop ends the JVM inside the distribution. Please report results on
+> GitHub.
 
 ## Installation
 
