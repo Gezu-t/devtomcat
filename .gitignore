@@ -24,7 +24,12 @@ out
 gen
 build
 target
-gradle
+# Ignore local Gradle dists, but keep the wrapper so a fresh clone builds
+gradle/*
+!gradle/wrapper/
+gradle/wrapper/*
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
 bin
 gradle.properties
 release-notes.txt
